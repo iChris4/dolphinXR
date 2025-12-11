@@ -12,8 +12,8 @@ use of AI tools.
 
 - **Windows** — VR runs on the Direct3D 11, Direct3D 12, Vulkan, and OpenGL
   backends with any OpenXR runtime (SteamVR, Oculus/Meta Link, VDXR, etc.).
-- **Linux** — VR runs on the Vulkan and OpenGL backends and requires a working
-  system OpenXR runtime such as Monado or SteamVR.
+- **Linux** — VR runs on the Vulkan backend and requires a working system
+  OpenXR runtime such as Monado or SteamVR.
 - **Meta Quest** — a standalone Android build (Quest 2, Quest 3, Quest 3S, and
   Quest Pro) renders natively in the headset on the Vulkan and OpenGL ES
   backends, with OpenXR controller support.
@@ -24,27 +24,27 @@ Please read the [FAQ](https://dolphin-emu.org/docs/faq/) before using Dolphin.
 
 ### Desktop
 
-- OS
-  - Windows (10 1903 or higher).
-  - Linux.
-  - macOS (11.0 Big Sur or higher).
-  - Unix-like systems other than Linux are not officially supported but might work.
-- Processor
-  - A CPU with SSE2 support.
-  - A modern CPU (3 GHz and Dual Core, not older than 2008) is highly recommended.
-- Graphics
-  - A reasonably modern graphics card (Direct3D 11.1 / OpenGL 3.3).
-  - A graphics card that supports Direct3D 11.1 / OpenGL 4.4 is recommended.
+* OS
+    * Windows (10 1903 or higher).
+    * Linux.
+    * macOS (11.0 Big Sur or higher).
+    * Unix-like systems other than Linux are not officially supported but might work.
+* Processor
+    * A CPU with SSE2 support.
+    * A modern CPU (3 GHz and Dual Core, not older than 2008) is highly recommended.
+* Graphics
+    * A reasonably modern graphics card (Direct3D 11.1 / OpenGL 3.3).
+    * A graphics card that supports Direct3D 11.1 / OpenGL 4.4 is recommended.
 
 ### Android
 
-- OS
-  - Android (7.0 Nougat or higher).
-- Processor
-  - A processor with support for 64-bit applications (either ARMv8 or x86-64).
-- Graphics
-  - A graphics processor that supports OpenGL ES 3.0 or higher. Performance varies heavily with [driver quality](https://dolphin-emu.org/blog/2013/09/26/dolphin-emulator-and-opengl-drivers-hall-fameshame/).
-  - A graphics processor that supports standard desktop OpenGL features is recommended for best performance.
+* OS
+    * Android (7.0 Nougat or higher).
+* Processor
+    * A processor with support for 64-bit applications (either ARMv8 or x86-64).
+* Graphics
+    * A graphics processor that supports OpenGL ES 3.0 or higher. Performance varies heavily with [driver quality](https://dolphin-emu.org/blog/2013/09/26/dolphin-emulator-and-opengl-drivers-hall-fameshame/).
+    * A graphics processor that supports standard desktop OpenGL features is recommended for best performance.
 
 Dolphin can only be installed on devices that satisfy the above requirements. Attempting to install on an unsupported device will fail and display an error message.
 
@@ -55,130 +55,63 @@ Dolphin can only be installed on devices that satisfy the above requirements. At
   - Direct3D 11, Direct3D 12, Vulkan, or OpenGL backend.
 - Linux
   - An OpenXR runtime such as Monado or SteamVR.
-  - Vulkan (recommended) or OpenGL backend.
+  - Vulkan backend (OpenGL cannot create an OpenXR session on Linux, since Dolphin now
+    creates EGL contexts and OpenXR has no standard EGL binding).
 - Meta Quest
   - Quest 2, Quest 3, Quest 3S, or Quest Pro, running the standalone `quest` build.
   - Vulkan or OpenGL ES backend.
 - VR is not supported on macOS.
 
-## Building for Windows
+## Building
 
-Use the solution file `Source/dolphin-emu.sln` to build Dolphin on Windows.
-Dolphin targets the latest MSVC shipped with Visual Studio or Build Tools.
-Other compilers might be able to build Dolphin on Windows but have not been
-tested and are not recommended to be used. Git and latest Windows SDK must be
-installed when building.
+You may find building instructions on the appropriate wiki page for your operating system:
 
-Make sure to pull submodules before building:
+* [Windows](https://github.com/dolphin-emu/dolphin/wiki/Building-for-Windows)
+* [Linux](https://github.com/dolphin-emu/dolphin/wiki/Building-for-Linux)
+* [macOS](https://github.com/dolphin-emu/dolphin/wiki/Building-for-macOS)
+* [Android](#android-specific-instructions) <!-- TODO: Create a "Building for Android" wiki page and link it here -->
+* [OpenBSD](https://github.com/dolphin-emu/dolphin/wiki/Building-for-OpenBSD) (unsupported)
+
+Before building, make sure to pull all submodules:
 
 ```sh
 git submodule update --init --recursive
 ```
+
+### Android-specific instructions
+
+These instructions assume familiarity with Android development. If you do not have an
+Android dev environment set up, see [AndroidSetup.md](AndroidSetup.md).
+
+If using Android Studio, import the Gradle project located in `./Source/Android`.
+
+Android apps are compiled using a build system called Gradle. Dolphin's native component,
+however, is compiled using CMake. The Gradle script will attempt to run a CMake build
+automatically while building the Java code.
 
 ### Building the OpenXR VR version
 
 To build the VR-enabled version of this fork, OpenXR support must be enabled
 with `-DENABLE_VR=ON`. VR is supported on Windows, desktop Linux, and Android
-(Meta Quest); see the Linux and Android sections below for those platforms.
+(Meta Quest). The OpenXR loader is built from the bundled Khronos SDK
+(`Externals/OpenXR`).
 
-If you are generating a Visual Studio build with CMake, configure with
-`-DENABLE_VR=ON`:
+On Windows, configure a Visual Studio build with CMake and build Dolphin:
 
 ```sh
 cmake -S . -B Build-vs2022 -G "Visual Studio 17 2022" -A x64 -DENABLE_VR=ON
-```
-
-When using the Visual Studio generator, build the OpenXR loader first:
-
-```sh
-cmake --build Build-vs2022 --config Release --target openxr_loader
-```
-
-Finally, build Dolphin:
-
-```sh
 cmake --build Build-vs2022 --config Release --target dolphin-emu
 ```
 
-If you prefer building OpenXR separately first, the repository also includes
-`Externals/OpenXR/build-win64/OPENXR.sln`.
-
-The "Release" solution configuration includes performance optimizations for the best user experience but complicates debugging Dolphin.
-The "Debug" solution configuration is significantly slower, more verbose and less permissive but makes debugging Dolphin easier.
-
-## Building for Linux and macOS
-
-Dolphin requires [CMake](https://cmake.org/) for systems other than Windows.
-You need a recent version of GCC or Clang with decent c++20 support. CMake will
-inform you if your compiler is too old.
-Many libraries are bundled with Dolphin and used if they're not installed on
-your system. CMake will inform you if a bundled library is used or if you need
-to install any missing packages yourself. You may refer to the [wiki](https://github.com/dolphin-emu/dolphin/wiki/Building-for-Linux) for more information.
-
-Make sure to pull submodules before building:
-
-```sh
-git submodule update --init --recursive
-```
-
-### Building the OpenXR VR version on Linux:
-
-OpenXR VR is available on desktop Linux (it is not supported on macOS). It
-requires a working system OpenXR runtime such as Monado or SteamVR, and runs on
-the Vulkan and OpenGL backends. Configure with OpenXR and Vulkan enabled:
+On desktop Linux, VR requires a working system OpenXR runtime such as Monado or
+SteamVR and the Vulkan backend. Configure with OpenXR and Vulkan enabled:
 
 ```sh
 cmake -S . -B Build -DENABLE_VR=ON -DENABLE_VULKAN=ON
 cmake --build Build --target dolphin-emu -j $(nproc)
 ```
 
-OpenGL (GLX) is always built on desktop Linux, so VR remains usable even
-without `-DENABLE_VULKAN=ON`, though Vulkan is recommended.
-
-### macOS Build Steps:
-
-A binary supporting a single architecture can be built using the following steps:
-
-1. `mkdir build`
-2. `cd build`
-3. `cmake ..`
-4. `make -j $(sysctl -n hw.logicalcpu)`
-
-An application bundle will be created in `./Binaries`.
-
-A script is also provided to build universal binaries supporting both x64 and ARM in the same
-application bundle using the following steps:
-
-1. `mkdir build`
-2. `cd build`
-3. `python ../BuildMacOSUniversalBinary.py`
-4. Universal binaries will be available in the `universal` folder
-
-Doing this is more complex as it requires installation of library dependencies for both x64 and ARM (or universal library
-equivalents) and may require specifying additional arguments to point to relevant library locations.
-Execute BuildMacOSUniversalBinary.py --help for more details.
-
-### Linux Global Build Steps:
-
-To install to your system.
-
-1. `mkdir build`
-2. `cd build`
-3. `cmake ..`
-4. `make -j $(nproc)`
-5. `sudo make install`
-
-### Linux Local Build Steps:
-
-Useful for development as root access is not required.
-
-1. `mkdir Build`
-2. `cd Build`
-3. `cmake .. -DLINUX_LOCAL_DEV=true`
-4. `make -j $(nproc)`
-5. `ln -s ../../Data/Sys Binaries/`
-
-### Building with Docker
+#### Building with Docker
 
 A `Dockerfile` is provided for a reproducible Linux build environment. Build the image from the repository root:
 
@@ -190,8 +123,7 @@ To produce an installable `.deb` package from the built image and extract it to 
 
 ```sh
 mkdir -p dist
-docker run --rm -v "$(pwd)/dist:/out" -w /app/dolphinxr/Build dolphinxr:latest \
-  bash -c "cpack -G DEB && cp -v *.deb /out/"
+docker run --rm -v "$(pwd)/dist:/out" -w /app/dolphinxr/Build dolphinxr:latest   bash -c "cpack -G DEB && cp -v *.deb /out/"
 ```
 
 Then install it:
@@ -200,36 +132,7 @@ Then install it:
 sudo apt install ./dist/dolphin-emu-*.deb
 ```
 
-### Linux Portable Build Steps:
-
-Can be stored on external storage and used on different Linux systems.
-Or useful for having multiple distinct Dolphin setups for testing/development/TAS.
-
-1. `mkdir Build`
-2. `cd Build`
-3. `cmake .. -DLINUX_LOCAL_DEV=true`
-4. `make -j $(nproc)`
-5. `cp -r ../Data/Sys/ Binaries/`
-6. `touch Binaries/portable.txt`
-
-## Building for Android
-
-These instructions assume familiarity with Android development. If you do not have an
-Android dev environment set up, see [AndroidSetup.md](AndroidSetup.md).
-
-Make sure to pull submodules before building:
-
-```sh
-git submodule update --init --recursive
-```
-
-If using Android Studio, import the Gradle project located in `./Source/Android`.
-
-Android apps are compiled using a build system called Gradle. Dolphin's native component,
-however, is compiled using CMake. The Gradle script will attempt to run a CMake build
-automatically while building the Java code.
-
-### Building the Meta Quest VR version
+#### Building the Meta Quest VR version
 
 The Android project has two product flavors on the `device` dimension:
 `standard` (phones and tablets, built with `-DENABLE_VR=OFF`) and `quest`
@@ -247,8 +150,8 @@ Build it with Gradle from `Source/Android`:
 Helper scripts are also provided for Windows:
 
 ```powershell
-.\Source\Android\build-quest.ps1          # debug APK
-.\Source\Android\build-quest-release.ps1  # release APK (needs signing properties)
+.\Source\Androiduild-quest.ps1          # debug APK
+.\Source\Androiduild-quest-release.ps1  # release APK (needs signing properties)
 ```
 
 Install the resulting APK on a headset with adb:
@@ -314,7 +217,6 @@ There's also "Null", which will not render anything, and
 is intended for debugging purposes only.
 
 ## DolphinTool Usage
-
 ```
 usage: dolphin-tool COMMAND -h
 
