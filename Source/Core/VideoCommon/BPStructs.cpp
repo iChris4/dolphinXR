@@ -304,155 +304,158 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
     const u32 copy_width = srcRect.GetWidth();
     const u32 copy_height = srcRect.GetHeight();
 
-    // Check if we are to copy from the EFB or draw to the XFB
-    if (PE_copy.copy_to_xfb == 0)
+    if (destStride != 0)
     {
-      // bpmem.zcontrol.pixel_format to PixelFormat::Z24 is when the game wants to copy from ZBuffer
-      // (Zbuffer uses 24-bit Format)
-      bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
-      g_texture_cache->CopyRenderTargetToTexture(
-          destAddr, PE_copy.tp_realFormat(), copy_width, copy_height, destStride, is_depth_copy,
-          srcRect, PE_copy.intensity_fmt && PE_copy.auto_conv, PE_copy.half_scale, 1.0f,
-          s_gammaLUT[PE_copy.gamma], bpmem.triggerEFBCopy.clamp_top,
-          bpmem.triggerEFBCopy.clamp_bottom, bpmem.copyfilter.GetCoefficients());
-    }
-    else
-    {
-      // We should be able to get away with deactivating the current bbox tracking
-      // here. Not sure if there's a better spot to put this.
-      // the number of lines copied is determined by the y scale * source efb height
-      g_bounding_box->Disable(pixel_shader_manager);
-
-      float yScale;
-      if (PE_copy.scale_invert)
-        yScale = 256.0f / static_cast<float>(bpmem.dispcopyyscale);
-      else
-        yScale = static_cast<float>(bpmem.dispcopyyscale) / 256.0f;
-
-      float num_xfb_lines = 1.0f + bpmem.copyTexSrcWH.y * yScale;
-
-      u32 height = static_cast<u32>(num_xfb_lines);
-
-      DEBUG_LOG_FMT(VIDEO,
-                    "RenderToXFB: destAddr: {:08x} | srcRect [{} {} {} {}] | fbWidth: {} | "
-                    "fbStride: {} | fbHeight: {} | yScale: {}",
-                    destAddr, srcRect.left, srcRect.top, srcRect.right, srcRect.bottom,
-                    bpmem.copyTexSrcWH.x + 1, destStride, height, yScale);
-
-      bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
-
-      // VR: the XFB copy source rect IS the displayed frame region (what the TV scans out).
-      // Latch it for the cinematic-bar fix and the viewport classifier.
-      MathUtil::Rectangle<int> vr_presentation_src_rect{};
-      const MathUtil::Rectangle<int>* vram_source_rect = nullptr;
-      if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
+      // Check if we are to copy from the EFB or draw to the XFB
+      if (PE_copy.copy_to_xfb == 0)
       {
-        if (g_ActiveConfig.vr_remove_bars && g_ActiveConfig.vr_frame_size_from_xfb)
+        // bpmem.zcontrol.pixel_format to PixelFormat::Z24 is when the game wants to copy from
+        // ZBuffer (Zbuffer uses 24-bit Format)
+        bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
+        g_texture_cache->CopyRenderTargetToTexture(
+            destAddr, PE_copy.tp_realFormat(), copy_width, copy_height, destStride, is_depth_copy,
+            srcRect, PE_copy.intensity_fmt && PE_copy.auto_conv, PE_copy.half_scale, 1.0f,
+            s_gammaLUT[PE_copy.gamma], bpmem.triggerEFBCopy.clamp_top,
+            bpmem.triggerEFBCopy.clamp_bottom, bpmem.copyfilter.GetCoefficients());
+      }
+      else
+      {
+        // We should be able to get away with deactivating the current bbox tracking
+        // here. Not sure if there's a better spot to put this.
+        // the number of lines copied is determined by the y scale * source efb height
+        g_bounding_box->Disable(pixel_shader_manager);
+
+        float yScale;
+        if (PE_copy.scale_invert)
+          yScale = 256.0f / static_cast<float>(bpmem.dispcopyyscale);
+        else
+          yScale = static_cast<float>(bpmem.dispcopyyscale) / 256.0f;
+
+        float num_xfb_lines = 1.0f + bpmem.copyTexSrcWH.y * yScale;
+
+        u32 height = static_cast<u32>(num_xfb_lines);
+
+        DEBUG_LOG_FMT(VIDEO,
+                      "RenderToXFB: destAddr: {:08x} | srcRect [{} {} {} {}] | fbWidth: {} | "
+                      "fbStride: {} | fbHeight: {} | yScale: {}",
+                      destAddr, srcRect.left, srcRect.top, srcRect.right, srcRect.bottom,
+                      bpmem.copyTexSrcWH.x + 1, destStride, height, yScale);
+
+        bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
+
+        // VR: the XFB copy source rect IS the displayed frame region (what the TV scans out).
+        // Latch it for the cinematic-bar fix and the viewport classifier.
+        MathUtil::Rectangle<int> vr_presentation_src_rect{};
+        const MathUtil::Rectangle<int>* vram_source_rect = nullptr;
+        if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
         {
-          const VR::VRFrameRegion xfb_source{srcRect.left, srcRect.top,
-                                             static_cast<int>(copy_width),
-                                             static_cast<int>(copy_height), true};
-          VR::VRFrameRegion presentation_source{};
-          if (VR::ConsumeVRPresentationSourceRegion(xfb_source, &presentation_source))
+          if (g_ActiveConfig.vr_remove_bars && g_ActiveConfig.vr_frame_size_from_xfb)
           {
-            vr_presentation_src_rect = {
-                presentation_source.left, presentation_source.top,
-                presentation_source.left + presentation_source.width,
-                presentation_source.top + presentation_source.height};
-            vram_source_rect = &vr_presentation_src_rect;
+            const VR::VRFrameRegion xfb_source{srcRect.left, srcRect.top,
+                                               static_cast<int>(copy_width),
+                                               static_cast<int>(copy_height), true};
+            VR::VRFrameRegion presentation_source{};
+            if (VR::ConsumeVRPresentationSourceRegion(xfb_source, &presentation_source))
+            {
+              vr_presentation_src_rect = {
+                  presentation_source.left, presentation_source.top,
+                  presentation_source.left + presentation_source.width,
+                  presentation_source.top + presentation_source.height};
+              vram_source_rect = &vr_presentation_src_rect;
+            }
+          }
+          VR::NotifyVRXFBCopyRegion(srcRect.left, srcRect.top, srcRect.right, srcRect.bottom);
+        }
+
+        g_texture_cache->CopyRenderTargetToTexture(
+            destAddr, EFBCopyFormat::XFB, copy_width, height, destStride, is_depth_copy, srcRect,
+            false, false, yScale, s_gammaLUT[PE_copy.gamma], bpmem.triggerEFBCopy.clamp_top,
+            bpmem.triggerEFBCopy.clamp_bottom, bpmem.copyfilter.GetCoefficients(), vram_source_rect);
+
+        auto& system = Core::System::GetInstance();
+
+        // This is as closest as we have to an "end of the frame"
+        // It works 99% of the time.
+        // But sometimes games want to render an XFB larger than the EFB's 640x528 pixel resolution
+        // (especially when using the 3xMSAA mode, which cuts EFB resolution to 640x264). So they
+        // render multiple sub-frames and arrange the XFB copies in next to each-other in main
+        // memory so they form a single completed XFB. See
+        // https://dolphin-emu.org/blog/2017/11/19/hybridxfb/ for examples and more detail.
+        system.GetVideoEvents().after_frame_event.Trigger(system);
+
+        // Note: Theoretically, in the future we could track the VI configuration and try to detect
+        //       when an XFB is the last XFB copy of a frame. Not only would we get a clean "end of
+        //       the frame", but we would also be able to use ImmediateXFB even for these games.
+        //       Might also clean up some issues with games doing XFB copies they don't intend to
+        //       display.
+
+  #ifdef ENABLE_VR
+        // The just-copied XFB is a completed frame. Two things must happen HERE, in FIFO
+        // order, and not at present time — with ImmediateXFB off, presents run from
+        // AsyncRequests at arbitrary points inside the NEXT frame's draw stream:
+        //  1. Stamp the XFB with the pose its draws used, so a deferred present submits
+        //     matching pose+content and the compositor's ATW reprojects correctly.
+        //     (Must precede the Lock Head Pose LocateViews below, and the ImmediateSwap
+        //     which consumes the stamp.)
+        //  2. Queue the VR full-EFB clear. It is deferred to the next frame's first draw
+        //     (FramebufferManager) so neither a mid-frame present nor a multi-copy burst
+        //     can wipe content that is still being composed or copied out.
+        if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
+            VR::g_openxr->IsSessionRunning())
+        {
+          VR::g_openxr->StampXFBPose(destAddr);
+          if (g_framebuffer_manager)
+            g_framebuffer_manager->RequestVRClearEFB();
+        }
+  #endif
+
+        if (g_ActiveConfig.bImmediateXFB)
+        {
+          // below div two to convert from bytes to pixels - it expects width, not stride
+          g_presenter->ImmediateSwap(destAddr, destStride / 2, destStride, height);
+        }
+        else
+        {
+          if (system.GetFifoPlayer().IsRunningWithFakeVideoInterfaceUpdates())
+          {
+            auto& vi = system.GetVideoInterface();
+            vi.FakeVIUpdate(destAddr, srcRect.GetWidth(), destStride, height);
           }
         }
-        VR::NotifyVRXFBCopyRegion(srcRect.left, srcRect.top, srcRect.right, srcRect.bottom);
-      }
 
-      g_texture_cache->CopyRenderTargetToTexture(
-          destAddr, EFBCopyFormat::XFB, copy_width, height, destStride, is_depth_copy, srcRect,
-          false, false, yScale, s_gammaLUT[PE_copy.gamma], bpmem.triggerEFBCopy.clamp_top,
-          bpmem.triggerEFBCopy.clamp_bottom, bpmem.copyfilter.GetCoefficients(), vram_source_rect);
-
-      auto& system = Core::System::GetInstance();
-
-      // This is as closest as we have to an "end of the frame"
-      // It works 99% of the time.
-      // But sometimes games want to render an XFB larger than the EFB's 640x528 pixel resolution
-      // (especially when using the 3xMSAA mode, which cuts EFB resolution to 640x264). So they
-      // render multiple sub-frames and arrange the XFB copies in next to each-other in main memory
-      // so they form a single completed XFB.
-      // See https://dolphin-emu.org/blog/2017/11/19/hybridxfb/ for examples and more detail.
-      system.GetVideoEvents().after_frame_event.Trigger(system);
-
-      // Note: Theoretically, in the future we could track the VI configuration and try to detect
-      //       when an XFB is the last XFB copy of a frame. Not only would we get a clean "end of
-      //       the frame", but we would also be able to use ImmediateXFB even for these games.
-      //       Might also clean up some issues with games doing XFB copies they don't intend to
-      //       display.
-
-#ifdef ENABLE_VR
-      // The just-copied XFB is a completed frame. Two things must happen HERE, in FIFO
-      // order, and not at present time — with ImmediateXFB off, presents run from
-      // AsyncRequests at arbitrary points inside the NEXT frame's draw stream:
-      //  1. Stamp the XFB with the pose its draws used, so a deferred present submits
-      //     matching pose+content and the compositor's ATW reprojects correctly.
-      //     (Must precede the Lock Head Pose LocateViews below, and the ImmediateSwap
-      //     which consumes the stamp.)
-      //  2. Queue the VR full-EFB clear. It is deferred to the next frame's first draw
-      //     (FramebufferManager) so neither a mid-frame present nor a multi-copy burst
-      //     can wipe content that is still being composed or copied out.
-      if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
-          VR::g_openxr->IsSessionRunning())
-      {
-        VR::g_openxr->StampXFBPose(destAddr);
-        if (g_framebuffer_manager)
-          g_framebuffer_manager->RequestVRClearEFB();
-      }
-#endif
-
-      if (g_ActiveConfig.bImmediateXFB)
-      {
-        // below div two to convert from bytes to pixels - it expects width, not stride
-        g_presenter->ImmediateSwap(destAddr, destStride / 2, destStride, height);
-      }
-      else
-      {
-        if (system.GetFifoPlayer().IsRunningWithFakeVideoInterfaceUpdates())
+  #ifdef ENABLE_VR
+        // Head-pose lock: refresh the OpenXR head pose at this XFB-copy point in the
+        // FIFO stream — between the just-finished game frame and the next one. Runs on
+        // the video thread in FIFO order so every draw within a single game frame sees
+        // one consistent head pose. Only applies when ImmediateXFB is off (see
+        // VideoConfig::VRLockHeadPosePerFrame); with it on, the GS refetches per draw
+        // and this invalidation is unnecessary.
+        if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+            g_ActiveConfig.VRLockHeadPosePerFrame() && VR::g_openxr &&
+            VR::g_openxr->IsSessionRunning() && VR::g_openxr->ShouldRender())
         {
-          auto& vi = system.GetVideoInterface();
-          vi.FakeVIUpdate(destAddr, srcRect.GetWidth(), destStride, height);
+          // Debounce: some games emit multiple XFB copies per visual frame within
+          // <1 ms. Only fire once per 5 ms so intra-frame bursts don't re-invalidate
+          // the pose cache between draws of the next frame.
+          static bool s_first_locate = true;
+          static auto s_last_locate_time = std::chrono::steady_clock::now();
+          const auto now = std::chrono::steady_clock::now();
+          const double ms_since_last =
+              std::chrono::duration<double, std::milli>(now - s_last_locate_time).count();
+          if (s_first_locate || ms_since_last >= 5.0)
+          {
+            VR::g_openxr->LocateViews();
+            system.GetGeometryShaderManager().InvalidateVRHeadPose();
+            // Controller Anchor rides the same boundary: hand positions latch with the
+            // head pose so anchored elements never move mid-frame. (When the lock is off
+            // the controller cache is bypassed entirely, so this is the only site.)
+            VR::g_openxr->InvalidateControllerAnchorCache();
+            s_last_locate_time = now;
+            s_first_locate = false;
+          }
         }
+  #endif
       }
-
-#ifdef ENABLE_VR
-      // Head-pose lock: refresh the OpenXR head pose at this XFB-copy point in the
-      // FIFO stream — between the just-finished game frame and the next one. Runs on
-      // the video thread in FIFO order so every draw within a single game frame sees
-      // one consistent head pose. Only applies when ImmediateXFB is off (see
-      // VideoConfig::VRLockHeadPosePerFrame); with it on, the GS refetches per draw
-      // and this invalidation is unnecessary.
-      if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
-          g_ActiveConfig.VRLockHeadPosePerFrame() && VR::g_openxr &&
-          VR::g_openxr->IsSessionRunning() && VR::g_openxr->ShouldRender())
-      {
-        // Debounce: some games emit multiple XFB copies per visual frame within
-        // <1 ms. Only fire once per 5 ms so intra-frame bursts don't re-invalidate
-        // the pose cache between draws of the next frame.
-        static bool s_first_locate = true;
-        static auto s_last_locate_time = std::chrono::steady_clock::now();
-        const auto now = std::chrono::steady_clock::now();
-        const double ms_since_last =
-            std::chrono::duration<double, std::milli>(now - s_last_locate_time).count();
-        if (s_first_locate || ms_since_last >= 5.0)
-        {
-          VR::g_openxr->LocateViews();
-          system.GetGeometryShaderManager().InvalidateVRHeadPose();
-          // Controller Anchor rides the same boundary: hand positions latch with the
-          // head pose so anchored elements never move mid-frame. (When the lock is off
-          // the controller cache is bypassed entirely, so this is the only site.)
-          VR::g_openxr->InvalidateControllerAnchorCache();
-          s_last_locate_time = now;
-          s_first_locate = false;
-        }
-      }
-#endif
     }
 
     // Clear the rectangular region after copying it.
