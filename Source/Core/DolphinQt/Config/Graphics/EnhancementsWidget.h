@@ -30,9 +30,6 @@ public:
   explicit EnhancementsWidget(GraphicsPane* gfx_pane);
 
 private:
-  template <typename T>
-  T ReadSetting(const Config::Info<T>& setting) const;
-
   void CreateWidgets();
   void ConnectWidgets();
   void AddDescriptions();
@@ -42,7 +39,6 @@ private:
   void UpdateAntialiasingOptions();
   void LoadPostProcessingShaders();
   void ShaderChanged();
-  void OnConfigChanged();
 
   void ConfigureColorCorrection();
   void ConfigurePostProcessingShader();

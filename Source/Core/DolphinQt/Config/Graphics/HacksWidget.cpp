@@ -30,8 +30,10 @@ HacksWidget::HacksWidget(GraphicsPane* gfx_pane) : m_game_layer{gfx_pane->GetCon
   // automatically whenever the hack is off, and games that need it off render correctly
   // (XFB pose stamps). The checkbox is the user's to set in VR as well as outside it.
   OnBackendChanged(QString::fromStdString(Config::Get(Config::MAIN_GFX_BACKEND)));
-  connect(m_gpu_texture_decoding, &QCheckBox::toggled,
-          [gfx_pane] { emit gfx_pane->UseGPUTextureDecodingChanged(); });
+  connect(gfx_pane, &GraphicsPane::UpdateGPUTextureDecoding, this, [this] {
+    m_gpu_texture_decoding->setEnabled(
+        !Get(m_game_layer, Config::GFX_ENHANCE_ARBITRARY_MIPMAP_DETECTION));
+  });
 }
 
 void HacksWidget::CreateWidgets()
@@ -217,8 +219,8 @@ void HacksWidget::AddDescriptions()
   static const char TR_GPU_DECODING_DESCRIPTION[] = QT_TR_NOOP(
       "Enables texture decoding using the GPU instead of the CPU.<br><br>This may result in "
       "performance gains in some scenarios, or on systems where the CPU is the "
-      "bottleneck.<br><br>If this setting is enabled, Arbitrary Mipmap Detection will be "
-      "disabled.<br><br>"
+      "bottleneck.<br><br>This setting is disabled when Arbitrary Mipmap Detection is "
+      "enabled.<br><br>"
       "<dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static const char TR_FAST_DEPTH_CALC_DESCRIPTION[] = QT_TR_NOOP(
       "Uses a less accurate algorithm to calculate depth values.<br><br>Causes issues in a few "
