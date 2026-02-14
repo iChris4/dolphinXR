@@ -69,6 +69,8 @@ public:
 
     const T& to() const { return It->second.To; }
 
+    std::pair<T, T> operator*() { return {from(), to()}; }
+
     const_iterator& operator++()
     {
       ++It;
@@ -349,6 +351,18 @@ public:
       return false;
     --it;
     return get_from(it) <= value && value < get_to(it);
+  }
+
+  bool overlaps(T from, T to) const
+  {
+    if (from >= to)
+      return false;
+
+    auto it = Map.lower_bound(to);
+    if (it == Map.begin())
+      return false;
+    --it;
+    return get_from(it) < to && from < get_to(it);
   }
 
   std::size_t size() const { return Map.size(); }

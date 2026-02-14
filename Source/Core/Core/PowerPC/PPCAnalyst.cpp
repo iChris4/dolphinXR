@@ -849,7 +849,8 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
     code[i].inst = inst;
     code[i].skip = false;
     block->m_stats->numCycles += opinfo->num_cycles;
-    block->m_physical_addresses.insert(result.physical_address);
+    block->m_physical_addresses.insert(result.physical_address,
+                                       result.physical_address + sizeof(UGeckoInstruction));
 
     SetInstructionStats(block, &code[i], opinfo);
 

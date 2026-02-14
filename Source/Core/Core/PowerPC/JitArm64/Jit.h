@@ -7,9 +7,8 @@
 #include <map>
 #include <optional>
 
-#include <rangeset/rangesizeset.h>
-
 #include "Common/Arm64Emitter.h"
+#include "Common/RangeSizeSet.h"
 
 #include "Core/PowerPC/JitArm64/JitArm64Cache.h"
 #include "Core/PowerPC/JitArm64/JitArm64_RegCache.h"
@@ -431,10 +430,10 @@ protected:
   u8* m_near_code_end = nullptr;
   bool m_near_code_write_failed = false;
 
-  HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_near_0;
-  HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_near_1;
-  HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_far_0;
-  HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_far_1;
+  Common::RangeSizeSet<u8*> m_free_ranges_near_0;
+  Common::RangeSizeSet<u8*> m_free_ranges_near_1;
+  Common::RangeSizeSet<u8*> m_free_ranges_far_0;
+  Common::RangeSizeSet<u8*> m_free_ranges_far_1;
 
   std::unique_ptr<HostDisassembler> m_disassembler;
 };
