@@ -127,6 +127,8 @@ add_library(common
   QoSSession.h
   Random.cpp
   Random.h
+  RangeSet.h
+  RangeSizeSet.h
   ScopeGuard.h
   SDCardUtil.cpp
   SDCardUtil.h

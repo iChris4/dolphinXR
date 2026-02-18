@@ -795,8 +795,6 @@ include_directories(Externals/picojson)
 
 add_subdirectory(Externals/expr)
 
-add_subdirectory(Externals/rangeset)
-
 add_subdirectory(Externals/FatFs)
 
 if (USE_RETRO_ACHIEVEMENTS)

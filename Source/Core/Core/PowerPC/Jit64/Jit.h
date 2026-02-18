@@ -19,9 +19,8 @@
 
 #include <optional>
 
-#include <rangeset/rangesizeset.h>
-
 #include "Common/CommonTypes.h"
+#include "Common/RangeSizeSet.h"
 #include "Common/x64Emitter.h"
 #include "Core/PowerPC/Jit64/JitAsm.h"
 #include "Core/PowerPC/Jit64/RegCache/FPURegCache.h"
@@ -295,8 +294,8 @@ private:
 
   Jit64AsmRoutineManager asm_routines{*this};
 
-  HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_near;
-  HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_far;
+  Common::RangeSizeSet<u8*> m_free_ranges_near;
+  Common::RangeSizeSet<u8*> m_free_ranges_far;
 
   const bool m_im_here_debug = false;
   const bool m_im_here_log = false;
