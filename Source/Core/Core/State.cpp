@@ -97,7 +97,7 @@ struct CompressAndDumpStateArgs
 static Common::WorkQueueThreadSP<CompressAndDumpStateArgs> s_compress_and_dump_thread;
 
 // Don't forget to increase this after doing changes on the savestate system
-constexpr u32 STATE_VERSION = 183;  // Last changed in PR 14406 (DolphinXR numbering; upstream 179)
+constexpr u32 STATE_VERSION = 184;  // Last changed in PR 14452 (DolphinXR numbering; upstream 180)
 
 // Increase this if the StateExtendedHeader definition changes
 constexpr u32 EXTENDED_HEADER_VERSION = 1;  // Last changed in PR 12217
