@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <numeric>
 
-#include "Common/BitUtils.h"
 #include "Common/DirectIOFile.h"
 #include "Common/FileUtil.h"
 #include "Common/Lazy.h"
@@ -21,12 +20,6 @@
 
 namespace
 {
-
-constexpr std::string GetHexDump(const auto& data)
-{
-  const auto u8_span = Common::AsU8Span(data);
-  return HexDump(u8_span.data(), u8_span.size());
-}
 
 void AppendRange(auto* container, const auto& range)
 {
@@ -549,32 +542,43 @@ void MagneticCardReader::ReadCardFile()
       track_data.reset();
       break;
     }
-  }
 
-  DEBUG_LOG_FMT(SERIALINTERFACE_CARD, "ReadCard: 0:{} 1:{} 2:{}", GetHexDump(m_card_data[0]),
-                GetHexDump(m_card_data[1]), GetHexDump(m_card_data[2]));
+    DEBUG_LOG_FMT(SERIALINTERFACE_CARD, "ReadCardFile: track:{} data:{}", track_num,
+                  HexDump(*track_data));
+  }
 }
 
 void MagneticCardReader::WriteCardFile()
 {
-  // Note: Creating empty upsets games when reinserting them later.
+  // Note: Creating empty cards upsets games when reinserting them later.
   // Games expect to dispense their own blank cards, not have such cards inserted.
   // We only write files when the game itself writes, so this won't happen.
 
   NOTICE_LOG_FMT(SERIALINTERFACE_CARD, "Writing card data to: {}", m_card_settings->card_name);
-  DEBUG_LOG_FMT(SERIALINTERFACE_CARD, "WriteCard: 0:{} 1:{} 2:{}", GetHexDump(m_card_data[0]),
-                GetHexDump(m_card_data[1]), GetHexDump(m_card_data[2]));
 
-  auto full_path = m_card_settings->card_path + m_card_settings->card_name;
+  const auto full_path = m_card_settings->card_path + m_card_settings->card_name;
 
   File::DirectIOFile file{full_path, File::AccessMode::Write};
 
-  for (auto& track_data : m_card_data)
+  for (std::size_t track_num = 0; track_num != m_card_data.size(); ++track_num)
   {
-    if (track_data.has_value() && !file.Write(*track_data))
+    const auto& track_data = m_card_data[track_num];
+
+    if (!track_data.has_value())
+    {
+      DEBUG_LOG_FMT(SERIALINTERFACE_CARD, "WriteCardFile: Skipping empty track:{}", track_num);
+      continue;
+    }
+
+    DEBUG_LOG_FMT(SERIALINTERFACE_CARD, "WriteCardFile: track:{} data:{}", track_num,
+                  HexDump(*track_data));
+
+    // FYI: Our simple file format assumes contiguously filled tracks.
+    // I don't think games ever just skip the 2nd track,
+    //  but we better write out every used tracks at the correct offset in case they do.
+    if (!file.OffsetWrite(track_num * TRACK_SIZE, *track_data))
     {
       ERROR_LOG_FMT(SERIALINTERFACE_CARD, "File write failed.");
-      break;
     }
   }
 }
@@ -654,7 +658,7 @@ void MagneticCardReader::Process(std::vector<u8>* read, std::vector<u8>* write)
 
 bool MagneticCardReader::ReceivePacket(std::span<const u8> packet)
 {
-  DEBUG_LOG_FMT(SERIALINTERFACE_CARD, "ReceivePacket: {}", GetHexDump(packet));
+  DEBUG_LOG_FMT(SERIALINTERFACE_CARD, "ReceivePacket: {}", HexDump(packet));
 
   if (packet.size() < 6)
   {
@@ -887,9 +891,8 @@ void MagneticCardReader::BuildPacket(std::vector<u8>& write_buffer)
   write_and_checksum(END_OF_TEXT);
   *(out_ptr++) = packet_checksum;
 
-  DEBUG_LOG_FMT(
-      SERIALINTERFACE_CARD, "BuildPacket: {}",
-      GetHexDump(std::span{write_buffer}.subspan(write_buffer.size() - payload_size - 2)));
+  DEBUG_LOG_FMT(SERIALINTERFACE_CARD, "BuildPacket: {}",
+                HexDump(std::span{write_buffer}.subspan(write_buffer.size() - payload_size - 2)));
 }
 
 bool MagneticCardReader::IsRunningCommand() const

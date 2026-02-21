@@ -164,6 +164,11 @@ std::string ValueToString(Common::Enum auto value)
 // Generates an hexdump-like representation of a binary data blob.
 std::string HexDump(const u8* data, size_t size);
 
+inline auto HexDump(std::span<const u8> data)
+{
+  return HexDump(data.data(), data.size());
+}
+
 namespace Common
 {
 std::from_chars_result FromChars(std::string_view sv, std::integral auto& value, int base = 10)
