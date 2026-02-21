@@ -72,6 +72,10 @@ static int WSAGetLastError()
 namespace AMMediaboard
 {
 
+// Written via Write_U32_Swap (LE) because PPC display code reads with lwz + manual bswap32.
+static constexpr u32 TEST_OK_WORD0 = 0x54455354;  // "TEST"
+static constexpr u32 TEST_OK_WORD1 = 0x204F4B00;  // " OK\0"
+
 MediaBoardRange::MediaBoardRange(u32 start_, u32 size_, std::span<u8> buffer_)
     : start{start_}, end{start_ + size_}, buffer{buffer_.data()}, buffer_size{buffer_.size()}
 {
@@ -1601,12 +1605,10 @@ u32 ExecuteCommand(std::array<u32, 3>& dicmd_buf, u32* diimm_buf, u32 address, u
         DEBUG_LOG_FMT(AMMEDIABOARD, "GC-AM: TestHardware (Execute2): type={:08x} str_ptr={:08x}",
                       test_type, string_ptr);
 
-        // Write "TEST OK\0" to the string buffer.
-        // Data must be LE because the PPC display code byte-swaps when reading.
         if (string_ptr != 0)
         {
-          memory.Write_U32_Swap(0x54455354, string_ptr);
-          memory.Write_U32_Swap(0x204F4B00, string_ptr + 4);
+          memory.Write_U32_Swap(TEST_OK_WORD0, string_ptr);
+          memory.Write_U32_Swap(TEST_OK_WORD1, string_ptr + 4);
         }
 
         // Phase 1: Echo test_type back. The 0x80 flag is set below in the generic path.
@@ -1965,11 +1967,10 @@ u32 ExecuteCommand(std::array<u32, 3>& dicmd_buf, u32* diimm_buf, u32 address, u
                         "GC-AM: TestHardware (Execute1 inner): type={:08x} str_ptr={:08x}",
                         test_type, string_ptr);
 
-          // PPC display code reads with lwz + manual bswap32; data must be LE.
           if (string_ptr != 0)
           {
-            memory.Write_U32_Swap(0x54455354, string_ptr);
-            memory.Write_U32_Swap(0x204F4B00, string_ptr + 4);
+            memory.Write_U32_Swap(TEST_OK_WORD0, string_ptr);
+            memory.Write_U32_Swap(TEST_OK_WORD1, string_ptr + 4);
           }
 
           // Phase 1: Echo test_type back. The 0x80 flag is set below.
@@ -2111,9 +2112,8 @@ u32 ExecuteCommand(std::array<u32, 3>& dicmd_buf, u32* diimm_buf, u32 address, u
         DEBUG_LOG_FMT(AMMEDIABOARD, "GC-AM:               ({:08x})", s_media_buffer_32[12]);
 
         // On real systems it shows the status about the DIMM/GD-ROM here
-        // We just show "TEST OK"
-        memory.Write_U32_Swap(0x54455354, s_media_buffer_32[12]);
-        memory.Write_U32_Swap(0x204F4B00, s_media_buffer_32[12] + 4);
+        memory.Write_U32_Swap(TEST_OK_WORD0, s_media_buffer_32[12]);
+        memory.Write_U32_Swap(TEST_OK_WORD1, s_media_buffer_32[12] + 4);
 
         s_media_buffer_32[1] = s_media_buffer_32[9];
         break;
