@@ -2112,8 +2112,8 @@ u32 ExecuteCommand(std::array<u32, 3>& dicmd_buf, u32* diimm_buf, u32 address, u
 
         // On real systems it shows the status about the DIMM/GD-ROM here
         // We just show "TEST OK"
-        memory.Write_U32(0x54455354, s_media_buffer_32[12]);
-        memory.Write_U32(0x204F4B00, s_media_buffer_32[12] + 4);
+        memory.Write_U32_Swap(0x54455354, s_media_buffer_32[12]);
+        memory.Write_U32_Swap(0x204F4B00, s_media_buffer_32[12] + 4);
 
         s_media_buffer_32[1] = s_media_buffer_32[9];
         break;
