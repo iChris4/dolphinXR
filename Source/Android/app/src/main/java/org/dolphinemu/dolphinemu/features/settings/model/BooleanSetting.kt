@@ -896,7 +896,7 @@ enum class BooleanSetting(
         Settings.FILE_ACHIEVEMENTS,
         Settings.SECTION_ACHIEVEMENTS,
         "HardcoreEnabled",
-        false
+        true
     ),
     ACHIEVEMENTS_UNOFFICIAL_ENABLED(
         Settings.FILE_ACHIEVEMENTS,
@@ -932,7 +932,7 @@ enum class BooleanSetting(
         Settings.FILE_ACHIEVEMENTS,
         Settings.SECTION_ACHIEVEMENTS,
         "ProgressEnabled",
-        true
+        false
     );
 
     override val isOverridden: Boolean
