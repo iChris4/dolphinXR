@@ -3,10 +3,12 @@
 
 #include "DiscIO/Volume.h"
 
+#include <cstring>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -33,6 +35,13 @@ namespace DiscIO
 const IOS::ES::TicketReader Volume::INVALID_TICKET{};
 const IOS::ES::TMDReader Volume::INVALID_TMD{};
 const std::vector<u8> Volume::INVALID_CERT_CHAIN{};
+
+std::string Volume::DecodeString(std::span<const char> data) const
+{
+  // strnlen to trim null bytes
+  std::string string(data.data(), strnlen(data.data(), data.size()));
+  return GetRegion() == Region::NTSC_J ? SHIFTJISToUTF8(string) : CP1252ToUTF8(string);
+}
 
 template <typename T>
 static void AddToSyncHash(Common::SHA1::Context* context, const T& data)

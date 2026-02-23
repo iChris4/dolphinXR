@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <cstring>
 #include <limits>
 #include <map>
 #include <memory>
@@ -14,7 +13,6 @@
 
 #include "Common/CommonTypes.h"
 #include "Common/Crypto/SHA1.h"
-#include "Common/StringUtil.h"
 #include "Common/Swap.h"
 #include "Core/IOS/ES/Formats.h"
 #include "DiscIO/Enums.h"
@@ -144,16 +142,7 @@ public:
   virtual std::array<u8, 20> GetSyncHash() const = 0;
 
 protected:
-  std::string DecodeString(std::span<const char> data) const
-  {
-    // strnlen to trim NULLs
-    std::string string(data.data(), strnlen(data.data(), data.size()));
-
-    if (GetRegion() == Region::NTSC_J)
-      return SHIFTJISToUTF8(string);
-
-    return CP1252ToUTF8(string);
-  }
+  std::string DecodeString(std::span<const char> data) const;
 
   void ReadAndAddToSyncHash(Common::SHA1::Context* context, u64 offset, u64 length,
                             const Partition& partition) const;
