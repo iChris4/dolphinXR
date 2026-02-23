@@ -50,13 +50,13 @@ std::string VolumeDisc::GetGameID(const Partition& partition) const
     const std::string maker_id{GetMakerID()};
     memcpy(id + 4, maker_id.c_str(), std::min<std::size_t>(maker_id.size(), 2));
 
-    return DecodeString(id);
+    return FilterGameID(id);
   }
 
   if (!Read(0, sizeof(id), reinterpret_cast<u8*>(id), partition))
     return std::string();
 
-  return DecodeString(id);
+  return FilterGameID(id);
 }
 
 Country VolumeDisc::GetCountry(const Partition& partition) const
@@ -126,9 +126,9 @@ std::string VolumeDisc::GetMakerID(const Partition& partition) const
     {
     case 'S':  // SEGA CORPORATION
     case 'H':  // Hitmaker co,ltd
-      return DecodeString("6E");
+      return "6E";
     case 'N':  // NAMCO CORPORATION
-      return DecodeString("82");
+      return "82";
     default:
       break;
     }
@@ -138,7 +138,7 @@ std::string VolumeDisc::GetMakerID(const Partition& partition) const
   if (!Read(0x4, sizeof(maker_id), reinterpret_cast<u8*>(&maker_id), partition))
     return std::string();
 
-  return DecodeString(maker_id);
+  return FilterGameID(maker_id);
 }
 
 std::optional<u16> VolumeDisc::GetRevision(const Partition& partition) const

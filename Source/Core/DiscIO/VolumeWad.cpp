@@ -247,7 +247,7 @@ std::string VolumeWAD::GetMakerID(const Partition& partition) const
   if (!Common::IsPrintableCharacter(temp[0]) || !Common::IsPrintableCharacter(temp[1]))
     return "00";
 
-  return DecodeString(temp);
+  return FilterGameID(temp);
 }
 
 std::optional<u64> VolumeWAD::GetTitleID(const Partition& partition) const

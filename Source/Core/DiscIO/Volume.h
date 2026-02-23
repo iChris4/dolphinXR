@@ -143,6 +143,7 @@ public:
 
 protected:
   std::string DecodeString(std::span<const char> data) const;
+  static std::string FilterGameID(std::span<const char> data);
 
   void ReadAndAddToSyncHash(Common::SHA1::Context* context, u64 offset, u64 length,
                             const Partition& partition) const;
