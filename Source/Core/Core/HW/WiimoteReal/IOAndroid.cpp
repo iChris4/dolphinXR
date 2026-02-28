@@ -66,6 +66,9 @@ WiimoteAndroid::WiimoteAndroid(int index) : Wiimote(), m_mayflash_index(index)
   jobject java_wiimote_payload = env->GetObjectArrayElement(payload_object, m_mayflash_index);
   m_java_wiimote_payload = reinterpret_cast<jbyteArray>(env->NewGlobalRef(java_wiimote_payload));
 
+  env->DeleteLocalRef(payload_object);
+  env->DeleteLocalRef(java_wiimote_payload);
+
   // Get function pointers
   m_input_func = env->GetStaticMethodID(s_adapter_class, "input", "(I)I");
   m_output_func = env->GetStaticMethodID(s_adapter_class, "output", "(I[BI)I");
@@ -152,5 +155,6 @@ void InitAdapterClass()
   JNIEnv* env = IDCache::GetEnvForThread();
   jclass adapter_class = env->FindClass("org/dolphinemu/dolphinemu/utils/WiimoteAdapter");
   s_adapter_class = reinterpret_cast<jclass>(env->NewGlobalRef(adapter_class));
+  env->DeleteLocalRef(adapter_class);
 }
 }  // namespace WiimoteReal
