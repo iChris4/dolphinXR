@@ -58,11 +58,25 @@ auto WiimoteScannerAndroid::FindAttachedWiimotes() -> FindResults
 
 WiimoteAndroid::WiimoteAndroid(int index) : Wiimote(), m_mayflash_index(index)
 {
+  auto* const env = IDCache::GetEnvForThread();
+
+  jfieldID payload_field = env->GetStaticFieldID(s_adapter_class, "wiimotePayload", "[[B");
+  jobjectArray payload_object =
+      reinterpret_cast<jobjectArray>(env->GetStaticObjectField(s_adapter_class, payload_field));
+  jobject java_wiimote_payload = env->GetObjectArrayElement(payload_object, m_mayflash_index);
+  m_java_wiimote_payload = reinterpret_cast<jbyteArray>(env->NewGlobalRef(java_wiimote_payload));
+
+  // Get function pointers
+  m_input_func = env->GetStaticMethodID(s_adapter_class, "input", "(I)I");
+  m_output_func = env->GetStaticMethodID(s_adapter_class, "output", "(I[BI)I");
 }
 
 WiimoteAndroid::~WiimoteAndroid()
 {
   Shutdown();
+
+  auto* const env = IDCache::GetEnvForThread();
+  env->DeleteGlobalRef(m_java_wiimote_payload);
 }
 
 std::string WiimoteAndroid::GetId() const
@@ -80,17 +94,6 @@ bool WiimoteAndroid::ConnectInternal()
 {
   if (IsConnected())
     return true;
-
-  auto* const env = IDCache::GetEnvForThread();
-
-  jfieldID payload_field = env->GetStaticFieldID(s_adapter_class, "wiimotePayload", "[[B");
-  jobjectArray payload_object =
-      reinterpret_cast<jobjectArray>(env->GetStaticObjectField(s_adapter_class, payload_field));
-  m_java_wiimote_payload = (jbyteArray)env->GetObjectArrayElement(payload_object, m_mayflash_index);
-
-  // Get function pointers
-  m_input_func = env->GetStaticMethodID(s_adapter_class, "input", "(I)I");
-  m_output_func = env->GetStaticMethodID(s_adapter_class, "output", "(I[BI)I");
 
   // Test a write to see if a remote is actually connected to the DolphinBar.
   constexpr u8 report[] = {WR_SET_REPORT | BT_OUTPUT,
