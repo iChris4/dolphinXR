@@ -524,6 +524,21 @@ void Settings::SetAutoRefreshEnabled(bool enabled)
   emit AutoRefreshToggled(enabled);
 }
 
+bool Settings::IsGameCountVisible() const
+{
+  return GetQSettings().value(QStringLiteral("GameCount/Visible"), true).toBool();
+}
+
+void Settings::SetGameCountVisible(const bool visible)
+{
+  if (IsGameCountVisible() == visible)
+    return;
+
+  GetQSettings().setValue(QStringLiteral("GameCount/Visible"), visible);
+
+  emit GameCountVisibilityChanged(visible);
+}
+
 QString Settings::GetDefaultGame() const
 {
   return QString::fromStdString(Config::Get(Config::MAIN_DEFAULT_ISO));
@@ -825,6 +840,7 @@ void Settings::RefreshWidgetVisibility()
   emit DebugModeToggled(IsDebugModeEnabled());
   emit LogVisibilityChanged(IsLogVisible());
   emit LogConfigVisibilityChanged(IsLogConfigVisible());
+  emit GameCountVisibilityChanged(IsGameCountVisible());
 }
 
 void Settings::SetDebugFont(QFont font)

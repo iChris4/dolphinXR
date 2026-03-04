@@ -296,6 +296,8 @@ add_executable(dolphin-emu
   FIFO/FIFOAnalyzer.h
   FIFO/FIFOPlayerWindow.cpp
   FIFO/FIFOPlayerWindow.h
+  GameCount.cpp
+  GameCount.h
   GameList/GameList.cpp
   GameList/GameList.h
   GameList/GameListModel.cpp
