@@ -206,6 +206,8 @@ void Wiimote::Reset()
 
 Wiimote::Wiimote(const unsigned int index) : m_index(index), m_bt_device_index(index)
 {
+  m_speaker_logic.SetWiimoteIndex(m_index);
+
   using Translatability = ControllerEmu::Translatability;
 
   // Buttons
