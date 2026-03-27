@@ -65,6 +65,7 @@ struct SConfig
   const std::string GetTitleDescription() const;
   u64 GetTitleID() const;
   u16 GetRevision() const;
+  u32 GetSimulatedMemorySize() const;
   void ResetRunningGameMetadata();
   void SetRunningGameMetadata(const DiscIO::Volume& volume, const DiscIO::Partition& partition);
   void SetRunningGameMetadata(const IOS::ES::TMDReader& tmd, DiscIO::Platform platform);
@@ -120,7 +121,8 @@ private:
   static void ReloadTextures(Core::System& system);
 
   void SetRunningGameMetadata(const std::string& game_id, const std::string& gametdb_id,
-                              u64 title_id, u16 revision, DiscIO::Region region);
+                              u64 title_id, u16 revision, DiscIO::Region region,
+                              u32 simulated_memory_size);
 
   static SConfig* m_Instance;
   mutable std::recursive_mutex m_metadata_lock;
@@ -131,4 +133,6 @@ private:
   std::string m_title_description;
   u64 m_title_id;
   u16 m_revision;
+  // Memory size requested by game's header.
+  u32 m_simulated_memory_size;
 };
