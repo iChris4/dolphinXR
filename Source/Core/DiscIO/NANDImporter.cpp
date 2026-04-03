@@ -24,8 +24,7 @@ NANDImporter::NANDImporter() : m_nand_root(File::GetUserPath(D_WIIROOT_IDX))
 }
 NANDImporter::~NANDImporter() = default;
 
-void NANDImporter::ImportNANDBin(const std::string& path_to_bin,
-                                 std::function<void()> update_callback,
+void NANDImporter::ImportNANDBin(const std::string& path_to_bin, UpdateCallback update_callback,
                                  const std::function<std::string()>& get_otp_dump_path)
 {
   m_update_callback = std::move(update_callback);
@@ -36,8 +35,13 @@ void NANDImporter::ImportNANDBin(const std::string& path_to_bin,
     return;
 
   ExportKeys();
-  ProcessEntry(0, "");
+
+  if (!ExtractFiles())
+    return;
+
   ExtractCertificates();
+
+  std::ignore = m_update_callback(Step::Extracting, m_progress_cur, m_progress_max);
 }
 
 bool NANDImporter::ReadNANDBin(const std::string& path_to_bin,
@@ -61,10 +65,8 @@ bool NANDImporter::ReadNANDBin(const std::string& path_to_bin,
 
   for (size_t i = 0; i < NAND_TOTAL_BLOCKS; i++)
   {
-    // Instead of updating on every cycle, we only update every 1000 cycles for a balance between
-    // not updating fast enough vs updating too fast
-    if (i % 1000 == 0)
-      m_update_callback();
+    if (m_update_callback(Step::Loading, int(i), int(NAND_TOTAL_BLOCKS)))
+      return false;
 
     file.ReadBytes(&m_nand[i * NAND_BLOCK_SIZE], NAND_BLOCK_SIZE);
 
@@ -122,31 +124,40 @@ bool NANDImporter::FindSuperblock()
   return true;
 }
 
+bool NANDImporter::ExtractFiles()
+{
+  constexpr u16 CLUSTER_CHAIN_END = 0xFFFB;
+  m_progress_cur = 0;
+  m_progress_max = std::ranges::count(m_superblock->fat, CLUSTER_CHAIN_END);
+  return ProcessEntry(0, "");
+}
+
 std::string NANDImporter::GetPath(const NANDFSTEntry& entry, const std::string& parent_path)
 {
   std::string name(entry.name, strnlen(entry.name, sizeof(NANDFSTEntry::name)));
   return parent_path + '/' + Common::EscapeFileName(name);
 }
 
-void NANDImporter::ProcessEntry(u16 entry_number, const std::string& parent_path)
+bool NANDImporter::ProcessEntry(u16 entry_number, const std::string& parent_path)
 {
   while (entry_number != 0xffff)
   {
     if (entry_number >= m_superblock->fst.size())
     {
       ERROR_LOG_FMT(DISCIO, "FST entry number {} out of range", entry_number);
-      return;
+      return false;
     }
 
     const NANDFSTEntry entry = m_superblock->fst[entry_number];
 
     const std::string path = entry_number == 0 ? parent_path : GetPath(entry, parent_path);
     INFO_LOG_FMT(DISCIO, "Entry: {} Path: {}", entry, path);
-    m_update_callback();
 
     Type type = static_cast<Type>(entry.mode & 3);
     if (type == Type::File)
     {
+      if (m_update_callback(Step::Extracting, m_progress_cur++, m_progress_max))
+        return false;
       std::vector<u8> data = GetEntryData(entry);
       File::IOFile file(m_nand_root + path, "wb");
       file.WriteBytes(data.data(), data.size());
@@ -154,7 +165,8 @@ void NANDImporter::ProcessEntry(u16 entry_number, const std::string& parent_path
     else if (type == Type::Directory)
     {
       File::CreateDir(m_nand_root + path);
-      ProcessEntry(entry.sub, path);
+      if (!ProcessEntry(entry.sub, path))
+        return false;
     }
     else
     {
@@ -163,6 +175,7 @@ void NANDImporter::ProcessEntry(u16 entry_number, const std::string& parent_path
 
     entry_number = entry.sib;
   }
+  return true;
 }
 
 std::vector<u8> NANDImporter::GetEntryData(const NANDFSTEntry& entry) const
