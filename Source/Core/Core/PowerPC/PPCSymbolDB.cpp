@@ -636,10 +636,10 @@ bool PPCSymbolDB::SaveSymbolMap(const std::string& filename) const
   std::lock_guard lock(m_mutex);
 
   // Write .text section
-  auto function_symbols =
-      m_functions |
-      std::views::filter([](auto f) { return f.second.type == Common::Symbol::Type::Function; }) |
-      std::views::transform([](auto f) { return f.second; });
+  auto function_symbols = m_functions | std::views::filter([](const auto& f) {
+                            return f.second.type == Common::Symbol::Type::Function;
+                          }) |
+                          std::views::transform([](const auto& f) { return f.second; });
   file.WriteString(".text section layout\n");
   for (const auto& symbol : function_symbols)
   {
@@ -654,10 +654,10 @@ bool PPCSymbolDB::SaveSymbolMap(const std::string& filename) const
   }
 
   // Write .data section
-  auto data_symbols =
-      m_functions |
-      std::views::filter([](auto f) { return f.second.type == Common::Symbol::Type::Data; }) |
-      std::views::transform([](auto f) { return f.second; });
+  auto data_symbols = m_functions | std::views::filter([](const auto& f) {
+                        return f.second.type == Common::Symbol::Type::Data;
+                      }) |
+                      std::views::transform([](const auto& f) { return f.second; });
   file.WriteString("\n.data section layout\n");
   for (const auto& symbol : data_symbols)
   {
@@ -672,7 +672,7 @@ bool PPCSymbolDB::SaveSymbolMap(const std::string& filename) const
   }
 
   // Write .note section
-  auto note_symbols = m_notes | std::views::transform([](auto f) { return f.second; });
+  auto note_symbols = m_notes | std::views::transform([](const auto& f) { return f.second; });
   file.WriteString("\n.note section layout\n");
   for (const auto& symbol : note_symbols)
   {

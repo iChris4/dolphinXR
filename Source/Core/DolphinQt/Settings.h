@@ -102,7 +102,7 @@ public:
   bool GetPreferredView() const;
   void SetPreferredView(bool list);
   QString GetDefaultGame() const;
-  void SetDefaultGame(QString path);
+  void SetDefaultGame(const QString& path);
   void RefreshGameList();
   void NotifyShaderOverridesChanged();
   void NotifyTextureElementOverridesChanged();
@@ -177,7 +177,7 @@ public:
   void SetAssemblerVisible(bool enabled);
   bool IsAssemblerVisible() const;
   QFont GetDebugFont() const;
-  void SetDebugFont(QFont font);
+  void SetDebugFont(const QFont& font);
 
   // Auto-Update
   QString GetAutoUpdateTrack() const;
