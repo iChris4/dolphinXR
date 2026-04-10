@@ -7,7 +7,7 @@ Linux, macOS, and recent Android devices. It's licensed under the terms
 of the GNU General Public License, version 2 or later (GPLv2+).
 
 This fork adds OpenXR support to Dolphin so users can play in VR on supported
-Windows builds.
+Windows builds. **This was developed with the use of AI tools.**
 
 Please read the [FAQ](https://dolphin-emu.org/docs/faq/) before using Dolphin.
 
@@ -163,10 +163,6 @@ If using Android Studio, import the Gradle project located in `./Source/Android`
 Android apps are compiled using a build system called Gradle. Dolphin's native component,
 however, is compiled using CMake. The Gradle script will attempt to run a CMake build
 automatically while building the Java code.
-
-## Project Notes
-
-This project was developed with the use of AI tools.
 
 ## Uninstalling
 
