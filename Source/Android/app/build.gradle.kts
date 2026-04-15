@@ -168,6 +168,12 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-Xannotation-default-target=param-property")
+    }
+}
+
 dependencies {
     baselineProfile(project(":benchmark"))
     coreLibraryDesugaring(libs.desugar.jdk.libs)
