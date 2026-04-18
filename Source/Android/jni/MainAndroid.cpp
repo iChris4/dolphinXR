@@ -62,7 +62,6 @@
 #include "InputCommon/ControlReference/ControlReference.h"
 #include "InputCommon/ControllerEmu/ControllerEmu.h"
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
-#include "InputCommon/GCAdapter.h"
 #include "InputCommon/InputConfig.h"
 
 #include "UICommon/GameFile.h"
@@ -704,20 +703,6 @@ JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_ResetDolphin
   HostThreadLock guard;
   SConfig::ResetAllSettings();
   UICommon::SetUserDirectory(File::GetUserPath(D_USER_IDX));
-}
-
-JNIEXPORT void JNICALL
-Java_org_dolphinemu_dolphinemu_NativeLibrary_UpdateGCAdapterScanThread(JNIEnv*, jclass)
-{
-  HostThreadLock guard;
-  if (GCAdapter::UseAdapter())
-  {
-    GCAdapter::StartScanThread();
-  }
-  else
-  {
-    GCAdapter::StopScanThread();
-  }
 }
 
 JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_Initialize(JNIEnv*, jclass)

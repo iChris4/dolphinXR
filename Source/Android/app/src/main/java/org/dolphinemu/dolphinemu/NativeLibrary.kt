@@ -303,9 +303,6 @@ object NativeLibrary {
     @JvmStatic
     external fun ResetDolphinSettings()
 
-    @JvmStatic
-    external fun UpdateGCAdapterScanThread()
-
     /**
      * Initializes the native parts of the app.
      *
