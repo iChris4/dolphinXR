@@ -672,8 +672,9 @@ if(ENABLE_VR AND NOT DOLPHIN_OPENXR_SUPPORTED_PLATFORM)
 endif()
 
 if(ENABLE_VR AND UNIX AND NOT APPLE AND NOT ANDROID AND NOT ENABLE_VULKAN)
-  # OpenGL (GLX) is always built on desktop Linux, so VR remains usable without Vulkan.
-  message(STATUS "Desktop Linux OpenXR VR without ENABLE_VULKAN: only the OpenGL backend will support VR.")
+  # Desktop Linux GL contexts are EGL-only since upstream removed GLX, and OpenXR has no
+  # standard EGL binding, so only the Vulkan backend can drive a headset on Linux.
+  message(WARNING "Desktop Linux OpenXR VR requires ENABLE_VULKAN: the OpenGL backend cannot create an OpenXR session on Linux.")
 endif()
 
 if(ENABLE_VR)

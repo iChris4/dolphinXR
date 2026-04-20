@@ -21,7 +21,6 @@
 #define XR_USE_PLATFORM_XLIB
 #define XR_USE_GRAPHICS_API_OPENGL
 #include <GL/glx.h>
-#include "Common/GL/GLInterface/GLX.h"
 #endif
 
 #include <openxr/openxr.h>
@@ -260,23 +259,14 @@ bool OGLOpenXR::CreateSessionGL()
   binding.context = egl->GetEGLContext();
   session_info.next = &binding;
 #elif HAVE_X11
-  if (m_context->GetNativeContextType() != GLContext::NativeContextType::GLX)
-  {
-    ERROR_LOG_FMT(VIDEO, "OpenXR GL: Only GLX (X11) contexts are supported on Linux for now; "
-                         "Wayland/EGL contexts are not yet supported. Run under X11/XWayland "
-                         "without the EGL/GLES preference, or use the Vulkan backend.");
-    return false;
-  }
-  const auto* glx = static_cast<const GLContextGLX*>(m_context);
-  XrGraphicsBindingOpenGLXlibKHR binding{XR_TYPE_GRAPHICS_BINDING_OPENGL_XLIB_KHR};
-  binding.xDisplay = glx->GetDisplay();
-  binding.glxFBConfig = glx->GetFBConfig();
-  binding.glxDrawable = glx->GetDrawable();
-  binding.glxContext = glx->GetContext();
-  int visual_id = 0;
-  glXGetFBConfigAttrib(glx->GetDisplay(), glx->GetFBConfig(), GLX_VISUAL_ID, &visual_id);
-  binding.visualid = static_cast<uint32_t>(visual_id);
-  session_info.next = &binding;
+  // Upstream Dolphin removed GLX (desktop Linux GL contexts are EGL-only now), and
+  // XR_KHR_opengl_enable has no EGL binding on Linux (only the Xlib/GLX, Xcb and Wayland
+  // ones). Until an XR_MNDX_egl_enable binding is implemented, desktop Linux VR needs the
+  // Vulkan backend.
+  ERROR_LOG_FMT(VIDEO, "OpenXR GL: OpenGL VR is not available on desktop Linux (Dolphin now "
+                       "creates EGL contexts and OpenXR has no standard EGL binding). "
+                       "Use the Vulkan backend.");
+  return false;
 #else
   ERROR_LOG_FMT(VIDEO, "OpenXR GL: No supported platform binding available in this build.");
   return false;

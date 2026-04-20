@@ -92,7 +92,7 @@ public:
 
 private:
   // Creates XrSession with the platform-specific GL graphics binding
-  // (Win32/WGL, Xlib/GLX or Android/EGL).
+  // (Win32/WGL or Android/EGL).
   bool CreateSessionGL();
 
   // Picks a swapchain format from xrEnumerateSwapchainFormats (GL internalformat enums).

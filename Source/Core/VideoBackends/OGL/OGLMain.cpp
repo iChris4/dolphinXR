@@ -81,7 +81,7 @@ std::string VideoBackend::GetDisplayName() const
 void VideoBackend::InitBackendInfo(const WindowSystemInfo& wsi)
 {
   std::unique_ptr<GLContext> temp_gl_context =
-      GLContext::Create(wsi, g_Config.stereo_mode == StereoMode::QuadBuffer, true, false,
+      GLContext::Create(wsi, g_Config.stereo_mode == StereoMode::QuadBuffer, true,
                         Config::Get(Config::GFX_PREFER_GLES));
 
   if (!temp_gl_context)
@@ -226,7 +226,7 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
   }
 #endif
   std::unique_ptr<GLContext> main_gl_context =
-      GLContext::Create(gl_wsi, g_Config.stereo_mode == StereoMode::QuadBuffer, true, false,
+      GLContext::Create(gl_wsi, g_Config.stereo_mode == StereoMode::QuadBuffer, true,
                         Config::Get(Config::GFX_PREFER_GLES));
   if (!main_gl_context)
     return false;
