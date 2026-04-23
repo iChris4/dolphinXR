@@ -243,8 +243,11 @@ void EnhancementsWidget::CreateWidgets()
   m_3d_convergence_value->setText(QString::asprintf("%.2f", m_3d_convergence->GetValue()));
 
   auto current_stereo_mode = Get(m_game_layer, Config::GFX_STEREO_MODE);
-  if (current_stereo_mode != StereoMode::SideBySide && current_stereo_mode != StereoMode::TAB)
+  if (current_stereo_mode != StereoMode::SideBySide &&
+      current_stereo_mode != StereoMode::TopAndBottom)
+  {
     m_3d_per_eye_resolution->hide();
+  }
 
   main_layout->addWidget(enhancements_box);
   main_layout->addWidget(m_stereoscopy_box);
@@ -259,10 +262,15 @@ void EnhancementsWidget::ConnectWidgets()
     auto current_stereo_mode = Get(m_game_layer, Config::GFX_STEREO_MODE);
     LoadPostProcessingShaders();
 
-    if (current_stereo_mode == StereoMode::SideBySide || current_stereo_mode == StereoMode::TAB)
+    if (current_stereo_mode == StereoMode::SideBySide ||
+        current_stereo_mode == StereoMode::TopAndBottom)
+    {
       m_3d_per_eye_resolution->show();
+    }
     else
+    {
       m_3d_per_eye_resolution->hide();
+    }
   });
 
   connect(m_post_processing_effect, &QComboBox::currentIndexChanged, this,
