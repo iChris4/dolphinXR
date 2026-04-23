@@ -1029,7 +1029,7 @@ void HotkeyScheduler::Run()
         emit DecrementSelectedStateSlotHotkey();
 
       // Stereoscopy
-      if (IsHotkey(HK_TOGGLE_STEREO_SBS))
+      if (IsHotkey(HK_TOGGLE_STEREO_SIDE_BY_SIDE))
       {
         if (Config::Get(Config::GFX_STEREO_MODE) != StereoMode::SBS)
         {
