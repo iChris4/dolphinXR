@@ -1774,8 +1774,8 @@ class SettingsFragmentPresenter(
         val helper = EGLHelper(EGLHelper.EGL_OPENGL_ES2_BIT)
 
         if (BuildConfig.IS_QUEST ||
-            helper.supportsOpenGL() && helper.GetVersion() >= 320 ||
-            helper.supportsGLES3() && helper.GetVersion() >= 310 && helper.SupportsExtension(
+            helper.supportsOpenGL() && helper.getVersion() >= 320 ||
+            helper.supportsGLES3() && helper.getVersion() >= 310 && helper.supportsExtension(
                 "GL_ANDROID_extension_pack_es31a"
             )
         ) {
