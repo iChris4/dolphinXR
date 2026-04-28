@@ -53,3 +53,6 @@ quest_first_mv_vs.glsl
 quest_mv_vs.glsl
 
 dist/*
+
+# clangd cache for Neovim
+.cache/clangd
