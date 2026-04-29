@@ -21,7 +21,6 @@
 #include "InputCommon/ControlReference/ControlReference.h"
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 
-#include "jni/Host.h"
 
 #ifdef ENABLE_VR
 #include "VideoCommon/VR/OpenXRManager.h"
@@ -109,7 +108,6 @@ void HotkeyDispatcher::Run()
 
     if (IsHotkey(HK_PLAY_PAUSE))
     {
-      HostThreadLock guard;
       const Core::State current = Core::GetState(system);
       if (current == Core::State::Running)
         Core::SetState(system, Core::State::Paused);
@@ -120,7 +118,6 @@ void HotkeyDispatcher::Run()
     if (IsHotkey(HK_STOP))
     {
       {
-        HostThreadLock guard;
         Core::Stop(system);
       }
       // Wake the Run() wait loop so it observes !Core::IsRunning and exits, which then
@@ -135,19 +132,16 @@ void HotkeyDispatcher::Run()
 
     if (IsHotkey(HK_RESET))
     {
-      HostThreadLock guard;
       system.GetProcessorInterface().ResetButton_Tap();
     }
 
     if (IsHotkey(HK_SCREENSHOT))
     {
-      HostThreadLock guard;
       Core::SaveScreenShot();
     }
 
     if (IsHotkey(HK_FRAME_ADVANCE))
     {
-      HostThreadLock guard;
       Core::DoFrameStep(system);
     }
 
@@ -181,12 +175,10 @@ void HotkeyDispatcher::Run()
     {
       if (IsHotkey(HK_LOAD_STATE_SLOT_1 + (slot - 1)))
       {
-        HostThreadLock guard;
         State::Load(system, slot);
       }
       if (IsHotkey(HK_SAVE_STATE_SLOT_1 + (slot - 1)))
       {
-        HostThreadLock guard;
         State::Save(system, slot);
       }
     }
@@ -360,7 +352,6 @@ void HotkeyDispatcher::Run()
       if (m_return_menu_hold_ticks == kReturnMenuHoldTicks)
       {
         {
-          HostThreadLock guard;
           Core::Stop(system);
         }
         if (m_on_stop_requested)
