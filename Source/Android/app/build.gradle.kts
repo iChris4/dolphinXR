@@ -191,6 +191,7 @@ dependencies {
     implementation(libs.androidx.profileinstaller)
 
     // Kotlin extensions for lifecycle components
+    implementation(libs.androidx.lifecycle.livedata.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
@@ -201,6 +202,7 @@ dependencies {
 
     // For loading game covers from disk and GameTDB
     implementation(libs.coil)
+    implementation(libs.coil.compose)
 
     // For loading custom GPU drivers
     implementation(libs.kotlinx.serialization.json)
@@ -214,6 +216,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.runtime.livedata)
     implementation(libs.androidx.compose.ui)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.tooling.preview)
