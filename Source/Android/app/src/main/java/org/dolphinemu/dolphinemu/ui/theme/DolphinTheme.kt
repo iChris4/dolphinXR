@@ -3,6 +3,7 @@
 package org.dolphinemu.dolphinemu.ui.theme
 
 import android.content.Context
+import android.content.res.Configuration
 import androidx.annotation.AttrRes
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.ScrollState
@@ -21,12 +22,16 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SheetValue.Hidden
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -41,6 +46,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -145,6 +152,45 @@ private fun Context.toDolphinColorScheme(isDark: Boolean): ColorScheme {
             inversePrimary = attr(MaterialR.attr.colorPrimaryInverse),
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DolphinScaffold(
+    title: @Composable () -> Unit,
+    navigationIcon: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    floatingActionButton: @Composable () -> Unit = {},
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    val isCompactLandscape = with(LocalConfiguration.current) {
+        orientation == Configuration.ORIENTATION_LANDSCAPE && smallestScreenWidthDp < 600
+    }
+
+    val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
+    Scaffold(
+        modifier = modifier.then(
+            if (isCompactLandscape) Modifier
+            else Modifier.nestedScroll(topAppBarScrollBehavior.nestedScrollConnection)
+        ),
+        topBar = {
+            if (isCompactLandscape) {
+                TopAppBar(
+                    title = title,
+                    navigationIcon = navigationIcon,
+                )
+            } else {
+                MediumTopAppBar(
+                    title = title,
+                    navigationIcon = navigationIcon,
+                    scrollBehavior = topAppBarScrollBehavior,
+                )
+            }
+        },
+        floatingActionButton = floatingActionButton,
+        content = content,
+    )
 }
 
 @Composable
