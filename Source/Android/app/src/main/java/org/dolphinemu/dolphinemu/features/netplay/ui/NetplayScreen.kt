@@ -4,6 +4,7 @@ package org.dolphinemu.dolphinemu.features.netplay.ui
 
 import android.content.Intent
 import android.content.res.Configuration
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -87,6 +88,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
 import androidx.window.core.layout.WindowSizeClass
 import coil.compose.AsyncImage
@@ -588,8 +590,10 @@ private fun Chat(
 
     fun LazyListScope.messages() {
         items(messages.size) { index ->
+            val message = messages[index]
             Text(
-                text = messages[index].message(context),
+                text = message.message(context),
+                color = message.color(),
                 style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 18.sp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1262,6 +1266,21 @@ private fun GameDigestPlayerRow(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun NetplayMessage.color(): Color {
+    val isDark = isSystemInDarkTheme()
+    return when (this) {
+        is NetplayMessage.Chat -> Color.Unspecified
+        is NetplayMessage.GameChanged -> if (isDark) Color(0xFFCE93D8) else Color(0xFF8E24AA)
+        is NetplayMessage.HostInputAuthorityChanged -> if (isDark) Color(0xFF90CAF9) else Color(
+            0xFF1565C0
+        )
+
+        is NetplayMessage.BufferChanged -> if (isDark) Color(0xFF80CBC4) else Color(0xFF00897B)
+        is NetplayMessage.Desync -> if (isDark) Color(0xFFEF9A9A) else Color(0xFFC62828)
     }
 }
 
