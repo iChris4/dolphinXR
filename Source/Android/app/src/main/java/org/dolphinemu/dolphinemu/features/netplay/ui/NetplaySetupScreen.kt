@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 @file:OptIn(ExperimentalMaterial3Api::class)
 
 package org.dolphinemu.dolphinemu.features.netplay.ui
