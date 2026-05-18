@@ -119,17 +119,14 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeJoin(JNIEnv
     host_port = Config::Get(Config::NETPLAY_CONNECT_PORT);
   }
 
-  auto* client = new NetPlay::NetPlayClient(
+  auto client = std::make_unique<NetPlay::NetPlayClient>(
       host_ip, host_port, ui, nickname,
       NetPlay::NetTraversalConfig{is_traversal, traversal_host, traversal_port});
 
   if (!client->IsConnected())
-  {
-    delete client;
     return 0;
-  }
 
-  return reinterpret_cast<jlong>(client);
+  return reinterpret_cast<jlong>(client.release());
 }
 
 JNIEXPORT jlong JNICALL
@@ -147,15 +144,12 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeHost(JNIEnv
   const u16 host_port = is_traversal ? Config::Get(Config::NETPLAY_LISTEN_PORT)
                                      : Config::Get(Config::NETPLAY_HOST_PORT);
 
-  auto* server = new NetPlay::NetPlayServer(
+  auto server = std::make_unique<NetPlay::NetPlayServer>(
       host_port, use_upnp, ui,
       NetPlay::NetTraversalConfig{is_traversal, traversal_host, traversal_port, traversal_port_alt});
 
   if (!server->is_connected)
-  {
-    delete server;
     return 0;
-  }
 
   const std::string network_mode = Config::Get(Config::NETPLAY_NETWORK_MODE);
   const bool host_input_authority =
@@ -163,7 +157,7 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeHost(JNIEnv
   server->SetHostInputAuthority(host_input_authority);
   server->AdjustPadBufferSize(Config::Get(Config::NETPLAY_BUFFER_SIZE));
 
-  return reinterpret_cast<jlong>(server);
+  return reinterpret_cast<jlong>(server.release());
 }
 
 JNIEXPORT void JNICALL
