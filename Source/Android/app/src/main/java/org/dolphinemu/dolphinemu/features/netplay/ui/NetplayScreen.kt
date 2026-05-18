@@ -61,6 +61,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -87,6 +88,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.window.core.layout.WindowSizeClass
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.flow.Flow
@@ -171,7 +173,13 @@ fun NetplayScreen(
             mutableStateOf(joinAddresses.keys.firstOrNull() ?: JoinInfoType.EXTERNAL)
         }
 
-        if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+        val isLandscape =
+            LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val isWidthAtLeastMedium = currentWindowAdaptiveInfo().windowSizeClass
+            .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
+        val useWideLayout = isLandscape && isWidthAtLeastMedium
+
+        if (useWideLayout) {
             LandscapeContent(
                 isHosting = isHosting,
                 messages = messages,
