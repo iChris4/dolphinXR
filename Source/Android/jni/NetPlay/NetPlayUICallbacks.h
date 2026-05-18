@@ -13,6 +13,7 @@
 #include "Common/HookableEvent.h"
 #include "Core/NetPlayClient.h"
 #include "UICommon/GameFile.h"
+#include "jni/AndroidCommon/IDCache.h"
 
 namespace NetPlay {
 
@@ -66,6 +67,17 @@ public:
 
 private:
   jobject GetNetplaySessionLocalRef(JNIEnv* env) const;
+
+  template <typename F>
+  void WithSession(F&& callback) const
+  {
+    JNIEnv* env = IDCache::GetEnvForThread();
+    jobject netplay_session = GetNetplaySessionLocalRef(env);
+    if (!netplay_session)
+      return;
+    callback(env, netplay_session);
+    env->DeleteLocalRef(netplay_session);
+  }
 
   jweak m_netplay_session;
   std::vector<std::shared_ptr<const UICommon::GameFile>> m_games;
