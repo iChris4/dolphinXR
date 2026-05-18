@@ -2,6 +2,9 @@
 
 package org.dolphinemu.dolphinemu.features.netplay.model
 
+import androidx.annotation.Keep
+
+@Keep
 data class Player(
     val pid: Int,
     val name: String,
