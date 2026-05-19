@@ -1222,4 +1222,5 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="netplay_address_unknown">Unknown</string>
     <string name="netplay_address_share">Share address</string>
     <string name="netplay_address_retry">Retry</string>
+    <string name="netplay_transfer_progress">%1$s/%2$s MiB</string>
 </resources>

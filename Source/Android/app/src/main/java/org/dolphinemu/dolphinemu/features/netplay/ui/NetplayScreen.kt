@@ -1165,7 +1165,11 @@ private fun SaveTransferProgressRow(
             )
             Spacer(modifier = Modifier.width(16.dp))
             Text(
-                text = "${formatMib(playerProgress.progress)}/${formatMib(totalSize)} MiB",
+                text = stringResource(
+                    R.string.netplay_transfer_progress,
+                    formatMib(playerProgress.progress),
+                    formatMib(totalSize)
+                ),
             )
         }
     }
