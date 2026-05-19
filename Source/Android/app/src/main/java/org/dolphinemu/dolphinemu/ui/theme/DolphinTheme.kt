@@ -5,11 +5,13 @@ package org.dolphinemu.dolphinemu.ui.theme
 import android.content.Context
 import androidx.annotation.AttrRes
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,10 +30,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -284,5 +291,47 @@ fun rememberSheetState(
             confirmValueChange,
             skipHiddenState,
         )
+    }
+}
+
+@Composable
+fun Modifier.bottomFadeOverlay(
+    scrollState: ScrollState,
+    fadeHeight: Dp,
+): Modifier {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val bottomPaddingPx = with(LocalDensity.current) {
+        fadeHeight.toPx()
+    }
+    val fadeDelayPx = with(LocalDensity.current) { 8.dp.toPx() }
+    val fadeDurationPx = with(LocalDensity.current) { 48.dp.toPx() }
+    val scrollProgress by remember {
+        derivedStateOf {
+            if (bottomPaddingPx <= 0f) 1f
+            else ((scrollState.value.coerceAtLeast(0) - fadeDelayPx) / fadeDurationPx)
+                .coerceIn(0f, 1f)
+        }
+    }
+    val surfaceStopFraction = (scrollProgress * 2f).coerceIn(0f, 1f)
+    val transparentStopFraction = ((scrollProgress * 2f) - 1f).coerceIn(0f, 1f)
+
+    return drawWithContent {
+        drawContent()
+        if (transparentStopFraction < 1f) {
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to Color.Transparent,
+                        transparentStopFraction to Color.Transparent,
+                        surfaceStopFraction to surfaceColor,
+                        1f to surfaceColor,
+                    ),
+                    startY = size.height - bottomPaddingPx,
+                    endY = size.height,
+                ),
+                topLeft = Offset(0f, size.height - bottomPaddingPx),
+                size = Size(size.width, bottomPaddingPx),
+            )
+        }
     }
 }

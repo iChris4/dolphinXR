@@ -108,6 +108,7 @@ import org.dolphinemu.dolphinemu.ui.theme.MenuSpacer
 import org.dolphinemu.dolphinemu.ui.theme.OutlinedBox
 import org.dolphinemu.dolphinemu.ui.theme.PreviewTheme
 import org.dolphinemu.dolphinemu.ui.theme.ReadOnlyTextField
+import org.dolphinemu.dolphinemu.ui.theme.bottomFadeOverlay
 import org.dolphinemu.dolphinemu.ui.theme.rememberSheetState
 import org.dolphinemu.dolphinemu.utils.CoilUtils
 import java.util.Locale
@@ -164,7 +165,6 @@ fun NetplayScreen(
         val modifier = Modifier
             .fillMaxSize()
             .consumeWindowInsets(innerPadding)
-            .padding(innerPadding)
 
         // State which must live above the landscape/portrait split.
         var showChat by rememberSaveable { mutableStateOf(false) }
@@ -202,6 +202,7 @@ fun NetplayScreen(
                 joinAddresses = joinAddresses,
                 selectedJoinInfoType = selectedJoinInfoType,
                 onSelectedJoinInfoTypeChanged = { selectedJoinInfoType = it },
+                contentPadding = innerPadding,
                 modifier = modifier
             )
         } else {
@@ -227,6 +228,7 @@ fun NetplayScreen(
                 joinAddresses = joinAddresses,
                 selectedJoinInfoType = selectedJoinInfoType,
                 onSelectedJoinInfoTypeChanged = { selectedJoinInfoType = it },
+                contentPadding = innerPadding,
                 modifier = modifier
             )
         }
@@ -344,11 +346,13 @@ private fun PortraitContent(
     joinAddresses: Map<JoinInfoType, JoinAddress>,
     selectedJoinInfoType: JoinInfoType,
     onSelectedJoinInfoTypeChanged: (JoinInfoType) -> Unit,
+    contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
+            .padding(contentPadding)
     ) {
         Chat(
             messages = messages,
@@ -414,11 +418,11 @@ private fun LandscapeContent(
     joinAddresses: Map<JoinInfoType, JoinAddress>,
     selectedJoinInfoType: JoinInfoType,
     onSelectedJoinInfoTypeChanged: (JoinInfoType) -> Unit,
+    contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
-            .padding(horizontal = DolphinTheme.scaffoldPadding)
     ) {
         Chat(
             messages = messages,
@@ -426,16 +430,26 @@ private fun LandscapeContent(
             showBottomSheet = showChat,
             onShowBottomSheetChanged = onShowChatChanged,
             modifier = Modifier
+                .padding(contentPadding)
+                .padding(
+                    start = DolphinTheme.scaffoldPadding,
+                    end = DolphinTheme.scaffoldPadding / 2,
+                )
                 .weight(1f)
                 .fillMaxHeight()
         )
 
-        Spacer(modifier = Modifier.width(16.dp))
-
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
+                .bottomFadeOverlay(scrollState, contentPadding.calculateBottomPadding())
+                .verticalScroll(scrollState)
+                .padding(contentPadding)
+                .padding(
+                    start = DolphinTheme.scaffoldPadding / 2,
+                    end = DolphinTheme.scaffoldPadding
+                )
         ) {
             PlayersAndSettings(
                 game = game,
