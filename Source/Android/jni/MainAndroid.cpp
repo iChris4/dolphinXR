@@ -36,7 +36,6 @@
 
 #include "Core/AchievementManager.h"
 #include "Core/Boot/Boot.h"
-#include "jni/NetPlay/NetPlayUICallbacks.h"
 #include "Core/BootManager.h"
 #include "Core/CommonTitles.h"
 #include "Core/ConfigLoaders/GameConfigLoader.h"
@@ -53,6 +52,7 @@
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/State.h"
 #include "Core/System.h"
+#include "jni/NetPlay/NetPlayUICallbacks.h"
 
 #include "DiscIO/Blob.h"
 #include "DiscIO/Enums.h"
@@ -841,13 +841,14 @@ Java_org_dolphinemu_dolphinemu_NativeLibrary_Run___3Ljava_lang_String_2ZLjava_la
 JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_RunNetPlay(
     JNIEnv* env, jclass, jobjectArray jPaths, jboolean jRiivolution, jlong jBootSessionData)
 {
-  auto boot_session_data = std::unique_ptr<BootSessionData>(
-      reinterpret_cast<BootSessionData*>(jBootSessionData));
+  auto boot_session_data =
+      std::unique_ptr<BootSessionData>(reinterpret_cast<BootSessionData*>(jBootSessionData));
   if (!boot_session_data)
   {
     env->CallStaticVoidMethod(IDCache::GetNativeLibraryClass(), IDCache::GetDisplayToastMsg(),
                               ToJString(env, "Netplay: no boot session data"), JNI_TRUE);
-    env->CallStaticVoidMethod(IDCache::GetNativeLibraryClass(), IDCache::GetFinishEmulationActivity());
+    env->CallStaticVoidMethod(IDCache::GetNativeLibraryClass(),
+                              IDCache::GetFinishEmulationActivity());
     return;
   }
   Run(env, JStringArrayToVector(env, jPaths), jRiivolution, std::move(*boot_session_data));

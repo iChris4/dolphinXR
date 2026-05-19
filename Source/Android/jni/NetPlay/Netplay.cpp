@@ -9,10 +9,10 @@
 
 #include "Common/CommonTypes.h"
 #include "Common/TraversalClient.h"
-#include "Core/NetPlayCommon.h"
 #include "Core/Boot/Boot.h"
 #include "Core/Config/NetplaySettings.h"
 #include "Core/NetPlayClient.h"
+#include "Core/NetPlayCommon.h"
 #include "Core/NetPlayServer.h"
 #include "UICommon/GameFile.h"
 
@@ -22,8 +22,8 @@
 
 static NetPlay::NetPlayUICallbacks* GetUICallbacksPointer(JNIEnv* env, jobject obj)
 {
-    return reinterpret_cast<NetPlay::NetPlayUICallbacks*>(
-            env->GetLongField(obj, IDCache::GetNetPlayUICallbacksPointer()));
+  return reinterpret_cast<NetPlay::NetPlayUICallbacks*>(
+      env->GetLongField(obj, IDCache::GetNetPlayUICallbacksPointer()));
 }
 
 static NetPlay::NetPlayClient* GetClientPointer(JNIEnv* env, jobject obj)
@@ -41,8 +41,9 @@ static NetPlay::NetPlayServer* GetServerPointer(JNIEnv* env, jobject obj)
 extern "C" {
 
 JNIEXPORT void JNICALL
-Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeSendMessage(JNIEnv* env, jobject obj,
-                                                                          jstring jmessage)
+Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeSendMessage(JNIEnv* env,
+                                                                                 jobject obj,
+                                                                                 jstring jmessage)
 {
   if (auto* client = GetClientPointer(env, obj))
     client->SendChatMessage(GetJString(env, jmessage));
@@ -50,16 +51,15 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeSendMessage
 
 JNIEXPORT void JNICALL
 Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeSetHostInputAuthority(
-        JNIEnv* env, jobject obj, jboolean enable)
+    JNIEnv* env, jobject obj, jboolean enable)
 {
-    if (auto* server = GetServerPointer(env, obj))
-        server->SetHostInputAuthority(static_cast<bool>(enable));
+  if (auto* server = GetServerPointer(env, obj))
+    server->SetHostInputAuthority(static_cast<bool>(enable));
 }
 
 JNIEXPORT void JNICALL
-Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeAdjustClientPadBufferSize(JNIEnv* env,
-                                                                                   jobject obj,
-                                                                                   jint buffer)
+Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeAdjustClientPadBufferSize(
+    JNIEnv* env, jobject obj, jint buffer)
 {
   if (auto* client = GetClientPointer(env, obj))
     client->AdjustPadBufferSize(static_cast<u32>(buffer));
@@ -118,7 +118,7 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeJoin(JNIEnv
     const std::string traversal_choice = Config::Get(Config::NETPLAY_TRAVERSAL_CHOICE);
     is_traversal = traversal_choice == "traversal";
     host_ip = is_traversal ? Config::Get(Config::NETPLAY_HOST_CODE) :
-              Config::Get(Config::NETPLAY_ADDRESS);
+                             Config::Get(Config::NETPLAY_ADDRESS);
     host_port = Config::Get(Config::NETPLAY_CONNECT_PORT);
   }
 
@@ -144,19 +144,19 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeHost(JNIEnv
   const u16 traversal_port = Config::Get(Config::NETPLAY_TRAVERSAL_PORT);
   const u16 traversal_port_alt = Config::Get(Config::NETPLAY_TRAVERSAL_PORT_ALT);
 
-  const u16 host_port = is_traversal ? Config::Get(Config::NETPLAY_LISTEN_PORT)
-                                     : Config::Get(Config::NETPLAY_HOST_PORT);
+  const u16 host_port = is_traversal ? Config::Get(Config::NETPLAY_LISTEN_PORT) :
+                                       Config::Get(Config::NETPLAY_HOST_PORT);
 
   auto server = std::make_unique<NetPlay::NetPlayServer>(
       host_port, use_upnp, ui,
-      NetPlay::NetTraversalConfig{is_traversal, traversal_host, traversal_port, traversal_port_alt});
+      NetPlay::NetTraversalConfig{is_traversal, traversal_host, traversal_port,
+                                  traversal_port_alt});
 
   if (!server->is_connected)
     return 0;
 
   const std::string network_mode = Config::Get(Config::NETPLAY_NETWORK_MODE);
-  const bool host_input_authority =
-      network_mode == "hostinputauthority" || network_mode == "golf";
+  const bool host_input_authority = network_mode == "hostinputauthority" || network_mode == "golf";
   server->SetHostInputAuthority(host_input_authority);
   server->AdjustPadBufferSize(Config::Get(Config::NETPLAY_BUFFER_SIZE));
 
@@ -189,7 +189,7 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeDoAllPlayer
 
 JNIEXPORT void JNICALL
 Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeStartGame(JNIEnv* env,
-                                                                          jobject obj)
+                                                                               jobject obj)
 {
   auto* server = GetServerPointer(env, obj);
   if (!server)
@@ -198,9 +198,8 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeStartGame(J
   server->RequestStartGame();
 }
 
-JNIEXPORT jint JNICALL
-Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeGetPort(JNIEnv* env,
-                                                                             jobject obj)
+JNIEXPORT jint JNICALL Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeGetPort(
+    JNIEnv* env, jobject obj)
 {
   if (auto* server = GetServerPointer(env, obj))
     return static_cast<jint>(server->GetPort());
@@ -219,38 +218,36 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeGetExternal
 
 JNIEXPORT void JNICALL
 Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeReconnectTraversal(JNIEnv*,
-                                                                                       jobject)
+                                                                                        jobject)
 {
   if (Common::g_TraversalClient)
     Common::g_TraversalClient->ReconnectToServer();
 }
 
 JNIEXPORT void JNICALL
-Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeReleaseUICallbacks(JNIEnv*,
-                                                                                  jobject,
-                                                                                  jlong pointer)
+Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeReleaseUICallbacks(
+    JNIEnv*, jobject, jlong pointer)
 {
   delete reinterpret_cast<NetPlay::NetPlayUICallbacks*>(pointer);
 }
 
 JNIEXPORT void JNICALL
-Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeReleaseBootSessionData(JNIEnv*,
-                                                                                      jobject,
-                                                                                      jlong pointer)
+Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeReleaseBootSessionData(
+    JNIEnv*, jobject, jlong pointer)
 {
   delete reinterpret_cast<BootSessionData*>(pointer);
 }
 
 JNIEXPORT void JNICALL
 Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeReleaseClient(JNIEnv*, jobject,
-                                                                             jlong pointer)
+                                                                                   jlong pointer)
 {
   delete reinterpret_cast<NetPlay::NetPlayClient*>(pointer);
 }
 
 JNIEXPORT void JNICALL
 Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeReleaseServer(JNIEnv*, jobject,
-                                                                              jlong pointer)
+                                                                                   jlong pointer)
 {
   delete reinterpret_cast<NetPlay::NetPlayServer*>(pointer);
 }

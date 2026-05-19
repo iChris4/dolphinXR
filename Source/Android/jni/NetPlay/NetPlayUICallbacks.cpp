@@ -3,13 +3,13 @@
 
 #include <android/log.h>
 
-#include "UICommon/GameFile.h"
-#include "UICommon/UICommon.h"
-#include "NetPlayUICallbacks.h"
 #include "Common/TraversalClient.h"
 #include "Core/Boot/Boot.h"
 #include "Core/Core.h"
 #include "Core/System.h"
+#include "NetPlayUICallbacks.h"
+#include "UICommon/GameFile.h"
+#include "UICommon/UICommon.h"
 #include "jni/AndroidCommon/AndroidCommon.h"
 #include "jni/AndroidCommon/IDCache.h"
 
@@ -57,7 +57,8 @@ const char* FailureReasonToString(Common::TraversalClient::FailureReason reason)
 }
 }  // namespace
 
-namespace NetPlay {
+namespace NetPlay
+{
 
 NetPlayUICallbacks::NetPlayUICallbacks(jobject netplay_session,
                                        std::vector<std::shared_ptr<const UICommon::GameFile>> games)
@@ -114,7 +115,10 @@ void NetPlayUICallbacks::StopGame()
 
 // Only used by Qt UI code, never by the C++ core. On Android, hosting state
 // is tracked in Kotlin (NetplaySession.isHosting).
-bool NetPlayUICallbacks::IsHosting() const { return false; }
+bool NetPlayUICallbacks::IsHosting() const
+{
+  return false;
+}
 
 void NetPlayUICallbacks::Update()
 {
@@ -126,20 +130,20 @@ void NetPlayUICallbacks::Update()
 
     const std::vector<const NetPlay::Player*> players = client->GetPlayers();
 
-    jobjectArray player_array = env->NewObjectArray(
-        static_cast<jsize>(players.size()), IDCache::GetNetplayPlayerClass(), nullptr);
+    jobjectArray player_array = env->NewObjectArray(static_cast<jsize>(players.size()),
+                                                    IDCache::GetNetplayPlayerClass(), nullptr);
 
     for (jsize i = 0; i < static_cast<jsize>(players.size()); i++)
     {
       const NetPlay::Player* player = players[i];
-      const std::string mapping = NetPlay::GetPlayerMappingString(
-          player->pid, client->GetPadMapping(), client->GetGBAConfig(),
-          client->GetWiimoteMapping());
-      jobject player_obj = env->NewObject(
-          IDCache::GetNetplayPlayerClass(), IDCache::GetNetplayPlayerConstructor(),
-          static_cast<jint>(player->pid), ToJString(env, player->name),
-          ToJString(env, player->revision), static_cast<jint>(player->ping),
-          static_cast<jboolean>(player->IsHost()), ToJString(env, mapping));
+      const std::string mapping =
+          NetPlay::GetPlayerMappingString(player->pid, client->GetPadMapping(),
+                                          client->GetGBAConfig(), client->GetWiimoteMapping());
+      jobject player_obj =
+          env->NewObject(IDCache::GetNetplayPlayerClass(), IDCache::GetNetplayPlayerConstructor(),
+                         static_cast<jint>(player->pid), ToJString(env, player->name),
+                         ToJString(env, player->revision), static_cast<jint>(player->ping),
+                         static_cast<jboolean>(player->IsHost()), ToJString(env, mapping));
       env->SetObjectArrayElement(player_array, i, player_obj);
       env->DeleteLocalRef(player_obj);
     }
@@ -164,12 +168,13 @@ void NetPlayUICallbacks::OnMsgChangeGame(const NetPlay::SyncIdentifier& sync_ide
   m_current_game_name = netplay_name;
 
   WithSession([&](JNIEnv* env, jobject session) {
-    env->CallVoidMethod(session, IDCache::GetNetplayOnGameChanged(),
-                        ToJString(env, netplay_name));
+    env->CallVoidMethod(session, IDCache::GetNetplayOnGameChanged(), ToJString(env, netplay_name));
   });
 }
 
-void NetPlayUICallbacks::OnMsgChangeGBARom(int, const NetPlay::GBAConfig&) {}
+void NetPlayUICallbacks::OnMsgChangeGBARom(int, const NetPlay::GBAConfig&)
+{
+}
 
 void NetPlayUICallbacks::OnMsgStartGame()
 {
@@ -184,7 +189,9 @@ void NetPlayUICallbacks::OnMsgStartGame()
   });
 }
 
-void NetPlayUICallbacks::OnMsgStopGame() {}
+void NetPlayUICallbacks::OnMsgStopGame()
+{
+}
 
 void NetPlayUICallbacks::OnMsgPowerButton()
 {
@@ -192,8 +199,12 @@ void NetPlayUICallbacks::OnMsgPowerButton()
     UICommon::TriggerSTMPowerEvent();
 }
 
-void NetPlayUICallbacks::OnPlayerConnect(const std::string&) {}
-void NetPlayUICallbacks::OnPlayerDisconnect(const std::string&) {}
+void NetPlayUICallbacks::OnPlayerConnect(const std::string&)
+{
+}
+void NetPlayUICallbacks::OnPlayerDisconnect(const std::string&)
+{
+}
 
 void NetPlayUICallbacks::OnPadBufferChanged(u32 buffer)
 {
@@ -214,8 +225,8 @@ void NetPlayUICallbacks::OnHostInputAuthorityChanged(bool enabled)
 void NetPlayUICallbacks::OnDesync(u32 frame, const std::string& player)
 {
   WithSession([&](JNIEnv* env, jobject session) {
-    env->CallVoidMethod(session, IDCache::GetNetplayOnDesync(),
-                        static_cast<jint>(frame), ToJString(env, player));
+    env->CallVoidMethod(session, IDCache::GetNetplayOnDesync(), static_cast<jint>(frame),
+                        ToJString(env, player));
   });
 }
 
@@ -229,13 +240,14 @@ void NetPlayUICallbacks::OnConnectionLost()
 void NetPlayUICallbacks::OnConnectionError(const std::string& message)
 {
   WithSession([&](JNIEnv* env, jobject session) {
-    env->CallVoidMethod(session, IDCache::GetNetplayOnConnectionError(),
-                        ToJString(env, message));
+    env->CallVoidMethod(session, IDCache::GetNetplayOnConnectionError(), ToJString(env, message));
   });
 }
 
 // No-op — all error info is captured by OnTraversalStateChanged which always fires alongside.
-void NetPlayUICallbacks::OnTraversalError(Common::TraversalClient::FailureReason) {}
+void NetPlayUICallbacks::OnTraversalError(Common::TraversalClient::FailureReason)
+{
+}
 
 void NetPlayUICallbacks::OnTraversalStateChanged(Common::TraversalClient::State state)
 {
@@ -272,12 +284,25 @@ void NetPlayUICallbacks::OnTraversalStateChanged(Common::TraversalClient::State 
   });
 }
 
-void NetPlayUICallbacks::OnGameStartAborted() {}
-void NetPlayUICallbacks::OnGolferChanged(bool, const std::string&) {}
-void NetPlayUICallbacks::OnTtlDetermined(u8) {}
-void NetPlayUICallbacks::OnIndexAdded(bool, std::string) {}
-void NetPlayUICallbacks::OnIndexRefreshFailed(std::string) {}
-bool NetPlayUICallbacks::IsRecording() { return false; }
+void NetPlayUICallbacks::OnGameStartAborted()
+{
+}
+void NetPlayUICallbacks::OnGolferChanged(bool, const std::string&)
+{
+}
+void NetPlayUICallbacks::OnTtlDetermined(u8)
+{
+}
+void NetPlayUICallbacks::OnIndexAdded(bool, std::string)
+{
+}
+void NetPlayUICallbacks::OnIndexRefreshFailed(std::string)
+{
+}
+bool NetPlayUICallbacks::IsRecording()
+{
+  return false;
+}
 
 std::shared_ptr<const UICommon::GameFile>
 NetPlayUICallbacks::FindGameFile(const NetPlay::SyncIdentifier& sync_identifier,
@@ -302,7 +327,10 @@ NetPlayUICallbacks::FindGameFile(const NetPlay::SyncIdentifier& sync_identifier,
   return result;
 }
 
-std::string NetPlayUICallbacks::FindGBARomPath(const std::array<u8, 20>&, std::string_view, int) { return {}; }
+std::string NetPlayUICallbacks::FindGBARomPath(const std::array<u8, 20>&, std::string_view, int)
+{
+  return {};
+}
 
 void NetPlayUICallbacks::ShowGameDigestDialog(const std::string& title)
 {
@@ -323,8 +351,8 @@ void NetPlayUICallbacks::SetGameDigestProgress(int pid, int progress)
 void NetPlayUICallbacks::SetGameDigestResult(int pid, const std::string& result)
 {
   WithSession([&](JNIEnv* env, jobject session) {
-    env->CallVoidMethod(session, IDCache::GetNetplayOnSetGameDigestResult(),
-                        static_cast<jint>(pid), ToJString(env, result));
+    env->CallVoidMethod(session, IDCache::GetNetplayOnSetGameDigestResult(), static_cast<jint>(pid),
+                        ToJString(env, result));
   });
 }
 
@@ -336,7 +364,7 @@ void NetPlayUICallbacks::AbortGameDigest()
 }
 
 void NetPlayUICallbacks::ShowChunkedProgressDialog(const std::string& title, u64 data_size,
-                                                    std::span<const int> players)
+                                                   std::span<const int> players)
 {
   WithSession([&](JNIEnv* env, jobject session) {
     jintArray j_players = env->NewIntArray(static_cast<jsize>(players.size()));
@@ -358,11 +386,13 @@ void NetPlayUICallbacks::HideChunkedProgressDialog()
 void NetPlayUICallbacks::SetChunkedProgress(int pid, u64 progress)
 {
   WithSession([&](JNIEnv* env, jobject session) {
-    env->CallVoidMethod(session, IDCache::GetNetplayOnSetChunkedProgress(),
-                        static_cast<jint>(pid), static_cast<jlong>(progress));
+    env->CallVoidMethod(session, IDCache::GetNetplayOnSetChunkedProgress(), static_cast<jint>(pid),
+                        static_cast<jlong>(progress));
   });
 }
 
-void NetPlayUICallbacks::SetHostWiiSyncData(std::vector<u64>, std::string) {}
+void NetPlayUICallbacks::SetHostWiiSyncData(std::vector<u64>, std::string)
+{
+}
 
 }  // namespace NetPlay

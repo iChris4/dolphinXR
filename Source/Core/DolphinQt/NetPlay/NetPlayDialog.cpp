@@ -30,9 +30,9 @@
 #endif
 
 #include "Common/Config/Config.h"
-#include "Core/NetPlayCommon.h"
 #include "Common/Logging/Log.h"
 #include "Common/TraversalClient.h"
+#include "Core/NetPlayCommon.h"
 
 #include "Core/Boot/Boot.h"
 #include "Core/Config/GraphicsSettings.h"

@@ -15,9 +15,11 @@
 #include "UICommon/GameFile.h"
 #include "jni/AndroidCommon/IDCache.h"
 
-namespace NetPlay {
+namespace NetPlay
+{
 
-class NetPlayUICallbacks : public NetPlay::NetPlayUI {
+class NetPlayUICallbacks : public NetPlay::NetPlayUI
+{
 public:
   NetPlayUICallbacks(jobject netplay_session,
                      std::vector<std::shared_ptr<const UICommon::GameFile>> games);
