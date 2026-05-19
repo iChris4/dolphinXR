@@ -30,17 +30,23 @@ import org.dolphinemu.dolphinemu.features.netplay.model.SaveTransferProgress
 import org.dolphinemu.dolphinemu.features.netplay.model.TraversalState
 import org.dolphinemu.dolphinemu.features.settings.model.StringSetting
 import org.dolphinemu.dolphinemu.model.GameFile
+import org.dolphinemu.dolphinemu.services.GameFileCacheManager
 
 class NetplaySession(
     private val onClosed: (NetplaySession) -> Unit,
 ) {
 
-    private var netPlayUICallbacksPointer: Long = nativeCreateUICallbacks()
+    @Keep
+    private var netPlayUICallbacksPointer: Long =
+        nativeCreateUICallbacks(GameFileCacheManager.getGameFiles().value ?: emptyArray())
 
+    @Keep
     private var netPlayClientPointer: Long = 0
 
+    @Keep
     private var netPlayServerPointer: Long = 0
 
+    @Keep
     private var bootSessionDataPointer: Long = 0
 
     private val sessionScope = CoroutineScope(SupervisorJob())
@@ -238,7 +244,7 @@ class NetplaySession(
 
     // JNI methods
 
-    private external fun nativeCreateUICallbacks(): Long
+    private external fun nativeCreateUICallbacks(gameFiles: Array<GameFile>): Long
 
     private external fun nativeJoin(): Long
 

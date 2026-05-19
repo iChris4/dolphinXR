@@ -15,7 +15,6 @@
 #include "Core/NetPlayClient.h"
 #include "Core/NetPlayServer.h"
 #include "UICommon/GameFile.h"
-#include "UICommon/GameFileCache.h"
 
 #include "jni/AndroidCommon/AndroidCommon.h"
 #include "jni/AndroidCommon/IDCache.h"
@@ -75,17 +74,21 @@ Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeAdjustServe
 }
 
 JNIEXPORT jlong JNICALL
-Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeCreateUICallbacks(JNIEnv* env,
-                                                                                 jobject obj)
+Java_org_dolphinemu_dolphinemu_features_netplay_NetplaySession_nativeCreateUICallbacks(
+    JNIEnv* env, jobject obj, jobjectArray jgame_files)
 {
-  jobject jgame_file_cache = env->GetStaticObjectField(
-      IDCache::GetGameFileCacheManagerClass(), IDCache::GetGameFileCacheManagerInstance());
-  auto* game_file_cache = reinterpret_cast<UICommon::GameFileCache*>(
-      env->GetLongField(jgame_file_cache, IDCache::GetGameFileCachePointer()));
-
   std::vector<std::shared_ptr<const UICommon::GameFile>> games;
-  game_file_cache->ForEach(
-      [&games](const std::shared_ptr<const UICommon::GameFile>& game) { games.push_back(game); });
+  const jsize count = env->GetArrayLength(jgame_files);
+  games.reserve(count);
+  for (jsize i = 0; i < count; i++)
+  {
+    jobject jgame_file = env->GetObjectArrayElement(jgame_files, i);
+    auto* game_ptr = reinterpret_cast<std::shared_ptr<const UICommon::GameFile>*>(
+        env->GetLongField(jgame_file, IDCache::GetGameFilePointer()));
+    if (game_ptr)
+      games.push_back(*game_ptr);
+    env->DeleteLocalRef(jgame_file);
+  }
 
   return reinterpret_cast<jlong>(new NetPlay::NetPlayUICallbacks(obj, std::move(games)));
 }
