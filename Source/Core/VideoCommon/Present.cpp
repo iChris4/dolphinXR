@@ -528,7 +528,6 @@ void Presenter::AdjustRectanglesToFitBounds(MathUtil::Rectangle<int>* target_rec
                                             int fb_height)
 {
   const int efb_scale = g_framebuffer_manager->GetEFBScale();
-  MathUtil::Rectangle<int> original_source_rect = *source_rect;
 
   // Crop the content.
   if (g_ActiveConfig.bCropCustom)
@@ -538,6 +537,7 @@ void Presenter::AdjustRectanglesToFitBounds(MathUtil::Rectangle<int>* target_rec
     const int crop_top = g_ActiveConfig.iCropCustomTop * efb_scale;
     const int crop_bottom = g_ActiveConfig.iCropCustomBottom * efb_scale;
 
+    const MathUtil::Rectangle<int> original_source_rect = *source_rect;
     source_rect->left = std::min(source_rect->left + crop_left, source_rect->right);
     source_rect->right = std::max(source_rect->right - crop_right, source_rect->left);
     source_rect->top = std::min(source_rect->top + crop_top, source_rect->bottom);
@@ -558,21 +558,17 @@ void Presenter::AdjustRectanglesToFitBounds(MathUtil::Rectangle<int>* target_rec
   }
 
   // Center the content.
-  const double source_aspect_ratio =
-      static_cast<double>(source_rect->GetWidth()) / static_cast<double>(source_rect->GetHeight());
   const double target_aspect_ratio =
       static_cast<double>(target_rect->GetWidth()) / static_cast<double>(target_rect->GetHeight());
   const double framebuffer_aspect_ratio =
       static_cast<double>(fb_width) / static_cast<double>(fb_height);
-  const double source_target_aspect_ratio = source_aspect_ratio / target_aspect_ratio;
-  const double source_target_framebuffer_aspect_ratio =
-      source_aspect_ratio / source_target_aspect_ratio / framebuffer_aspect_ratio;
+  const double target_framebuffer_aspect_ratio = target_aspect_ratio / framebuffer_aspect_ratio;
 
-  if (source_target_framebuffer_aspect_ratio < 1)
+  if (target_framebuffer_aspect_ratio < 1)
   {
     // Width.
     const int new_width =
-        static_cast<double>(fb_width) * static_cast<double>(source_target_framebuffer_aspect_ratio);
+        static_cast<double>(fb_width) * static_cast<double>(target_framebuffer_aspect_ratio);
     const int width_diff = fb_width - new_width;
     const int half_width_diff = width_diff / 2;
 
@@ -590,8 +586,8 @@ void Presenter::AdjustRectanglesToFitBounds(MathUtil::Rectangle<int>* target_rec
     target_rect->right = fb_width;
 
     // Height.
-    const int new_height = static_cast<double>(fb_height) /
-                           static_cast<double>(source_target_framebuffer_aspect_ratio);
+    const int new_height =
+        static_cast<double>(fb_height) / static_cast<double>(target_framebuffer_aspect_ratio);
     const int height_diff = fb_height - new_height;
     const int half_height_diff = height_diff / 2;
 
@@ -767,7 +763,7 @@ void Presenter::UpdateDrawRectangle()
   // FIXME: this breaks at very low widget sizes
   // Make ControllerInterface aware of the render window region actually being used
   // to adjust mouse cursor inputs.
-  // This also fails to acknowledge "g_ActiveConfig.bCrop".
+  // This also doesn't handle the image cropping settings.
   g_controller_interface.SetAspectRatioAdjustment(draw_aspect_ratio / win_aspect_ratio);
 
   float draw_width = draw_aspect_ratio;
