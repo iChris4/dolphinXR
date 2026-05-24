@@ -456,6 +456,54 @@ Presenter::ConvertStereoRectangle(const MathUtil::Rectangle<int>& rc) const
   return std::make_tuple(left_rc, right_rc);
 }
 
+MathUtil::Rectangle<int> Presenter::GetCustomCrop(const MathUtil::Rectangle<int>& rect) const
+{
+  if (!g_ActiveConfig.bCropCustom)
+    return MathUtil::Rectangle<int>(0, 0, 0, 0);
+
+  const int uncropped_source_width = rect.GetWidth();
+  const int uncropped_source_height = rect.GetHeight();
+  const int efb_scale = g_framebuffer_manager->GetEFBScale();
+
+  // Determine amount of pixels to crop from the source rect.
+  const int source_crop_left =
+      std::min(g_ActiveConfig.iCropCustomLeft * efb_scale, uncropped_source_width);
+  const int source_crop_right = std::min(g_ActiveConfig.iCropCustomRight * efb_scale,
+                                         uncropped_source_width - source_crop_left);
+  const int source_crop_top =
+      std::min(g_ActiveConfig.iCropCustomTop * efb_scale, uncropped_source_height);
+  const int source_crop_bottom = std::min(g_ActiveConfig.iCropCustomBottom * efb_scale,
+                                          uncropped_source_height - source_crop_top);
+
+  return MathUtil::Rectangle<int>(source_crop_left, source_crop_top, source_crop_right,
+                                  source_crop_bottom);
+}
+
+MathUtil::Rectangle<int> Presenter::AdjustForCustomCrop(const MathUtil::Rectangle<int>& rect) const
+{
+  const MathUtil::Rectangle<int> crop = GetCustomCrop(rect);
+  const MathUtil::Rectangle<int> cropped(rect.left + crop.left, rect.top + crop.top,
+                                         rect.right - crop.right, rect.bottom - crop.bottom);
+  return cropped;
+}
+
+float Presenter::AdjustAspectRatioForCustomCrop(float input_aspect_ratio) const
+{
+  if (!g_ActiveConfig.bCropCustom)
+    return input_aspect_ratio;
+
+  const MathUtil::Rectangle<int> rect = m_xfb_rect;
+  if (rect.GetWidth() <= 0 || rect.GetHeight() <= 0)
+    return input_aspect_ratio;
+
+  const MathUtil::Rectangle<int> cropped = AdjustForCustomCrop(rect);
+  const float relative_width_difference =
+      static_cast<float>(cropped.GetWidth()) / static_cast<float>(rect.GetWidth());
+  const float relative_height_difference =
+      static_cast<float>(cropped.GetHeight()) / static_cast<float>(rect.GetHeight());
+  return input_aspect_ratio * (relative_width_difference / relative_height_difference);
+}
+
 float Presenter::CalculateDrawAspectRatio(bool allow_stretch) const
 {
   auto aspect_mode = g_ActiveConfig.aspect_mode;
@@ -474,7 +522,8 @@ float Presenter::CalculateDrawAspectRatio(bool allow_stretch) const
   {
     // The actual aspect ratio of the XFB texture is irrelevant, the VI one is the one that matters
     const auto& vi = Core::System::GetInstance().GetVideoInterface();
-    const float source_aspect_ratio = vi.GetAspectRatio();
+    const float vi_aspect_ratio = vi.GetAspectRatio();
+    const float source_aspect_ratio = AdjustAspectRatioForCustomCrop(vi_aspect_ratio);
 
     // This will scale up the source ~4:3 resolution to its equivalent ~16:9 resolution
     if (aspect_mode == AspectMode::ForceWide ||
@@ -770,8 +819,8 @@ void Presenter::UpdateDrawRectangle()
     {
       if (g_ActiveConfig.aspect_mode != AspectMode::Stretch)
       {
-        TryToSnapToXFBSize(int_draw_width, int_draw_height, m_xfb_rect.GetWidth(),
-                           m_xfb_rect.GetHeight());
+        const MathUtil::Rectangle<int> rect = AdjustForCustomCrop(m_xfb_rect);
+        TryToSnapToXFBSize(int_draw_width, int_draw_height, rect.GetWidth(), rect.GetHeight());
       }
       // We can't draw something bigger than the window, it will crop
       int_draw_width = std::min(int_draw_width, static_cast<int>(win_width));
@@ -780,8 +829,9 @@ void Presenter::UpdateDrawRectangle()
   }
   else
   {
-    int_draw_width = m_xfb_rect.GetWidth();
-    int_draw_height = m_xfb_rect.GetHeight();
+    const MathUtil::Rectangle<int> rect = AdjustForCustomCrop(m_xfb_rect);
+    int_draw_width = rect.GetWidth();
+    int_draw_height = rect.GetHeight();
   }
 
   m_target_rectangle.left = static_cast<int>(std::round(win_width / 2.0 - int_draw_width / 2.0));
@@ -1213,11 +1263,12 @@ void Presenter::Present(PresentInfo* present_info)
     // So just show the XFB
     if (m_xfb_entry)
     {
-      g_gfx->ShowImage(m_xfb_entry->texture.get(), m_xfb_rect);
+      const MathUtil::Rectangle<int> rect = AdjustForCustomCrop(m_xfb_rect);
+      g_gfx->ShowImage(m_xfb_entry->texture.get(), rect);
 
       // Update the window size based on the frame that was just rendered.
       // Due to depending on guest state, we need to call this every frame.
-      SetSuggestedWindowSize(m_xfb_rect.GetWidth(), m_xfb_rect.GetHeight());
+      SetSuggestedWindowSize(rect.GetWidth(), rect.GetHeight());
     }
     return;
   }
@@ -1284,8 +1335,8 @@ void Presenter::Present(PresentInfo* present_info)
   if (backbuffer_bound && m_xfb_entry)
   {
     // Adjust the source rectangle instead of using an oversized viewport to render the XFB.
-    auto render_target_rc = GetTargetRectangle();
-    auto render_source_rc = m_xfb_rect;
+    MathUtil::Rectangle<int> render_target_rc = GetTargetRectangle();
+    MathUtil::Rectangle<int> render_source_rc = AdjustForCustomCrop(m_xfb_rect);
     AdjustRectanglesToFitBounds(&render_target_rc, &render_source_rc, m_backbuffer_width,
                                 m_backbuffer_height);
     RenderXFBToScreen(render_target_rc, m_xfb_entry->texture.get(), render_source_rc);
@@ -1352,7 +1403,8 @@ void Presenter::Present(PresentInfo* present_info)
   {
     // Update the window size based on the frame that was just rendered.
     // Due to depending on guest state, we need to call this every frame.
-    SetSuggestedWindowSize(m_xfb_rect.GetWidth(), m_xfb_rect.GetHeight());
+    const MathUtil::Rectangle<int> rect = AdjustForCustomCrop(m_xfb_rect);
+    SetSuggestedWindowSize(rect.GetWidth(), rect.GetHeight());
   }
 
   if (m_onscreen_ui)
