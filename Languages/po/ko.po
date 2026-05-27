@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Dolphin Emulator\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-24 11:23+0200\n"
+"POT-Creation-Date: 2026-05-27 20:00+0200\n"
 "PO-Revision-Date: 2013-01-23 13:48+0000\n"
 "Last-Translator: Siegfried, 2013-2025\n"
 "Language-Team: Korean (http://app.transifex.com/dolphinemu/dolphin-emu/"
@@ -6934,7 +6934,7 @@ msgid "Info"
 msgstr "정보"
 
 #: Source/Core/DolphinQt/Config/LogConfigWidget.cpp:49
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:97
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:99
 msgid "Debug"
 msgstr "디버그"
 
@@ -14711,88 +14711,92 @@ msgstr "성능 통계"
 msgid "Show FPS"
 msgstr "FPS 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:46
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:47
+msgid "Show Internal Resolution"
+msgstr ""
+
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:48
 msgid "Show Frame Times"
 msgstr "프레임 타임 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:47
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:49
 msgid "Show VPS"
 msgstr "VPS 보여주기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:48
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:50
 msgid "Show VBlank Times"
 msgstr "VBlank 타임 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:49
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
 #, c-format
 msgid "Show % Speed"
 msgstr "% 속도 보여주기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:50
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:52
 msgid "Show Performance Graphs"
 msgstr "성능 그래프 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:53
 msgid "Show Speed Colors"
 msgstr "속도 색 보여주기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:61
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:63
 msgid "Performance Sample Window (ms):"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:62
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:64
 msgid "Performance Sample Window (ms)"
 msgstr "성능 샘플 윈도우 (ms)"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:66
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:68
 msgid "Movie Window"
 msgstr "무비 창"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:70
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:72
 msgid "Show Movie Window"
 msgstr "무비 창 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:72
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:74
 msgid "Show Rerecord Counter"
 msgstr "재녹화 횟수 보이기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:73
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:75
 msgid "Show Lag Counter"
 msgstr "랙 카운터 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:74
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:76
 msgid "Show Frame Counter"
 msgstr "프레임 카운터 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:75
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:77
 msgid "Show Input Display"
 msgstr "입력 표시 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:76
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:78
 msgid "Show System Clock"
 msgstr "시스템 클럭 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:86
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:88
 msgid "Netplay"
 msgstr "넷플레이"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:90
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:92
 msgid "Show NetPlay Ping"
 msgstr "넷플레이 핑 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:91
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:93
 msgid "Show NetPlay Chat"
 msgstr "넷플레이 채팅 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:101
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:103
 msgid "Show Statistics"
 msgstr "통계 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:103
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:105
 msgid "Show Projection Statistics"
 msgstr "추정 통계 보기"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:139
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:142
 msgid ""
 "Shows on-screen display messages over the render window. These messages "
 "disappear after several seconds.<br><br><dolphin_emphasis>If unsure, leave "
@@ -14802,7 +14806,7 @@ msgstr ""
 "에 사라집니다.<br><br><dolphin_emphasis>잘 모르겠으면, 체크해 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:143
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:146
 msgid ""
 "Changes the font size of the On-Screen Display. Affects features such as "
 "performance statistics, frame counter, and netplay chat.<br><br>The font can "
@@ -14815,7 +14819,7 @@ msgstr ""
 "User/Load 폴더에 넣고, 그걸 OSD_Font.ttf 로 리네임해서 변경될 수 있습니다."
 "<br><br><dolphin_emphasis>모르겠으면, 이것을 13 에 두세요.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:150
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:153
 msgid ""
 "Shows the number of distinct frames rendered per second as a measure of "
 "visual smoothness.<br><br><dolphin_emphasis>If unsure, leave this unchecked."
@@ -14825,7 +14829,13 @@ msgstr ""
 "<br><br><dolphin_emphasis>잘 모르겠으면, 체크 해제해 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:154
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:158
+msgid ""
+"Shows the internal resolution in pixels, as a product of width and height. "
+"<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
+msgstr ""
+
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:162
 msgid ""
 "Shows the average time in ms between each distinct rendered frame alongside "
 "the standard deviation.<br><br><dolphin_emphasis>If unsure, leave this "
@@ -14835,7 +14845,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>잘 모르겠으면, 체크 해제해 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:158
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:166
 msgid ""
 "Shows the number of frames rendered per second as a measure of emulation "
 "speed.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
@@ -14845,7 +14855,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>잘 모르겠으면, 체크 해제해 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:162
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:170
 msgid ""
 "Shows the average time in ms between each rendered frame alongside the "
 "standard deviation.<br><br><dolphin_emphasis>If unsure, leave this unchecked."
@@ -14855,7 +14865,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>잘 모르겠으면, 체크 해제해 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:166
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:174
 msgid ""
 "Shows frametime graph along with statistics as a representation of emulation "
 "performance.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
@@ -14865,7 +14875,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>잘 모르겠으면, 체크 해제해 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:170
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
 #, c-format
 msgid ""
 "Shows the % speed of emulation compared to full speed."
@@ -14874,7 +14884,7 @@ msgstr ""
 "풀스피드와 비교해 에뮬레이션의 % 속도를 보여줍니다.<br><br><dolphin_emphasis>"
 "잘 모르겠으면, 체크 해제해 두세요.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:174
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:182
 msgid ""
 "Changes the color of the FPS counter depending on emulation speed."
 "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>"
@@ -14882,7 +14892,7 @@ msgstr ""
 "에뮬레이션 속도에 따른 FPS 카운터의 색을 변경합니다<br><br><dolphin_emphasis>"
 "잘 모르겠으면, 체크해 두세요.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:186
 msgid ""
 "The amount of time the FPS and VPS counters will sample over.<br><br>The "
 "higher the value, the more stable the FPS/VPS counter will be, but the "
@@ -14894,7 +14904,7 @@ msgstr ""
 "입니다.<br><br><dolphin_emphasis>잘 모르겠으면 이것을 1000ms 로 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:185
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:193
 msgid ""
 "Shows the player's maximum ping while playing on NetPlay."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
@@ -14903,7 +14913,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>잘 모르겠으면, 체크 해제해 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:188
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:196
 msgid ""
 "Shows chat messages, buffer changes, and desync alerts while playing NetPlay."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
@@ -14912,7 +14922,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>잘 모르겠으면, 체크 해제해 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:193
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:201
 msgid ""
 "Shows a window that can be filled with information related to movie "
 "recordings. The other options in this group determine what appears in the "
@@ -14923,7 +14933,7 @@ msgstr ""
 "창에 무엇을 보일지 결정합니다.<br><br><dolphin_emphasis>잘 모르겠으면, 체크 "
 "해제해 두세요.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:197
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:205
 msgid ""
 "Shows how many times the input recording has been overwritten by using "
 "savestates.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
@@ -14933,7 +14943,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>잘 모르겠으면, 체크 해제해 두세요.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:201
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:209
 msgid ""
 "Shows how many frames have occurred without controller inputs being checked. "
 "Resets to 1 when inputs are processed. <br><br><dolphin_emphasis>If unsure, "
@@ -14943,7 +14953,7 @@ msgstr ""
 "면 1로 리셋됩니다. <br><br><dolphin_emphasis>잘 모르겠으면, 체크 해제해 두세"
 "요.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:205
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:213
 msgid ""
 "Shows how many frames have passed. <br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"
@@ -14951,7 +14961,7 @@ msgstr ""
 "몇 프레임이 지나갔는지 보여줍니다. <br><br><dolphin_emphasis>잘 모르겠으면, "
 "체크 해제해 두세요.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:208
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:216
 msgid ""
 "Shows the controls currently being input.<br><br><dolphin_emphasis>If "
 "unsure, leave this unchecked.</dolphin_emphasis>"
@@ -14959,7 +14969,7 @@ msgstr ""
 "컨트롤 장치들이 현재 입력하고 있는 것을 보여줍니다.<br><br><dolphin_emphasis>"
 "잘 모르겠으면, 체크 해제해 두세요.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:211
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:219
 msgid ""
 "Shows current system time.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
@@ -14967,7 +14977,7 @@ msgstr ""
 "현재 시스템 시간을 보여줍니다.<br><br><dolphin_emphasis>잘 모르겠으면, 체크 "
 "해제해 두세요.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:215
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:223
 msgid ""
 "Shows various rendering statistics.<br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"
@@ -14975,7 +14985,7 @@ msgstr ""
 "다양한 렌더링 통계를 보여줍니다.<br><br><dolphin_emphasis>잘 모르겠으면, 체"
 "크 해제해 두세요.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:218
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:226
 msgid ""
 "Shows various projection statistics.<br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"

@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Dolphin Emulator\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-24 11:23+0200\n"
+"POT-Creation-Date: 2026-05-27 20:00+0200\n"
 "PO-Revision-Date: 2013-01-23 13:48+0000\n"
 "Last-Translator: mansoor <asseryma@hotmail.com>, 2013,2015-2026\n"
 "Language-Team: Arabic (http://app.transifex.com/dolphinemu/dolphin-emu/"
@@ -6451,7 +6451,7 @@ msgid "Info"
 msgstr "معلومات"
 
 #: Source/Core/DolphinQt/Config/LogConfigWidget.cpp:49
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:97
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:99
 msgid "Debug"
 msgstr "التصحيح"
 
@@ -13833,95 +13833,99 @@ msgstr "إحصائيات الأداء"
 msgid "Show FPS"
 msgstr "FPS عرض"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:46
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:47
+msgid "Show Internal Resolution"
+msgstr ""
+
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:48
 msgid "Show Frame Times"
 msgstr "عرض أوقات الإطار"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:47
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:49
 msgid "Show VPS"
 msgstr "VPS عرض "
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:48
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:50
 msgid "Show VBlank Times"
 msgstr "VBlank عرض أوقات"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:49
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
 #, c-format
 msgid "Show % Speed"
 msgstr "عرض السرعة"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:50
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:52
 msgid "Show Performance Graphs"
 msgstr "عرض الرسوم البيانية للأداء"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:53
 msgid "Show Speed Colors"
 msgstr "عرض ألوان السرعة"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:61
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:63
 msgid "Performance Sample Window (ms):"
 msgstr "(ms) نافذة نموذج الأداء:"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:62
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:64
 msgid "Performance Sample Window (ms)"
 msgstr "(ms) نافذة نموذج الأداء"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:66
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:68
 msgid "Movie Window"
 msgstr "نافذة الفيلم"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:70
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:72
 msgid "Show Movie Window"
 msgstr "عرض نافذة الفيلم"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:72
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:74
 msgid "Show Rerecord Counter"
 msgstr "عرض عداد إعادة التسجيل"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:73
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:75
 msgid "Show Lag Counter"
 msgstr "عرض عداد التأخر"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:74
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:76
 msgid "Show Frame Counter"
 msgstr "عرض عداد الإطار"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:75
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:77
 msgid "Show Input Display"
 msgstr "عرض مدخلات العرض"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:76
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:78
 msgid "Show System Clock"
 msgstr "عرض ساعة النظام"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:86
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:88
 msgid "Netplay"
 msgstr "اللعب عبر الشبكة"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:90
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:92
 msgid "Show NetPlay Ping"
 msgstr "في اللعب عبر الشبكة Ping عرض الـ"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:91
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:93
 msgid "Show NetPlay Chat"
 msgstr "عرض الدردشة في اللعب عبر الشبكة"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:101
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:103
 msgid "Show Statistics"
 msgstr "عرض الإحصاءات"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:103
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:105
 msgid "Show Projection Statistics"
 msgstr "عرض إحصائيات الإسقاط"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:139
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:142
 msgid ""
 "Shows on-screen display messages over the render window. These messages "
 "disappear after several seconds.<br><br><dolphin_emphasis>If unsure, leave "
 "this checked.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:143
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:146
 msgid ""
 "Changes the font size of the On-Screen Display. Affects features such as "
 "performance statistics, frame counter, and netplay chat.<br><br>The font can "
@@ -13930,7 +13934,7 @@ msgid ""
 "13.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:150
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:153
 msgid ""
 "Shows the number of distinct frames rendered per second as a measure of "
 "visual smoothness.<br><br><dolphin_emphasis>If unsure, leave this unchecked."
@@ -13940,42 +13944,48 @@ msgstr ""
 "<br><br><dolphin_emphasis>إذا كنت غير متأكد، اترك هذا الخيار غير محدد.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:154
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:158
+msgid ""
+"Shows the internal resolution in pixels, as a product of width and height. "
+"<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
+msgstr ""
+
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:162
 msgid ""
 "Shows the average time in ms between each distinct rendered frame alongside "
 "the standard deviation.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:158
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:166
 msgid ""
 "Shows the number of frames rendered per second as a measure of emulation "
 "speed.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
 "dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:162
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:170
 msgid ""
 "Shows the average time in ms between each rendered frame alongside the "
 "standard deviation.<br><br><dolphin_emphasis>If unsure, leave this unchecked."
 "</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:166
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:174
 msgid ""
 "Shows frametime graph along with statistics as a representation of emulation "
 "performance.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
 "dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:170
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
 #, c-format
 msgid ""
 "Shows the % speed of emulation compared to full speed."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:174
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:182
 msgid ""
 "Changes the color of the FPS counter depending on emulation speed."
 "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>"
@@ -13984,7 +13994,7 @@ msgstr ""
 "المحاكاة<br><br><dolphin_emphasis>إذا لم تكن متأكدا ، فاترك هذا الاختيار</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:186
 msgid ""
 "The amount of time the FPS and VPS counters will sample over.<br><br>The "
 "higher the value, the more stable the FPS/VPS counter will be, but the "
@@ -13992,19 +14002,19 @@ msgid ""
 "at 1000ms.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:185
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:193
 msgid ""
 "Shows the player's maximum ping while playing on NetPlay."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:188
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:196
 msgid ""
 "Shows chat messages, buffer changes, and desync alerts while playing NetPlay."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:193
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:201
 msgid ""
 "Shows a window that can be filled with information related to movie "
 "recordings. The other options in this group determine what appears in the "
@@ -14015,39 +14025,39 @@ msgstr ""
 "الأخرى في هذه المجموعة ما يظهر في النافذة <br><br><dolphin_emphasis>إذا كنت "
 "غير متأكد، اترك هذا الخيار غير محدد.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:197
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:205
 msgid ""
 "Shows how many times the input recording has been overwritten by using "
 "savestates.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
 "dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:201
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:209
 msgid ""
 "Shows how many frames have occurred without controller inputs being checked. "
 "Resets to 1 when inputs are processed. <br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:205
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:213
 msgid ""
 "Shows how many frames have passed. <br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:208
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:216
 msgid ""
 "Shows the controls currently being input.<br><br><dolphin_emphasis>If "
 "unsure, leave this unchecked.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:211
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:219
 msgid ""
 "Shows current system time.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
 msgstr ""
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:215
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:223
 msgid ""
 "Shows various rendering statistics.<br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"
@@ -14055,7 +14065,7 @@ msgstr ""
 "<dolphin_emphasis>يعرض إحصائيات عرض متنوعة.<br><br></dolphin_emphasis>إذا لم "
 "تكن متأكدًا، اترك هذا الخيار دون تحديد."
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:218
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:226
 msgid ""
 "Shows various projection statistics.<br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"

@@ -24,7 +24,7 @@
 # Guilherme Dias, 2017-2018
 # Guilherme Dias, 2018-2021
 # Runo <i.am.runo@gmail.com>, 2013
-# Igor Rückert, 2020-2022
+# Igor Rückert, 2020-2022,2026
 # Igor Rückert, 2015-2020
 # JohnCorsi <jjcorsif@hotmail.com>, 2018
 # João Almeida <jpcapoani98@gmail.com>, 2020
@@ -46,7 +46,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Dolphin Emulator\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-24 11:23+0200\n"
+"POT-Creation-Date: 2026-05-27 20:00+0200\n"
 "PO-Revision-Date: 2013-01-23 13:48+0000\n"
 "Last-Translator: Mateus B. Cassiano <mbc07@live.com>, 2017,2021-2026\n"
 "Language-Team: Portuguese (Brazil) (http://app.transifex.com/dolphinemu/"
@@ -828,11 +828,11 @@ msgstr "Perfil de Jogo Anterior"
 
 #: Source/Core/Core/HotkeyManager.cpp:107
 msgid "Toggle Aspect Ratio Crop"
-msgstr ""
+msgstr "Ativar/Desativar Corte de Proporção"
 
 #: Source/Core/Core/HotkeyManager.cpp:108
 msgid "Toggle Custom Crop"
-msgstr ""
+msgstr "Ativar/Desativar Corte Personalizado"
 
 #: Source/Core/Core/HotkeyManager.cpp:109
 msgid "Toggle Aspect Ratio"
@@ -2774,6 +2774,10 @@ msgid ""
 "The game probably would have crashed on real hardware. Enable MMU in "
 "advanced settings to accurately emulate game crashes."
 msgstr ""
+"Escrita inválida em {0:#010x}, PC = {1:#010x}.\n"
+"\n"
+"O jogo provavelmente teria travado se executado no console original. Ative o "
+"MMU nas configurações avançadas para emular travamentos do jogo com precisão."
 
 #: Source/Core/Core/PowerPC/MMU.cpp:1226
 #, c++-format
@@ -2783,6 +2787,10 @@ msgid ""
 "The game probably would have crashed on real hardware. Enable MMU in "
 "advanced settings to accurately emulate game crashes."
 msgstr ""
+"Leitura inválida de {0:#010x}, PC = {1:#010x}.\n"
+"\n"
+"O jogo provavelmente teria travado se executado no console original. Ative o "
+"MMU nas configurações avançadas para emular travamentos do jogo com precisão."
 
 #: Source/Core/Core/State.cpp:342
 msgid "Internal LZ4 Error - compression failed"
@@ -3233,12 +3241,12 @@ msgstr "A partição de atualização não contém o IOS utilizado por esse jogo
 #: Source/Core/DiscIO/VolumeVerifier.cpp:699
 #, c++-format
 msgid "The {0} partition does not have a valid ticket."
-msgstr ""
+msgstr "A partição {0} não possui um ticket válido."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:705
 #, c++-format
 msgid "The {0} partition does not have a valid TMD."
-msgstr ""
+msgstr "A partição {0} não possui um TMD válido."
 
 #. i18n: This string is referring to a game mode in Super Smash Bros. Brawl called Masterpieces
 #. where you play demos of NES/SNES/N64 games. This string is referring to a specific such demo
@@ -3362,7 +3370,7 @@ msgstr "O índice de chave comum especificado é {0}, mas deveria ser {1}."
 #. i18n: "Ticket" here is a kind of digital authorization to use a certain title (e.g. a game)
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1008
 msgid "The ticket is invalid."
-msgstr ""
+msgstr "O ticket é inválido."
 
 #. i18n: "Ticket" here is a kind of digital authorization to use a certain title (e.g. a game)
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1016
@@ -3371,7 +3379,7 @@ msgstr "O ticket não foi assinado corretamente."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1021
 msgid "The TMD is invalid."
-msgstr ""
+msgstr "O TMD é inválido."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1030
 msgid ""
@@ -4244,15 +4252,15 @@ msgstr "Excluir Endereço"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:550
 msgid "Add Read/Write Breakpoint(s)"
-msgstr ""
+msgstr "Adicionar Ponto(s) de Interrupção de Leitura/Escrita"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:552
 msgid "Add Write Breakpoint(s)"
-msgstr ""
+msgstr "Adicionar Ponto(s) de Interrupção de Escrita"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:553
 msgid "Add Read Breakpoint(s)"
-msgstr ""
+msgstr "Adicionar Ponto(s) de Interrupção de Leitura"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:635
 msgid "Multiple errors occurred while generating AR codes."
@@ -4595,7 +4603,7 @@ msgstr "Nada para configurar"
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientEditServerDialog.cpp:32
 msgid "Edit DSU Server"
-msgstr ""
+msgstr "Editar Servidor DSU"
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientEditServerDialog.cpp:37
 msgid "BetterJoy, DS4Windows, etc"
@@ -4640,7 +4648,7 @@ msgstr "Adicionar..."
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientWidget.cpp:36
 msgid "Edit"
-msgstr ""
+msgstr "Editar..."
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientWidget.cpp:37
 #: Source/Core/DolphinQt/Config/NewPatchDialog.cpp:128
@@ -4658,6 +4666,10 @@ msgid ""
 "setup instructions, <a href=\"https://wiki.dolphin-emu.org/index.php?"
 "title=DSU_Client\">refer to this page</a>."
 msgstr ""
+"O protocolo DSU permite acessar dados de entrada e sensores de movimento de "
+"fontes compatíveis, como controles do PlayStation, Nintendo Switch e Steam."
+"<br><br>Para instruções de configuração, <a href=\"https://wiki.dolphin-"
+"emu.org/index.php?title=DSU_Client\">consulte essa página</a>."
 
 #: Source/Core/DolphinQt/Config/FilesystemWidget.cpp:63
 #: Source/Core/DolphinQt/Config/SDLHints/SDLHintsWindow.cpp:48
@@ -5164,6 +5176,8 @@ msgid ""
 "Failed to download Gecko codes. The code server may be temporarily "
 "unavailable. Please try again later."
 msgstr ""
+"Falha ao baixar códigos Gecko. O servidor de códigos pode estar "
+"temporariamente indisponível. Por favor, tente novamente mais tarde."
 
 #: Source/Core/DolphinQt/Config/GeckoCodeWidget.cpp:407
 msgid ""
@@ -5171,10 +5185,13 @@ msgid ""
 "\n"
 "Server response: HTTP %1."
 msgstr ""
+"\n"
+"\n"
+"Resposta do servidor: HTTP %1."
 
 #: Source/Core/DolphinQt/Config/GeckoCodeWidget.cpp:409
 msgid "Download Failed"
-msgstr ""
+msgstr "Falha no Download"
 
 #: Source/Core/DolphinQt/Config/GeckoCodeWidget.cpp:416
 msgid "File contained no codes."
@@ -5291,7 +5308,7 @@ msgstr "Cortar"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:162
 msgid "To Aspect Ratio"
-msgstr ""
+msgstr "Para Proporção de Tela"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:163
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:165
@@ -5302,12 +5319,12 @@ msgstr "Personalizada"
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:173
 #: Source/Core/DolphinQt/Settings/WiiPane.cpp:311
 msgid "Top"
-msgstr "Em cima"
+msgstr "Superior"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:177
 #: Source/Core/DolphinQt/Settings/WiiPane.cpp:311
 msgid "Bottom"
-msgstr "Embaixo"
+msgstr "Inferior"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:193
 msgid "Misc"
@@ -5664,6 +5681,11 @@ msgid ""
 "Graphics/Advanced/Misc/Crop.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
 msgstr ""
+"Corta a imagem da sua proporção de tela nativa (que raramente corresponde à "
+"exatos 4:3 ou 16:9, por normalmente incluir overscan) para a proporção de "
+"tela especificada pelo usuário (por exemplo, 4:3 ou 16:9).<br><br>Essa opção "
+"era conhecida anteriormente como \"Cortar\".<br><br><dolphin_emphasis>Na "
+"dúvida, mantenha essa opção desativada.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:412
 msgid ""
@@ -5672,6 +5694,11 @@ msgid ""
 "target aspect ratio. Useful to resolve letterboxing issues. "
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
 msgstr ""
+"Ativa ajustes para cortar a imagem em pixels nativos discretos "
+"(independentes da configuração de resolução interna), a fim obter uma "
+"proporção de tela específica. Útil para resolver problemas de letterboxing. "
+"<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção desativada.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:417
 msgid ""
@@ -5680,6 +5707,10 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Corta o lado esquerdo da imagem em pixels nativos discretos (independente da "
+"configuração de resolução interna), a fim de obter uma proporção de tela "
+"específica.  <br><br><dolphin_emphasis>Na dúvida, mantenha esse valor em 0.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:421
 msgid ""
@@ -5688,6 +5719,10 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Corta o lado superior da imagem em pixels nativos discretos (independente da "
+"configuração de resolução interna), a fim de obter uma proporção de tela "
+"específica.  <br><br><dolphin_emphasis>Na dúvida, mantenha esse valor em 0.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:425
 msgid ""
@@ -5696,6 +5731,10 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Corta o lado direito da imagem em pixels nativos discretos (independente da "
+"configuração de resolução interna), a fim de obter uma proporção de tela "
+"específica.  <br><br><dolphin_emphasis>Na dúvida, mantenha esse valor em 0.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:429
 msgid ""
@@ -5704,6 +5743,10 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Corta o lado inferior da imagem em pixels nativos discretos (independente da "
+"configuração de resolução interna), a fim de obter uma proporção de tela "
+"específica.  <br><br><dolphin_emphasis>Na dúvida, mantenha esse valor em 0.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:434
 msgid "<dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
@@ -6354,6 +6397,15 @@ msgid ""
 "Texture Decoding will be disabled.<br><br><dolphin_emphasis>If unsure, leave "
 "this unchecked.</dolphin_emphasis>"
 msgstr ""
+"Ativa a detecção de mipmaps arbitrários, que alguns jogos utilizam para "
+"renderizar efeitos gráficos especiais baseados na distância da câmera."
+"<br><br>Pode causar falsos positivos, resultando em texturas borradas em "
+"resoluções internas maiores, como em jogos que utilizam mipmaps de resolução "
+"muito baixa. Desativar essa opção também pode reduzir engasgos em jogos que "
+"frequentemente carregam novas texturas.<br><br>Se essa opção for ativada, "
+"\"Decodificação de Texturas na GPU\" será desativada."
+"<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção desativada.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/EnhancementsWidget.cpp:564
 msgid ""
@@ -6923,6 +6975,11 @@ msgid ""
 "Detection is enabled.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
 msgstr ""
+"Ativa a decodificação de texturas usando a GPU ao invés da CPU.<br><br>Isso "
+"pode melhorar o desempenho em algumas situações, ou em sistemas com gargalos "
+"de CPU.<br><br>Essa opção é desativada quando \"Detecção de Mipmaps "
+"Arbitrários\" está ativada.<br><br><dolphin_emphasis>Na dúvida, mantenha "
+"essa opção desativada.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/HacksWidget.cpp:221
 msgid ""
@@ -7148,7 +7205,7 @@ msgid "Info"
 msgstr "Informações"
 
 #: Source/Core/DolphinQt/Config/LogConfigWidget.cpp:49
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:97
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:99
 msgid "Debug"
 msgstr "Depuração"
 
@@ -10683,11 +10740,11 @@ msgstr "Nenhum arquivo carregado / gravado."
 
 #: Source/Core/DolphinQt/GameCount.cpp:24
 msgid "%1 game(s) in your collection (%2 visible, %3 filtered)"
-msgstr ""
+msgstr "%1 jogo(s) em sua coleção (%2 visíveis, %3 filtrados)"
 
 #: Source/Core/DolphinQt/GameCount.cpp:31
 msgid "%1 game(s) in your collection"
-msgstr ""
+msgstr "%1 jogo(s) em sua coleção"
 
 #: Source/Core/DolphinQt/GameList/GameList.cpp:308
 #: Source/Core/DolphinQt/NetPlay/NetPlayBrowser.cpp:195
@@ -11723,11 +11780,11 @@ msgstr "Importando backup da NAND"
 
 #: Source/Core/DolphinQt/MainWindow.cpp:1894
 msgid "Loading NAND..."
-msgstr ""
+msgstr "Carregando NAND..."
 
 #: Source/Core/DolphinQt/MainWindow.cpp:1897
 msgid "Extracting NAND..."
-msgstr ""
+msgstr "Extraindo NAND..."
 
 #: Source/Core/DolphinQt/MainWindow.cpp:1907
 msgid "Select Keys File (OTP/SEEPROM Dump)"
@@ -12037,7 +12094,7 @@ msgstr "&Assembler"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:599
 msgid "Show Game Count"
-msgstr ""
+msgstr "Mostrar Contagem de Jogos"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:607
 msgid "Purge Game List Cache"
@@ -12281,7 +12338,7 @@ msgstr "Desativar Fastmem"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:929
 msgid "Disable Page Table Fastmem"
-msgstr ""
+msgstr "Desativar Fastmem na Tabela de Páginas"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:936
 msgid "Disable Fastmem Arena"
@@ -14034,12 +14091,12 @@ msgstr "Tamanho do Buffer:"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:213
 msgid "Wii Remote Audio Routing"
-msgstr ""
+msgstr "Redirecionamento de Áudio do Wii Remote"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:217
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:487
 msgid "Enable Wii Remote Audio Routing"
-msgstr ""
+msgstr "Ativar Redirecionamento de Áudio do Wii Remote"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:395
 msgid ""
@@ -14179,11 +14236,20 @@ msgid ""
 "selected.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
 "dolphin_emphasis>"
 msgstr ""
+"Redireciona o áudio do alto-falante do Wii Remote para um dispositivo de "
+"saída de áudio separado. Essa opção não pode ser alterada enquanto a "
+"emulação estiver em execução.<br><br>Essa opção é desativada quando \"Ativar "
+"Dados do Auto-falante\" está desativada, \"Redirecionar um adaptador "
+"Bluetooth\" está selecionada ou um backend de áudio diferente de Cubeb está "
+"selecionado.<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção "
+"desativada.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:479
 msgid ""
 "Enables routing this Wii Remote's speaker audio to a separate output device."
 msgstr ""
+"Ativa o redirecionamento de áudio do alto-falante deste Wii Remote para um "
+"dispositivo de saída de áudio separado."
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:481
 msgid ""
@@ -14191,6 +14257,9 @@ msgid ""
 "<br><br>This setting is disabled when this Wii Remote is not set to Emulated "
 "Wii Remote."
 msgstr ""
+"Seleciona o dispositivo de saída para o áudio do alto-falante deste Wii "
+"Remote.<br><br>Essa opção é desativada quando este Wii Remote não está "
+"definido como \"Wii Remote Emulado\"."
 
 #. i18n: MAC stands for Media Access Control. A MAC address uniquely identifies a network
 #. interface (physical) like a serial number. "MAC" should be kept in translations.
@@ -14339,7 +14408,7 @@ msgstr "BIOS:"
 
 #: Source/Core/DolphinQt/Settings/GameCubePane.cpp:219
 msgid "Game Boy Player ROM:"
-msgstr ""
+msgstr "ROM do Game Boy Player:"
 
 #: Source/Core/DolphinQt/Settings/GameCubePane.cpp:220
 msgid "Port %1 ROM:"
@@ -15086,88 +15155,92 @@ msgstr "Estatísticas de Desempenho"
 msgid "Show FPS"
 msgstr "Mostrar FPS"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:46
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:47
+msgid "Show Internal Resolution"
+msgstr ""
+
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:48
 msgid "Show Frame Times"
 msgstr "Mostrar Duração dos Quadros"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:47
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:49
 msgid "Show VPS"
 msgstr "Mostrar VPS"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:48
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:50
 msgid "Show VBlank Times"
 msgstr "Mostrar Duração do VBlank"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:49
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
 #, c-format
 msgid "Show % Speed"
 msgstr "Mostrar Velocidade em %"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:50
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:52
 msgid "Show Performance Graphs"
 msgstr "Mostrar Gráfico de Desempenho"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:53
 msgid "Show Speed Colors"
 msgstr "Mostrar Velocidade em Cores"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:61
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:63
 msgid "Performance Sample Window (ms):"
 msgstr "Tamanho da Amostra de Desempenho (ms):"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:62
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:64
 msgid "Performance Sample Window (ms)"
 msgstr "Tamanho da Amostra de Desempenho (ms)"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:66
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:68
 msgid "Movie Window"
 msgstr "Painel de Gravação"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:70
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:72
 msgid "Show Movie Window"
 msgstr "Mostrar Painel de Gravação"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:72
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:74
 msgid "Show Rerecord Counter"
 msgstr "Mostrar Contador de Regravações"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:73
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:75
 msgid "Show Lag Counter"
 msgstr "Mostrar Contador de Lag"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:74
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:76
 msgid "Show Frame Counter"
 msgstr "Mostrar Contador de Quadros"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:75
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:77
 msgid "Show Input Display"
 msgstr "Mostrar Entrada de Dados"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:76
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:78
 msgid "Show System Clock"
 msgstr "Mostrar Relógio do Sistema"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:86
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:88
 msgid "Netplay"
 msgstr "NetPlay"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:90
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:92
 msgid "Show NetPlay Ping"
 msgstr "Mostrar Ping do NetPlay"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:91
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:93
 msgid "Show NetPlay Chat"
 msgstr "Mostrar Chat do NetPlay"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:101
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:103
 msgid "Show Statistics"
 msgstr "Exibir Estatísticas"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:103
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:105
 msgid "Show Projection Statistics"
 msgstr "Exibir Estatísticas de Projeção"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:139
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:142
 msgid ""
 "Shows on-screen display messages over the render window. These messages "
 "disappear after several seconds.<br><br><dolphin_emphasis>If unsure, leave "
@@ -15177,7 +15250,7 @@ msgstr ""
 "alguns segundos.<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção "
 "ativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:143
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:146
 msgid ""
 "Changes the font size of the On-Screen Display. Affects features such as "
 "performance statistics, frame counter, and netplay chat.<br><br>The font can "
@@ -15192,7 +15265,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção em 13.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:150
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:153
 msgid ""
 "Shows the number of distinct frames rendered per second as a measure of "
 "visual smoothness.<br><br><dolphin_emphasis>If unsure, leave this unchecked."
@@ -15202,7 +15275,13 @@ msgstr ""
 "métrica de suavidade visual.<br><br><dolphin_emphasis>Na dúvida, mantenha "
 "essa opção desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:154
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:158
+msgid ""
+"Shows the internal resolution in pixels, as a product of width and height. "
+"<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
+msgstr ""
+
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:162
 msgid ""
 "Shows the average time in ms between each distinct rendered frame alongside "
 "the standard deviation.<br><br><dolphin_emphasis>If unsure, leave this "
@@ -15212,7 +15291,7 @@ msgstr ""
 "e seu desvio padrão.<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção "
 "desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:158
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:166
 msgid ""
 "Shows the number of frames rendered per second as a measure of emulation "
 "speed.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
@@ -15222,7 +15301,7 @@ msgstr ""
 "velocidade de emulação.<br><br><dolphin_emphasis>Na dúvida, mantenha essa "
 "opção desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:162
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:170
 msgid ""
 "Shows the average time in ms between each rendered frame alongside the "
 "standard deviation.<br><br><dolphin_emphasis>If unsure, leave this unchecked."
@@ -15232,7 +15311,7 @@ msgstr ""
 "desvio padrão.<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção "
 "desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:166
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:174
 msgid ""
 "Shows frametime graph along with statistics as a representation of emulation "
 "performance.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
@@ -15242,7 +15321,7 @@ msgstr ""
 "de emulação.<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção "
 "desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:170
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
 #, c-format
 msgid ""
 "Shows the % speed of emulation compared to full speed."
@@ -15252,7 +15331,7 @@ msgstr ""
 "velocidade total.<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção "
 "desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:174
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:182
 msgid ""
 "Changes the color of the FPS counter depending on emulation speed."
 "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>"
@@ -15261,7 +15340,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção ativada.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:186
 msgid ""
 "The amount of time the FPS and VPS counters will sample over.<br><br>The "
 "higher the value, the more stable the FPS/VPS counter will be, but the "
@@ -15273,7 +15352,7 @@ msgstr ""
 "no entanto eles serão atualizados com menor frequência."
 "<br><br><dolphin_emphasis>Na dúvida, selecione \"1000\".</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:185
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:193
 msgid ""
 "Shows the player's maximum ping while playing on NetPlay."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
@@ -15282,7 +15361,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção desativada.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:188
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:196
 msgid ""
 "Shows chat messages, buffer changes, and desync alerts while playing NetPlay."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
@@ -15291,7 +15370,7 @@ msgstr ""
 "enquanto joga no NetPlay.<br><br><dolphin_emphasis>Na dúvida, mantenha essa "
 "opção desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:193
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:201
 msgid ""
 "Shows a window that can be filled with information related to movie "
 "recordings. The other options in this group determine what appears in the "
@@ -15303,7 +15382,7 @@ msgstr ""
 "painel. <br><br><dolphin_emphasis>Na dúvida, mantenha essa opção desativada."
 "</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:197
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:205
 msgid ""
 "Shows how many times the input recording has been overwritten by using "
 "savestates.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
@@ -15313,7 +15392,7 @@ msgstr ""
 "estados salvos.<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção "
 "desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:201
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:209
 msgid ""
 "Shows how many frames have occurred without controller inputs being checked. "
 "Resets to 1 when inputs are processed. <br><br><dolphin_emphasis>If unsure, "
@@ -15324,7 +15403,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção desativada.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:205
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:213
 msgid ""
 "Shows how many frames have passed. <br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"
@@ -15333,7 +15412,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção desativada.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:208
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:216
 msgid ""
 "Shows the controls currently being input.<br><br><dolphin_emphasis>If "
 "unsure, leave this unchecked.</dolphin_emphasis>"
@@ -15342,7 +15421,7 @@ msgstr ""
 "<br><br><dolphin_emphasis>Na dúvida, mantenha essa opção desativada.</"
 "dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:211
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:219
 msgid ""
 "Shows current system time.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
@@ -15350,7 +15429,7 @@ msgstr ""
 "Mostra a data e hora atuais do sistema.<br><br><dolphin_emphasis>Na dúvida, "
 "mantenha essa opção desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:215
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:223
 msgid ""
 "Shows various rendering statistics.<br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"
@@ -15358,7 +15437,7 @@ msgstr ""
 "Mostra várias estatísticas de renderização.<br><br><dolphin_emphasis>Na "
 "dúvida, mantenha essa opção desativada.</dolphin_emphasis>"
 
-#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:218
+#: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:226
 msgid ""
 "Shows various projection statistics.<br><br><dolphin_emphasis>If unsure, "
 "leave this unchecked.</dolphin_emphasis>"
@@ -16848,6 +16927,8 @@ msgstr "Nenhum perfil encontrado pra configuração do jogo '{0}'"
 #: Source/Core/UICommon/AutoUpdate.cpp:203
 msgid "A Dolphin update is already scheduled for the next time it closes."
 msgstr ""
+"Uma atualização do Dolphin já está agendada para quando o emulador for "
+"fechado."
 
 #: Source/Core/UICommon/AutoUpdate.cpp:227
 msgid "Unable to contact update server."
@@ -17156,6 +17237,9 @@ msgid ""
 "system. To prevent visual glitches and artifacts, please use the Metal "
 "backend or update to macOS Sonoma 14 or newer."
 msgstr ""
+"Você está tentando utilizar o backend do Vulkan em um sistema operacional "
+"sem suporte. Para evitar defeitos visuais e falhas, por favor utilize o "
+"backend Metal ou atualize para o macOS 14 (Sonoma) ou mais recente."
 
 #. i18n: Please leave SyncOnSkipIdle and True untranslated.
 #. The user needs to enter these terms as-is in an INI file.
@@ -17181,6 +17265,9 @@ msgid ""
 "CPU, but your current settings make this unlikely to happen. The error may "
 "also be caused by a game bug."
 msgstr ""
+"Esse erro normalmente é causado quando a GPU emulada perde sincronia com a "
+"CPU emulada, mas suas configurações atuais evitam que esse problema "
+"aconteça. O erro também pode ser causado por um problema no jogo."
 
 #: Source/Core/VideoCommon/CommandProcessor.cpp:707
 #, c++-format
