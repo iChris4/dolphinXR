@@ -1085,7 +1085,7 @@ void ZeldaAudioRenderer::ApplyReverb(bool post_rendering)
   auto& memory = m_system.GetMemory();
   for (u16 rpb_idx = 0; rpb_idx < 4; ++rpb_idx)
   {
-    ReverbPB rpb;
+    ReverbPB rpb{};
     u32 rpb_addr = m_reverb_pb_base_addr + rpb_idx * sizeof(ReverbPB);
     memory.CopyFromEmuSwapped(reinterpret_cast<u16*>(&rpb), rpb_addr, sizeof(ReverbPB));
 
