@@ -11,6 +11,7 @@
 #include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#include "Common/NandPaths.h"
 #include "Core/IOS/ES/Formats.h"
 
 namespace DiscIO
@@ -124,7 +125,7 @@ bool NANDImporter::FindSuperblock()
 std::string NANDImporter::GetPath(const NANDFSTEntry& entry, const std::string& parent_path)
 {
   std::string name(entry.name, strnlen(entry.name, sizeof(NANDFSTEntry::name)));
-  return parent_path + '/' + name;
+  return parent_path + '/' + Common::EscapeFileName(name);
 }
 
 void NANDImporter::ProcessEntry(u16 entry_number, const std::string& parent_path)
