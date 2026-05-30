@@ -1976,7 +1976,7 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
         for (u8 byte : header->md5)
           pac << byte;
         pac << header->unk2;
-        for (size_t i = 0; i < header->banner_size; i++)
+        for (size_t i = 0; i < std::min<size_t>(header->banner_size, sizeof(header->banner)); i++)
           pac << header->banner[i];
 
         // BkHeader

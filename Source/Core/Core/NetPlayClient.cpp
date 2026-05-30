@@ -1210,7 +1210,7 @@ void NetPlayClient::OnSyncSaveDataWii(sf::Packet& packet)
     for (u8& byte : header.md5)
       packet >> byte;
     packet >> header.unk2;
-    for (size_t i = 0; i < header.banner_size; i++)
+    for (size_t i = 0; i < std::min<size_t>(header.banner_size, sizeof(header.banner)); i++)
       packet >> header.banner[i];
 
     // BkHeader
