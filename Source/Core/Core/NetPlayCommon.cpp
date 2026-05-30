@@ -197,6 +197,12 @@ bool DecompressPacketIntoFile(sf::Packet& packet, const std::string& file_path)
     if (!cur_len)
       break;  // We reached the end of the data stream
 
+    if (cur_len > in_buffer.size())
+    {
+      PanicAlertFmt("LZO error - input is too large");
+      return false;
+    }
+
     for (size_t j = 0; j < cur_len; j++)
     {
       packet >> in_buffer[j];
@@ -280,6 +286,12 @@ std::optional<std::vector<u8>> DecompressPacketIntoBuffer(sf::Packet& packet)
     packet >> cur_len;
     if (!cur_len)
       break;  // We reached the end of the data stream
+
+    if (cur_len > in_buffer.size())
+    {
+      PanicAlertFmt("LZO error - input is too large");
+      return {};
+    }
 
     for (size_t j = 0; j < cur_len; j++)
     {
