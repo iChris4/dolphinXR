@@ -402,7 +402,7 @@
     <string name="overclock_title_description">Adjusts the emulated CPU\'s clock rate if \"Override Emulated CPU Clock Speed\" is enabled.</string>
     <string name="memory_override">Memory Override</string>
     <string name="enable_memory_size_override">Enable Emulated Memory Size Override</string>
-    <string name="enable_memory_size_override_description">Adjusts the amount of RAM in the emulated console.\n\nWARNING: Enabling this will completely break many games. Only a small number of games can benefit from this.</string>
+    <string name="enable_memory_size_override_description">Sets the amount of RAM in the emulated console to the values provided.\n\nWARNING: Enabling this will completely break many games. By default, Dolphin determines what value is required based on the game information.</string>
     <string name="main_mem1_size">MEM1 Size</string>
     <string name="main_mem2_size">MEM2 Size</string>
     <string name="gpu_options">GPU Options</string>
