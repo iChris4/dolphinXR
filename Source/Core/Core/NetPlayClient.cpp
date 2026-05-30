@@ -679,16 +679,17 @@ void NetPlayClient::OnPadData(sf::Packet& packet)
 
     GCPadStatus pad;
     packet >> pad.button;
-    if (!m_gba_config.at(map).enabled)
+    if (static_cast<size_t>(map) < m_gba_config.size() && !m_gba_config.at(map).enabled)
     {
       packet >> pad.analogA >> pad.analogB >> pad.stickX >> pad.stickY >> pad.substickX >>
           pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
     }
 
-    // Trusting server for good map value (>=0 && <4)
-    // add to pad buffer
-    m_pad_buffer.at(map).Push(pad);
-    m_gc_pad_event.Set();
+    if (static_cast<size_t>(map) < m_pad_buffer.size())
+    {
+      m_pad_buffer.at(map).Push(pad);
+      m_gc_pad_event.Set();
+    }
   }
 }
 
@@ -701,20 +702,22 @@ void NetPlayClient::OnPadHostData(sf::Packet& packet)
 
     GCPadStatus pad;
     packet >> pad.button;
-    if (!m_gba_config.at(map).enabled)
+    if (static_cast<size_t>(map) < m_gba_config.size() && !m_gba_config.at(map).enabled)
     {
       packet >> pad.analogA >> pad.analogB >> pad.stickX >> pad.stickY >> pad.substickX >>
           pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
     }
 
-    // Trusting server for good map value (>=0 && <4)
-    // write to last status
-    m_last_pad_status[map] = pad;
+    if (static_cast<size_t>(map) < m_last_pad_status.size())
+      m_last_pad_status[map] = pad;
 
-    if (!m_first_pad_status_received[map])
+    if (static_cast<size_t>(map) < m_first_pad_status_received.size())
     {
-      m_first_pad_status_received[map] = true;
-      m_first_pad_status_received_event.Set();
+      if (!m_first_pad_status_received[map])
+      {
+        m_first_pad_status_received[map] = true;
+        m_first_pad_status_received_event.Set();
+      }
     }
   }
 }
@@ -739,10 +742,11 @@ void NetPlayClient::OnWiimoteData(sf::Packet& packet)
       pad.length = 0;
     }
 
-    // Trusting server for good map value (>=0 && <4)
-    // add to pad buffer
-    m_wiimote_buffer.at(map).Push(pad);
-    m_wii_pad_event.Set();
+    if (static_cast<size_t>(map) < m_wiimote_buffer.size())
+    {
+      m_wiimote_buffer.at(map).Push(pad);
+      m_wii_pad_event.Set();
+    }
   }
 }
 
