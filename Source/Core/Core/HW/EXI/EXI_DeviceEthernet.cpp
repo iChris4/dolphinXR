@@ -435,7 +435,7 @@ void CEXIETHERNET::DirectFIFOWrite(const u8* data, u32 size)
   // GMAC instead of finagling with packet descriptors and such
   u16* tx_fifo_count = (u16*)&mBbaMem[BBA_TXFIFOCNT];
 
-  if (*tx_fifo_count < BBA_TXFIFO_SIZE)
+  if (data != nullptr && *tx_fifo_count < BBA_TXFIFO_SIZE)
   {
     const u32 max_size = BBA_TXFIFO_SIZE - *tx_fifo_count;
     memcpy(tx_fifo.get() + *tx_fifo_count, data, std::min(size, max_size));
