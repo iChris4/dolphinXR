@@ -867,10 +867,14 @@ void JitArm64::dcbx(UGeckoInstruction inst)
     bat_lookup_failed =
         BATAddressLookup(physical_addr, effective_addr, WA, m_mmu.GetIBATTable().data());
     BFI(physical_addr, effective_addr, 0, PowerPC::BAT_INDEX_SHIFT);
+    // Check whether a JIT cache line needs to be invalidated.
+    LSR(physical_addr, physical_addr, 5 + 5);  // >> 5 for cache line size, >> 5 for width of bitset
+  }
+  else
+  {
+    LSR(physical_addr, effective_addr, 5 + 5);
   }
 
-  // Check whether a JIT cache line needs to be invalidated.
-  LSR(physical_addr, physical_addr, 5 + 5);  // >> 5 for cache line size, >> 5 for width of bitset
   MOVP2R(EncodeRegTo64(WA), GetBlockCache()->GetBlockBitSet());
   LDR(physical_addr, EncodeRegTo64(WA), ArithOption(EncodeRegTo64(physical_addr), true));
 
