@@ -539,6 +539,21 @@ unsigned int NetPlayServer::OnDisconnect(const Client& player)
         break;
       }
     }
+
+    for (PlayerId& mapping : m_wiimote_map)
+    {
+      if (m_is_running && mapping == pid && pid != 1)
+      {
+        std::lock_guard lkg(m_crit.game);
+        m_is_running = false;
+
+        sf::Packet spac;
+        spac << MessageID::DisableGame;
+        // this thread doesn't need players lock
+        SendToClients(spac);
+        break;
+      }
+    }
   }
 
   if (m_start_pending)
