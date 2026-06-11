@@ -192,6 +192,12 @@ static void ClearPeerPlayerId(ENetPeer* peer)
   }
 }
 
+template <typename T>
+static bool IsValidPadIndex(const T& map_array, PadIndex index)
+{
+  return index >= 0 && static_cast<size_t>(index) < map_array.size();
+}
+
 void NetPlayServer::SetupIndex()
 {
   if (!Config::Get(Config::NETPLAY_USE_INDEX) || Config::Get(Config::NETPLAY_INDEX_NAME).empty() ||
@@ -814,7 +820,7 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
 
       // If the data is not from the correct player,
       // then disconnect them.
-      if (m_pad_map.at(map) != player.pid)
+      if (!IsValidPadIndex(m_pad_map, map) || m_pad_map.at(map) != player.pid)
       {
         return 1;
       }
@@ -862,6 +868,9 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
       PadIndex map;
       packet >> map;
 
+      if (!IsValidPadIndex(m_pad_map, map))
+        return 1;
+
       GCPadStatus pad;
       packet >> pad.button;
       spac << map << pad.button;
@@ -895,7 +904,7 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
 
       // If the data is not from the correct player,
       // then disconnect them.
-      if (m_wiimote_map.at(map) != player.pid)
+      if (!IsValidPadIndex(m_wiimote_map, map) || m_wiimote_map.at(map) != player.pid)
       {
         return 1;
       }
