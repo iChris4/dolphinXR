@@ -757,6 +757,12 @@ bool PPCAnalyzer::IsBusyWaitLoop(CodeBlock* block, CodeOp* code, size_t instruct
       if (code[i].branchTo == block->m_address && i == instructions)
         return true;
     }
+    // A `nop` is actually a `ori r0, r0, 0`, which would violate the rules (unless `r0` was written
+    // earlier).
+    else if (code[i].inst.hex == 0x60000000)
+    {
+      continue;
+    }
     else if (code[i].opinfo->type != OpType::Integer && code[i].opinfo->type != OpType::Load)
     {
       // In the future, some subsets of other instruction types might get
