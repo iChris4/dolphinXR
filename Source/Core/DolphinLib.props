@@ -159,14 +159,12 @@
     <ClInclude Include="Common\scmrev.h" />
     <ClInclude Include="Common\ScopeGuard.h" />
     <ClInclude Include="Common\SDCardUtil.h" />
-    <ClInclude Include="Common\Semaphore.h" />
     <ClInclude Include="Common\SettingsHandler.h" />
     <ClInclude Include="Common\SFMLHelper.h" />
     <ClInclude Include="Common\SmallVector.h" />
     <ClInclude Include="Common\SocketContext.h" />
     <ClInclude Include="Common\SpanUtils.h" />
     <ClInclude Include="Common\SPSCQueue.h" />
-    <ClInclude Include="Common\StringLiteral.h" />
     <ClInclude Include="Common\StringUtil.h" />
     <ClInclude Include="Common\Swap.h" />
     <ClInclude Include="Common\SymbolDB.h" />
@@ -222,7 +220,6 @@
     <ClInclude Include="Core\Debugger\DebugInterface.h" />
     <ClInclude Include="Core\Debugger\Debugger_SymbolMap.h" />
     <ClInclude Include="Core\Debugger\Dump.h" />
-    <ClInclude Include="Core\Debugger\GCELF.h" />
     <ClInclude Include="Core\Debugger\OSThread.h" />
     <ClInclude Include="Core\Debugger\PPCDebugInterface.h" />
     <ClInclude Include="Core\Debugger\RSO.h" />
@@ -632,7 +629,6 @@
     <ClInclude Include="VideoBackends\Null\PerfQuery.h" />
     <ClInclude Include="VideoBackends\Null\TextureCache.h" />
     <ClInclude Include="VideoBackends\Null\VideoBackend.h" />
-    <ClInclude Include="VideoBackends\OGL\GPUTimer.h" />
     <ClInclude Include="VideoBackends\OGL\OGLBoundingBox.h" />
     <ClInclude Include="VideoBackends\OGL\OGLConfig.h" />
     <ClInclude Include="VideoBackends\OGL\OGLGfx.h" />

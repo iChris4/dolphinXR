@@ -71,7 +71,6 @@ add_library(core
   Debugger/Debugger_SymbolMap.h
   Debugger/Dump.cpp
   Debugger/Dump.h
-  Debugger/GCELF.h
   Debugger/OSThread.cpp
   Debugger/OSThread.h
   Debugger/PPCDebugInterface.cpp
