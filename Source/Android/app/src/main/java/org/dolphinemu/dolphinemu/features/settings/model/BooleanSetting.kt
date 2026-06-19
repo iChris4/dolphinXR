@@ -701,6 +701,18 @@ enum class BooleanSetting(
         false
     ),
     GFX_OVERLAY_STATS(Settings.FILE_GFX, Settings.SECTION_GFX_SETTINGS, "OverlayStats", false),
+    GFX_OVERLAY_PROJ_STATS(
+        Settings.FILE_GFX,
+        Settings.SECTION_GFX_SETTINGS,
+        "OverlayProjStats",
+        false
+    ),
+    GFX_SHOW_INTERNAL_RESOLUTION(
+        Settings.FILE_GFX,
+        Settings.SECTION_GFX_SETTINGS,
+        "ShowInternalResolution",
+        false
+    ),
     GFX_DUMP_TEXTURES(Settings.FILE_GFX, Settings.SECTION_GFX_SETTINGS, "DumpTextures", false),
     GFX_DUMP_MIP_TEXTURES(
         Settings.FILE_GFX,

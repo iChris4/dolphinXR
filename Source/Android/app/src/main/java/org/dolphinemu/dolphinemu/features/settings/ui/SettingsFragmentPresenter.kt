@@ -2268,6 +2268,22 @@ class SettingsFragmentPresenter(
         sl.add(
             SwitchSetting(
                 context,
+                BooleanSetting.GFX_OVERLAY_PROJ_STATS,
+                R.string.show_proj_stats,
+                R.string.leave_this_unchecked
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                BooleanSetting.GFX_SHOW_INTERNAL_RESOLUTION,
+                R.string.show_internal_resolution,
+                R.string.leave_this_unchecked
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
                 BooleanSetting.GFX_TEXFMT_OVERLAY_ENABLE,
                 R.string.texture_format,
                 R.string.leave_this_unchecked
