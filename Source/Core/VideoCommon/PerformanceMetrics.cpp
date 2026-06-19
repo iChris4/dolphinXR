@@ -323,27 +323,6 @@ void PerformanceMetrics::DrawImGuiStats(const float backbuffer_scale)
     ImGui::End();
   }
 
-  if (g_ActiveConfig.bShowInternalResolution)
-  {
-    ImGui::SetNextWindowPos(ImVec2(window_x, window_y), set_next_position_condition,
-                            ImVec2(1.0f, 0.0f));
-    ImGui::SetNextWindowBgAlpha(bg_alpha);
-
-    if (ImGui::Begin("ResolutionStats", nullptr, imgui_flags))
-    {
-      if (stack_vertically)
-        window_y += ImGui::GetWindowHeight() + window_padding;
-      else
-        window_x -= ImGui::GetWindowWidth() + window_padding;
-
-      clamp_window_position();
-
-      const FrameBufferSize size = m_frame_buffer_size.load(std::memory_order_relaxed);
-      ImGui::TextColored(ImVec4(r, g, b, 1.0f), "XFB res: %ux%u", size.width, size.height);
-    }
-    ImGui::End();
-  }
-
   if (g_ActiveConfig.bShowVPS || g_ActiveConfig.bShowVTimes)
   {
     // Position in the top-right corner of the screen.
@@ -367,6 +346,27 @@ void PerformanceMetrics::DrawImGuiStats(const float backbuffer_scale)
         ImGui::TextColored(ImVec4(r, g, b, 1.0f), " ±:%6.2lfms",
                            DT_ms(m_vps_counter.GetDtStd()).count());
       }
+    }
+    ImGui::End();
+  }
+
+  if (g_ActiveConfig.bShowInternalResolution)
+  {
+    ImGui::SetNextWindowPos(ImVec2(window_x, window_y), set_next_position_condition,
+                            ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(bg_alpha);
+
+    if (ImGui::Begin("ResolutionStats", nullptr, imgui_flags))
+    {
+      if (stack_vertically)
+        window_y += ImGui::GetWindowHeight() + window_padding;
+      else
+        window_x -= ImGui::GetWindowWidth() + window_padding;
+
+      clamp_window_position();
+
+      const FrameBufferSize size = m_frame_buffer_size.load(std::memory_order_relaxed);
+      ImGui::TextColored(ImVec4(r, g, b, 1.0f), "XFB res: %ux%u", size.width, size.height);
     }
     ImGui::End();
   }
