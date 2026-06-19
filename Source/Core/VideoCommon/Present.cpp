@@ -263,9 +263,9 @@ void Presenter::ImmediateSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_
   PresentInfo present_info{
       .frame_count = m_frame_count++,
       .present_count = m_present_count++,
-      .reason = PresentInfo::PresentReason::Immediate,
       .emulated_timestamp = ticks,
       .intended_present_time = m_next_swap_estimated_time,
+      .reason = PresentInfo::PresentReason::Immediate,
   };
 
   auto& video_events = GetVideoEvents();
