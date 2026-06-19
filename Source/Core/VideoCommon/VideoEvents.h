@@ -61,6 +61,9 @@ struct PresentInfo
   // Where the presentation of the frame was triggered from
   PresentReason reason = PresentReason::Immediate;
 
+  u32 frame_buffer_width;
+  u32 frame_buffer_height;
+
   std::vector<std::string_view> xfb_copy_hashes;
 };
 

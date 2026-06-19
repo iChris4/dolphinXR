@@ -41,15 +41,20 @@ public:
   double GetVPS() const;
   double GetSpeed() const;
   double GetMaxSpeed() const;
-  u32 GetEFBWidth() const;
-  u32 GetEFBHeight() const;
   // Call from any thread.
   void SetLatestFramePresentationOffset(DT offset);
+  void SetLatestFrameBufferSize(u32 width, u32 height);
 
   // ImGui Functions
   void DrawImGuiStats(const float backbuffer_scale);
 
 private:
+  struct FrameBufferSize
+  {
+    u32 width = 0;
+    u32 height = 0;
+  };
+
   PerformanceTracker m_fps_counter{"render_times.txt"};
   PerformanceTracker m_vps_counter{"vblank_times.txt"};
 
@@ -59,6 +64,7 @@ private:
   std::atomic<double> m_max_speed{};
 
   std::atomic<DT> m_frame_presentation_offset{};
+  std::atomic<FrameBufferSize> m_frame_buffer_size{};
 
   struct PerfSample
   {

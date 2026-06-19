@@ -11,7 +11,6 @@
 #include "Common/HookableEvent.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Core.h"
-#include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/VideoConfig.h"
 
 PerformanceMetrics::PerformanceMetrics()
@@ -89,20 +88,6 @@ double PerformanceMetrics::GetFPS() const
   return m_fps_counter.GetHzAvg();
 }
 
-u32 PerformanceMetrics::GetEFBWidth() const
-{
-  if (g_framebuffer_manager)
-    return g_framebuffer_manager->GetEFBWidth();
-  return 0;
-}
-
-u32 PerformanceMetrics::GetEFBHeight() const
-{
-  if (g_framebuffer_manager)
-    return g_framebuffer_manager->GetEFBHeight();
-  return 0;
-}
-
 double PerformanceMetrics::GetVPS() const
 {
   return m_vps_counter.GetHzAvg();
@@ -123,6 +108,11 @@ void PerformanceMetrics::SetLatestFramePresentationOffset(DT offset)
   m_frame_presentation_offset.store(offset, std::memory_order_relaxed);
 }
 
+void PerformanceMetrics::SetLatestFrameBufferSize(u32 width, u32 height)
+{
+  m_frame_buffer_size.store(FrameBufferSize{width, height}, std::memory_order_relaxed);
+}
+
 void PerformanceMetrics::DrawImGuiStats(const float backbuffer_scale)
 {
   m_vps_counter.UpdateStats();
@@ -139,8 +129,6 @@ void PerformanceMetrics::DrawImGuiStats(const float backbuffer_scale)
   const double fps = GetFPS();
   const double vps = GetVPS();
   const double speed = GetSpeed();
-  const u32 width = GetEFBWidth();
-  const u32 height = GetEFBHeight();
 
   static ImVec2 last_display_size(-1.0f, -1.0f);
 
@@ -350,7 +338,8 @@ void PerformanceMetrics::DrawImGuiStats(const float backbuffer_scale)
 
       clamp_window_position();
 
-      ImGui::TextColored(ImVec4(r, g, b, 1.0f), "Res: %ux%u", width, height);
+      const FrameBufferSize size = m_frame_buffer_size.load(std::memory_order_relaxed);
+      ImGui::TextColored(ImVec4(r, g, b, 1.0f), "XFB res: %ux%u", size.width, size.height);
     }
     ImGui::End();
   }
