@@ -43,8 +43,6 @@ const Info<int> GFX_CROP_CUSTOM_BOTTOM{{System::GFX, "Settings", "CropCustomBott
 const Info<int> GFX_SAFE_TEXTURE_CACHE_COLOR_SAMPLES{
     {System::GFX, "Settings", "SafeTextureCacheColorSamples"}, 128};
 const Info<bool> GFX_SHOW_FPS{{System::GFX, "Settings", "ShowFPS"}, false};
-const Info<bool> GFX_SHOW_INTERNAL_RESOLUTION{{System::GFX, "Settings", "ShowInternalResolution"},
-                                              false};
 const Info<bool> GFX_SHOW_FTIMES{{System::GFX, "Settings", "ShowFTimes"}, false};
 const Info<bool> GFX_SHOW_VPS{{System::GFX, "Settings", "ShowVPS"}, false};
 const Info<bool> GFX_SHOW_VTIMES{{System::GFX, "Settings", "ShowVTimes"}, false};
@@ -64,6 +62,8 @@ const Info<bool> GFX_OVERLAY_SCISSOR_STATS{{System::GFX, "Settings", "OverlaySci
 const Info<bool> GFX_OVERLAY_SHADER_FLAGS{{System::GFX, "Settings", "OverlayShaderFlags"}, false};
 const Info<bool> GFX_OVERLAY_SHADER_HUNTING{{System::GFX, "Settings", "OverlayShaderHunting"},
                                             false};
+const Info<bool> GFX_SHOW_INTERNAL_RESOLUTION{{System::GFX, "Settings", "ShowInternalResolution"},
+                                              false};
 const Info<bool> GFX_DUMP_TEXTURES{{System::GFX, "Settings", "DumpTextures"}, false};
 const Info<bool> GFX_DUMP_MIP_TEXTURES{{System::GFX, "Settings", "DumpMipTextures"}, true};
 const Info<bool> GFX_DUMP_BASE_TEXTURES{{System::GFX, "Settings", "DumpBaseTextures"}, true};

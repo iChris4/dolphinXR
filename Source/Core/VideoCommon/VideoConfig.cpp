@@ -107,7 +107,6 @@ void VideoConfig::Refresh()
   iCropCustomBottom = Config::Get(Config::GFX_CROP_CUSTOM_BOTTOM);
   iSafeTextureCache_ColorSamples = Config::Get(Config::GFX_SAFE_TEXTURE_CACHE_COLOR_SAMPLES);
   bShowFPS = Config::Get(Config::GFX_SHOW_FPS);
-  bShowInternalResolution = Config::Get(Config::GFX_SHOW_INTERNAL_RESOLUTION);
   bShowFTimes = Config::Get(Config::GFX_SHOW_FTIMES);
   bShowVPS = Config::Get(Config::GFX_SHOW_VPS);
   bShowVTimes = Config::Get(Config::GFX_SHOW_VTIMES);
@@ -121,6 +120,7 @@ void VideoConfig::Refresh()
   bOverlayScissorStats = Config::Get(Config::GFX_OVERLAY_SCISSOR_STATS);
   bOverlayShaderFlags = Config::Get(Config::GFX_OVERLAY_SHADER_FLAGS);
   bOverlayShaderHunting = Config::Get(Config::GFX_OVERLAY_SHADER_HUNTING);
+  bShowInternalResolution = Config::Get(Config::GFX_SHOW_INTERNAL_RESOLUTION);
   bDumpTextures = Config::Get(Config::GFX_DUMP_TEXTURES);
   bDumpMipmapTextures = Config::Get(Config::GFX_DUMP_MIP_TEXTURES);
   bDumpBaseTextures = Config::Get(Config::GFX_DUMP_BASE_TEXTURES);

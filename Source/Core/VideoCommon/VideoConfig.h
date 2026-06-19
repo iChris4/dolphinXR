@@ -288,7 +288,6 @@ struct VideoConfig final
 
   // Information
   bool bShowFPS = false;
-  bool bShowInternalResolution = false;
   bool bShowFTimes = false;
   bool bShowVPS = false;
   bool bShowVTimes = false;
@@ -301,6 +300,7 @@ struct VideoConfig final
   bool bOverlayScissorStats = false;
   bool bOverlayShaderFlags = false;
   bool bOverlayShaderHunting = false;
+  bool bShowInternalResolution = false;
   bool bTexFmtOverlayEnable = false;
   bool bTexFmtOverlayCenter = false;
   bool bLogRenderTimeToFile = false;
