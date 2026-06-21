@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Dolphin Emulator\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-27 20:00+0200\n"
+"POT-Creation-Date: 2026-06-21 21:48+0200\n"
 "PO-Revision-Date: 2013-01-23 13:48+0000\n"
 "Last-Translator: Mewster <mewster92@gmail.com>, 2023-2026\n"
 "Language-Team: Italian (http://app.transifex.com/dolphinemu/dolphin-emu/"
@@ -731,19 +731,19 @@ msgstr "Premi il pulsante Sync"
 
 #: Source/Core/Core/HotkeyManager.cpp:81
 msgid "Connect Wii Remote 1"
-msgstr "Collega Wii Remote 1"
+msgstr "Collega Telecomando Wii 1"
 
 #: Source/Core/Core/HotkeyManager.cpp:82
 msgid "Connect Wii Remote 2"
-msgstr "Collega Wii Remote 2"
+msgstr "Collega Telecomando Wii 2"
 
 #: Source/Core/Core/HotkeyManager.cpp:83
 msgid "Connect Wii Remote 3"
-msgstr "Collega Wii Remote 3"
+msgstr "Collega Telecomando Wii 3"
 
 #: Source/Core/Core/HotkeyManager.cpp:84
 msgid "Connect Wii Remote 4"
-msgstr "Collega Wii Remote 4"
+msgstr "Collega Telecomando Wii 4"
 
 #: Source/Core/Core/HotkeyManager.cpp:85 Source/Core/DolphinQt/MenuBar.cpp:381
 msgid "Connect Balance Board"
@@ -785,11 +785,11 @@ msgstr "Profilo di gioco precedente"
 
 #: Source/Core/Core/HotkeyManager.cpp:107
 msgid "Toggle Aspect Ratio Crop"
-msgstr ""
+msgstr "Attiva/disattiva ritaglio rapporto d'aspetto"
 
 #: Source/Core/Core/HotkeyManager.cpp:108
 msgid "Toggle Custom Crop"
-msgstr ""
+msgstr "Attiva/disattiva ritaglio personalizzato"
 
 #: Source/Core/Core/HotkeyManager.cpp:109
 msgid "Toggle Aspect Ratio"
@@ -1746,7 +1746,7 @@ msgstr "Errore: Questa build non supporta i controller GBA emulati"
 
 #: Source/Core/Core/HW/Wiimote.cpp:100
 msgid "Wii Remote"
-msgstr "Wii Remote"
+msgstr "Telecomando Wii"
 
 #: Source/Core/Core/HW/WiimoteEmu/Extension/Classic.cpp:50
 #: Source/Core/DolphinQt/Config/Mapping/WiimoteEmuExtension.cpp:45
@@ -2120,11 +2120,11 @@ msgstr "Batteria"
 
 #: Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp:307
 msgid "Upright Wii Remote"
-msgstr "Wii Remote in posizione verticale"
+msgstr "Telecomando Wii in posizione verticale"
 
 #: Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp:310
 msgid "Sideways Wii Remote"
-msgstr "Wii Remote in posizione di traverso"
+msgstr "Telecomando Wii in posizione di traverso"
 
 #: Source/Core/Core/IOS/ES/ES.cpp:342
 msgid ""
@@ -2192,12 +2192,12 @@ msgstr "Scrittura di BT.DINF su SYSCONF non riuscita"
 
 #: Source/Core/Core/IOS/USB/Bluetooth/BTEmu.cpp:378
 msgid "Received invalid Wii Remote data from Netplay."
-msgstr "Ricevuti dati Wii Remote non validi da Netplay."
+msgstr "Ricevuti dati Telecomando Wii non validi da Netplay."
 
 #: Source/Core/Core/IOS/USB/Bluetooth/BTEmu.cpp:1912
 #, c++-format
 msgid "Can't find Wii Remote by connection handle {0:02x}"
-msgstr "Impossibile trovare Wii Remote con handle di connessione {0:02x}"
+msgstr "Impossibile trovare Telecomando Wii con handle di connessione {0:02x}"
 
 #: Source/Core/Core/IOS/USB/Bluetooth/BTStub.cpp:14
 msgid ""
@@ -2505,52 +2505,52 @@ msgstr "Il server ha inviato un messaggio d'errore sconosciuto."
 msgid "Unknown message received with id : {0}"
 msgstr "Ricevuto messaggio sconosciuto con id : {0}"
 
-#: Source/Core/Core/NetPlayClient.cpp:1035
+#: Source/Core/Core/NetPlayClient.cpp:1039
 #, c++-format
 msgid "Unknown SYNC_SAVE_DATA message received with id: {0}"
 msgstr "Messaggio SYNC_SAVE_DATA sconosciuto ricevuto con id: {0}"
 
-#: Source/Core/Core/NetPlayClient.cpp:1050
+#: Source/Core/Core/NetPlayClient.cpp:1054
 msgid "Synchronizing save data..."
 msgstr "Sincronizzazione dei dati di salvataggio in corso..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1082
+#: Source/Core/Core/NetPlayClient.cpp:1086
 msgid "Failed to delete NetPlay memory card. Verify your write permissions."
 msgstr ""
 "Impossibile eliminare la memory card NetPlay. Controlla di avere i corretti "
 "permessi di scrittura."
 
-#: Source/Core/Core/NetPlayClient.cpp:1106
+#: Source/Core/Core/NetPlayClient.cpp:1110
 msgid "Failed to reset NetPlay GCI folder. Verify your write permissions."
 msgstr ""
 "Impossibile resettare la cartella NetPlay GCI. Controlla di avere i corretti "
 "permessi di scrittura."
 
-#: Source/Core/Core/NetPlayClient.cpp:1137
+#: Source/Core/Core/NetPlayClient.cpp:1141
 msgid "Failed to reset NetPlay NAND folder. Verify your write permissions."
 msgstr ""
 "Impossibile resettare la cartella NetPlay NAND. Controlla di avere i "
 "corretti permessi di scrittura."
 
-#: Source/Core/Core/NetPlayClient.cpp:1143
+#: Source/Core/Core/NetPlayClient.cpp:1147
 msgid "Failed to reset NetPlay redirect folder. Verify your write permissions."
 msgstr ""
 "Impossibile resettare la cartella di reindirizzamento NetPlay. Controlla di "
 "avere i corretti permessi di scrittura."
 
-#: Source/Core/Core/NetPlayClient.cpp:1173
+#: Source/Core/Core/NetPlayClient.cpp:1177
 msgid "Failed to write Mii data."
 msgstr "Fallita scrittura dei dati Mii."
 
-#: Source/Core/Core/NetPlayClient.cpp:1258
+#: Source/Core/Core/NetPlayClient.cpp:1262
 msgid "Failed to write Wii save."
 msgstr "Fallita scrittura del salvataggio Wii."
 
-#: Source/Core/Core/NetPlayClient.cpp:1271
+#: Source/Core/Core/NetPlayClient.cpp:1275
 msgid "Failed to write redirected save."
 msgstr "Fallita scrittura del salvataggio redirezionato."
 
-#: Source/Core/Core/NetPlayClient.cpp:1292
+#: Source/Core/Core/NetPlayClient.cpp:1296
 #, c++-format
 msgid ""
 "Failed to delete NetPlay GBA{0} save file. Verify your write permissions."
@@ -2558,62 +2558,62 @@ msgstr ""
 "Impossibile eliminare il file di salvataggio NetPlay GBA{0}. Controlla di "
 "avere i corretti permessi di scrittura."
 
-#: Source/Core/Core/NetPlayClient.cpp:1334
+#: Source/Core/Core/NetPlayClient.cpp:1338
 #, c++-format
 msgid "Unknown SYNC_CODES message received with id: {0}"
 msgstr "Messaggio SYNC_CODES sconosciuto ricevuto con id: {0}"
 
-#: Source/Core/Core/NetPlayClient.cpp:1367
+#: Source/Core/Core/NetPlayClient.cpp:1371
 msgid "Synchronizing Gecko codes..."
 msgstr "Sincronizzazione codici Gecko..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1434
+#: Source/Core/Core/NetPlayClient.cpp:1438
 msgid "Synchronizing AR codes..."
 msgstr "Sincronizzazione codici AR..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1594
+#: Source/Core/Core/NetPlayClient.cpp:1598
 msgid "Quality of Service (QoS) was successfully enabled."
 msgstr "Quality of Service (QoS) abilitato con successo."
 
-#: Source/Core/Core/NetPlayClient.cpp:1598
+#: Source/Core/Core/NetPlayClient.cpp:1602
 msgid "Quality of Service (QoS) couldn't be enabled."
 msgstr "Impossibile abilitare Quality of Service (QoS)."
 
-#: Source/Core/Core/NetPlayClient.cpp:1747
+#: Source/Core/Core/NetPlayClient.cpp:1751
 msgid "Game is already running!"
 msgstr "Il gioco è già in esecuzione!"
 
-#: Source/Core/Core/NetPlayClient.cpp:1821
+#: Source/Core/Core/NetPlayClient.cpp:1825
 msgid "Data received!"
 msgstr "Dati ricevuti!"
 
-#: Source/Core/Core/NetPlayClient.cpp:1822
+#: Source/Core/Core/NetPlayClient.cpp:1826
 msgid "Error processing data."
 msgstr "Errore processando i dati."
 
-#: Source/Core/Core/NetPlayClient.cpp:1850
+#: Source/Core/Core/NetPlayClient.cpp:1854
 msgid "Error processing codes."
 msgstr "Errore processando i codici."
 
-#: Source/Core/Core/NetPlayClient.cpp:1863
+#: Source/Core/Core/NetPlayClient.cpp:1867
 msgid "Codes received!"
 msgstr "Codici ricevuti!"
 
-#: Source/Core/Core/NetPlayClient.cpp:1977
+#: Source/Core/Core/NetPlayClient.cpp:1981
 msgid "Traversal server timed out connecting to the host"
 msgstr ""
 "Il traversal server è andato in time out durante la connessione con l'host."
 
-#: Source/Core/Core/NetPlayClient.cpp:1980
+#: Source/Core/Core/NetPlayClient.cpp:1984
 msgid "Server rejected traversal attempt"
 msgstr ""
 "Il server ha rifiutato il tentativo di connessione in modalità traversal"
 
-#: Source/Core/Core/NetPlayClient.cpp:1983
+#: Source/Core/Core/NetPlayClient.cpp:1987
 msgid "Invalid host"
 msgstr "Host non valido"
 
-#: Source/Core/Core/NetPlayClient.cpp:1986
+#: Source/Core/Core/NetPlayClient.cpp:1990
 #, c++-format
 msgid "Unknown error {0:x}"
 msgstr "Errore sconosciuto {0:x}"
@@ -2639,12 +2639,12 @@ msgstr ""
 "Impossibile aprire il file \"{0}\". Verifica di avere i corretti permessi di "
 "scrittura."
 
-#: Source/Core/Core/NetPlayCommon.cpp:208
-#: Source/Core/Core/NetPlayCommon.cpp:291
+#: Source/Core/Core/NetPlayCommon.cpp:214
+#: Source/Core/Core/NetPlayCommon.cpp:303
 msgid "Internal LZO Error - decompression failed"
 msgstr "Errore Interno LZO - decompressione non riuscita"
 
-#: Source/Core/Core/NetPlayCommon.cpp:214
+#: Source/Core/Core/NetPlayCommon.cpp:220
 #, c++-format
 msgid "Error writing file: {0}"
 msgstr "Errore durante la scrittura del file: {0}"
@@ -2653,16 +2653,16 @@ msgstr "Errore durante la scrittura del file: {0}"
 msgid "Enet Didn't Initialize"
 msgstr "Enet non è stato inizializzato"
 
-#: Source/Core/Core/NetPlayServer.cpp:1158
+#: Source/Core/Core/NetPlayServer.cpp:1182
 msgid "All players' saves synchronized."
 msgstr "Tutti i salvataggi dei giocatori sono sincronizzati."
 
-#: Source/Core/Core/NetPlayServer.cpp:1179
+#: Source/Core/Core/NetPlayServer.cpp:1203
 #, c++-format
 msgid "{0} failed to synchronize."
 msgstr "{0} ha fallito la sincronizzazione."
 
-#: Source/Core/Core/NetPlayServer.cpp:1188
+#: Source/Core/Core/NetPlayServer.cpp:1212
 #, c++-format
 msgid ""
 "Unknown SYNC_SAVE_DATA message with id:{0} received from player:{1} Kicking "
@@ -2671,16 +2671,16 @@ msgstr ""
 "Ricevuto messaggio SYNC_SAVE_DATA sconosciuto con id:{0} dal giocatore:{1} "
 "Giocatore espulso!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1216
+#: Source/Core/Core/NetPlayServer.cpp:1240
 msgid "All players' codes synchronized."
 msgstr "Tutti i codici dei giocatori sono sincronizzati."
 
-#: Source/Core/Core/NetPlayServer.cpp:1237
+#: Source/Core/Core/NetPlayServer.cpp:1261
 #, c++-format
 msgid "{0} failed to synchronize codes."
 msgstr "{0} ha fallito la sincronizzazione dei codici."
 
-#: Source/Core/Core/NetPlayServer.cpp:1245
+#: Source/Core/Core/NetPlayServer.cpp:1269
 #, c++-format
 msgid ""
 "Unknown SYNC_GECKO_CODES message with id:{0} received from player:{1} "
@@ -2689,30 +2689,30 @@ msgstr ""
 "Ricevuto messaggio SYNC_GECKO_CODES sconosciuto con id:{0} dal giocatore:{1} "
 "Giocatore espulso!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1253
+#: Source/Core/Core/NetPlayServer.cpp:1277
 #, c++-format
 msgid "Unknown message with id:{0} received from player:{1} Kicking player!"
 msgstr ""
 "Ricevuto messaggio sconosciuto con id:{0} ricevuto dal giocatore:{1} "
 "Giocatore espulso!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1347
-#: Source/Core/Core/NetPlayServer.cpp:1726
-#: Source/Core/Core/NetPlayServer.cpp:2054
+#: Source/Core/Core/NetPlayServer.cpp:1371
+#: Source/Core/Core/NetPlayServer.cpp:1750
+#: Source/Core/Core/NetPlayServer.cpp:2078
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:485
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:891
 msgid "Selected game doesn't exist in game list!"
 msgstr "Il gioco selezionato non esiste nella lista dei giochi!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1511
+#: Source/Core/Core/NetPlayServer.cpp:1535
 msgid "Error collecting save data!"
 msgstr "Errore recuperando i salvataggi!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1533
+#: Source/Core/Core/NetPlayServer.cpp:1557
 msgid "Error synchronizing save data!"
 msgstr "Errore sincronizzando i dati di salvataggio!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1547
+#: Source/Core/Core/NetPlayServer.cpp:1571
 msgid "Error synchronizing cheat codes!"
 msgstr "Errore sincronizzando i cheat code!"
 
@@ -2735,6 +2735,10 @@ msgid ""
 "The game probably would have crashed on real hardware. Enable MMU in "
 "advanced settings to accurately emulate game crashes."
 msgstr ""
+"Scrittura non valida a {0:#010x}, PC = {1:#010x};\n"
+"\n"
+"Su hardware reale il gioco sarebbe probabilmente crashato. Abilita MMU nelle "
+"impostazioni avanzate per emulare accuratamente il crash del gioco."
 
 #: Source/Core/Core/PowerPC/MMU.cpp:1226
 #, c++-format
@@ -2744,12 +2748,16 @@ msgid ""
 "The game probably would have crashed on real hardware. Enable MMU in "
 "advanced settings to accurately emulate game crashes."
 msgstr ""
+"Lettura non valida da {0:#010x}, PC = {1:#010x};\n"
+"\n"
+"Su hardware reale il gioco sarebbe probabilmente crashato. Abilita MMU nelle "
+"impostazioni avanzate per emulare accuratamente il crash del gioco."
 
-#: Source/Core/Core/State.cpp:342
+#: Source/Core/Core/State.cpp:343
 msgid "Internal LZ4 Error - compression failed"
 msgstr "Errore Interno LZ4 - compressione non riuscita"
 
-#: Source/Core/Core/State.cpp:518
+#: Source/Core/Core/State.cpp:519
 #, c++-format
 msgid ""
 "Internal LZO Error - decompression failed ({0}) ({1}) \n"
@@ -2758,7 +2766,7 @@ msgstr ""
 "Errore Interno LZO - decompressione non riuscita ({0}) ({1}) \n"
 "Impossibile recuperare i dati di versione del salvataggio obsoleto."
 
-#: Source/Core/Core/State.cpp:531
+#: Source/Core/Core/State.cpp:532
 #, c++-format
 msgid ""
 "Internal LZO Error - failed to parse decompressed version cookie and version "
@@ -2767,7 +2775,7 @@ msgstr ""
 "Errore Interno LZO - impossibile analizzare il cookie di versione e la "
 "lunghezza della stringa di versione ({0})"
 
-#: Source/Core/Core/State.cpp:546
+#: Source/Core/Core/State.cpp:547
 #, c++-format
 msgid ""
 "Internal LZO Error - failed to parse decompressed version string ({0} / {1})"
@@ -2775,11 +2783,11 @@ msgstr ""
 "Errore Interno LZO - impossibile analizzare la stringa di versione "
 "decompressa ({0} / {1})"
 
-#: Source/Core/Core/State.cpp:614
+#: Source/Core/Core/State.cpp:615
 msgid "Empty"
 msgstr "Vuoto"
 
-#: Source/Core/Core/State.cpp:618 Source/Core/DiscIO/Enums.cpp:62
+#: Source/Core/Core/State.cpp:619 Source/Core/DiscIO/Enums.cpp:62
 #: Source/Core/DiscIO/Enums.cpp:106 Source/Core/DiscIO/Enums.cpp:132
 #: Source/Core/DolphinQt/Config/InfoWidget.cpp:87
 #: Source/Core/DolphinQt/Debugger/NetworkWidget.cpp:48
@@ -2791,17 +2799,17 @@ msgstr "Vuoto"
 msgid "Unknown"
 msgstr "Sconosciuto"
 
-#: Source/Core/Core/State.cpp:652
+#: Source/Core/Core/State.cpp:653
 #, c++-format
 msgid "Internal LZ4 Error - Tried decompressing {0} bytes"
 msgstr "Errore Interno LZ4 - Tentata decompressione di {0} byte"
 
-#: Source/Core/Core/State.cpp:672
+#: Source/Core/Core/State.cpp:673
 #, c++-format
 msgid "Internal LZ4 Error - decompression failed ({0}, {1}, {2})"
 msgstr "Errore Interno LZ4 - decompressione non riuscita ({0}, {1}, {2})"
 
-#: Source/Core/Core/State.cpp:686
+#: Source/Core/Core/State.cpp:687
 #, c++-format
 msgid "Internal LZ4 Error - payload size mismatch ({0} / {1}))"
 msgstr "Errore Interno LZ4 - dimensione del payload differente ({0} / {1}))"
@@ -3050,15 +3058,15 @@ msgstr "NTSC-K"
 msgid "Unpacking"
 msgstr "Apertura"
 
-#: Source/Core/DiscIO/NANDImporter.cpp:59
+#: Source/Core/DiscIO/NANDImporter.cpp:60
 msgid "This file does not look like a BootMii NAND backup."
 msgstr "Questo file non sembra un backup NAND BootMii."
 
-#: Source/Core/DiscIO/NANDImporter.cpp:118
+#: Source/Core/DiscIO/NANDImporter.cpp:119
 msgid "This file does not contain a valid Wii filesystem."
 msgstr "Questo file non contiene un filesystem Wii valido."
 
-#: Source/Core/DiscIO/NANDImporter.cpp:309
+#: Source/Core/DiscIO/NANDImporter.cpp:315
 #, c++-format
 msgid "Unable to write to file {0}"
 msgstr "Impossibile scrivere su file {0}"
@@ -3199,12 +3207,12 @@ msgstr ""
 #: Source/Core/DiscIO/VolumeVerifier.cpp:699
 #, c++-format
 msgid "The {0} partition does not have a valid ticket."
-msgstr ""
+msgstr "La partizione {0} non contiene un ticket valido."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:705
 #, c++-format
 msgid "The {0} partition does not have a valid TMD."
-msgstr ""
+msgstr "La partizione {0} non contiene un TMD valido."
 
 #. i18n: This string is referring to a game mode in Super Smash Bros. Brawl called Masterpieces
 #. where you play demos of NES/SNES/N64 games. This string is referring to a specific such demo
@@ -3329,7 +3337,7 @@ msgstr ""
 #. i18n: "Ticket" here is a kind of digital authorization to use a certain title (e.g. a game)
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1008
 msgid "The ticket is invalid."
-msgstr ""
+msgstr "Il ticket non è valido."
 
 #. i18n: "Ticket" here is a kind of digital authorization to use a certain title (e.g. a game)
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1016
@@ -3338,7 +3346,7 @@ msgstr "Il ticket non è correttamente firmato."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1021
 msgid "The TMD is invalid."
-msgstr ""
+msgstr "Il TMD non è valido."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1030
 msgid ""
@@ -4206,15 +4214,15 @@ msgstr "Rimuovi indirizzo"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:550
 msgid "Add Read/Write Breakpoint(s)"
-msgstr ""
+msgstr "Aggiungi punto di interruzione in lettura/scrittura"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:552
 msgid "Add Write Breakpoint(s)"
-msgstr ""
+msgstr "Aggiungi punto di interruzione in scrittura"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:553
 msgid "Add Read Breakpoint(s)"
-msgstr ""
+msgstr "Aggiungi punto di interruzione in lettura"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:635
 msgid "Multiple errors occurred while generating AR codes."
@@ -4556,7 +4564,7 @@ msgstr "Nulla da configurare"
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientEditServerDialog.cpp:32
 msgid "Edit DSU Server"
-msgstr ""
+msgstr "Modifica server DSU"
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientEditServerDialog.cpp:37
 msgid "BetterJoy, DS4Windows, etc"
@@ -4601,7 +4609,7 @@ msgstr "Aggiungi..."
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientWidget.cpp:36
 msgid "Edit"
-msgstr ""
+msgstr "Modifica"
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientWidget.cpp:37
 #: Source/Core/DolphinQt/Config/NewPatchDialog.cpp:128
@@ -4619,6 +4627,10 @@ msgid ""
 "setup instructions, <a href=\"https://wiki.dolphin-emu.org/index.php?"
 "title=DSU_Client\">refer to this page</a>."
 msgstr ""
+"Il protocollo DSU permette l'uso degli input e dei dati di movimento da "
+"sorgenti compatibili, come PlayStation, Nintendo Switch e controller Steam."
+"<br><br> Per istruzioni sulla configurazione, <a href=\"https://wiki.dolphin-"
+"emu.org/index.php?title=DSU_Client\">consulta questa pagina</a>."
 
 #: Source/Core/DolphinQt/Config/FilesystemWidget.cpp:63
 #: Source/Core/DolphinQt/Config/SDLHints/SDLHintsWindow.cpp:48
@@ -5123,6 +5135,8 @@ msgid ""
 "Failed to download Gecko codes. The code server may be temporarily "
 "unavailable. Please try again later."
 msgstr ""
+"Impossibile scaricare i codici Gecko. Il server dei codici potrebbe essere "
+"momentaneamente non disponibile. Si prega di riprovare più tardi."
 
 #: Source/Core/DolphinQt/Config/GeckoCodeWidget.cpp:407
 msgid ""
@@ -5130,10 +5144,13 @@ msgid ""
 "\n"
 "Server response: HTTP %1."
 msgstr ""
+"\n"
+"\n"
+"Risposta server: HTTP %1."
 
 #: Source/Core/DolphinQt/Config/GeckoCodeWidget.cpp:409
 msgid "Download Failed"
-msgstr ""
+msgstr "Download fallito"
 
 #: Source/Core/DolphinQt/Config/GeckoCodeWidget.cpp:416
 msgid "File contained no codes."
@@ -5250,7 +5267,7 @@ msgstr "Taglia immagine lungo i bordi"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:162
 msgid "To Aspect Ratio"
-msgstr ""
+msgstr "Verso rapporto d'aspetto"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:163
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:165
@@ -5613,6 +5630,11 @@ msgid ""
 "Graphics/Advanced/Misc/Crop.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
 msgstr ""
+"Ritaglia l'immagine per modificare il rapporto d'aspetto originale (che "
+"raramente è uguale a 4:3 o 16:9, perché spesso include l'overscan) a quello "
+"indicato dall'utente (tipo 4:3 o 16:9).<br><br>Precedentemente questa "
+"opzione era conosciuta come Grafica/Avanzate/Misc/Ritaglia.<br><br></"
+"dolphin_emphasis>Nel dubbio, lascia deselezionato.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:412
 msgid ""
@@ -5621,6 +5643,11 @@ msgid ""
 "target aspect ratio. Useful to resolve letterboxing issues. "
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
 msgstr ""
+"Abilita le opzioni per ritagliare l'immagine secondo una determinata "
+"quantità di pixel nativi (indipendenti dalle impostazioni di risoluzione "
+"interna) per ottenere il rapporto d'aspetto specifico definito dall'utente. "
+"Utile per risolvere problemi di letterboxing.<br><br><dolphin_emphasis>Nel "
+"dubbio, lascia deselezionato.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:417
 msgid ""
@@ -5629,6 +5656,11 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Ritaglia la parte sinistra dell'immagine di una determinata quantità di "
+"pixel nativi (indipendenti dalle impostazioni di risoluzione interna) per "
+"ottenere il rapporto d'aspetto specifico definito dall'utente."
+"<br><br><dolphin_emphasis>Nel dubbio, lascia questo valore a 0.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:421
 msgid ""
@@ -5637,6 +5669,11 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Ritaglia la parte superiore dell'immagine di una determinata quantità di "
+"pixel nativi (indipendenti dalle impostazioni di risoluzione interna) per "
+"ottenere il rapporto d'aspetto specifico definito dall'utente."
+"<br><br><dolphin_emphasis>Nel dubbio, lascia questo valore a 0.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:425
 msgid ""
@@ -5645,6 +5682,11 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Ritaglia la parte destra dell'immagine di una determinata quantità di pixel "
+"nativi (indipendenti dalle impostazioni di risoluzione interna) per ottenere "
+"il rapporto d'aspetto specifico definito dall'utente."
+"<br><br><dolphin_emphasis>Nel dubbio, lascia questo valore a 0.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:429
 msgid ""
@@ -5653,6 +5695,11 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Ritaglia la parte inferiore dell'immagine di una determinata quantità di "
+"pixel nativi (indipendenti dalle impostazioni di risoluzione interna) per "
+"ottenere il rapporto d'aspetto specifico definito dall'utente."
+"<br><br><dolphin_emphasis>Nel dubbio, lascia questo valore a 0.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:434
 msgid "<dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
@@ -6287,6 +6334,14 @@ msgid ""
 "Texture Decoding will be disabled.<br><br><dolphin_emphasis>If unsure, leave "
 "this unchecked.</dolphin_emphasis>"
 msgstr ""
+"Abilita il riconoscimento di mipmap arbitrarie, usate da alcuni giochi per "
+"ottenere effetti dipendenti dalla distanza.<br><br>Potrebbe ottenere falsi "
+"positivi, causando texture sfocate a maggiori risoluzioni interne, come in "
+"giochi che utilizzano mipmap di risoluzioni molto basse. Disabilitandolo, "
+"potrebbe ridursi lo stutter in giochi che caricano spesso nuove texture."
+"<br><br>Se questa funzione è abilitata, Decodifica texture GPU verrà "
+"disabilitata.<br><br><dolphin_emphasis>Nel dubbio, lascia deselezionato.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/EnhancementsWidget.cpp:564
 msgid ""
@@ -6856,6 +6911,11 @@ msgid ""
 "Detection is enabled.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
 msgstr ""
+"Abilita la decodifica delle texture usando la GPU al posto della CPU."
+"<br><br>Potrebbe aumentare le perfomance in alcuni casi, soprattutto se la "
+"CPU fa da collo di bottiglia.<br><br>Questa funzione è disabilitata se "
+"Mipmap detection arbitraria è abilitata.<br><br><dolphin_emphasis>Nel "
+"dubbio, lascia deselezionato.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/HacksWidget.cpp:221
 msgid ""
@@ -7201,7 +7261,7 @@ msgstr "Frequenza di polling: %1 Hz"
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:233
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:492
 msgid "Wii Remote %1"
-msgstr "Wii Remote %1"
+msgstr "Telecomando Wii %1"
 
 #: Source/Core/DolphinQt/Config/Mapping/HotkeyGBA.cpp:25
 #: Source/Core/DolphinQt/GBAWidget.cpp:426
@@ -7554,7 +7614,7 @@ msgstr "Strumenti TAS"
 
 #: Source/Core/DolphinQt/Config/Mapping/MappingWindow.cpp:502
 msgid "Wii and Wii Remote"
-msgstr "Wii e Wii Remote"
+msgstr "Wii e Telecomando Wii"
 
 #: Source/Core/DolphinQt/Config/Mapping/MappingWindow.cpp:503
 msgid "Controller Profile"
@@ -7904,7 +7964,7 @@ msgstr "Più opzioni..."
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:187
 msgid "Wii Remotes"
-msgstr "Wii Remote"
+msgstr "Telecomandi Wii"
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:190
 msgid "Passthrough a Bluetooth adapter"
@@ -7917,11 +7977,11 @@ msgstr "Sincronizza"
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:221
 msgid "Sync real Wii Remotes and pair them"
-msgstr "Sincronizza e abbina Wii Remote reali"
+msgstr "Sincronizza e abbina Telecomandi Wii reali"
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:222
 msgid "Reset all saved Wii Remote pairings"
-msgstr "Reimposta tutti gli abbinamenti salvati con i Wii Remote"
+msgstr "Reimposta tutti gli abbinamenti salvati con i Telecomandi Wii"
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:223
 msgid "Emulate the Wii's Bluetooth adapter"
@@ -7941,15 +8001,15 @@ msgstr "Abilita dati altoparlante"
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:227
 msgid "Connect Wii Remotes for Emulated Controllers"
-msgstr "Connetti i Wii Remote per i controller simulati"
+msgstr "Connetti i Telecomandi Wii per i controller simulati"
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:259
 msgid "Emulated Wii Remote"
-msgstr "Wii Remote emulato"
+msgstr "Telecomando Wii emulato"
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:259
 msgid "Real Wii Remote"
-msgstr "Wii Remote reale"
+msgstr "Telecomando Wii reale"
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:346
 msgid "Select a Bluetooth Device"
@@ -7958,8 +8018,8 @@ msgstr "Seleziona un dispositivo Bluetooth"
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:378
 msgid "Saved Wii Remote pairings can only be reset when a Wii game is running."
 msgstr ""
-"Gli abbinamenti salvati con i Wii Remote possono essere resettati soltanto "
-"durante l'esecuzione di un gioco Wii."
+"Gli abbinamenti salvati con i Telecomandi Wii possono essere resettati "
+"soltanto durante l'esecuzione di un gioco Wii."
 
 #: Source/Core/DolphinQt/Config/WiimoteControllersWidget.cpp:394
 msgid "A sync can only be triggered when a Wii game is running."
@@ -10611,11 +10671,11 @@ msgstr "Nessun file caricato / registrato."
 
 #: Source/Core/DolphinQt/GameCount.cpp:24
 msgid "%1 game(s) in your collection (%2 visible, %3 filtered)"
-msgstr ""
+msgstr "%1 gioco/i nella tua collezione (%2 visibili, %3 filtrati)"
 
 #: Source/Core/DolphinQt/GameCount.cpp:31
 msgid "%1 game(s) in your collection"
-msgstr ""
+msgstr "%1 gioco/i nella tua collezione"
 
 #: Source/Core/DolphinQt/GameList/GameList.cpp:308
 #: Source/Core/DolphinQt/NetPlay/NetPlayBrowser.cpp:195
@@ -11647,11 +11707,11 @@ msgstr "Importazione di backup NAND in corso"
 
 #: Source/Core/DolphinQt/MainWindow.cpp:1894
 msgid "Loading NAND..."
-msgstr ""
+msgstr "Caricamento NAND..."
 
 #: Source/Core/DolphinQt/MainWindow.cpp:1897
 msgid "Extracting NAND..."
-msgstr ""
+msgstr "Estrazione NAND..."
 
 #: Source/Core/DolphinQt/MainWindow.cpp:1907
 msgid "Select Keys File (OTP/SEEPROM Dump)"
@@ -11823,11 +11883,11 @@ msgstr "Esporta tutti i salvataggi Wii"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:367
 msgid "Connect Wii Remotes"
-msgstr "Connetti Wii Remote"
+msgstr "Connetti Telecomando Wii"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:375
 msgid "Connect Wii Remote %1"
-msgstr "Collega Wii Remote %1"
+msgstr "Collega Telecomando Wii %1"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:388
 msgid "&Emulation"
@@ -11961,7 +12021,7 @@ msgstr "&Assembler"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:599
 msgid "Show Game Count"
-msgstr ""
+msgstr "Mostra contatore giochi"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:607
 msgid "Purge Game List Cache"
@@ -12205,7 +12265,7 @@ msgstr "Disabilita Fastmem"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:929
 msgid "Disable Page Table Fastmem"
-msgstr ""
+msgstr "Disabilita page table fastmem"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:936
 msgid "Disable Fastmem Arena"
@@ -13283,8 +13343,8 @@ msgstr ""
 "In caso di connessione diretta, l'host deve avere la porta UDP scelta aperta "
 "o correttamente reindirizzata.\n"
 "\n"
-"Il supporto per i Wii Remote durante il netplay è sperimentale e potrebbe "
-"non funzionare correttamente.\n"
+"Il supporto per i Telecomandi Wii durante il netplay è sperimentale e "
+"potrebbe non funzionare correttamente.\n"
 "Usalo a tuo rischio e pericolo.\n"
 
 #: Source/Core/DolphinQt/NetPlay/NetPlaySetupDialog.cpp:138
@@ -13948,12 +14008,12 @@ msgstr "Dimensione buffer audio:"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:213
 msgid "Wii Remote Audio Routing"
-msgstr ""
+msgstr "Reindirizzamento audio Telecomando Wii"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:217
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:487
 msgid "Enable Wii Remote Audio Routing"
-msgstr ""
+msgstr "Abilita reindirizzamento audio Telecomando Wii"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:395
 msgid ""
@@ -14092,11 +14152,20 @@ msgid ""
 "selected.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
 "dolphin_emphasis>"
 msgstr ""
+"Reindirizza l'audio di ogni Telecomando Wii verso un dispositivo audio "
+"alternativo. Questa impostazione non può venire cambiata durante "
+"l'esecuzione.<br><br>Questa opzione è disabilitata se l'opzione \"Abilita "
+"dati altoparlante\" è disabilitata, \"Usa adattatore Bluetooth ponte\" è "
+"selezionata, o se è selezionato un backend audio diverso da Cubeb."
+"<br><br><dolphin_emphasis>Nel dubbio, lascia deselezionato.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:479
 msgid ""
 "Enables routing this Wii Remote's speaker audio to a separate output device."
 msgstr ""
+"Abilita il dirottamento dell'audio dell'altoparlante del Telecomando Wii "
+"verso un diverso dispositivo audio."
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:481
 msgid ""
@@ -14104,6 +14173,9 @@ msgid ""
 "<br><br>This setting is disabled when this Wii Remote is not set to Emulated "
 "Wii Remote."
 msgstr ""
+"Indica il dispositivo audio di output per l'altoparlante di questo "
+"Telecomando Wii.<br><br>Questa funzione è disabilitata quando questo "
+"telecomando Wii non è impostato su Telecomando Wii emulato."
 
 #. i18n: MAC stands for Media Access Control. A MAC address uniquely identifies a network
 #. interface (physical) like a serial number. "MAC" should be kept in translations.
@@ -14255,7 +14327,7 @@ msgstr "BIOS:"
 
 #: Source/Core/DolphinQt/Settings/GameCubePane.cpp:219
 msgid "Game Boy Player ROM:"
-msgstr ""
+msgstr "ROM Game Boy Player:"
 
 #: Source/Core/DolphinQt/Settings/GameCubePane.cpp:220
 msgid "Port %1 ROM:"
@@ -14987,7 +15059,7 @@ msgstr "Mostra FPS"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:47
 msgid "Show Internal Resolution"
-msgstr ""
+msgstr "Mostra risoluzione interna"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:48
 msgid "Show Frame Times"
@@ -15002,7 +15074,6 @@ msgid "Show VBlank Times"
 msgstr "Mostra tempi VBlank"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
-#, c-format
 msgid "Show % Speed"
 msgstr "Mostra velocità %"
 
@@ -15109,6 +15180,8 @@ msgid ""
 "Shows the internal resolution in pixels, as a product of width and height. "
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
 msgstr ""
+"Mostra la risoluzione interna in pixel, come prodotto di altezza e larghezza."
+"<br><br><dolphin_emphasis>Nel dubbio, lascia deselezionato</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:162
 msgid ""
@@ -15151,7 +15224,6 @@ msgstr ""
 "deselezionato.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
-#, c-format
 msgid ""
 "Shows the % speed of emulation compared to full speed."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
@@ -15556,7 +15628,7 @@ msgstr "Dispositivi USB ponte accettati"
 
 #: Source/Core/DolphinQt/Settings/WiiPane.cpp:304
 msgid "Wii Remote Settings"
-msgstr "Impostazioni Wii Remote"
+msgstr "Impostazioni Telecomando Wii"
 
 #: Source/Core/DolphinQt/Settings/WiiPane.cpp:310
 msgid "Sensor Bar Position:"
@@ -16169,7 +16241,7 @@ msgstr "Levetta Nunchuk"
 
 #: Source/Core/DolphinQt/TAS/WiiTASInputWindow.cpp:107
 msgid "Wii Remote Accelerometer"
-msgstr "Accelerometro Wii Remote"
+msgstr "Accelerometro Telecomando Wii"
 
 #. i18n: Refers to a 3D axis (used when mapping motion controls)
 #: Source/Core/DolphinQt/TAS/WiiTASInputWindow.cpp:117
@@ -16197,7 +16269,7 @@ msgstr "Z"
 
 #: Source/Core/DolphinQt/TAS/WiiTASInputWindow.cpp:140
 msgid "Wii Remote Gyroscope"
-msgstr "Giroscopio Wii Remote"
+msgstr "Giroscopio Telecomando Wii"
 
 #: Source/Core/DolphinQt/TAS/WiiTASInputWindow.cpp:180
 msgid "Nunchuk Accelerometer"
@@ -16205,7 +16277,7 @@ msgstr "Accelerometro Nunchuk"
 
 #: Source/Core/DolphinQt/TAS/WiiTASInputWindow.cpp:265
 msgid "Wii Remote Buttons"
-msgstr "Pulsanti Wii Remote"
+msgstr "Pulsanti Telecomando Wii"
 
 #: Source/Core/DolphinQt/TAS/WiiTASInputWindow.cpp:273
 msgid "Nunchuk Buttons"
@@ -16217,7 +16289,7 @@ msgstr "Pulsanti controller tradizionale"
 
 #: Source/Core/DolphinQt/TAS/WiiTASInputWindow.cpp:431
 msgid "Wii TAS Input %1 - Wii Remote + Nunchuk"
-msgstr "Wii TAS Input %1 - Wii Remote + Nunchuk"
+msgstr "Wii TAS Input %1 - Telecomando Wii + Nunchuk"
 
 #: Source/Core/DolphinQt/TAS/WiiTASInputWindow.cpp:446
 msgid "Wii TAS Input %1 - Classic Controller"
@@ -16225,7 +16297,7 @@ msgstr "Wii TAS Input %1 - Classic Controller"
 
 #: Source/Core/DolphinQt/TAS/WiiTASInputWindow.cpp:461
 msgid "Wii TAS Input %1 - Wii Remote"
-msgstr "Wii TAS Input %1 - Wii Remote"
+msgstr "Wii TAS Input %1 - Telecomando Wii"
 
 #: Source/Core/DolphinQt/ToolBar.cpp:28
 msgid "Toolbar"
@@ -16750,6 +16822,8 @@ msgstr "Nessun profilo trovato per l'impostazione di gioco  '{0}'"
 #: Source/Core/UICommon/AutoUpdate.cpp:203
 msgid "A Dolphin update is already scheduled for the next time it closes."
 msgstr ""
+"È già programmato un aggiornamento di Dolphin la prossima volta che verrà "
+"chiuso."
 
 #: Source/Core/UICommon/AutoUpdate.cpp:227
 msgid "Unable to contact update server."
@@ -17054,6 +17128,9 @@ msgid ""
 "system. To prevent visual glitches and artifacts, please use the Metal "
 "backend or update to macOS Sonoma 14 or newer."
 msgstr ""
+"Stai tentando di usare il backend Vulkan su un sistema operativo non "
+"supportato. Per evitare artefatti o glitch grafici usa il backend Metal o "
+"aggiorna a macOS Sonoma 14 o successivi."
 
 #. i18n: Please leave SyncOnSkipIdle and True untranslated.
 #. The user needs to enter these terms as-is in an INI file.
@@ -17080,6 +17157,9 @@ msgid ""
 "CPU, but your current settings make this unlikely to happen. The error may "
 "also be caused by a game bug."
 msgstr ""
+"Questo errore è di solito causato dalla desincronizzazione della GPU emulata "
+"con la CPU emulata, ma dovrebbe essere mitigato dalle tue impostazioni "
+"correnti. Potrebbe anche essere causato da un bug di gioco."
 
 #: Source/Core/VideoCommon/CommandProcessor.cpp:707
 #, c++-format

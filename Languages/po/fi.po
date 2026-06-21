@@ -12,7 +12,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Dolphin Emulator\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-27 20:00+0200\n"
+"POT-Creation-Date: 2026-06-21 21:48+0200\n"
 "PO-Revision-Date: 2013-01-23 13:48+0000\n"
 "Last-Translator: Aleksi, 2023-2026\n"
 "Language-Team: Finnish (http://app.transifex.com/dolphinemu/dolphin-emu/"
@@ -787,11 +787,11 @@ msgstr "Edellinen peliprofiili"
 
 #: Source/Core/Core/HotkeyManager.cpp:107
 msgid "Toggle Aspect Ratio Crop"
-msgstr ""
+msgstr "Kuvan rajaus kuvasuhteeseen päälle/pois"
 
 #: Source/Core/Core/HotkeyManager.cpp:108
 msgid "Toggle Custom Crop"
-msgstr ""
+msgstr "Kuvan rajaus määrätysti päälle/pois"
 
 #: Source/Core/Core/HotkeyManager.cpp:109
 msgid "Toggle Aspect Ratio"
@@ -2505,49 +2505,49 @@ msgstr "Palvelin lähetti tuntemattoman virheilmoituksen."
 msgid "Unknown message received with id : {0}"
 msgstr "Saapui tuntematon viesti tunnisteella {0}"
 
-#: Source/Core/Core/NetPlayClient.cpp:1035
+#: Source/Core/Core/NetPlayClient.cpp:1039
 #, c++-format
 msgid "Unknown SYNC_SAVE_DATA message received with id: {0}"
 msgstr "Tuntematon SYNC_SAVE_DATA-viesti saapui tunnisteella {0}"
 
-#: Source/Core/Core/NetPlayClient.cpp:1050
+#: Source/Core/Core/NetPlayClient.cpp:1054
 msgid "Synchronizing save data..."
 msgstr "Tallennustiedostojen synkronointi käynnissä..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1082
+#: Source/Core/Core/NetPlayClient.cpp:1086
 msgid "Failed to delete NetPlay memory card. Verify your write permissions."
 msgstr ""
 "Nettipelin muistikortin poisto epäonnistui. Tarkista kirjoitusoikeudet."
 
-#: Source/Core/Core/NetPlayClient.cpp:1106
+#: Source/Core/Core/NetPlayClient.cpp:1110
 msgid "Failed to reset NetPlay GCI folder. Verify your write permissions."
 msgstr ""
 "Nettipelin GCI-kansion nollaaminen epäonnistui. Tarkista kirjoitusoikeudet."
 
-#: Source/Core/Core/NetPlayClient.cpp:1137
+#: Source/Core/Core/NetPlayClient.cpp:1141
 msgid "Failed to reset NetPlay NAND folder. Verify your write permissions."
 msgstr ""
 "Nettipelin NAND-kansion nollaaminen epäonnistui. Tarkista kirjoitusoikeudet."
 
-#: Source/Core/Core/NetPlayClient.cpp:1143
+#: Source/Core/Core/NetPlayClient.cpp:1147
 msgid "Failed to reset NetPlay redirect folder. Verify your write permissions."
 msgstr ""
 "Nettipelin uudelleenohjauskansion nollaaminen epäonnistui. Tarkista "
 "kirjoitusoikeudet."
 
-#: Source/Core/Core/NetPlayClient.cpp:1173
+#: Source/Core/Core/NetPlayClient.cpp:1177
 msgid "Failed to write Mii data."
 msgstr "Mii-datan kirjoittaminen epäonnistui."
 
-#: Source/Core/Core/NetPlayClient.cpp:1258
+#: Source/Core/Core/NetPlayClient.cpp:1262
 msgid "Failed to write Wii save."
 msgstr "Wiin tallennustiedoston kirjoittaminen epäonnistui."
 
-#: Source/Core/Core/NetPlayClient.cpp:1271
+#: Source/Core/Core/NetPlayClient.cpp:1275
 msgid "Failed to write redirected save."
 msgstr "Uudelleenohjatun tallennustiedoston kirjoittaminen epäonnistui."
 
-#: Source/Core/Core/NetPlayClient.cpp:1292
+#: Source/Core/Core/NetPlayClient.cpp:1296
 #, c++-format
 msgid ""
 "Failed to delete NetPlay GBA{0} save file. Verify your write permissions."
@@ -2555,60 +2555,60 @@ msgstr ""
 "Nettipelin GBA{0}-tallennustiedoston poisto epäonnistui. Tarkista "
 "kirjoitusoikeudet."
 
-#: Source/Core/Core/NetPlayClient.cpp:1334
+#: Source/Core/Core/NetPlayClient.cpp:1338
 #, c++-format
 msgid "Unknown SYNC_CODES message received with id: {0}"
 msgstr "Tuntematon SYNC_CODES-viesti saapui tunnisteella {0}"
 
-#: Source/Core/Core/NetPlayClient.cpp:1367
+#: Source/Core/Core/NetPlayClient.cpp:1371
 msgid "Synchronizing Gecko codes..."
 msgstr "Gecko-koodien synkronointi käynnissä..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1434
+#: Source/Core/Core/NetPlayClient.cpp:1438
 msgid "Synchronizing AR codes..."
 msgstr "AR-koodien synkronointi käynnissä..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1594
+#: Source/Core/Core/NetPlayClient.cpp:1598
 msgid "Quality of Service (QoS) was successfully enabled."
 msgstr "QoS-tekniikan käynnistys onnistui."
 
-#: Source/Core/Core/NetPlayClient.cpp:1598
+#: Source/Core/Core/NetPlayClient.cpp:1602
 msgid "Quality of Service (QoS) couldn't be enabled."
 msgstr "QoS-tekniikan käynnistäminen ei onnistunut."
 
-#: Source/Core/Core/NetPlayClient.cpp:1747
+#: Source/Core/Core/NetPlayClient.cpp:1751
 msgid "Game is already running!"
 msgstr "Peli on jo käynnissä!"
 
-#: Source/Core/Core/NetPlayClient.cpp:1821
+#: Source/Core/Core/NetPlayClient.cpp:1825
 msgid "Data received!"
 msgstr "Dataa vastaanotettu!"
 
-#: Source/Core/Core/NetPlayClient.cpp:1822
+#: Source/Core/Core/NetPlayClient.cpp:1826
 msgid "Error processing data."
 msgstr "Virhe datan käsittelyssä."
 
-#: Source/Core/Core/NetPlayClient.cpp:1850
+#: Source/Core/Core/NetPlayClient.cpp:1854
 msgid "Error processing codes."
 msgstr "Virhe koodien käsittelyssä."
 
-#: Source/Core/Core/NetPlayClient.cpp:1863
+#: Source/Core/Core/NetPlayClient.cpp:1867
 msgid "Codes received!"
 msgstr "Koodit saatu!"
 
-#: Source/Core/Core/NetPlayClient.cpp:1977
+#: Source/Core/Core/NetPlayClient.cpp:1981
 msgid "Traversal server timed out connecting to the host"
 msgstr "Läpikulkupalvelimen yhteys isäntäkoneeseen aikakatkaistiin"
 
-#: Source/Core/Core/NetPlayClient.cpp:1980
+#: Source/Core/Core/NetPlayClient.cpp:1984
 msgid "Server rejected traversal attempt"
 msgstr "Palvelin kieltäytyi läpikulkuyrityksestä"
 
-#: Source/Core/Core/NetPlayClient.cpp:1983
+#: Source/Core/Core/NetPlayClient.cpp:1987
 msgid "Invalid host"
 msgstr "Virheellinen isäntäkone"
 
-#: Source/Core/Core/NetPlayClient.cpp:1986
+#: Source/Core/Core/NetPlayClient.cpp:1990
 #, c++-format
 msgid "Unknown error {0:x}"
 msgstr "Tuntematon virhe {0:x}"
@@ -2632,12 +2632,12 @@ msgstr "Sisäinen LZO-virhe - pakkaaminen epäonnistui"
 msgid "Failed to open file \"{0}\". Verify your write permissions."
 msgstr "Tiedoston \"{0}\" avaus epäonnistui. Tarkista kirjoitusoikeudet."
 
-#: Source/Core/Core/NetPlayCommon.cpp:208
-#: Source/Core/Core/NetPlayCommon.cpp:291
+#: Source/Core/Core/NetPlayCommon.cpp:214
+#: Source/Core/Core/NetPlayCommon.cpp:303
 msgid "Internal LZO Error - decompression failed"
 msgstr "Sisäinen LZO-virhe - purkaminen epäonnistui"
 
-#: Source/Core/Core/NetPlayCommon.cpp:214
+#: Source/Core/Core/NetPlayCommon.cpp:220
 #, c++-format
 msgid "Error writing file: {0}"
 msgstr "Virhe tiedoston kirjoituksessa: {0}"
@@ -2646,16 +2646,16 @@ msgstr "Virhe tiedoston kirjoituksessa: {0}"
 msgid "Enet Didn't Initialize"
 msgstr "Enetin alustus epäonnistui"
 
-#: Source/Core/Core/NetPlayServer.cpp:1158
+#: Source/Core/Core/NetPlayServer.cpp:1182
 msgid "All players' saves synchronized."
 msgstr "Kaikkien pelaajien tallennustiedostot synkronoitu."
 
-#: Source/Core/Core/NetPlayServer.cpp:1179
+#: Source/Core/Core/NetPlayServer.cpp:1203
 #, c++-format
 msgid "{0} failed to synchronize."
 msgstr "Pelaajan {0} kanssa synkronointi ei onnistunut."
 
-#: Source/Core/Core/NetPlayServer.cpp:1188
+#: Source/Core/Core/NetPlayServer.cpp:1212
 #, c++-format
 msgid ""
 "Unknown SYNC_SAVE_DATA message with id:{0} received from player:{1} Kicking "
@@ -2664,16 +2664,16 @@ msgstr ""
 "Tuntematon SYNC_SAVE_DATA-viesti tunnisteella {0} saapui pelaajalta {1}. "
 "Pelaaja tulee poistetuksi!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1216
+#: Source/Core/Core/NetPlayServer.cpp:1240
 msgid "All players' codes synchronized."
 msgstr "Kaikkien pelaajien koodit synkronoitu."
 
-#: Source/Core/Core/NetPlayServer.cpp:1237
+#: Source/Core/Core/NetPlayServer.cpp:1261
 #, c++-format
 msgid "{0} failed to synchronize codes."
 msgstr "Koodien synkronointi pelaajan {0} kanssa ei onnistunut."
 
-#: Source/Core/Core/NetPlayServer.cpp:1245
+#: Source/Core/Core/NetPlayServer.cpp:1269
 #, c++-format
 msgid ""
 "Unknown SYNC_GECKO_CODES message with id:{0} received from player:{1} "
@@ -2682,30 +2682,30 @@ msgstr ""
 "Tuntematon SYNC_GECKO_CODES-viesti saapui tunnisteella {0} pelaajalta {1}. "
 "Pelaaja tulee poistetuksi!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1253
+#: Source/Core/Core/NetPlayServer.cpp:1277
 #, c++-format
 msgid "Unknown message with id:{0} received from player:{1} Kicking player!"
 msgstr ""
 "Saapui tuntematon viesti tunnisteella {0} pelaajalta {1}. Pelaaja tulee "
 "poistetuksi!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1347
-#: Source/Core/Core/NetPlayServer.cpp:1726
-#: Source/Core/Core/NetPlayServer.cpp:2054
+#: Source/Core/Core/NetPlayServer.cpp:1371
+#: Source/Core/Core/NetPlayServer.cpp:1750
+#: Source/Core/Core/NetPlayServer.cpp:2078
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:485
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:891
 msgid "Selected game doesn't exist in game list!"
 msgstr "Valittua peliä ei ole pelilistassa!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1511
+#: Source/Core/Core/NetPlayServer.cpp:1535
 msgid "Error collecting save data!"
 msgstr "Virhe tallennustiedoston keräämisessä!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1533
+#: Source/Core/Core/NetPlayServer.cpp:1557
 msgid "Error synchronizing save data!"
 msgstr "Virhe tallennustiedoston synkronoinnissa!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1547
+#: Source/Core/Core/NetPlayServer.cpp:1571
 msgid "Error synchronizing cheat codes!"
 msgstr "Virhe huijauskoodien synkronoinnissa!"
 
@@ -2728,6 +2728,11 @@ msgid ""
 "The game probably would have crashed on real hardware. Enable MMU in "
 "advanced settings to accurately emulate game crashes."
 msgstr ""
+"Virheellinen kirjoitus osoitteeseen {0:#010x}, PC = {1:#010x}.\n"
+"\n"
+"Peli olisi varmaan kaatunut alkuperäisellä laitteistolla. Jos valitset MMU-"
+"emuloinnin edistyneissä asetuksissa, Dolphin voi emuloida pelien "
+"kaatumistilanteet tarkasti."
 
 #: Source/Core/Core/PowerPC/MMU.cpp:1226
 #, c++-format
@@ -2737,12 +2742,17 @@ msgid ""
 "The game probably would have crashed on real hardware. Enable MMU in "
 "advanced settings to accurately emulate game crashes."
 msgstr ""
+"Virheellinen luku osoitteesta {0:#010x}, PC = {1:#010x}.\n"
+"\n"
+"Peli olisi varmaan kaatunut alkuperäisellä laitteistolla. Jos valitset MMU-"
+"emuloinnin edistyneissä asetuksissa, Dolphin voi emuloida pelien "
+"kaatumistilanteet tarkasti."
 
-#: Source/Core/Core/State.cpp:342
+#: Source/Core/Core/State.cpp:343
 msgid "Internal LZ4 Error - compression failed"
 msgstr "Sisäinen LZ4-virhe - pakkaus epäonnistui"
 
-#: Source/Core/Core/State.cpp:518
+#: Source/Core/Core/State.cpp:519
 #, c++-format
 msgid ""
 "Internal LZO Error - decompression failed ({0}) ({1}) \n"
@@ -2751,7 +2761,7 @@ msgstr ""
 "Sisäinen LZO-virhe - purku epäonnistui ({0}) ({1})\n"
 "Vanhentuneen tilantallennuksen versiotiedon haku epäonnistui."
 
-#: Source/Core/Core/State.cpp:531
+#: Source/Core/Core/State.cpp:532
 #, c++-format
 msgid ""
 "Internal LZO Error - failed to parse decompressed version cookie and version "
@@ -2760,7 +2770,7 @@ msgstr ""
 "Sisäinen LZO-virhe - puretun versioevästeen ja versiomerkkijonon pituuden "
 "jäsentäminen epäonnistui ({0})"
 
-#: Source/Core/Core/State.cpp:546
+#: Source/Core/Core/State.cpp:547
 #, c++-format
 msgid ""
 "Internal LZO Error - failed to parse decompressed version string ({0} / {1})"
@@ -2768,11 +2778,11 @@ msgstr ""
 "Sisäinen LZO-virhe - puretun versiomerkkijonon jäsentäminen epäonnistui "
 "({0} / {1})"
 
-#: Source/Core/Core/State.cpp:614
+#: Source/Core/Core/State.cpp:615
 msgid "Empty"
 msgstr "Tyhjä"
 
-#: Source/Core/Core/State.cpp:618 Source/Core/DiscIO/Enums.cpp:62
+#: Source/Core/Core/State.cpp:619 Source/Core/DiscIO/Enums.cpp:62
 #: Source/Core/DiscIO/Enums.cpp:106 Source/Core/DiscIO/Enums.cpp:132
 #: Source/Core/DolphinQt/Config/InfoWidget.cpp:87
 #: Source/Core/DolphinQt/Debugger/NetworkWidget.cpp:48
@@ -2784,17 +2794,17 @@ msgstr "Tyhjä"
 msgid "Unknown"
 msgstr "Tuntematon"
 
-#: Source/Core/Core/State.cpp:652
+#: Source/Core/Core/State.cpp:653
 #, c++-format
 msgid "Internal LZ4 Error - Tried decompressing {0} bytes"
 msgstr "Sisäinen LZ4-virhe - Yritys purkaa {0} tavua"
 
-#: Source/Core/Core/State.cpp:672
+#: Source/Core/Core/State.cpp:673
 #, c++-format
 msgid "Internal LZ4 Error - decompression failed ({0}, {1}, {2})"
 msgstr "Sisäinen LZ4-virhe - purku epäonnistui ({0}, {1}, {2})"
 
-#: Source/Core/Core/State.cpp:686
+#: Source/Core/Core/State.cpp:687
 #, c++-format
 msgid "Internal LZ4 Error - payload size mismatch ({0} / {1}))"
 msgstr "Sisäinen LZ4-virhe - hyötykuorman koko ei täsmää ({0} / {1})"
@@ -3036,15 +3046,15 @@ msgstr "NTSC-K"
 msgid "Unpacking"
 msgstr "Purku käynnissä"
 
-#: Source/Core/DiscIO/NANDImporter.cpp:59
+#: Source/Core/DiscIO/NANDImporter.cpp:60
 msgid "This file does not look like a BootMii NAND backup."
 msgstr "Tämä tiedosto ei vaikuta BootMii NAND-varmuuskopiolta."
 
-#: Source/Core/DiscIO/NANDImporter.cpp:118
+#: Source/Core/DiscIO/NANDImporter.cpp:119
 msgid "This file does not contain a valid Wii filesystem."
 msgstr "Tässä tiedostossa ei ole kelpaavaa Wii-tiedostojärjestelmää."
 
-#: Source/Core/DiscIO/NANDImporter.cpp:309
+#: Source/Core/DiscIO/NANDImporter.cpp:315
 #, c++-format
 msgid "Unable to write to file {0}"
 msgstr "Tiedoston {0} kirjoittaminen epäonnistui"
@@ -3180,12 +3190,12 @@ msgstr "Päivitysosio ei sisällä tämän julkaisun käyttämää IOS-versiota.
 #: Source/Core/DiscIO/VolumeVerifier.cpp:699
 #, c++-format
 msgid "The {0} partition does not have a valid ticket."
-msgstr ""
+msgstr "Osoilla {0} ei ole kelvollista lippua."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:705
 #, c++-format
 msgid "The {0} partition does not have a valid TMD."
-msgstr ""
+msgstr "Osiolla {0} ei ole kelvollista TMD:tä."
 
 #. i18n: This string is referring to a game mode in Super Smash Bros. Brawl called Masterpieces
 #. where you play demos of NES/SNES/N64 games. This string is referring to a specific such demo
@@ -3302,7 +3312,7 @@ msgstr "Annettu yhteisavaimen indeksi on {0}, kun sen tulisi olla {1}."
 #. i18n: "Ticket" here is a kind of digital authorization to use a certain title (e.g. a game)
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1008
 msgid "The ticket is invalid."
-msgstr ""
+msgstr "Lippu on virheellinen."
 
 #. i18n: "Ticket" here is a kind of digital authorization to use a certain title (e.g. a game)
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1016
@@ -3311,7 +3321,7 @@ msgstr "Lipun allekirjoitus on virheellinen."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1021
 msgid "The TMD is invalid."
-msgstr ""
+msgstr "TMD on virheellinen."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1030
 msgid ""
@@ -4173,15 +4183,15 @@ msgstr "Poista osoite"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:550
 msgid "Add Read/Write Breakpoint(s)"
-msgstr ""
+msgstr "Lisää luvun/kirjoituksen keskeytyskohta/-kohdat"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:552
 msgid "Add Write Breakpoint(s)"
-msgstr ""
+msgstr "Lisää kirjoituksen keskeytyskohta/-kohdat"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:553
 msgid "Add Read Breakpoint(s)"
-msgstr ""
+msgstr "Lisää luvun keskeytyskohta/-kohdat"
 
 #: Source/Core/DolphinQt/CheatSearchWidget.cpp:635
 msgid "Multiple errors occurred while generating AR codes."
@@ -4526,7 +4536,7 @@ msgstr "Ei mitään säädettävää"
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientEditServerDialog.cpp:32
 msgid "Edit DSU Server"
-msgstr ""
+msgstr "Muokkaa DSU-palvelinta"
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientEditServerDialog.cpp:37
 msgid "BetterJoy, DS4Windows, etc"
@@ -4571,7 +4581,7 @@ msgstr "Lisää..."
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientWidget.cpp:36
 msgid "Edit"
-msgstr ""
+msgstr "Muokkaa"
 
 #: Source/Core/DolphinQt/Config/ControllerInterface/DualShockUDPClientWidget.cpp:37
 #: Source/Core/DolphinQt/Config/NewPatchDialog.cpp:128
@@ -5097,6 +5107,8 @@ msgid ""
 "Failed to download Gecko codes. The code server may be temporarily "
 "unavailable. Please try again later."
 msgstr ""
+"Gecko-koodien lataaminen epäonnistui. Palvelin voi olla tilapäisesti "
+"tavoittamattomissa. Yritä uudelleen myöhemmin"
 
 #: Source/Core/DolphinQt/Config/GeckoCodeWidget.cpp:407
 msgid ""
@@ -5104,10 +5116,13 @@ msgid ""
 "\n"
 "Server response: HTTP %1."
 msgstr ""
+"\n"
+"\n"
+"Palvelimen vastua: HTTP %1."
 
 #: Source/Core/DolphinQt/Config/GeckoCodeWidget.cpp:409
 msgid "Download Failed"
-msgstr ""
+msgstr "Lataus epäonnistui"
 
 #: Source/Core/DolphinQt/Config/GeckoCodeWidget.cpp:416
 msgid "File contained no codes."
@@ -5224,7 +5239,7 @@ msgstr "Rajaa"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:162
 msgid "To Aspect Ratio"
-msgstr ""
+msgstr "Kuvasuhteeseen"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:163
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:165
@@ -5594,6 +5609,11 @@ msgid ""
 "Graphics/Advanced/Misc/Crop.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
 msgstr ""
+"Rajaa kuvan valittuun kuvasuhteeseen (kuten 4:3 tai 16:9). Alkuperäinen "
+"kuvasuhde on usein lähes sama, muttei täsmälleen, sillä siihen sisältyy "
+"ruudun ulkopuolisia pystyrivejä.<br><br>Tämä asetus oli aiemmin nimeltään "
+"Grafiikka/Lisäasetukset/Sekalaiset/Rajaa.<br><br><dolphin_emphasis>Ellet ole "
+"varma, jätä tämä valitsematta.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:412
 msgid ""
@@ -5602,6 +5622,11 @@ msgid ""
 "target aspect ratio. Useful to resolve letterboxing issues. "
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
 msgstr ""
+"Rajaa kuvan siten, että kuvasuhteen määräämät kuvapistemitat pyöristetään "
+"alkuperäisen kuvatarkkuuden monikerraksi (sen sijaan, että ne "
+"pyöristettäisiin sisäisen kuvatarkkuuden mukaan). Asetus auttaa välttämään "
+"mustia palkkeja reunoilla.<br><br><dolphin_emphasis>Ellet ole varma, jätä "
+"tämä valitsematta.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:417
 msgid ""
@@ -5610,6 +5635,10 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Rajaa kuvan vasemmasta reunasta pois tietyn määrän alkuperäisellä "
+"kuvatarkkuudella määrättyjä kuvapisteitä (riippumatta sisäisestä "
+"hahmonnustarkkuudesta).<br><br><dolphin_emphasis>Ellet ole varma, valitse 0."
+"</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:421
 msgid ""
@@ -5618,6 +5647,9 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Rajaa kuvan yläreunasta pois tietyn määrän alkuperäisellä kuvatarkkuudella "
+"määrättyjä kuvapisteitä (riippumatta sisäisestä hahmonnustarkkuudesta)."
+"<br><br><dolphin_emphasis>Ellet ole varma, valitse 0.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:425
 msgid ""
@@ -5626,6 +5658,10 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Rajaa kuvan oikeasta reunasta pois tietyn määrän alkuperäisellä "
+"kuvatarkkuudella määrättyjä kuvapisteitä (riippumatta sisäisestä "
+"hahmonnustarkkuudesta).<br><br><dolphin_emphasis>Ellet ole varma, valitse 0."
+"</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:429
 msgid ""
@@ -5634,6 +5670,9 @@ msgid ""
 "aspect ratio.  <br><br><dolphin_emphasis>If unsure, leave this value to 0.</"
 "dolphin_emphasis>"
 msgstr ""
+"Rajaa kuvan alareunasta pois tietyn määrän alkuperäisellä kuvatarkkuudella "
+"määrättyjä kuvapisteitä (riippumatta sisäisestä hahmonnustarkkuudesta)."
+"<br><br><dolphin_emphasis>Ellet ole varma, valitse 0.</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/AdvancedWidget.cpp:434
 msgid "<dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
@@ -6280,6 +6319,15 @@ msgid ""
 "Texture Decoding will be disabled.<br><br><dolphin_emphasis>If unsure, leave "
 "this unchecked.</dolphin_emphasis>"
 msgstr ""
+"Tunnistaa mielivaltaiset mipmapit, joita jotkin pelit käyttävät erityisiin "
+"etäisyysperusteisiin tehosteisiin.<br><br>Voi johtaa vääriin tunnistuksiin, "
+"jotka puolestaan aiheuttavat sumeita tekstuureja korkeilla sisäisillä "
+"kuvatarkkuuksilla, kuten peleissä, jotka käyttävät erittäin "
+"matalatarkkuuksisia mipmapeja. Tämän poistaminen käytöstä voi myös vähentää "
+"pätkintää peleissä, jotka lataavat usein uusia tekstuureja.<br><br>Asetuksen "
+"valitseminen poistaa käytöstä tekstuurien purun grafiikkasuorittimella."
+"<br><br><dolphin_emphasis>Ellet ole varma, jätä tämä valitsematta.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/EnhancementsWidget.cpp:564
 msgid ""
@@ -6855,6 +6903,12 @@ msgid ""
 "Detection is enabled.<br><br><dolphin_emphasis>If unsure, leave this "
 "unchecked.</dolphin_emphasis>"
 msgstr ""
+"Purkaa tekstuurit grafiikkasuorittimella tavallisen suorittimen sijaan."
+"<br><br>Asetus voi parantaa suorituskykyä tietyissä tilanteissa, etenkin jos "
+"suorittimen teho on rajoittava tekijä.<br><br>Asetusta ei voi käyttää, jos "
+"mielivaltaisten mipmapien havainta on käytössä."
+"<br><br><dolphin_emphasis>Ellet ole varma, jätä tämä valitsematta.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Config/Graphics/HacksWidget.cpp:221
 msgid ""
@@ -10597,11 +10651,11 @@ msgstr "Ei ladattua/nauhoitettua tiedostoa."
 
 #: Source/Core/DolphinQt/GameCount.cpp:24
 msgid "%1 game(s) in your collection (%2 visible, %3 filtered)"
-msgstr ""
+msgstr "Kokoelmassa %1 peli(ä) (%2 näkyy, %3 piilotettu)"
 
 #: Source/Core/DolphinQt/GameCount.cpp:31
 msgid "%1 game(s) in your collection"
-msgstr ""
+msgstr "Kokoelmassa %1 peli(ä)"
 
 #: Source/Core/DolphinQt/GameList/GameList.cpp:308
 #: Source/Core/DolphinQt/NetPlay/NetPlayBrowser.cpp:195
@@ -11623,11 +11677,11 @@ msgstr "NAND-varmuuskopion tuonti käynnissä"
 
 #: Source/Core/DolphinQt/MainWindow.cpp:1894
 msgid "Loading NAND..."
-msgstr ""
+msgstr "NAND-muistia ladataan..."
 
 #: Source/Core/DolphinQt/MainWindow.cpp:1897
 msgid "Extracting NAND..."
-msgstr ""
+msgstr "NAND-muistia puretaan..."
 
 #: Source/Core/DolphinQt/MainWindow.cpp:1907
 msgid "Select Keys File (OTP/SEEPROM Dump)"
@@ -11937,7 +11991,7 @@ msgstr "&Konekielen kääntäjä"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:599
 msgid "Show Game Count"
-msgstr ""
+msgstr "Näytä pelien lukumäärä"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:607
 msgid "Purge Game List Cache"
@@ -12181,7 +12235,7 @@ msgstr "Poista nopea muistihaku (Fastmem) käytöstä"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:929
 msgid "Disable Page Table Fastmem"
-msgstr ""
+msgstr "Poista sivutaulun nopea muistihaku käytöstä"
 
 #: Source/Core/DolphinQt/MenuBar.cpp:936
 msgid "Disable Fastmem Arena"
@@ -13930,12 +13984,12 @@ msgstr "Äänen puskurikoko:"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:213
 msgid "Wii Remote Audio Routing"
-msgstr ""
+msgstr "Wii Remote -äänen reititys"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:217
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:487
 msgid "Enable Wii Remote Audio Routing"
-msgstr ""
+msgstr "Ota Wii Remote -äänen reititys käyttöön"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:395
 msgid ""
@@ -14076,11 +14130,17 @@ msgid ""
 "selected.<br><br><dolphin_emphasis>If unsure, leave this unchecked.</"
 "dolphin_emphasis>"
 msgstr ""
+"Reitittää kunkin Wii Remote -ohjaimen kaiutinäänet erilliseen "
+"äänilaitteeseen. Asetusta ei voi muuttaa, kun emulointi on käynnissä."
+"<br><br>Asetusta voi käyttää vain, jos kaiutindata on päällä, Bluetooth-"
+"läpipäästö ei ole valittuna ja äänijärjestelmäksi on valittu Cubeb."
+"<br><br><dolphin_emphasis>Ellet ole varma, jätä tämä valitsematta.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:479
 msgid ""
 "Enables routing this Wii Remote's speaker audio to a separate output device."
-msgstr ""
+msgstr "Reitittää tämän Wii Remoten kaiutinäänet erilliseen äänilaitteeseen."
 
 #: Source/Core/DolphinQt/Settings/AudioPane.cpp:481
 msgid ""
@@ -14088,6 +14148,8 @@ msgid ""
 "<br><br>This setting is disabled when this Wii Remote is not set to Emulated "
 "Wii Remote."
 msgstr ""
+"Valitsee äänilaitteen tämän Wii Remoten kaiutinäänille.<br><br>Asetusta ei "
+"voi käyttää, jos ohjainta ei emuloida."
 
 #. i18n: MAC stands for Media Access Control. A MAC address uniquely identifies a network
 #. interface (physical) like a serial number. "MAC" should be kept in translations.
@@ -14237,7 +14299,7 @@ msgstr "BIOS:"
 
 #: Source/Core/DolphinQt/Settings/GameCubePane.cpp:219
 msgid "Game Boy Player ROM:"
-msgstr ""
+msgstr "Game Boy Playerin ROM:"
 
 #: Source/Core/DolphinQt/Settings/GameCubePane.cpp:220
 msgid "Port %1 ROM:"
@@ -14982,7 +15044,7 @@ msgstr "Näytä kehysnopeus"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:47
 msgid "Show Internal Resolution"
-msgstr ""
+msgstr "Näytä sisäinen kuvatarkkuus"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:48
 msgid "Show Frame Times"
@@ -14997,7 +15059,6 @@ msgid "Show VBlank Times"
 msgstr "Näytä VBlank-ajat"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
-#, c-format
 msgid "Show % Speed"
 msgstr "Näytä prosentuaalinen nopeus"
 
@@ -15104,6 +15165,9 @@ msgid ""
 "Shows the internal resolution in pixels, as a product of width and height. "
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
 msgstr ""
+"Näyttää sisäisen kuvatarkkuuden pikselimääräisenä leveyden ja korkeuden "
+"tulona.<br><br><dolphin_emphasis>Ellet ole varma, jätä tämä valitsematta.</"
+"dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:162
 msgid ""
@@ -15146,7 +15210,6 @@ msgstr ""
 "dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
-#, c-format
 msgid ""
 "Shows the % speed of emulation compared to full speed."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
@@ -16741,6 +16804,7 @@ msgstr "Peliasetukselle '{0}' ei löydy profiileja"
 #: Source/Core/UICommon/AutoUpdate.cpp:203
 msgid "A Dolphin update is already scheduled for the next time it closes."
 msgstr ""
+"Dolphinin päivitys on ajastettu tapahtumaan seuraavan sulkemisen yhteydessä."
 
 #: Source/Core/UICommon/AutoUpdate.cpp:227
 msgid "Unable to contact update server."
@@ -17046,6 +17110,9 @@ msgid ""
 "system. To prevent visual glitches and artifacts, please use the Metal "
 "backend or update to macOS Sonoma 14 or newer."
 msgstr ""
+"Käytössä on Vulkan-hahmonnin ja heikosti tuettu käyttöjärjestelmä. "
+"Grafiikkahäiriöiden välttämiseksi voit valita Metal-hahmontimen tai "
+"päivittää macOS:n versioon Sonoma 14 tai uudempaan."
 
 #. i18n: Please leave SyncOnSkipIdle and True untranslated.
 #. The user needs to enter these terms as-is in an INI file.
@@ -17072,6 +17139,9 @@ msgid ""
 "CPU, but your current settings make this unlikely to happen. The error may "
 "also be caused by a game bug."
 msgstr ""
+"Virhe johtuu yleensä emuloidun grafiikkasuorittimen desynkronoitumisesta "
+"emuloituun suorittimeen nähden, joskin nykyisillä asetuksella tämä on "
+"epätodennäköistä. Virhe voi johtua myös pelin ohjelmointivirheestä."
 
 #: Source/Core/VideoCommon/CommandProcessor.cpp:707
 #, c++-format

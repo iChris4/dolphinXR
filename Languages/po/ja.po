@@ -22,7 +22,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Dolphin Emulator\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-27 20:00+0200\n"
+"POT-Creation-Date: 2026-06-21 21:48+0200\n"
 "PO-Revision-Date: 2013-01-23 13:48+0000\n"
 "Last-Translator: raid273, 2020,2026\n"
 "Language-Team: Japanese (http://app.transifex.com/dolphinemu/dolphin-emu/"
@@ -2492,51 +2492,51 @@ msgstr "The server sent an unknown error message."
 msgid "Unknown message received with id : {0}"
 msgstr "不明なメッセージをid : {0} で受信しました"
 
-#: Source/Core/Core/NetPlayClient.cpp:1035
+#: Source/Core/Core/NetPlayClient.cpp:1039
 #, c++-format
 msgid "Unknown SYNC_SAVE_DATA message received with id: {0}"
 msgstr "不明な SYNC_SAVE_DATA メッセージを id: {0} で受信しました"
 
-#: Source/Core/Core/NetPlayClient.cpp:1050
+#: Source/Core/Core/NetPlayClient.cpp:1054
 msgid "Synchronizing save data..."
 msgstr "セーブデータの同期中..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1082
+#: Source/Core/Core/NetPlayClient.cpp:1086
 msgid "Failed to delete NetPlay memory card. Verify your write permissions."
 msgstr ""
 "ネットプレイ メモリカードの削除に失敗しました。書き込み権限を確認してください"
 
-#: Source/Core/Core/NetPlayClient.cpp:1106
+#: Source/Core/Core/NetPlayClient.cpp:1110
 msgid "Failed to reset NetPlay GCI folder. Verify your write permissions."
 msgstr ""
 "ネットプレイ GCIフォルダのリセットに失敗しました。書き込み権限を確認してくだ"
 "さい"
 
-#: Source/Core/Core/NetPlayClient.cpp:1137
+#: Source/Core/Core/NetPlayClient.cpp:1141
 msgid "Failed to reset NetPlay NAND folder. Verify your write permissions."
 msgstr ""
 "ネットプレイ NANDフォルダのリセットに失敗しました。書き込み権限を確認してくだ"
 "さい"
 
-#: Source/Core/Core/NetPlayClient.cpp:1143
+#: Source/Core/Core/NetPlayClient.cpp:1147
 msgid "Failed to reset NetPlay redirect folder. Verify your write permissions."
 msgstr ""
 "NetPlayリダイレクトフォルダのリセットに失敗しました。書き込み権限を確認してく"
 "ださい。"
 
-#: Source/Core/Core/NetPlayClient.cpp:1173
+#: Source/Core/Core/NetPlayClient.cpp:1177
 msgid "Failed to write Mii data."
 msgstr "Mii データの書き込みに失敗しました。"
 
-#: Source/Core/Core/NetPlayClient.cpp:1258
+#: Source/Core/Core/NetPlayClient.cpp:1262
 msgid "Failed to write Wii save."
 msgstr "Wii セーブデータの書き込みに失敗しました"
 
-#: Source/Core/Core/NetPlayClient.cpp:1271
+#: Source/Core/Core/NetPlayClient.cpp:1275
 msgid "Failed to write redirected save."
 msgstr "リダイレクトセーブの書き込みに失敗しました。"
 
-#: Source/Core/Core/NetPlayClient.cpp:1292
+#: Source/Core/Core/NetPlayClient.cpp:1296
 #, c++-format
 msgid ""
 "Failed to delete NetPlay GBA{0} save file. Verify your write permissions."
@@ -2544,60 +2544,60 @@ msgstr ""
 "NetPlay GBA{0}セーブファイルの削除に失敗しました。書き込み権限を確認してくだ"
 "さい。"
 
-#: Source/Core/Core/NetPlayClient.cpp:1334
+#: Source/Core/Core/NetPlayClient.cpp:1338
 #, c++-format
 msgid "Unknown SYNC_CODES message received with id: {0}"
 msgstr "不明な SYNC_CODES メッセージを id: {0} で受信しました"
 
-#: Source/Core/Core/NetPlayClient.cpp:1367
+#: Source/Core/Core/NetPlayClient.cpp:1371
 msgid "Synchronizing Gecko codes..."
 msgstr "Geckoコードの同期中..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1434
+#: Source/Core/Core/NetPlayClient.cpp:1438
 msgid "Synchronizing AR codes..."
 msgstr "アクションリプレイコードの同期中..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1594
+#: Source/Core/Core/NetPlayClient.cpp:1598
 msgid "Quality of Service (QoS) was successfully enabled."
 msgstr "Quality of Service (QoS) が有効になっています"
 
-#: Source/Core/Core/NetPlayClient.cpp:1598
+#: Source/Core/Core/NetPlayClient.cpp:1602
 msgid "Quality of Service (QoS) couldn't be enabled."
 msgstr "Quality of Service (QoS) は有効になりませんでした"
 
-#: Source/Core/Core/NetPlayClient.cpp:1747
+#: Source/Core/Core/NetPlayClient.cpp:1751
 msgid "Game is already running!"
 msgstr "すでに起動しています！"
 
-#: Source/Core/Core/NetPlayClient.cpp:1821
+#: Source/Core/Core/NetPlayClient.cpp:1825
 msgid "Data received!"
 msgstr "データが受信されました！"
 
-#: Source/Core/Core/NetPlayClient.cpp:1822
+#: Source/Core/Core/NetPlayClient.cpp:1826
 msgid "Error processing data."
 msgstr "データ処理中にエラーが発生しました"
 
-#: Source/Core/Core/NetPlayClient.cpp:1850
+#: Source/Core/Core/NetPlayClient.cpp:1854
 msgid "Error processing codes."
 msgstr "コード処理エラー。"
 
-#: Source/Core/Core/NetPlayClient.cpp:1863
+#: Source/Core/Core/NetPlayClient.cpp:1867
 msgid "Codes received!"
 msgstr "コードを受け取りました！"
 
-#: Source/Core/Core/NetPlayClient.cpp:1977
+#: Source/Core/Core/NetPlayClient.cpp:1981
 msgid "Traversal server timed out connecting to the host"
 msgstr "中継サーバーからホストへの接続がタイムアウト"
 
-#: Source/Core/Core/NetPlayClient.cpp:1980
+#: Source/Core/Core/NetPlayClient.cpp:1984
 msgid "Server rejected traversal attempt"
 msgstr "サーバーが中継処理を拒否しました"
 
-#: Source/Core/Core/NetPlayClient.cpp:1983
+#: Source/Core/Core/NetPlayClient.cpp:1987
 msgid "Invalid host"
 msgstr "このホストコードは無効です"
 
-#: Source/Core/Core/NetPlayClient.cpp:1986
+#: Source/Core/Core/NetPlayClient.cpp:1990
 #, c++-format
 msgid "Unknown error {0:x}"
 msgstr "不明なエラー {0:x}"
@@ -2622,12 +2622,12 @@ msgid "Failed to open file \"{0}\". Verify your write permissions."
 msgstr ""
 "ファイル \"{0}\" のオープンに失敗しました。書き込み権限を確認してください。"
 
-#: Source/Core/Core/NetPlayCommon.cpp:208
-#: Source/Core/Core/NetPlayCommon.cpp:291
+#: Source/Core/Core/NetPlayCommon.cpp:214
+#: Source/Core/Core/NetPlayCommon.cpp:303
 msgid "Internal LZO Error - decompression failed"
 msgstr "Internal LZO Error - compression failed"
 
-#: Source/Core/Core/NetPlayCommon.cpp:214
+#: Source/Core/Core/NetPlayCommon.cpp:220
 #, c++-format
 msgid "Error writing file: {0}"
 msgstr "ファイルの書き込みエラー: {0}"
@@ -2636,16 +2636,16 @@ msgstr "ファイルの書き込みエラー: {0}"
 msgid "Enet Didn't Initialize"
 msgstr "Enet Didn't Initialize"
 
-#: Source/Core/Core/NetPlayServer.cpp:1158
+#: Source/Core/Core/NetPlayServer.cpp:1182
 msgid "All players' saves synchronized."
 msgstr "すべてのプレイヤーのセーブデータは同期されました"
 
-#: Source/Core/Core/NetPlayServer.cpp:1179
+#: Source/Core/Core/NetPlayServer.cpp:1203
 #, c++-format
 msgid "{0} failed to synchronize."
 msgstr "{0} は同期に失敗しました。"
 
-#: Source/Core/Core/NetPlayServer.cpp:1188
+#: Source/Core/Core/NetPlayServer.cpp:1212
 #, c++-format
 msgid ""
 "Unknown SYNC_SAVE_DATA message with id:{0} received from player:{1} Kicking "
@@ -2654,16 +2654,16 @@ msgstr ""
 "不明な SYNC_SAVE_DATA メッセージ、id:{0} を player:{1} から受信しました。プレ"
 "イヤーをキックしています！"
 
-#: Source/Core/Core/NetPlayServer.cpp:1216
+#: Source/Core/Core/NetPlayServer.cpp:1240
 msgid "All players' codes synchronized."
 msgstr "すべてのプレイヤーのチートコードは同期されました"
 
-#: Source/Core/Core/NetPlayServer.cpp:1237
+#: Source/Core/Core/NetPlayServer.cpp:1261
 #, c++-format
 msgid "{0} failed to synchronize codes."
 msgstr "{0} はコードの同期に失敗しました。"
 
-#: Source/Core/Core/NetPlayServer.cpp:1245
+#: Source/Core/Core/NetPlayServer.cpp:1269
 #, c++-format
 msgid ""
 "Unknown SYNC_GECKO_CODES message with id:{0} received from player:{1} "
@@ -2672,30 +2672,30 @@ msgstr ""
 "不明な SYNC_GECKO_CODES メッセージ、id:{0} を player:{1} から受信しました。プ"
 "レイヤーをキックしています！"
 
-#: Source/Core/Core/NetPlayServer.cpp:1253
+#: Source/Core/Core/NetPlayServer.cpp:1277
 #, c++-format
 msgid "Unknown message with id:{0} received from player:{1} Kicking player!"
 msgstr ""
 "プレイヤー:{1} から id:{0} の不明なメッセージを受信しました。プレイヤーをキッ"
 "クしています！"
 
-#: Source/Core/Core/NetPlayServer.cpp:1347
-#: Source/Core/Core/NetPlayServer.cpp:1726
-#: Source/Core/Core/NetPlayServer.cpp:2054
+#: Source/Core/Core/NetPlayServer.cpp:1371
+#: Source/Core/Core/NetPlayServer.cpp:1750
+#: Source/Core/Core/NetPlayServer.cpp:2078
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:485
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:891
 msgid "Selected game doesn't exist in game list!"
 msgstr "選択されたゲームがゲームリストに存在しません！"
 
-#: Source/Core/Core/NetPlayServer.cpp:1511
+#: Source/Core/Core/NetPlayServer.cpp:1535
 msgid "Error collecting save data!"
 msgstr "セーブデータ収集時にエラーが発生しました！"
 
-#: Source/Core/Core/NetPlayServer.cpp:1533
+#: Source/Core/Core/NetPlayServer.cpp:1557
 msgid "Error synchronizing save data!"
 msgstr "セーブデータ同期中にエラー発生！"
 
-#: Source/Core/Core/NetPlayServer.cpp:1547
+#: Source/Core/Core/NetPlayServer.cpp:1571
 msgid "Error synchronizing cheat codes!"
 msgstr "チートコードの同期中にエラーが発生しました！"
 
@@ -2728,11 +2728,11 @@ msgid ""
 "advanced settings to accurately emulate game crashes."
 msgstr ""
 
-#: Source/Core/Core/State.cpp:342
+#: Source/Core/Core/State.cpp:343
 msgid "Internal LZ4 Error - compression failed"
 msgstr "内部 LZ4 エラー - 圧縮に失敗しました"
 
-#: Source/Core/Core/State.cpp:518
+#: Source/Core/Core/State.cpp:519
 #, c++-format
 msgid ""
 "Internal LZO Error - decompression failed ({0}) ({1}) \n"
@@ -2741,7 +2741,7 @@ msgstr ""
 "内部 LZO エラー - 展開に失敗しました ({0}) ({1})\n"
 "古いセーブステートのバージョン情報を取得できません。"
 
-#: Source/Core/Core/State.cpp:531
+#: Source/Core/Core/State.cpp:532
 #, c++-format
 msgid ""
 "Internal LZO Error - failed to parse decompressed version cookie and version "
@@ -2750,7 +2750,7 @@ msgstr ""
 "内部 LZO エラー - 解凍されたバージョンのクッキーとバージョン文字列長 ({0}) の"
 "解析に失敗しました。"
 
-#: Source/Core/Core/State.cpp:546
+#: Source/Core/Core/State.cpp:547
 #, c++-format
 msgid ""
 "Internal LZO Error - failed to parse decompressed version string ({0} / {1})"
@@ -2758,11 +2758,11 @@ msgstr ""
 "内部 LZO エラー - 展開されたバージョンの文字列の解析に失敗しました ({0} / "
 "{1})"
 
-#: Source/Core/Core/State.cpp:614
+#: Source/Core/Core/State.cpp:615
 msgid "Empty"
 msgstr "空き"
 
-#: Source/Core/Core/State.cpp:618 Source/Core/DiscIO/Enums.cpp:62
+#: Source/Core/Core/State.cpp:619 Source/Core/DiscIO/Enums.cpp:62
 #: Source/Core/DiscIO/Enums.cpp:106 Source/Core/DiscIO/Enums.cpp:132
 #: Source/Core/DolphinQt/Config/InfoWidget.cpp:87
 #: Source/Core/DolphinQt/Debugger/NetworkWidget.cpp:48
@@ -2774,17 +2774,17 @@ msgstr "空き"
 msgid "Unknown"
 msgstr "フィルタ無し"
 
-#: Source/Core/Core/State.cpp:652
+#: Source/Core/Core/State.cpp:653
 #, c++-format
 msgid "Internal LZ4 Error - Tried decompressing {0} bytes"
 msgstr "内部 LZ4 エラー - {0} bytesの展開を試行しました"
 
-#: Source/Core/Core/State.cpp:672
+#: Source/Core/Core/State.cpp:673
 #, c++-format
 msgid "Internal LZ4 Error - decompression failed ({0}, {1}, {2})"
 msgstr "内部 LZ4 エラー - 展開に失敗しました ({0}, {1}, {2})"
 
-#: Source/Core/Core/State.cpp:686
+#: Source/Core/Core/State.cpp:687
 #, c++-format
 msgid "Internal LZ4 Error - payload size mismatch ({0} / {1}))"
 msgstr "内部 LZ4 エラー - ペイロードサイズの不一致 ({0} / {1}))"
@@ -3030,15 +3030,15 @@ msgstr "NTSC-K"
 msgid "Unpacking"
 msgstr "復元処理を行っています..."
 
-#: Source/Core/DiscIO/NANDImporter.cpp:59
+#: Source/Core/DiscIO/NANDImporter.cpp:60
 msgid "This file does not look like a BootMii NAND backup."
 msgstr "このファイルはBootMii NANDバックアップではないようです"
 
-#: Source/Core/DiscIO/NANDImporter.cpp:118
+#: Source/Core/DiscIO/NANDImporter.cpp:119
 msgid "This file does not contain a valid Wii filesystem."
 msgstr "このファイルには有効な Wii ファイルシステムが含まれていません。"
 
-#: Source/Core/DiscIO/NANDImporter.cpp:309
+#: Source/Core/DiscIO/NANDImporter.cpp:315
 #, c++-format
 msgid "Unable to write to file {0}"
 msgstr "ファイル {0} に書き込めません"
@@ -14632,7 +14632,6 @@ msgid "Show VBlank Times"
 msgstr "垂直ブランキング期間 (VBlank) 時間を表示"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
-#, c-format
 msgid "Show % Speed"
 msgstr "% 速度を表示する"
 
@@ -14781,7 +14780,6 @@ msgstr ""
 "い。</dolphin_emphasis>"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
-#, c-format
 msgid ""
 "Shows the % speed of emulation compared to full speed."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"

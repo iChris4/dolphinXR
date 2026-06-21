@@ -14,7 +14,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Dolphin Emulator\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-27 20:00+0200\n"
+"POT-Creation-Date: 2026-06-21 21:48+0200\n"
 "PO-Revision-Date: 2013-01-23 13:48+0000\n"
 "Last-Translator: Péter Patkós, 2023-2026\n"
 "Language-Team: Hungarian (http://app.transifex.com/dolphinemu/dolphin-emu/"
@@ -2484,52 +2484,52 @@ msgstr "A szerver egy ismeretlen hibaüzenetet küldött."
 msgid "Unknown message received with id : {0}"
 msgstr "Ismeretlen üzenet érkezett az alábbi azonosítóval: {0}"
 
-#: Source/Core/Core/NetPlayClient.cpp:1035
+#: Source/Core/Core/NetPlayClient.cpp:1039
 #, c++-format
 msgid "Unknown SYNC_SAVE_DATA message received with id: {0}"
 msgstr "Ismeretlen SYNC_SAVE_DATA üzenet érkezett az alábbi azonosítóval: {0}"
 
-#: Source/Core/Core/NetPlayClient.cpp:1050
+#: Source/Core/Core/NetPlayClient.cpp:1054
 msgid "Synchronizing save data..."
 msgstr "Mentett adatok szinkronizálása..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1082
+#: Source/Core/Core/NetPlayClient.cpp:1086
 msgid "Failed to delete NetPlay memory card. Verify your write permissions."
 msgstr ""
 "A NetPlay memóriakártya törlése nem sikerült. Ellenőrizd az írási "
 "jogosultságaidat."
 
-#: Source/Core/Core/NetPlayClient.cpp:1106
+#: Source/Core/Core/NetPlayClient.cpp:1110
 msgid "Failed to reset NetPlay GCI folder. Verify your write permissions."
 msgstr ""
 "A NetPlay GCI mappa visszaállítása sikertelen. Ellenőrizd az írási "
 "jogosultságaidat."
 
-#: Source/Core/Core/NetPlayClient.cpp:1137
+#: Source/Core/Core/NetPlayClient.cpp:1141
 msgid "Failed to reset NetPlay NAND folder. Verify your write permissions."
 msgstr ""
 "A NetPlay NAND mappa visszaállítása sikertelen. Ellenőrizd az írási "
 "jogosultságaidat."
 
-#: Source/Core/Core/NetPlayClient.cpp:1143
+#: Source/Core/Core/NetPlayClient.cpp:1147
 msgid "Failed to reset NetPlay redirect folder. Verify your write permissions."
 msgstr ""
 "A NetPlay átirányítási mappa visszaállítása sikertelen. Ellenőrizd az írási "
 "jogosultságaidat."
 
-#: Source/Core/Core/NetPlayClient.cpp:1173
+#: Source/Core/Core/NetPlayClient.cpp:1177
 msgid "Failed to write Mii data."
 msgstr "Mii adat írása sikertelen."
 
-#: Source/Core/Core/NetPlayClient.cpp:1258
+#: Source/Core/Core/NetPlayClient.cpp:1262
 msgid "Failed to write Wii save."
 msgstr "Wii mentés írása sikertelen."
 
-#: Source/Core/Core/NetPlayClient.cpp:1271
+#: Source/Core/Core/NetPlayClient.cpp:1275
 msgid "Failed to write redirected save."
 msgstr "Átirányított mentés írása sikertelen."
 
-#: Source/Core/Core/NetPlayClient.cpp:1292
+#: Source/Core/Core/NetPlayClient.cpp:1296
 #, c++-format
 msgid ""
 "Failed to delete NetPlay GBA{0} save file. Verify your write permissions."
@@ -2537,60 +2537,60 @@ msgstr ""
 "A NetPlay GBA{0} mentési fájl törlése sikertelen. Ellenőrizd az írási "
 "jogosultságaidat."
 
-#: Source/Core/Core/NetPlayClient.cpp:1334
+#: Source/Core/Core/NetPlayClient.cpp:1338
 #, c++-format
 msgid "Unknown SYNC_CODES message received with id: {0}"
 msgstr "Ismeretlen SYNC_CODES üzenet érkezett az alábbi azonosítóval: {0}"
 
-#: Source/Core/Core/NetPlayClient.cpp:1367
+#: Source/Core/Core/NetPlayClient.cpp:1371
 msgid "Synchronizing Gecko codes..."
 msgstr "Gecko kódok szinkronizálása..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1434
+#: Source/Core/Core/NetPlayClient.cpp:1438
 msgid "Synchronizing AR codes..."
 msgstr "AR kódok szinkronizálása..."
 
-#: Source/Core/Core/NetPlayClient.cpp:1594
+#: Source/Core/Core/NetPlayClient.cpp:1598
 msgid "Quality of Service (QoS) was successfully enabled."
 msgstr "Quality of Service (QoS) sikeresen engedélyezve."
 
-#: Source/Core/Core/NetPlayClient.cpp:1598
+#: Source/Core/Core/NetPlayClient.cpp:1602
 msgid "Quality of Service (QoS) couldn't be enabled."
 msgstr "Quality of Service (QoS) nem engedélyezhető."
 
-#: Source/Core/Core/NetPlayClient.cpp:1747
+#: Source/Core/Core/NetPlayClient.cpp:1751
 msgid "Game is already running!"
 msgstr "A játék már fut!"
 
-#: Source/Core/Core/NetPlayClient.cpp:1821
+#: Source/Core/Core/NetPlayClient.cpp:1825
 msgid "Data received!"
 msgstr "Adatok fogadva!"
 
-#: Source/Core/Core/NetPlayClient.cpp:1822
+#: Source/Core/Core/NetPlayClient.cpp:1826
 msgid "Error processing data."
 msgstr "Adatfeldolgozási hiba."
 
-#: Source/Core/Core/NetPlayClient.cpp:1850
+#: Source/Core/Core/NetPlayClient.cpp:1854
 msgid "Error processing codes."
 msgstr "Kódfeldolgozási hiba."
 
-#: Source/Core/Core/NetPlayClient.cpp:1863
+#: Source/Core/Core/NetPlayClient.cpp:1867
 msgid "Codes received!"
 msgstr "Kódok fogadva!"
 
-#: Source/Core/Core/NetPlayClient.cpp:1977
+#: Source/Core/Core/NetPlayClient.cpp:1981
 msgid "Traversal server timed out connecting to the host"
 msgstr "Időtúllépés az átjárási szerver és a gazda csatlakozásakor"
 
-#: Source/Core/Core/NetPlayClient.cpp:1980
+#: Source/Core/Core/NetPlayClient.cpp:1984
 msgid "Server rejected traversal attempt"
 msgstr "A szerver elutasította az átjárási kérelmet"
 
-#: Source/Core/Core/NetPlayClient.cpp:1983
+#: Source/Core/Core/NetPlayClient.cpp:1987
 msgid "Invalid host"
 msgstr "Érvénytelen gazda"
 
-#: Source/Core/Core/NetPlayClient.cpp:1986
+#: Source/Core/Core/NetPlayClient.cpp:1990
 #, c++-format
 msgid "Unknown error {0:x}"
 msgstr "Ismeretlen hiba {0:x}"
@@ -2615,12 +2615,12 @@ msgid "Failed to open file \"{0}\". Verify your write permissions."
 msgstr ""
 "Fájl megnyitása sikertelen \"{0}\". Ellenőrizd az írási jogosultságaidat."
 
-#: Source/Core/Core/NetPlayCommon.cpp:208
-#: Source/Core/Core/NetPlayCommon.cpp:291
+#: Source/Core/Core/NetPlayCommon.cpp:214
+#: Source/Core/Core/NetPlayCommon.cpp:303
 msgid "Internal LZO Error - decompression failed"
 msgstr "Belső LZO hiba - sikertelen kibontás"
 
-#: Source/Core/Core/NetPlayCommon.cpp:214
+#: Source/Core/Core/NetPlayCommon.cpp:220
 #, c++-format
 msgid "Error writing file: {0}"
 msgstr "Hiba a fájl írása közben: {0}"
@@ -2629,16 +2629,16 @@ msgstr "Hiba a fájl írása közben: {0}"
 msgid "Enet Didn't Initialize"
 msgstr "Enet nincs inicializálva"
 
-#: Source/Core/Core/NetPlayServer.cpp:1158
+#: Source/Core/Core/NetPlayServer.cpp:1182
 msgid "All players' saves synchronized."
 msgstr "Minden játékos mentései szinkronizálva."
 
-#: Source/Core/Core/NetPlayServer.cpp:1179
+#: Source/Core/Core/NetPlayServer.cpp:1203
 #, c++-format
 msgid "{0} failed to synchronize."
 msgstr "{0} szinkronizálása sikertelen."
 
-#: Source/Core/Core/NetPlayServer.cpp:1188
+#: Source/Core/Core/NetPlayServer.cpp:1212
 #, c++-format
 msgid ""
 "Unknown SYNC_SAVE_DATA message with id:{0} received from player:{1} Kicking "
@@ -2647,16 +2647,16 @@ msgstr ""
 "Ismeretlen SYNC_SAVE_DATA üzenet {0} azonosítóval ettől a játékostól:{1}  "
 "Játékos kirúgása!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1216
+#: Source/Core/Core/NetPlayServer.cpp:1240
 msgid "All players' codes synchronized."
 msgstr "Minden játékos kódjai szinkronizálva."
 
-#: Source/Core/Core/NetPlayServer.cpp:1237
+#: Source/Core/Core/NetPlayServer.cpp:1261
 #, c++-format
 msgid "{0} failed to synchronize codes."
 msgstr "{0} kódok szinkronizálása sikertelen."
 
-#: Source/Core/Core/NetPlayServer.cpp:1245
+#: Source/Core/Core/NetPlayServer.cpp:1269
 #, c++-format
 msgid ""
 "Unknown SYNC_GECKO_CODES message with id:{0} received from player:{1} "
@@ -2665,29 +2665,29 @@ msgstr ""
 "Ismeretlen SYNC_GECKO_CODES üzenet {0} azonosítóval ettől a játékostól:{1} "
 "Játékos kirúgása!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1253
+#: Source/Core/Core/NetPlayServer.cpp:1277
 #, c++-format
 msgid "Unknown message with id:{0} received from player:{1} Kicking player!"
 msgstr ""
 "Ismeretlen üzenet {0} azonosítóval ettől a játékostól:{1} Játékos kirúgása!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1347
-#: Source/Core/Core/NetPlayServer.cpp:1726
-#: Source/Core/Core/NetPlayServer.cpp:2054
+#: Source/Core/Core/NetPlayServer.cpp:1371
+#: Source/Core/Core/NetPlayServer.cpp:1750
+#: Source/Core/Core/NetPlayServer.cpp:2078
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:485
 #: Source/Core/DolphinQt/NetPlay/NetPlayDialog.cpp:891
 msgid "Selected game doesn't exist in game list!"
 msgstr "A kiválasztott játék nem létezik a játéklistában!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1511
+#: Source/Core/Core/NetPlayServer.cpp:1535
 msgid "Error collecting save data!"
 msgstr "Hiba a mentett adatok összegyűjtésekor!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1533
+#: Source/Core/Core/NetPlayServer.cpp:1557
 msgid "Error synchronizing save data!"
 msgstr "Hiba a mentett adatok szinkronizálásakor!"
 
-#: Source/Core/Core/NetPlayServer.cpp:1547
+#: Source/Core/Core/NetPlayServer.cpp:1571
 msgid "Error synchronizing cheat codes!"
 msgstr "Hiba a csaláskódok szinkronizálása közben!"
 
@@ -2717,11 +2717,11 @@ msgid ""
 "advanced settings to accurately emulate game crashes."
 msgstr ""
 
-#: Source/Core/Core/State.cpp:342
+#: Source/Core/Core/State.cpp:343
 msgid "Internal LZ4 Error - compression failed"
 msgstr "Belső LZ4 hiba - sikertelen tömörítés"
 
-#: Source/Core/Core/State.cpp:518
+#: Source/Core/Core/State.cpp:519
 #, c++-format
 msgid ""
 "Internal LZO Error - decompression failed ({0}) ({1}) \n"
@@ -2730,24 +2730,24 @@ msgstr ""
 "Belső LZO hiba - sikertelen kibontás ({0}) ({1})\n"
 "Nem sikerült lekérni az elavult savestate verziójának adatait."
 
-#: Source/Core/Core/State.cpp:531
+#: Source/Core/Core/State.cpp:532
 #, c++-format
 msgid ""
 "Internal LZO Error - failed to parse decompressed version cookie and version "
 "string length ({0})"
 msgstr ""
 
-#: Source/Core/Core/State.cpp:546
+#: Source/Core/Core/State.cpp:547
 #, c++-format
 msgid ""
 "Internal LZO Error - failed to parse decompressed version string ({0} / {1})"
 msgstr ""
 
-#: Source/Core/Core/State.cpp:614
+#: Source/Core/Core/State.cpp:615
 msgid "Empty"
 msgstr "Üres"
 
-#: Source/Core/Core/State.cpp:618 Source/Core/DiscIO/Enums.cpp:62
+#: Source/Core/Core/State.cpp:619 Source/Core/DiscIO/Enums.cpp:62
 #: Source/Core/DiscIO/Enums.cpp:106 Source/Core/DiscIO/Enums.cpp:132
 #: Source/Core/DolphinQt/Config/InfoWidget.cpp:87
 #: Source/Core/DolphinQt/Debugger/NetworkWidget.cpp:48
@@ -2759,17 +2759,17 @@ msgstr "Üres"
 msgid "Unknown"
 msgstr "Ismeretlen"
 
-#: Source/Core/Core/State.cpp:652
+#: Source/Core/Core/State.cpp:653
 #, c++-format
 msgid "Internal LZ4 Error - Tried decompressing {0} bytes"
 msgstr ""
 
-#: Source/Core/Core/State.cpp:672
+#: Source/Core/Core/State.cpp:673
 #, c++-format
 msgid "Internal LZ4 Error - decompression failed ({0}, {1}, {2})"
 msgstr "Belső LZ4 hiba - sikertelen kibontás ({0}, {1}, {2})"
 
-#: Source/Core/Core/State.cpp:686
+#: Source/Core/Core/State.cpp:687
 #, c++-format
 msgid "Internal LZ4 Error - payload size mismatch ({0} / {1}))"
 msgstr ""
@@ -3010,15 +3010,15 @@ msgstr "NTSC-K"
 msgid "Unpacking"
 msgstr "Kicsomagolása"
 
-#: Source/Core/DiscIO/NANDImporter.cpp:59
+#: Source/Core/DiscIO/NANDImporter.cpp:60
 msgid "This file does not look like a BootMii NAND backup."
 msgstr "Ez a fájl nem tűnik BootMii NAND biztonsági másolatnak."
 
-#: Source/Core/DiscIO/NANDImporter.cpp:118
+#: Source/Core/DiscIO/NANDImporter.cpp:119
 msgid "This file does not contain a valid Wii filesystem."
 msgstr "Ez a fájl nem tartalmaz érvényes Wii fájlrendszert."
 
-#: Source/Core/DiscIO/NANDImporter.cpp:309
+#: Source/Core/DiscIO/NANDImporter.cpp:315
 #, c++-format
 msgid "Unable to write to file {0}"
 msgstr "Nem sikerült a fájlba írni {0}"
@@ -14098,7 +14098,6 @@ msgid "Show VBlank Times"
 msgstr "VBlank idők megjelenítése"
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:51
-#, c-format
 msgid "Show % Speed"
 msgstr "Sebesség % megjelenítése"
 
@@ -14227,7 +14226,6 @@ msgid ""
 msgstr ""
 
 #: Source/Core/DolphinQt/Settings/OnScreenDisplayPane.cpp:178
-#, c-format
 msgid ""
 "Shows the % speed of emulation compared to full speed."
 "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"
