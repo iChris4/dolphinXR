@@ -101,10 +101,6 @@ void RedumpVerifier::Start(const Volume& volume)
     case DownloadStatus::Success:
       return ScanDatfile(ReadDatfile(system), system);
 
-    case DownloadStatus::SystemNotAvailable:
-      m_result = {Status::Error, Common::GetStringT("Wii data is not public yet")};
-      return {};
-
     case DownloadStatus::Fail:
     default:
       m_result = {Status::Error, Common::GetStringT("Failed to connect to Redump.info")};
@@ -121,7 +117,7 @@ static std::string GetPathForSystem(const std::string& system)
 RedumpVerifier::DownloadStatus RedumpVerifier::DownloadDatfile(const std::string& system,
                                                                DownloadStatus old_status)
 {
-  if (old_status == DownloadStatus::Success || old_status == DownloadStatus::SystemNotAvailable)
+  if (old_status == DownloadStatus::Success)
     return old_status;
 
   Common::HttpRequest request;
@@ -141,13 +137,8 @@ RedumpVerifier::DownloadStatus RedumpVerifier::DownloadDatfile(const std::string
   if (result->size() > 1 && (*result)[0] == '<' && (*result)[1] == '!')
   {
     // This is an HTML page, not a zip file like we want
-
-    if (File::Exists(output_path))
-      return DownloadStatus::FailButOldCacheAvailable;
-
-    const bool system_not_available_match =
-        Common::ContainsSubrange(*result, "System \"" + system + "\" doesn't exist.");
-    return system_not_available_match ? DownloadStatus::SystemNotAvailable : DownloadStatus::Fail;
+    return File::Exists(output_path) ? DownloadStatus::FailButOldCacheAvailable :
+                                       DownloadStatus::Fail;
   }
 
   File::CreateFullPath(output_path);
