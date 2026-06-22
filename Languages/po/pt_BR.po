@@ -3112,13 +3112,13 @@ msgid "Wii data is not public yet"
 msgstr "Dados do Wii ainda não são públicos"
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:110
-msgid "Failed to connect to Redump.org"
-msgstr "Falha na conexão com Redump.org"
+msgid "Failed to connect to Redump.info"
+msgstr "Falha na conexão com Redump.info"
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:222
 #: Source/Core/DiscIO/VolumeVerifier.cpp:321
-msgid "Failed to parse Redump.org data"
-msgstr "Falha ao processar dados do Redump.org"
+msgid "Failed to parse Redump.info data"
+msgstr "Falha ao processar dados do Redump.info"
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:317
 #, c++-format
@@ -3436,10 +3436,10 @@ msgstr "Essa cópia é válida."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1392
 msgid ""
-"This is a good dump according to Redump.org, but Dolphin has found problems. "
+"This is a good dump according to Redump.info, but Dolphin has found problems. "
 "This might be a bug in Dolphin."
 msgstr ""
-"Essa é uma cópia válida do disco de acordo com Redump.org, no entanto o "
+"Essa é uma cópia válida do disco de acordo com Redump.info, no entanto o "
 "Dolphin encontrou problemas. Isso pode ser um bug no Dolphin."
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1400
@@ -7989,8 +7989,8 @@ msgid "SHA-1:"
 msgstr "SHA-1:"
 
 #: Source/Core/DolphinQt/Config/VerifyWidget.cpp:87
-msgid "Redump.org Status:"
-msgstr "Status no Redump.org:"
+msgid "Redump.info Status:"
+msgstr "Status no Redump.info:"
 
 #: Source/Core/DolphinQt/Config/VerifyWidget.cpp:101
 msgid "Verify Integrity"

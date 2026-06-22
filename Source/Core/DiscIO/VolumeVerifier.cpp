@@ -96,7 +96,7 @@ void RedumpVerifier::Start(const Volume& volume)
     switch (download_state->status)
     {
     case DownloadStatus::FailButOldCacheAvailable:
-      ERROR_LOG_FMT(DISCIO, "Failed to fetch data from Redump.org, using old cached data instead");
+      ERROR_LOG_FMT(DISCIO, "Failed to fetch data from Redump.info, using old cached data instead");
       [[fallthrough]];
     case DownloadStatus::Success:
       return ScanDatfile(ReadDatfile(system), system);
@@ -107,7 +107,7 @@ void RedumpVerifier::Start(const Volume& volume)
 
     case DownloadStatus::Fail:
     default:
-      m_result = {Status::Error, Common::GetStringT("Failed to connect to Redump.org")};
+      m_result = {Status::Error, Common::GetStringT("Failed to connect to Redump.info")};
       return {};
     }
   });
@@ -127,7 +127,7 @@ RedumpVerifier::DownloadStatus RedumpVerifier::DownloadDatfile(const std::string
   Common::HttpRequest request;
 
   const std::optional<std::vector<u8>> result =
-      request.Get("http://redump.org/datfile/" + system + "/serial,version",
+      request.Get("https://redump.info/datfile/" + system + "/serial,version",
                   {{"User-Agent", Common::GetScmRevStr()}});
 
   const std::string output_path = GetPathForSystem(system);
@@ -219,7 +219,7 @@ std::vector<RedumpVerifier::PotentialMatch> RedumpVerifier::ScanDatfile(const st
   pugi::xml_document doc;
   if (!doc.load_buffer(data.data(), data.size()))
   {
-    m_result = {Status::Error, Common::GetStringT("Failed to parse Redump.org data")};
+    m_result = {Status::Error, Common::GetStringT("Failed to parse Redump.info data")};
     return {};
   }
 
@@ -317,8 +317,8 @@ std::vector<RedumpVerifier::PotentialMatch> RedumpVerifier::ScanDatfile(const st
         "Serial and/or version data is missing from {0}\n"
         "Please append \"{1}\" (without the quotes) to the datfile URL when downloading\n"
         "Example: {2}",
-        GetPathForSystem(system), "serial,version", "http://redump.org/datfile/gc/serial,version");
-    m_result = {Status::Error, Common::GetStringT("Failed to parse Redump.org data")};
+        GetPathForSystem(system), "serial,version", "http://redump.info/datfile/gc/serial,version");
+    m_result = {Status::Error, Common::GetStringT("Failed to parse Redump.info data")};
     return {};
   }
 
@@ -1389,7 +1389,7 @@ void VolumeVerifier::Finish()
     else
     {
       m_result.summary_text =
-          Common::GetStringT("This is a good dump according to Redump.org, but Dolphin has found "
+          Common::GetStringT("This is a good dump according to Redump.info, but Dolphin has found "
                              "problems. This might be a bug in Dolphin.");
     }
     return;

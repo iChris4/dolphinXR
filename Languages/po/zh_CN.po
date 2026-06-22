@@ -2982,13 +2982,13 @@ msgid "Wii data is not public yet"
 msgstr "Wii 数据尚未公开"
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:110
-msgid "Failed to connect to Redump.org"
-msgstr "连接 Redump.org 失败"
+msgid "Failed to connect to Redump.info"
+msgstr "连接 Redump.info 失败"
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:222
 #: Source/Core/DiscIO/VolumeVerifier.cpp:321
-msgid "Failed to parse Redump.org data"
-msgstr "解析 Redump.org 数据失败"
+msgid "Failed to parse Redump.info data"
+msgstr "解析 Redump.info 数据失败"
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:317
 #, c++-format
@@ -3283,10 +3283,10 @@ msgstr "这是一个正确的转储。"
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1392
 msgid ""
-"This is a good dump according to Redump.org, but Dolphin has found problems. "
+"This is a good dump according to Redump.info, but Dolphin has found problems. "
 "This might be a bug in Dolphin."
 msgstr ""
-"依据 Redump.org，这是一个正确的转储，但 Dolphin 发现了问题。这可能是 Dolphin "
+"依据 Redump.info，这是一个正确的转储，但 Dolphin 发现了问题。这可能是 Dolphin "
 "中的错误。"
 
 #: Source/Core/DiscIO/VolumeVerifier.cpp:1400
@@ -7560,8 +7560,8 @@ msgid "SHA-1:"
 msgstr "SHA-1:"
 
 #: Source/Core/DolphinQt/Config/VerifyWidget.cpp:87
-msgid "Redump.org Status:"
-msgstr "Redump.org 状态："
+msgid "Redump.info Status:"
+msgstr "Redump.info 状态："
 
 #: Source/Core/DolphinQt/Config/VerifyWidget.cpp:101
 msgid "Verify Integrity"
