@@ -128,7 +128,7 @@ RedumpVerifier::DownloadStatus RedumpVerifier::DownloadDatfile(const std::string
 
   const std::optional<std::vector<u8>> result =
       request.Get("https://redump.info/datfile/" + system + "/serial,version",
-                  {{"User-Agent", Common::GetScmRevStr()}});
+                  {{"User-Agent", Common::GetEmulatorName()}});
 
   const std::string output_path = GetPathForSystem(system);
 
