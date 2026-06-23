@@ -403,12 +403,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
   set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};/usr/local")
   set(CMAKE_REQUIRED_INCLUDES "/usr/local/include")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/lib")
-
-  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14.0)
-    # Workaround: the llvm libc++ and versions of clang earlier than 14 have a bug with consteval
-    # so we define FMT_CONSTEVAL to blank to just disable consteval in fmt
-    add_definitions(-DFMT_CONSTEVAL=)
-  endif()
 endif()
 
 # Dolphin requires threads.
