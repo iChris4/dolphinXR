@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "Common/TimeUtil.h"
-#include "Common/Logging/Log.h"
 
+#include <cstring>
 #include <ctime>
 #include <optional>
+
+#include "Common/Logging/Log.h"
 
 namespace Common
 {
