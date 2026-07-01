@@ -458,7 +458,6 @@ if(ANDROID)
     # but not as a shared library. We want an executable.
     set(ANDROID 0)
   endif()
-  set(USE_UPNP 0)
   set(ENABLE_QT 0)
   set(USE_DISCORD_PRESENCE 0)
 
