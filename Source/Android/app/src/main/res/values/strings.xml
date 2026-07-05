@@ -377,7 +377,7 @@
     <string name="wireframe">Enable Wireframe</string>
     <string name="show_stats">Show Statistics</string>
     <string name="show_proj_stats">Show Projection Statistics</string>
-    <string name="show_internal_resolution">Show Internal Resolution</string>
+    <string name="show_internal_resolution">Show XFB Resolution</string>
     <string name="texture_format">Texture Format Overlay</string>
     <string name="validation_layer">Enable API Validation Layers</string>
     <string name="dump_efb">Dump EFB Target</string>

@@ -106,7 +106,7 @@ void OnScreenDisplayPane::CreateLayout()
   m_show_shader_hunting =
       new ConfigBool(tr("Shader Hunting"), Config::GFX_OVERLAY_SHADER_HUNTING);
   m_show_internal_resolution =
-      new ConfigBool(tr("Show Internal Resolution"), Config::GFX_SHOW_INTERNAL_RESOLUTION);
+      new ConfigBool(tr("Show XFB Resolution"), Config::GFX_SHOW_INTERNAL_RESOLUTION);
 
   debug_layout->addWidget(m_show_statistics, 0, 0);
   debug_layout->addWidget(m_show_proj_statistics, 0, 1);
@@ -235,8 +235,8 @@ void OnScreenDisplayPane::AddDescriptions()
                  "shader hash, draw-call filter state, and selected texture hashes."
                  "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static const char TR_SHOW_INTERNAL_RESOLUTION_DESCRIPTION[] =
-      QT_TR_NOOP("Shows the internal resolution in pixels, as a product of "
-                 "width and height. <br><br><dolphin_emphasis>If unsure, leave this "
+      QT_TR_NOOP("Shows the size of the emulated external frame buffer (XFB) in pixels, as a "
+                 "product of width and height.<br><br><dolphin_emphasis>If unsure, leave this "
                  "unchecked.</dolphin_emphasis>");
 
   m_enable_osd->SetDescription(tr(TR_ENABLE_OSD_DESCRIPTION));
