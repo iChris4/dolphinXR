@@ -3,6 +3,8 @@
 
 #include "DolphinQt/ResourcePackManager.h"
 
+#include <string>
+
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QGridLayout>
@@ -243,8 +245,10 @@ void ResourcePackManager::Remove()
   if (box.exec() != QMessageBox::Yes)
     return;
 
+  const std::string selected_pack_path =
+      ResourcePack::GetPacks()[GetResourcePackIndex(items[0])].GetPath();
   Uninstall();
-  File::Delete(ResourcePack::GetPacks()[GetResourcePackIndex(items[0])].GetPath());
+  File::Delete(selected_pack_path);
   RepopulateTable();
 }
 
