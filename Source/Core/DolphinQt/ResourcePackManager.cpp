@@ -17,6 +17,7 @@
 #include "DolphinQt/QtUtils/ModalMessageBox.h"
 #include "DolphinQt/QtUtils/NonDefaultQPushButton.h"
 #include "UICommon/ResourcePack/Manager.h"
+#include "UICommon/ResourcePack/ResourcePack.h"
 
 ResourcePackManager::ResourcePackManager(QWidget* widget) : QDialog(widget)
 {
@@ -245,9 +246,11 @@ void ResourcePackManager::Remove()
   if (box.exec() != QMessageBox::Yes)
     return;
 
-  const std::string selected_pack_path =
-      ResourcePack::GetPacks()[GetResourcePackIndex(items[0])].GetPath();
+  ResourcePack::ResourcePack& selected_pack =
+      ResourcePack::GetPacks()[GetResourcePackIndex(items[0])];
+  const std::string selected_pack_path = selected_pack.GetPath();
   Uninstall();
+  ResourcePack::Remove(selected_pack);
   File::Delete(selected_pack_path);
   RepopulateTable();
 }
