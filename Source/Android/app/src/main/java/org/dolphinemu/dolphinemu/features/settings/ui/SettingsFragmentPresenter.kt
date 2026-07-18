@@ -13,7 +13,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.collection.ArraySet
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.dolphinemu.dolphinemu.BuildConfig
 import org.dolphinemu.dolphinemu.NativeLibrary
@@ -32,29 +36,64 @@ import org.dolphinemu.dolphinemu.features.input.model.view.InputDeviceSetting
 import org.dolphinemu.dolphinemu.features.input.model.view.InputMappingControlSetting
 import org.dolphinemu.dolphinemu.features.input.ui.ProfileDialog
 import org.dolphinemu.dolphinemu.features.input.ui.ProfileDialogPresenter
-import org.dolphinemu.dolphinemu.features.settings.model.*
-import org.dolphinemu.dolphinemu.features.settings.model.view.*
+import org.dolphinemu.dolphinemu.features.settings.model.AbstractBooleanSetting
+import org.dolphinemu.dolphinemu.features.settings.model.AbstractIntSetting
+import org.dolphinemu.dolphinemu.features.settings.model.AchievementModel
 import org.dolphinemu.dolphinemu.features.settings.model.AchievementModel.logout
+import org.dolphinemu.dolphinemu.features.settings.model.AdHocBooleanSetting
+import org.dolphinemu.dolphinemu.features.settings.model.AdHocStringSetting
+import org.dolphinemu.dolphinemu.features.settings.model.BooleanSetting
+import org.dolphinemu.dolphinemu.features.settings.model.FloatSetting
+import org.dolphinemu.dolphinemu.features.settings.model.IntSetting
+import org.dolphinemu.dolphinemu.features.settings.model.PostProcessing
+import org.dolphinemu.dolphinemu.features.settings.model.ScaledIntSetting
+import org.dolphinemu.dolphinemu.features.settings.model.Settings
+import org.dolphinemu.dolphinemu.features.settings.model.StringSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.DateTimeChoiceSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.DirectoryPicker
+import org.dolphinemu.dolphinemu.features.settings.model.view.FilePicker
+import org.dolphinemu.dolphinemu.features.settings.model.view.FloatSliderSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.HeaderSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.HyperLinkHeaderSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.InputStringSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.IntSliderSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.InvertedSwitchSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.LogSwitchSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.PercentSliderSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.RunRunnable
+import org.dolphinemu.dolphinemu.features.settings.model.view.SettingsItem
+import org.dolphinemu.dolphinemu.features.settings.model.view.SettingsSearchResult
+import org.dolphinemu.dolphinemu.features.settings.model.view.SingleChoiceSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.SingleChoiceSettingDynamicDescriptions
+import org.dolphinemu.dolphinemu.features.settings.model.view.StringSingleChoiceSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.SubmenuSetting
+import org.dolphinemu.dolphinemu.features.settings.model.view.SwitchSetting
 import org.dolphinemu.dolphinemu.model.GpuDriverMetadata
-import org.dolphinemu.dolphinemu.utils.*
-import kotlin.collections.ArrayList
+import org.dolphinemu.dolphinemu.utils.BooleanSupplier
+import org.dolphinemu.dolphinemu.utils.EGLHelper
+import org.dolphinemu.dolphinemu.utils.GpuDriverHelper
+import org.dolphinemu.dolphinemu.utils.GpuDriverInstallResult
+import org.dolphinemu.dolphinemu.utils.ThemeHelper
+import org.dolphinemu.dolphinemu.utils.ThreadUtil
+import org.dolphinemu.dolphinemu.utils.WiiUtils
+import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
 
 class SettingsFragmentPresenter(
-    private val fragmentView: SettingsFragmentView,
-    private val context: Context
+    private val fragmentView: SettingsFragmentView, private val context: Context
 ) {
     private lateinit var menuTag: MenuTag
     private var gameId: String? = null
     private var revision = 0
 
     private var settingsList: ArrayList<SettingsItem>? = null
+    private var searchableSettings: List<SearchableSetting>? = null
+    private val searchIndexMutex = Mutex()
+    private var searchIndexGeneration = 0
     private var hasOldControllerSettings = false
-
-    private var serialPort1Type = 0
-    private var controllerNumber = 0
-    private var controllerType = 0
+    private var menuExtras = Bundle()
+    private var shouldUpdateWarnings = true
 
     var gpuDriver: GpuDriverMetadata? = null
     private val libNameSetting: StringSetting = StringSetting.GFX_DRIVER_LIB_NAME
@@ -63,23 +102,11 @@ class SettingsFragmentPresenter(
         this.gameId = gameId
         this.menuTag = menuTag
         this.revision = extras.getInt(ARG_REVISION, 0)
+        menuExtras = Bundle(extras)
 
-        if (menuTag.isGCPadMenu || menuTag.isWiimoteExtensionMenu) {
-            controllerNumber = menuTag.subType
-            controllerType = extras.getInt(ARG_CONTROLLER_TYPE)
-        } else if (menuTag.isWiimoteMenu || menuTag.isWiimoteSubmenu) {
-            controllerNumber = menuTag.subType
-        } else if (menuTag.isSerialPort1Menu) {
-            serialPort1Type = extras.getInt(ARG_SERIALPORT1_TYPE)
-        } else if (
-            menuTag == MenuTag.GRAPHICS
-            && this.gameId.isNullOrEmpty()
-            && NativeLibrary.IsUninitialized()
-            && GpuDriverHelper.supportsCustomDriverLoading()
-        ) {
-            this.gpuDriver =
-                GpuDriverHelper.getInstalledDriverMetadata()
-                    ?: GpuDriverHelper.getSystemDriverMetadata(context.applicationContext)
+        if (menuTag == MenuTag.GRAPHICS && this.gameId.isNullOrEmpty() && NativeLibrary.IsUninitialized() && GpuDriverHelper.supportsCustomDriverLoading()) {
+            this.gpuDriver = GpuDriverHelper.getInstalledDriverMetadata()
+                ?: GpuDriverHelper.getSystemDriverMetadata(context.applicationContext)
         }
     }
 
@@ -105,133 +132,259 @@ class SettingsFragmentPresenter(
         }
 
     fun loadSettingsList() {
-        val sl = ArrayList<SettingsItem>()
-        when (menuTag) {
-            MenuTag.SETTINGS -> addTopLevelSettings(sl)
-            MenuTag.CONFIG -> addConfigSettings(sl)
-            MenuTag.CONFIG_GENERAL -> addGeneralSettings(sl)
-            MenuTag.CONFIG_INTERFACE -> addInterfaceSettings(sl)
-            MenuTag.CONFIG_AUDIO -> addAudioSettings(sl)
-            MenuTag.CONFIG_PATHS -> addPathsSettings(sl)
-            MenuTag.CONFIG_GAME_CUBE -> addGameCubeSettings(sl)
-            MenuTag.CONFIG_WII -> addWiiSettings(sl)
-            MenuTag.CONFIG_ACHIEVEMENTS -> addAchievementSettings(sl);
-            MenuTag.CONFIG_ADVANCED -> addAdvancedSettings(sl)
-            MenuTag.GRAPHICS -> addGraphicsSettings(sl)
-            MenuTag.CONFIG_SERIALPORT1 -> addSerialPortSubSettings(sl, serialPort1Type)
-            MenuTag.GCPAD_TYPE -> addGcPadSettings(sl)
-            MenuTag.WIIMOTE -> addWiimoteSettings(sl)
-            MenuTag.ENHANCEMENTS -> addEnhanceSettings(sl)
-            MenuTag.COLOR_CORRECTION -> addColorCorrectionSettings(sl)
-            MenuTag.OPENXR -> addOpenXrSettings(sl)
-            MenuTag.STEREOSCOPY -> addStereoSettings(sl)
-            MenuTag.HACKS -> addHackSettings(sl)
-            MenuTag.STATISTICS -> addStatisticsSettings(sl)
-            MenuTag.ADVANCED_GRAPHICS -> addAdvancedGraphicsSettings(sl)
-            MenuTag.QUEST_HIDE_OBJECTS -> addQuestOverrideSettings(
-                sl,
-                QuestGameOverrideSettings.Category.HIDE_OBJECTS
-            )
-            MenuTag.QUEST_SHADER_OVERRIDES -> addQuestOverrideSettings(
-                sl,
-                QuestGameOverrideSettings.Category.SHADER_OVERRIDES
-            )
-            MenuTag.QUEST_ELEMENTS_GROUP_OVERRIDES -> addQuestOverrideSettings(
-                sl,
-                QuestGameOverrideSettings.Category.ELEMENTS_GROUP_OVERRIDES
-            )
-            MenuTag.QUEST_TEXTURE_ELEMENT_OVERRIDES -> addQuestOverrideSettings(
-                sl,
-                QuestGameOverrideSettings.Category.TEXTURE_ELEMENT_OVERRIDES
-            )
-            MenuTag.QUEST_VR_CAMERA -> addQuestVrCameraSettings(sl)
-            MenuTag.QUEST_VR_VIRTUAL_SCREEN -> addQuestVrVirtualScreenSettings(sl)
-            MenuTag.QUEST_VR_RENDERING -> addQuestVrRenderingSettings(sl)
-            MenuTag.QUEST_VR_FRAMERATE -> addQuestVrFramerateSettings(sl)
-            MenuTag.QUEST_VR_HACKS -> addQuestVrHackSettings(sl)
-            MenuTag.QUEST_VR_PASSTHROUGH -> addQuestVrPassthroughSettings(sl)
-            MenuTag.QUEST_VR_DEBUG -> addQuestVrDebugSettings(sl)
-            MenuTag.QUEST_VR_CONFIG -> addQuestGameVrConfigSettings(sl)
-            MenuTag.QUEST_VR_CONFIG_CAMERA -> addQuestGameVrCameraSettings(sl)
-            MenuTag.QUEST_VR_CONFIG_VIRTUAL_SCREEN -> addQuestGameVrVirtualScreenSettings(sl)
-            MenuTag.QUEST_VR_CONFIG_RENDERING -> addQuestGameVrRenderingSettings(sl)
-            MenuTag.QUEST_VR_CONFIG_FRAMERATE -> addQuestGameVrFramerateSettings(sl)
-            MenuTag.QUEST_VR_CONFIG_HACKS -> addQuestGameVrHackSettings(sl)
-            MenuTag.QUEST_VR_CONFIG_PASSTHROUGH -> addQuestGameVrPassthroughSettings(sl)
-            MenuTag.QUEST_VR_CONFIG_DEBUG -> addQuestGameVrDebugSettings(sl)
-            MenuTag.CONFIG_LOG -> addLogConfigurationSettings(sl)
-            MenuTag.DEBUG -> addDebugSettings(sl)
-            MenuTag.GCPAD_1,
-            MenuTag.GCPAD_2,
-            MenuTag.GCPAD_3,
-            MenuTag.GCPAD_4 -> addGcPadSubSettings(
-                sl,
-                controllerNumber,
-                controllerType
-            )
+        invalidateSearchIndex()
+        settingsList = tryBuildSettingsList(menuTag, menuExtras, true)
+            ?: throw UnsupportedOperationException("Unimplemented menu")
+        fragmentView.showSettingsList(settingsList!!)
+    }
 
-            MenuTag.WIIMOTE_1,
-            MenuTag.WIIMOTE_2,
-            MenuTag.WIIMOTE_3,
-            MenuTag.WIIMOTE_4 -> addWiimoteSubSettings(
-                sl,
-                controllerNumber
-            )
+    fun getSettingsList(): ArrayList<SettingsItem> = settingsList ?: arrayListOf()
 
-            MenuTag.WIIMOTE_EXTENSION_1,
-            MenuTag.WIIMOTE_EXTENSION_2,
-            MenuTag.WIIMOTE_EXTENSION_3,
-            MenuTag.WIIMOTE_EXTENSION_4 -> addExtensionTypeSettings(
-                sl,
-                controllerNumber,
-                controllerType
-            )
+    suspend fun prepareSearchIndex() {
+        getSearchIndex()
+    }
 
-            MenuTag.WIIMOTE_GENERAL_1,
-            MenuTag.WIIMOTE_GENERAL_2,
-            MenuTag.WIIMOTE_GENERAL_3,
-            MenuTag.WIIMOTE_GENERAL_4 -> addWiimoteGeneralSubSettings(
-                sl,
-                controllerNumber
-            )
-
-            MenuTag.WIIMOTE_MOTION_SIMULATION_1,
-            MenuTag.WIIMOTE_MOTION_SIMULATION_2,
-            MenuTag.WIIMOTE_MOTION_SIMULATION_3,
-            MenuTag.WIIMOTE_MOTION_SIMULATION_4 -> addWiimoteMotionSimulationSubSettings(
-                sl,
-                controllerNumber
-            )
-
-            MenuTag.WIIMOTE_MOTION_INPUT_1,
-            MenuTag.WIIMOTE_MOTION_INPUT_2,
-            MenuTag.WIIMOTE_MOTION_INPUT_3,
-            MenuTag.WIIMOTE_MOTION_INPUT_4 -> addWiimoteMotionInputSubSettings(
-                sl,
-                controllerNumber
-            )
-
-            MenuTag.HOTKEYS -> addHotkeySettings(sl)
-
-            MenuTag.HOTKEYS_GENERAL,
-            MenuTag.HOTKEYS_TAS,
-            MenuTag.HOTKEYS_DEBUGGING,
-            MenuTag.HOTKEYS_WII,
-            MenuTag.HOTKEYS_CONTROLLER_PROFILE,
-            MenuTag.HOTKEYS_GRAPHICS,
-            MenuTag.HOTKEYS_VR,
-            MenuTag.HOTKEYS_3D,
-            MenuTag.HOTKEYS_SAVE_STATES,
-            MenuTag.HOTKEYS_STATES_OTHER,
-            MenuTag.HOTKEYS_GBA,
-            MenuTag.HOTKEYS_USB,
-            MenuTag.HOTKEYS_ANDROID -> addHotkeyCategorySettings(sl, menuTag)
-
-            else -> throw UnsupportedOperationException("Unimplemented menu")
+    suspend fun searchSettings(query: String): ArrayList<SettingsItem> {
+        val normalizedQuery = query.trim().lowercase(Locale.ROOT)
+        if (normalizedQuery.isEmpty()) {
+            return getSettingsList()
         }
 
-        settingsList = sl
-        fragmentView.showSettingsList(settingsList!!)
+        val terms = normalizedQuery.split(Regex("\\s+"))
+        val index = getSearchIndex()
+        return withContext(Dispatchers.Default) {
+            index.asSequence()
+                .filter { setting -> terms.all(setting.normalizedSearchText::contains) }
+                .map { setting ->
+                    val score = when {
+                        setting.normalizedName == normalizedQuery -> 0
+                        setting.normalizedName.startsWith(normalizedQuery) -> 1
+                        terms.all(setting.normalizedName::contains) -> 2
+                        setting.normalizedCategory.contains(normalizedQuery) -> 3
+                        else -> 4
+                    }
+                    score to SettingsSearchResult(
+                        setting.name,
+                        setting.description,
+                        setting.menuTag,
+                        setting.position,
+                        setting.navigationExtras
+                    )
+                }
+                .sortedWith(compareBy<Pair<Int, SettingsSearchResult>> { it.first }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.second.name.toString() })
+                .mapTo(ArrayList()) { it.second }
+        }
+    }
+
+    private suspend fun getSearchIndex(): List<SearchableSetting> {
+        return searchIndexMutex.withLock {
+            searchableSettings?.let { return@withLock it }
+
+            val generation = searchIndexGeneration
+            val index = withContext(Dispatchers.IO) {
+                buildSearchIndex()
+            }
+            if (generation == searchIndexGeneration) {
+                searchableSettings = index
+            }
+            index
+        }
+    }
+
+    private suspend fun buildSearchIndex(): List<SearchableSetting> {
+        return getSearchableMenus().flatMap { searchableMenu ->
+            currentCoroutineContext().ensureActive()
+            searchableMenu.settings.withIndex().asSequence()
+                .filterNot { it.value is HeaderSetting || it.value is SubmenuSetting }
+                .map { indexedItem ->
+                    val item = indexedItem.value
+                    val name = item.name.toString()
+                    val description = item.description.toString()
+                    SearchableSetting(
+                        name = name,
+                        description = searchableMenu.category,
+                        menuTag = searchableMenu.menuTag,
+                        navigationExtras = searchableMenu.navigationExtras,
+                        position = indexedItem.index,
+                        normalizedName = name.lowercase(Locale.ROOT),
+                        normalizedCategory = searchableMenu.category.lowercase(Locale.ROOT),
+                        normalizedSearchText = "$name $description ${searchableMenu.category}".lowercase(
+                            Locale.ROOT
+                        )
+                    )
+                }.toList()
+        }
+    }
+
+    fun invalidateSearchIndex() {
+        searchableSettings = null
+        searchIndexGeneration++
+    }
+
+    private suspend fun getSearchableMenus(): List<SearchableMenu> {
+        val menus = mutableListOf<SearchableMenu>()
+        val visitedMenus = mutableSetOf<String>()
+
+        suspend fun visitMenu(
+            menuTag: MenuTag,
+            category: String,
+            navigationExtras: Bundle? = null,
+            actionValue: Int? = null
+        ) {
+            currentCoroutineContext().ensureActive()
+            if (!visitedMenus.add("$menuTag:$actionValue")) {
+                return
+            }
+
+            val items = tryBuildSettingsList(menuTag, navigationExtras ?: Bundle(), false) ?: return
+            if (menuTag != MenuTag.SETTINGS) {
+                menus += SearchableMenu(menuTag, category, navigationExtras, items)
+            }
+
+            suspend fun visitMenuAction(
+                childMenuTag: MenuTag?, selectedValue: Int, childCategory: String
+            ) {
+                if (childMenuTag != null && fragmentView.hasMenuTagActionForValue(
+                        childMenuTag, selectedValue
+                    )
+                ) {
+                    visitMenu(
+                        childMenuTag,
+                        childCategory,
+                        fragmentView.getMenuTagActionExtras(childMenuTag, selectedValue),
+                        selectedValue
+                    )
+                }
+            }
+
+            for (item in items) {
+                currentCoroutineContext().ensureActive()
+                val childCategory = if (category.isEmpty()) item.name.toString()
+                else context.getString(
+                    R.string.search_settings_category_path, category, item.name
+                )
+
+                when (item) {
+                    is SubmenuSetting -> visitMenu(item.menuKey, childCategory)
+                    is SingleChoiceSetting -> {
+                        visitMenuAction(item.menuTag, item.selectedValue, childCategory)
+                    }
+
+                    is StringSingleChoiceSetting -> {
+                        visitMenuAction(item.menuTag, item.selectedValueIndex, childCategory)
+                    }
+                }
+            }
+        }
+
+        visitMenu(MenuTag.SETTINGS, "")
+        return menus
+    }
+
+    private fun tryBuildSettingsList(
+        targetMenuTag: MenuTag, extras: Bundle, updateWarnings: Boolean
+    ): ArrayList<SettingsItem>? {
+        val sl = ArrayList<SettingsItem>()
+        var isSupportedMenu = true
+        val previousMenuTag = menuTag
+        val previousShouldUpdateWarnings = shouldUpdateWarnings
+        menuTag = targetMenuTag
+        shouldUpdateWarnings = updateWarnings
+        try {
+            when (targetMenuTag) {
+                MenuTag.SETTINGS -> addTopLevelSettings(sl)
+                MenuTag.CONFIG -> addConfigSettings(sl)
+                MenuTag.CONFIG_GENERAL -> addGeneralSettings(sl)
+                MenuTag.CONFIG_INTERFACE -> addInterfaceSettings(sl)
+                MenuTag.CONFIG_AUDIO -> addAudioSettings(sl)
+                MenuTag.CONFIG_PATHS -> addPathsSettings(sl)
+                MenuTag.CONFIG_GAME_CUBE -> addGameCubeSettings(sl)
+                MenuTag.CONFIG_WII -> addWiiSettings(sl)
+                MenuTag.CONFIG_ACHIEVEMENTS -> addAchievementSettings(sl)
+                MenuTag.CONFIG_ADVANCED -> addAdvancedSettings(sl)
+                MenuTag.GRAPHICS -> addGraphicsSettings(sl)
+                MenuTag.CONFIG_SERIALPORT1 -> addSerialPortSubSettings(
+                    sl, extras.getInt(ARG_SERIALPORT1_TYPE)
+                )
+
+                MenuTag.GCPAD_TYPE -> addGcPadSettings(sl)
+                MenuTag.WIIMOTE -> addWiimoteSettings(sl)
+                MenuTag.ENHANCEMENTS -> addEnhanceSettings(sl)
+                MenuTag.COLOR_CORRECTION -> addColorCorrectionSettings(sl)
+                MenuTag.STEREOSCOPY -> addStereoSettings(sl)
+                MenuTag.HACKS -> addHackSettings(sl)
+                MenuTag.STATISTICS -> addStatisticsSettings(sl)
+                MenuTag.ADVANCED_GRAPHICS -> addAdvancedGraphicsSettings(sl)
+                MenuTag.CONFIG_LOG -> addLogConfigurationSettings(sl)
+                MenuTag.DEBUG -> addDebugSettings(sl)
+                MenuTag.GCPAD_1, MenuTag.GCPAD_2, MenuTag.GCPAD_3, MenuTag.GCPAD_4 -> addGcPadSubSettings(
+                    sl, targetMenuTag.subType, extras.getInt(ARG_CONTROLLER_TYPE)
+                )
+
+                MenuTag.WIIMOTE_1, MenuTag.WIIMOTE_2, MenuTag.WIIMOTE_3, MenuTag.WIIMOTE_4 -> addWiimoteSubSettings(
+                    sl, targetMenuTag.subType
+                )
+
+                MenuTag.WIIMOTE_EXTENSION_1, MenuTag.WIIMOTE_EXTENSION_2, MenuTag.WIIMOTE_EXTENSION_3, MenuTag.WIIMOTE_EXTENSION_4 -> addExtensionTypeSettings(
+                    sl, targetMenuTag.subType, extras.getInt(ARG_CONTROLLER_TYPE)
+                )
+
+                MenuTag.WIIMOTE_GENERAL_1, MenuTag.WIIMOTE_GENERAL_2, MenuTag.WIIMOTE_GENERAL_3, MenuTag.WIIMOTE_GENERAL_4 -> addWiimoteGeneralSubSettings(
+                    sl, targetMenuTag.subType
+                )
+
+                MenuTag.WIIMOTE_MOTION_SIMULATION_1, MenuTag.WIIMOTE_MOTION_SIMULATION_2, MenuTag.WIIMOTE_MOTION_SIMULATION_3, MenuTag.WIIMOTE_MOTION_SIMULATION_4 -> addWiimoteMotionSimulationSubSettings(
+                    sl, targetMenuTag.subType
+                )
+
+                MenuTag.WIIMOTE_MOTION_INPUT_1, MenuTag.WIIMOTE_MOTION_INPUT_2, MenuTag.WIIMOTE_MOTION_INPUT_3, MenuTag.WIIMOTE_MOTION_INPUT_4 -> addWiimoteMotionInputSubSettings(
+                    sl, targetMenuTag.subType
+                )
+
+                MenuTag.OPENXR -> addOpenXrSettings(sl)
+                MenuTag.QUEST_HIDE_OBJECTS -> addQuestOverrideSettings(
+                    sl, QuestGameOverrideSettings.Category.HIDE_OBJECTS
+                )
+
+                MenuTag.QUEST_SHADER_OVERRIDES -> addQuestOverrideSettings(
+                    sl, QuestGameOverrideSettings.Category.SHADER_OVERRIDES
+                )
+
+                MenuTag.QUEST_ELEMENTS_GROUP_OVERRIDES -> addQuestOverrideSettings(
+                    sl, QuestGameOverrideSettings.Category.ELEMENTS_GROUP_OVERRIDES
+                )
+
+                MenuTag.QUEST_TEXTURE_ELEMENT_OVERRIDES -> addQuestOverrideSettings(
+                    sl, QuestGameOverrideSettings.Category.TEXTURE_ELEMENT_OVERRIDES
+                )
+
+                MenuTag.QUEST_VR_CAMERA -> addQuestVrCameraSettings(sl)
+                MenuTag.QUEST_VR_VIRTUAL_SCREEN -> addQuestVrVirtualScreenSettings(sl)
+                MenuTag.QUEST_VR_RENDERING -> addQuestVrRenderingSettings(sl)
+                MenuTag.QUEST_VR_FRAMERATE -> addQuestVrFramerateSettings(sl)
+                MenuTag.QUEST_VR_HACKS -> addQuestVrHackSettings(sl)
+                MenuTag.QUEST_VR_PASSTHROUGH -> addQuestVrPassthroughSettings(sl)
+                MenuTag.QUEST_VR_DEBUG -> addQuestVrDebugSettings(sl)
+                MenuTag.QUEST_VR_CONFIG -> addQuestGameVrConfigSettings(sl)
+                MenuTag.QUEST_VR_CONFIG_CAMERA -> addQuestGameVrCameraSettings(sl)
+                MenuTag.QUEST_VR_CONFIG_VIRTUAL_SCREEN -> addQuestGameVrVirtualScreenSettings(sl)
+                MenuTag.QUEST_VR_CONFIG_RENDERING -> addQuestGameVrRenderingSettings(sl)
+                MenuTag.QUEST_VR_CONFIG_FRAMERATE -> addQuestGameVrFramerateSettings(sl)
+                MenuTag.QUEST_VR_CONFIG_HACKS -> addQuestGameVrHackSettings(sl)
+                MenuTag.QUEST_VR_CONFIG_PASSTHROUGH -> addQuestGameVrPassthroughSettings(sl)
+                MenuTag.QUEST_VR_CONFIG_DEBUG -> addQuestGameVrDebugSettings(sl)
+                MenuTag.HOTKEYS -> addHotkeySettings(sl)
+                MenuTag.HOTKEYS_GENERAL, MenuTag.HOTKEYS_TAS, MenuTag.HOTKEYS_DEBUGGING, MenuTag.HOTKEYS_WII, MenuTag.HOTKEYS_CONTROLLER_PROFILE, MenuTag.HOTKEYS_GRAPHICS, MenuTag.HOTKEYS_VR, MenuTag.HOTKEYS_3D, MenuTag.HOTKEYS_SAVE_STATES, MenuTag.HOTKEYS_STATES_OTHER, MenuTag.HOTKEYS_GBA, MenuTag.HOTKEYS_USB, MenuTag.HOTKEYS_ANDROID -> addHotkeyCategorySettings(
+                    sl, targetMenuTag
+                )
+
+                else -> isSupportedMenu = false
+            }
+        } finally {
+            menuTag = previousMenuTag
+            shouldUpdateWarnings = previousShouldUpdateWarnings
+        }
+        return if (isSupportedMenu) sl else null
     }
 
     private fun addTopLevelSettings(sl: ArrayList<SettingsItem>) {
@@ -287,9 +440,9 @@ class SettingsFragmentPresenter(
         sl.add(SubmenuSetting(context, R.string.log_submenu, MenuTag.CONFIG_LOG))
         sl.add(SubmenuSetting(context, R.string.debug_submenu, MenuTag.DEBUG))
         sl.add(
-            RunRunnable(context, R.string.user_data_submenu, 0, 0, 0, false)
-            { UserDataActivity.launch(context) }
-        )
+            RunRunnable(
+                context, R.string.user_data_submenu, 0, 0, 0, false
+            ) { UserDataActivity.launch(context) })
     }
 
     private fun addGeneralSettings(sl: ArrayList<SettingsItem>) {
@@ -303,10 +456,7 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_ENABLE_CHEATS,
-                R.string.enable_cheats,
-                0
+                context, BooleanSetting.MAIN_ENABLE_CHEATS, R.string.enable_cheats, 0
             )
         )
         sl.add(
@@ -319,10 +469,7 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_AUTO_DISC_CHANGE,
-                R.string.auto_disc_change,
-                0
+                context, BooleanSetting.MAIN_AUTO_DISC_CHANGE, R.string.auto_disc_change, 0
             )
         )
         sl.add(
@@ -350,10 +497,7 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_ANALYTICS_ENABLED,
-                R.string.analytics,
-                0
+                context, BooleanSetting.MAIN_ANALYTICS_ENABLED, R.string.analytics, 0
             )
         )
         sl.add(
@@ -364,8 +508,7 @@ class SettingsFragmentPresenter(
                 R.string.analytics_new_id_confirmation,
                 0,
                 true
-            ) { NativeLibrary.GenerateNewStatisticsId() }
-        )
+            ) { NativeLibrary.GenerateNewStatisticsId() })
         sl.add(
             SwitchSetting(
                 context,
@@ -380,8 +523,9 @@ class SettingsFragmentPresenter(
         // Hide the orientation setting if the device only supports one orientation. Old devices which
         // support both portrait and landscape may report support for neither, so we use ==, not &&.
         val packageManager = context.packageManager
-        if (packageManager.hasSystemFeature(PackageManager.FEATURE_SCREEN_PORTRAIT) ==
-            packageManager.hasSystemFeature(PackageManager.FEATURE_SCREEN_LANDSCAPE)
+        if (packageManager.hasSystemFeature(PackageManager.FEATURE_SCREEN_PORTRAIT) == packageManager.hasSystemFeature(
+                PackageManager.FEATURE_SCREEN_LANDSCAPE
+            )
         ) {
             sl.add(
                 SingleChoiceSetting(
@@ -450,8 +594,7 @@ class SettingsFragmentPresenter(
             override fun setInt(settings: Settings, newValue: Int) {
                 IntSetting.MAIN_INTERFACE_THEME.setInt(settings, newValue)
                 ThemeHelper.saveTheme(
-                    (fragmentView.fragmentActivity as AppCompatActivity),
-                    newValue
+                    (fragmentView.fragmentActivity as AppCompatActivity), newValue
                 )
             }
         }
@@ -499,8 +642,7 @@ class SettingsFragmentPresenter(
             override fun setInt(settings: Settings, newValue: Int) {
                 IntSetting.MAIN_INTERFACE_THEME_MODE.setInt(settings, newValue)
                 ThemeHelper.saveThemeMode(
-                    (fragmentView.fragmentActivity as AppCompatActivity),
-                    newValue
+                    (fragmentView.fragmentActivity as AppCompatActivity), newValue
                 )
             }
         }
@@ -533,8 +675,7 @@ class SettingsFragmentPresenter(
             override fun setBoolean(settings: Settings, newValue: Boolean) {
                 BooleanSetting.MAIN_USE_BLACK_BACKGROUNDS.setBoolean(settings, newValue)
                 ThemeHelper.saveBackgroundSetting(
-                    (fragmentView.fragmentActivity as AppCompatActivity),
-                    newValue
+                    (fragmentView.fragmentActivity as AppCompatActivity), newValue
                 )
             }
         }
@@ -583,17 +724,16 @@ class SettingsFragmentPresenter(
             }
 
             override val isOverridden: Boolean
-                get() = BooleanSetting.MAIN_DSP_HLE.isOverridden ||
-                        BooleanSetting.MAIN_DSP_JIT.isOverridden
+                get() = BooleanSetting.MAIN_DSP_HLE.isOverridden || BooleanSetting.MAIN_DSP_JIT.isOverridden
 
             override val isRuntimeEditable: Boolean
-                get() = BooleanSetting.MAIN_DSP_HLE.isRuntimeEditable &&
-                        BooleanSetting.MAIN_DSP_JIT.isRuntimeEditable
+                get() = BooleanSetting.MAIN_DSP_HLE.isRuntimeEditable && BooleanSetting.MAIN_DSP_JIT.isRuntimeEditable
 
             override fun delete(settings: Settings): Boolean {
                 // Not short circuiting
-                return BooleanSetting.MAIN_DSP_HLE.delete(settings) and
-                        BooleanSetting.MAIN_DSP_JIT.delete(settings)
+                return BooleanSetting.MAIN_DSP_HLE.delete(settings) and BooleanSetting.MAIN_DSP_JIT.delete(
+                    settings
+                )
             }
         }
 
@@ -648,14 +788,7 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             IntSliderSetting(
-                context,
-                IntSetting.MAIN_AUDIO_VOLUME,
-                R.string.audio_volume,
-                0,
-                0,
-                100,
-                "%",
-                1
+                context, IntSetting.MAIN_AUDIO_VOLUME, R.string.audio_volume, 0, 0, 100, "%", 1
             )
         )
     }
@@ -663,10 +796,7 @@ class SettingsFragmentPresenter(
     private fun addPathsSettings(sl: ArrayList<SettingsItem>) {
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_RECURSIVE_ISO_PATHS,
-                R.string.search_subfolders,
-                0
+                context, BooleanSetting.MAIN_RECURSIVE_ISO_PATHS, R.string.search_subfolders, 0
             )
         )
         sl.add(
@@ -884,10 +1014,7 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_ALLOW_SD_WRITES,
-                R.string.wii_sd_card_allow_writes,
-                0
+                context, BooleanSetting.MAIN_ALLOW_SD_WRITES, R.string.wii_sd_card_allow_writes, 0
             )
         )
         sl.add(
@@ -929,8 +1056,7 @@ class SettingsFragmentPresenter(
                 R.string.wii_sd_card_folder_to_file_confirmation,
                 0,
                 false
-            ) { convertOnThread { WiiUtils.syncSdFolderToSdImage() } }
-        )
+            ) { convertOnThread { WiiUtils.syncSdFolderToSdImage() } })
         sl.add(
             RunRunnable(
                 context,
@@ -939,16 +1065,12 @@ class SettingsFragmentPresenter(
                 R.string.wii_sd_card_file_to_folder_confirmation,
                 0,
                 false
-            ) { convertOnThread { WiiUtils.syncSdImageToSdFolder() } }
-        )
+            ) { convertOnThread { WiiUtils.syncSdImageToSdFolder() } })
 
         sl.add(HeaderSetting(context, R.string.wii_wiimote_settings, 0))
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.SYSCONF_WIIMOTE_MOTOR,
-                R.string.wiimote_rumble,
-                0
+                context, BooleanSetting.SYSCONF_WIIMOTE_MOTOR, R.string.wiimote_rumble, 0
             )
         )
         sl.add(
@@ -1021,18 +1143,12 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_EMULATE_WII_SPEAK,
-                R.string.emulate_wii_speak,
-                0
+                context, BooleanSetting.MAIN_EMULATE_WII_SPEAK, R.string.emulate_wii_speak, 0
             )
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_WII_SPEAK_MUTED,
-                R.string.mute_wii_speak,
-                0
+                context, BooleanSetting.MAIN_WII_SPEAK_MUTED, R.string.mute_wii_speak, 0
             )
         )
     }
@@ -1044,10 +1160,8 @@ class SettingsFragmentPresenter(
 
             override fun setBoolean(settings: Settings, newValue: Boolean) {
                 BooleanSetting.ACHIEVEMENTS_ENABLED.setBoolean(settings, newValue)
-                if (newValue)
-                    AchievementModel.init()
-                else
-                    AchievementModel.shutdown()
+                if (newValue) AchievementModel.init()
+                else AchievementModel.shutdown()
                 loadSettingsList()
             }
 
@@ -1067,38 +1181,25 @@ class SettingsFragmentPresenter(
 
         sl.add(
             SwitchSetting(
-                context,
-                achievementsEnabledSetting,
-                R.string.achievements_enabled,
-                0
+                context, achievementsEnabledSetting, R.string.achievements_enabled, 0
             )
         )
         if (BooleanSetting.ACHIEVEMENTS_ENABLED.boolean) {
             if (StringSetting.ACHIEVEMENTS_API_TOKEN.string == "") {
                 sl.add(
                     RunRunnable(
-                        context,
-                        R.string.achievements_login,
-                        0,
-                        0,
-                        0,
-                        false
+                        context, R.string.achievements_login, 0, 0, 0, false
                     ) {
-                      fragmentView.showDialogFragment(LoginDialog(this))
-                      loadSettingsList()
+                        fragmentView.showDialogFragment(LoginDialog(this))
+                        loadSettingsList()
                     })
             } else {
                 sl.add(
                     RunRunnable(
-                        context,
-                        R.string.achievements_logout,
-                        0,
-                        0,
-                        0,
-                        false
+                        context, R.string.achievements_logout, 0, 0, 0, false
                     ) {
-                      logout()
-                      loadSettingsList()
+                        logout()
+                        loadSettingsList()
                     })
             }
             sl.add(
@@ -1194,17 +1295,16 @@ class SettingsFragmentPresenter(
             }
 
             override val isOverridden: Boolean
-                get() = BooleanSetting.MAIN_SYNC_ON_SKIP_IDLE.isOverridden ||
-                        BooleanSetting.MAIN_SYNC_GPU.isOverridden
+                get() = BooleanSetting.MAIN_SYNC_ON_SKIP_IDLE.isOverridden || BooleanSetting.MAIN_SYNC_GPU.isOverridden
 
             override val isRuntimeEditable: Boolean
-                get() = BooleanSetting.MAIN_SYNC_ON_SKIP_IDLE.isRuntimeEditable &&
-                        BooleanSetting.MAIN_SYNC_GPU.isRuntimeEditable
+                get() = BooleanSetting.MAIN_SYNC_ON_SKIP_IDLE.isRuntimeEditable && BooleanSetting.MAIN_SYNC_GPU.isRuntimeEditable
 
             override fun delete(settings: Settings): Boolean {
                 // Not short circuiting
-                return BooleanSetting.MAIN_SYNC_ON_SKIP_IDLE.delete(settings) and
-                        BooleanSetting.MAIN_SYNC_GPU.delete(settings)
+                return BooleanSetting.MAIN_SYNC_ON_SKIP_IDLE.delete(settings) and BooleanSetting.MAIN_SYNC_GPU.delete(
+                    settings
+                )
             }
         }
 
@@ -1325,26 +1425,12 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             IntSliderSetting(
-                context,
-                mem1Size,
-                R.string.main_mem1_size,
-                0,
-                24,
-                64,
-                "MB",
-                1
+                context, mem1Size, R.string.main_mem1_size, 0, 24, 64, "MB", 1
             )
         )
         sl.add(
             IntSliderSetting(
-                context,
-                mem2Size,
-                R.string.main_mem2_size,
-                0,
-                64,
-                128,
-                "MB",
-                1
+                context, mem2Size, R.string.main_mem2_size, 0, 64, 128, "MB", 1
             )
         )
 
@@ -1371,10 +1457,7 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             DateTimeChoiceSetting(
-                context,
-                StringSetting.MAIN_CUSTOM_RTC_VALUE,
-                R.string.set_custom_rtc,
-                0
+                context, StringSetting.MAIN_CUSTOM_RTC_VALUE, R.string.set_custom_rtc, 0
             )
         )
 
@@ -1602,42 +1685,29 @@ class SettingsFragmentPresenter(
         sl.add(HeaderSetting(context, R.string.graphics_more_settings, 0))
         sl.add(
             SubmenuSetting(
-                context,
-                R.string.enhancements_submenu,
-                MenuTag.ENHANCEMENTS
+                context, R.string.enhancements_submenu, MenuTag.ENHANCEMENTS
             )
         )
         sl.add(
             SubmenuSetting(
-                context,
-                R.string.hacks_submenu,
-                MenuTag.HACKS
+                context, R.string.hacks_submenu, MenuTag.HACKS
             )
         )
         sl.add(
             SubmenuSetting(
-                context,
-                R.string.statistics_submenu,
-                MenuTag.STATISTICS
+                context, R.string.statistics_submenu, MenuTag.STATISTICS
             )
         )
         sl.add(
             SubmenuSetting(
-                context,
-                R.string.advanced_graphics_submenu,
-                MenuTag.ADVANCED_GRAPHICS
+                context, R.string.advanced_graphics_submenu, MenuTag.ADVANCED_GRAPHICS
             )
         )
 
-        if (
-            this.gpuDriver != null && this.gameId.isNullOrEmpty()
-            && NativeLibrary.IsUninitialized()
-            && GpuDriverHelper.supportsCustomDriverLoading()
-        ) {
+        if (this.gpuDriver != null && this.gameId.isNullOrEmpty() && NativeLibrary.IsUninitialized() && GpuDriverHelper.supportsCustomDriverLoading()) {
             sl.add(
                 SubmenuSetting(
-                    context,
-                    R.string.gpu_driver_submenu, MenuTag.GPU_DRIVERS
+                    context, R.string.gpu_driver_submenu, MenuTag.GPU_DRIVERS
                 )
             )
         }
@@ -1686,9 +1756,7 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             SubmenuSetting(
-                context,
-                R.string.color_correction_submenu,
-                MenuTag.COLOR_CORRECTION
+                context, R.string.color_correction_submenu, MenuTag.COLOR_CORRECTION
             )
         )
 
@@ -1781,9 +1849,7 @@ class SettingsFragmentPresenter(
         ) {
             sl.add(
                 SubmenuSetting(
-                    context,
-                    R.string.stereoscopy_submenu,
-                    MenuTag.STEREOSCOPY
+                    context, R.string.stereoscopy_submenu, MenuTag.STEREOSCOPY
                 )
             )
         }
@@ -1827,10 +1893,7 @@ class SettingsFragmentPresenter(
             )
             add(
                 SwitchSetting(
-                    context,
-                    BooleanSetting.GFX_CC_CORRECT_GAMMA,
-                    R.string.correct_sdr_gamma,
-                    0
+                    context, BooleanSetting.GFX_CC_CORRECT_GAMMA, R.string.correct_sdr_gamma, 0
                 )
             )
         }
@@ -2137,10 +2200,10 @@ class SettingsFragmentPresenter(
                 IntSetting.GFX_CROP_CUSTOM_LEFT,
                 R.string.crop_custom_left,
                 R.string.crop_custom_left_description,
-                min=0,
-                max=640,
-                units="px",
-                stepSize=1,
+                min = 0,
+                max = 640,
+                units = "px",
+                stepSize = 1,
             )
         )
         sl.add(
@@ -2159,18 +2222,12 @@ class SettingsFragmentPresenter(
         sl.add(HeaderSetting(context, R.string.misc, 0))
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.SYSCONF_PROGRESSIVE_SCAN,
-                R.string.progressive_scan,
-                0
+                context, BooleanSetting.SYSCONF_PROGRESSIVE_SCAN, R.string.progressive_scan, 0
             )
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.GFX_VSYNC,
-                R.string.vsync,
-                R.string.vsync_description
+                context, BooleanSetting.GFX_VSYNC, R.string.vsync, R.string.vsync_description
             )
         )
         sl.add(
@@ -2338,35 +2395,21 @@ class SettingsFragmentPresenter(
                 IntSetting.LOGGER_VERBOSITY,
                 R.string.log_verbosity,
                 0,
-                getLogVerbosityEntries(), getLogVerbosityValues()
+                getLogVerbosityEntries(),
+                getLogVerbosityValues()
             )
         )
         sl.add(
             RunRunnable(
-                context,
-                R.string.log_enable_all,
-                0,
-                R.string.log_enable_all_confirmation,
-                0,
-                true
+                context, R.string.log_enable_all, 0, R.string.log_enable_all_confirmation, 0, true
             ) { setAllLogTypes(true) })
         sl.add(
             RunRunnable(
-                context,
-                R.string.log_disable_all,
-                0,
-                R.string.log_disable_all_confirmation,
-                0,
-                true
+                context, R.string.log_disable_all, 0, R.string.log_disable_all_confirmation, 0, true
             ) { setAllLogTypes(false) })
         sl.add(
             RunRunnable(
-                context,
-                R.string.log_clear,
-                0,
-                R.string.log_clear_confirmation,
-                0,
-                true
+                context, R.string.log_clear, 0, R.string.log_clear_confirmation, 0, true
             ) { SettingsAdapter.clearLog() })
 
         sl.add(HeaderSetting(context, R.string.log_types, 0))
@@ -2379,10 +2422,7 @@ class SettingsFragmentPresenter(
         sl.add(HeaderSetting(context, R.string.debug_warning, 0))
         sl.add(
             InvertedSwitchSetting(
-                context,
-                BooleanSetting.MAIN_FASTMEM,
-                R.string.debug_fastmem,
-                0
+                context, BooleanSetting.MAIN_FASTMEM, R.string.debug_fastmem, 0
             )
         )
         sl.add(
@@ -2395,10 +2435,7 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             InvertedSwitchSetting(
-                context,
-                BooleanSetting.MAIN_FASTMEM_ARENA,
-                R.string.debug_fastmem_arena,
-                0
+                context, BooleanSetting.MAIN_FASTMEM_ARENA, R.string.debug_fastmem_arena, 0
             )
         )
         sl.add(
@@ -2417,7 +2454,7 @@ class SettingsFragmentPresenter(
                 BooleanSetting.MAIN_DEBUG_JIT_ENABLE_PROFILING,
                 R.string.debug_jit_enable_block_profiling,
                 0
-           )
+            )
         )
         sl.add(
             RunRunnable(
@@ -2427,26 +2464,16 @@ class SettingsFragmentPresenter(
                 R.string.debug_jit_wipe_block_profiling_data_alert,
                 0,
                 true
-            ) { NativeLibrary.WipeJitBlockProfilingData() }
-        )
+            ) { NativeLibrary.WipeJitBlockProfilingData() })
         sl.add(
             RunRunnable(
-                context,
-                R.string.debug_jit_write_block_log_dump,
-                0,
-                0,
-                0,
-                true
-            ) { NativeLibrary.WriteJitBlockLogDump() }
-        )
+                context, R.string.debug_jit_write_block_log_dump, 0, 0, 0, true
+            ) { NativeLibrary.WriteJitBlockLogDump() })
 
         sl.add(HeaderSetting(context, R.string.debug_jit_header, 0))
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_DEBUG_JIT_OFF,
-                R.string.debug_jitoff,
-                0
+                context, BooleanSetting.MAIN_DEBUG_JIT_OFF, R.string.debug_jitoff, 0
             )
         )
         sl.add(
@@ -2483,18 +2510,12 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_DEBUG_JIT_INTEGER_OFF,
-                R.string.debug_jitintegeroff,
-                0
+                context, BooleanSetting.MAIN_DEBUG_JIT_INTEGER_OFF, R.string.debug_jitintegeroff, 0
             )
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_DEBUG_JIT_PAIRED_OFF,
-                R.string.debug_jitpairedoff,
-                0
+                context, BooleanSetting.MAIN_DEBUG_JIT_PAIRED_OFF, R.string.debug_jitpairedoff, 0
             )
         )
         sl.add(
@@ -2507,10 +2528,7 @@ class SettingsFragmentPresenter(
         )
         sl.add(
             SwitchSetting(
-                context,
-                BooleanSetting.MAIN_DEBUG_JIT_BRANCH_OFF,
-                R.string.debug_jitbranchoff,
-                0
+                context, BooleanSetting.MAIN_DEBUG_JIT_BRANCH_OFF, R.string.debug_jitbranchoff, 0
             )
         )
         sl.add(
@@ -3659,7 +3677,10 @@ class SettingsFragmentPresenter(
         )
     }
 
-    private fun addGcPadSubSettings(sl: ArrayList<SettingsItem>, gcPadNumber: Int, gcPadType: Int) {
+
+    private fun addGcPadSubSettings(
+        sl: ArrayList<SettingsItem>, gcPadNumber: Int, gcPadType: Int
+    ) {
         when (gcPadType) {
             6, 8, 9, 10, 11 -> {
                 // Emulated
@@ -3676,9 +3697,10 @@ class SettingsFragmentPresenter(
                             OpenXRControllerMapperActivity.TARGET_GAMECUBE_CONTROLLER
                         )
                     }
-                    addControllerMappingSettings(sl, gcPad, null)
+                    addControllerMappingSettings(sl, gcPad, gcPadNumber, null)
                 }
             }
+
             7 -> {
                 // Emulated keyboard controller
                 val gcKeyboard = EmulatedController.getGcKeyboard(gcPadNumber)
@@ -3688,9 +3710,12 @@ class SettingsFragmentPresenter(
                 } else {
                     sl.add(HeaderSetting(context, R.string.keyboard_controller_warning, 0))
                     addControllerMetaSettings(sl, gcKeyboard)
-                    addControllerMappingSettings(sl, gcKeyboard, null)
+                    addControllerMappingSettings(
+                        sl, gcKeyboard, gcPadNumber, null
+                    )
                 }
             }
+
             12 -> {
                 // Adapter
                 sl.add(
@@ -3713,7 +3738,9 @@ class SettingsFragmentPresenter(
         }
     }
 
-    private fun addWiimoteSubSettings(sl: ArrayList<SettingsItem>, wiimoteNumber: Int) {
+    private fun addWiimoteSubSettings(
+        sl: ArrayList<SettingsItem>, wiimoteNumber: Int
+    ) {
         val wiimote = EmulatedController.getWiimote(wiimoteNumber)
 
         if (!TextUtils.isEmpty(gameId)) {
@@ -3762,39 +3789,40 @@ class SettingsFragmentPresenter(
             addControllerMappingSettings(
                 sl,
                 wiimote,
+                wiimoteNumber,
                 ArraySet(listOf(ControlGroup.TYPE_ATTACHMENTS, ControlGroup.TYPE_OTHER))
             )
         }
     }
 
     private fun addExtensionTypeSettings(
-        sl: ArrayList<SettingsItem>,
-        wiimoteNumber: Int,
-        extensionType: Int
+        sl: ArrayList<SettingsItem>, wiimoteNumber: Int, extensionType: Int
     ) {
         addContainerMappingSettings(
             sl,
             EmulatedController.getWiimote(wiimoteNumber),
             EmulatedController.getWiimoteAttachment(wiimoteNumber, extensionType),
+            wiimoteNumber,
             null
         )
     }
 
-    private fun addWiimoteGeneralSubSettings(sl: ArrayList<SettingsItem>, wiimoteNumber: Int) {
+    private fun addWiimoteGeneralSubSettings(
+        sl: ArrayList<SettingsItem>, wiimoteNumber: Int
+    ) {
         addControllerMappingSettings(
             sl,
             EmulatedController.getWiimote(wiimoteNumber),
+            wiimoteNumber,
             setOf(ControlGroup.TYPE_BUTTONS)
         )
     }
 
     private fun addWiimoteMotionSimulationSubSettings(
-        sl: ArrayList<SettingsItem>,
-        wiimoteNumber: Int
+        sl: ArrayList<SettingsItem>, wiimoteNumber: Int
     ) {
         addControllerMappingSettings(
-            sl, EmulatedController.getWiimote(wiimoteNumber),
-            ArraySet(
+            sl, EmulatedController.getWiimote(wiimoteNumber), wiimoteNumber, ArraySet(
                 listOf(
                     ControlGroup.TYPE_FORCE,
                     ControlGroup.TYPE_TILT,
@@ -3805,10 +3833,11 @@ class SettingsFragmentPresenter(
         )
     }
 
-    private fun addWiimoteMotionInputSubSettings(sl: ArrayList<SettingsItem>, wiimoteNumber: Int) {
+    private fun addWiimoteMotionInputSubSettings(
+        sl: ArrayList<SettingsItem>, wiimoteNumber: Int
+    ) {
         addControllerMappingSettings(
-            sl, EmulatedController.getWiimote(wiimoteNumber),
-            ArraySet(
+            sl, EmulatedController.getWiimote(wiimoteNumber), wiimoteNumber, ArraySet(
                 listOf(
                     ControlGroup.TYPE_IMU_ACCELEROMETER,
                     ControlGroup.TYPE_IMU_GYROSCOPE,
@@ -3912,9 +3941,7 @@ class SettingsFragmentPresenter(
      * @param controllerNumber The index of the controller, 0-3.
      */
     private fun addControllerPerGameSettings(
-        sl: ArrayList<SettingsItem>,
-        controller: EmulatedController,
-        controllerNumber: Int
+        sl: ArrayList<SettingsItem>, controller: EmulatedController, controllerNumber: Int
     ) {
         val profiles = ProfileDialogPresenter(menuTag).getProfileNames(false)
         val profileKey = controller.getProfileKey() + "Profile" + (controllerNumber + 1)
@@ -3947,10 +3974,7 @@ class SettingsFragmentPresenter(
     ) {
         sl.add(
             InputDeviceSetting(
-                context,
-                R.string.input_device,
-                0,
-                controller
+                context, R.string.input_device, 0, controller
             )
         )
 
@@ -3992,12 +4016,7 @@ class SettingsFragmentPresenter(
             ) { clearControllerSettings(controller) })
         sl.add(
             RunRunnable(
-                context,
-                R.string.input_profiles,
-                0,
-                0,
-                0,
-                true
+                context, R.string.input_profiles, 0, 0, 0, true
             ) { fragmentView.showDialogFragment(ProfileDialog.create(menuTag)) })
 
         updateOldControllerSettingsWarningVisibility(controller)
@@ -4008,14 +4027,18 @@ class SettingsFragmentPresenter(
      *
      * @param sl              The list to place controller settings into.
      * @param controller      The controller to add settings for.
+     * @param controllerNumber The zero-based controller number.
      * @param groupTypeFilter If this is non-null, only groups whose types match this are considered.
      */
     private fun addControllerMappingSettings(
-      sl: ArrayList<SettingsItem>,
-      controller: EmulatedController,
-      groupTypeFilter: Set<Int>?
+        sl: ArrayList<SettingsItem>,
+        controller: EmulatedController,
+        controllerNumber: Int,
+        groupTypeFilter: Set<Int>?
     ) {
-      addContainerMappingSettings(sl, controller, controller, groupTypeFilter)
+        addContainerMappingSettings(
+            sl, controller, controller, controllerNumber, groupTypeFilter
+        )
     }
 
     /**
@@ -4024,12 +4047,14 @@ class SettingsFragmentPresenter(
      * @param sl              The list to place controller settings into.
      * @param controller      The encompassing controller.
      * @param container       The container of control groups to add settings for.
+     * @param controllerNumber The zero-based controller number.
      * @param groupTypeFilter If this is non-null, only groups whose types match this are considered.
      */
     private fun addContainerMappingSettings(
         sl: ArrayList<SettingsItem>,
         controller: EmulatedController,
         container: ControlGroupContainer,
+        controllerNumber: Int,
         groupTypeFilter: Set<Int>?
     ) {
         updateOldControllerSettingsWarningVisibility(controller)
@@ -4045,10 +4070,7 @@ class SettingsFragmentPresenter(
             if (group.getDefaultEnabledValue() != ControlGroup.DEFAULT_ENABLED_ALWAYS) {
                 sl.add(
                     SwitchSetting(
-                        context,
-                        ControlGroupEnabledSetting(group),
-                        R.string.enabled,
-                        0
+                        context, ControlGroupEnabledSetting(group), R.string.enabled, 0
                     )
                 )
             }
@@ -4062,8 +4084,11 @@ class SettingsFragmentPresenter(
                 val attachmentSetting = group.getAttachmentSetting()
                 sl.add(
                     SingleChoiceSetting(
-                        context, InputMappingIntSetting(attachmentSetting),
-                        R.string.wiimote_extensions, 0, R.array.wiimoteExtensionsEntries,
+                        context,
+                        InputMappingIntSetting(attachmentSetting),
+                        R.string.wiimote_extensions,
+                        0,
+                        R.array.wiimoteExtensionsEntries,
                         R.array.wiimoteExtensionsValues,
                         MenuTag.getWiimoteExtensionMenuTag(controllerNumber)
                     )
@@ -4107,10 +4132,14 @@ class SettingsFragmentPresenter(
     }
 
     private fun updateOldControllerSettingsWarningVisibility(controller: EmulatedController) {
+        if (!shouldUpdateWarnings) {
+            return
+        }
+
         val defaultDevice = controller.getDefaultDevice()
 
-        hasOldControllerSettings = defaultDevice.startsWith("Android/") &&
-                defaultDevice.endsWith("/Touchscreen")
+        hasOldControllerSettings =
+            defaultDevice.startsWith("Android/") && defaultDevice.endsWith("/Touchscreen")
 
         fragmentView.setOldControllerSettingsWarningVisibility(hasOldControllerSettings)
     }
@@ -4138,10 +4167,7 @@ class SettingsFragmentPresenter(
 
         for (logType in NativeLibrary.GetLogTypeNames()) {
             AdHocBooleanSetting(
-                Settings.FILE_LOGGER,
-                Settings.SECTION_LOGGER_LOGS,
-                logType.first,
-                false
+                Settings.FILE_LOGGER, Settings.SECTION_LOGGER_LOGS, logType.first, false
             ).setBoolean(settings!!, value)
         }
 
@@ -4153,8 +4179,7 @@ class SettingsFragmentPresenter(
             fragmentView.fragmentActivity,
             R.string.wii_converting,
             0,
-            { context.resources.getString(if (f.get()) R.string.wii_convert_success else R.string.wii_convert_failure) }
-        )
+            { context.resources.getString(if (f.get()) R.string.wii_convert_success else R.string.wii_convert_failure) })
     }
 
     fun installDriver(uri: Uri) {
@@ -4186,9 +4211,8 @@ class SettingsFragmentPresenter(
             GpuDriverHelper.uninstallDriver()
             withContext(Dispatchers.Main) {
                 with(this@SettingsFragmentPresenter) {
-                    this.gpuDriver =
-                        GpuDriverHelper.getInstalledDriverMetadata()
-                            ?: GpuDriverHelper.getSystemDriverMetadata(context.applicationContext)
+                    this.gpuDriver = GpuDriverHelper.getInstalledDriverMetadata()
+                        ?: GpuDriverHelper.getSystemDriverMetadata(context.applicationContext)
                     this.libNameSetting.setString(this.settings!!, "")
                 }
                 fragmentView.onDriverUninstallDone()
@@ -4201,6 +4225,24 @@ class SettingsFragmentPresenter(
         const val ARG_SERIALPORT1_TYPE = "serialport1_type"
         const val ARG_REVISION = "revision"
         private const val OPENXR_CONTROLLER_DEVICE = "OpenXR/0/OpenXR Controller"
+
+        private data class SearchableSetting(
+            val name: String,
+            val description: String,
+            val menuTag: MenuTag,
+            val navigationExtras: Bundle?,
+            val position: Int,
+            val normalizedName: String,
+            val normalizedCategory: String,
+            val normalizedSearchText: String
+        )
+
+        private data class SearchableMenu(
+            val menuTag: MenuTag,
+            val category: String,
+            val navigationExtras: Bundle?,
+            val settings: List<SettingsItem>
+        )
 
         // Value obtained from LogLevel in Common/Logging/Log.h
         private fun getLogVerbosityEntries(): Int {
