@@ -630,9 +630,10 @@ std::string GameFile::GetNetPlayName(const Core::TitleDatabase& title_database) 
 
   std::string lower_name = name;
   Common::ToLower(&lower_name);
-  if (disc_number > 1 &&
-      lower_name.find(fmt::format("disc {}", disc_number)) == std::string::npos &&
-      lower_name.find(fmt::format("disc{}", disc_number)) == std::string::npos)
+  auto is_numbered_disc = lower_name.contains(fmt::format("disc {}", disc_number)) ||
+                          lower_name.contains(fmt::format("disc{}", disc_number));
+
+  if (disc_number > 1 && !is_numbered_disc)
   {
     std::string disc_text = "Disc ";
     info.push_back(disc_text + std::to_string(disc_number));
