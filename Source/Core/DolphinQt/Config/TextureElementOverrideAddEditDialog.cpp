@@ -30,8 +30,10 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QStringList>
+#include <QTextDocument>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -51,6 +53,7 @@ constexpr double UPM_OVERRIDE_MIN = 0.01;
 constexpr double UPM_OVERRIDE_MAX = 1000.0;
 constexpr double UPM_OVERRIDE_STEP = 0.01;
 constexpr int MAX_VISIBLE_TEXTURE_HASH_ROWS = 6;
+constexpr int MAX_VISIBLE_COMMENT_LINES = 5;
 constexpr int TEXTURE_HASH_PREVIEW_SIZE = 40;  // Thumbnail square, in pixels.
 constexpr int TEXTURE_HASH_ROW_HEIGHT = TEXTURE_HASH_PREVIEW_SIZE + 6;
 
@@ -138,7 +141,13 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   m_comments_edit = new QPlainTextEdit;
   m_comments_edit->setPlaceholderText(tr("Optional notes..."));
   m_comments_edit->setTabChangesFocus(true);
-  // m_comments_edit->setMinimumHeight(30);
+  const int comments_document_margins =
+      static_cast<int>(2.0 * m_comments_edit->document()->documentMargin());
+  const int comments_max_height =
+      MAX_VISIBLE_COMMENT_LINES * m_comments_edit->fontMetrics().lineSpacing() +
+      2 * m_comments_edit->frameWidth() + comments_document_margins;
+  m_comments_edit->setMaximumHeight(comments_max_height);
+  m_comments_edit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
   m_handling_combo = new QComboBox;
   m_handling_combo->addItem(tr("Skip"), static_cast<int>(HandlingType::Skip));
@@ -310,7 +319,9 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   m_texture_hash_layout = new QVBoxLayout(m_texture_hash_container);
   m_texture_hash_layout->setContentsMargins(0, 0, 0, 0);
   m_texture_hash_layout->setSpacing(4);
+  m_texture_hash_layout->setAlignment(Qt::AlignTop);
   m_texture_hash_scroll = new QScrollArea;
+  m_texture_hash_scroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   m_texture_hash_scroll->setWidgetResizable(true);
   m_texture_hash_scroll->setFrameShape(QFrame::NoFrame);
   m_texture_hash_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -743,6 +754,7 @@ void TextureElementOverrideAddEditDialog::AddTextureHashField(const QString& tex
   preview->setAlignment(Qt::AlignCenter);
 
   auto* row = new QWidget;
+  row->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
   auto* row_layout = new QHBoxLayout(row);
   row_layout->setContentsMargins(0, 0, 0, 0);
   row_layout->setSpacing(6);
@@ -795,7 +807,6 @@ void TextureElementOverrideAddEditDialog::EnsureTextureHashFieldRows()
   const int visible_rows = std::min(desired_rows, MAX_VISIBLE_TEXTURE_HASH_ROWS);
   const int viewport_height = visible_rows * TEXTURE_HASH_ROW_HEIGHT;
   m_texture_hash_scroll->setMinimumHeight(viewport_height);
-  m_texture_hash_scroll->setMaximumHeight(viewport_height);
 
   m_updating_texture_hash_fields = false;
 }
