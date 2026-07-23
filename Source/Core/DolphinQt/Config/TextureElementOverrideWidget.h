@@ -42,6 +42,11 @@ private:
 
   void OnItemChanged(QListWidgetItem* item);
   void OnSelectionChanged();
+  void OnContextMenuRequested();
+  void SortAlphabetically();
+  void SortEnabledCodesFirst();
+  void SortDisabledCodesFirst();
+  void OnListReordered();
   void OnAddClicked();
   void OnEditClicked();
   void OnRemoveClicked();

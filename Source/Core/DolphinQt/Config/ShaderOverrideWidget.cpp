@@ -3,10 +3,12 @@
 
 #include "DolphinQt/Config/ShaderOverrideWidget.h"
 
-#include <QHBoxLayout>
 #include <QColor>
+#include <QCursor>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QPushButton>
 #include <QStringList>
 #include <QVBoxLayout>
@@ -32,6 +34,7 @@ ShaderOverrideWidget::~ShaderOverrideWidget() = default;
 void ShaderOverrideWidget::CreateWidgets()
 {
   m_code_list = new QListWidget;
+  m_code_list->setContextMenuPolicy(Qt::CustomContextMenu);
 
   auto* info_label = new QLabel(
       tr("Shader overrides control how individual shaders are handled.\n"
@@ -73,6 +76,8 @@ void ShaderOverrideWidget::ConnectWidgets()
   connect(m_code_list, &QListWidget::itemChanged, this, &ShaderOverrideWidget::OnItemChanged);
   connect(m_code_list, &QListWidget::itemSelectionChanged, this,
           &ShaderOverrideWidget::OnSelectionChanged);
+  connect(m_code_list, &QListWidget::customContextMenuRequested, this,
+          &ShaderOverrideWidget::OnContextMenuRequested);
   connect(m_code_add, &QPushButton::clicked, this, &ShaderOverrideWidget::OnAddClicked);
   connect(m_code_edit, &QPushButton::clicked, this, &ShaderOverrideWidget::OnEditClicked);
   connect(m_code_remove, &QPushButton::clicked, this, &ShaderOverrideWidget::OnRemoveClicked);
@@ -149,46 +154,7 @@ void ShaderOverrideWidget::UpdateList()
     ++handling_hash_counts[{static_cast<int>(ovr.handling), ovr.hash}];
   }
 
-  // Build sorted display order: Flag overrides first, then their conditionals, then standalone.
-  std::vector<size_t> sorted_indices;
-  sorted_indices.reserve(m_overrides.size());
-
-  // 1. Overrides that set a flag (Flag-only or combined), then their conditionals
-  for (size_t i = 0; i < m_overrides.size(); i++)
-  {
-    if (!m_overrides[i].flag_group.empty())
-    {
-      sorted_indices.push_back(i);
-      // 2. Conditionals that depend on this flag
-      const auto& flag = m_overrides[i].flag_group;
-      for (size_t j = 0; j < m_overrides.size(); j++)
-      {
-        if (j != i && m_overrides[j].condition_flag == flag &&
-            std::find(sorted_indices.begin(), sorted_indices.end(), j) == sorted_indices.end())
-          sorted_indices.push_back(j);
-      }
-    }
-  }
-  // 3. Standalone overrides (no flag_group, no condition)
-  for (size_t i = 0; i < m_overrides.size(); i++)
-  {
-    if (m_overrides[i].flag_group.empty() && m_overrides[i].condition_flag.empty() &&
-        std::find(sorted_indices.begin(), sorted_indices.end(), i) == sorted_indices.end())
-    {
-      sorted_indices.push_back(i);
-    }
-  }
-  // 4. Any conditional overrides whose flag doesn't exist (orphaned)
-  for (size_t i = 0; i < m_overrides.size(); i++)
-  {
-    if (!m_overrides[i].condition_flag.empty() &&
-        std::find(sorted_indices.begin(), sorted_indices.end(), i) == sorted_indices.end())
-    {
-      sorted_indices.push_back(i);
-    }
-  }
-
-  for (size_t idx : sorted_indices)
+  for (size_t idx = 0; idx < m_overrides.size(); ++idx)
   {
     const auto& ovr = m_overrides[idx];
 
@@ -352,6 +318,61 @@ void ShaderOverrideWidget::OnSelectionChanged()
   const bool has_selection = !items.empty();
   m_code_remove->setEnabled(has_selection);
   m_code_edit->setEnabled(has_selection);
+}
+
+void ShaderOverrideWidget::OnContextMenuRequested()
+{
+  QMenu menu;
+
+  menu.addAction(tr("Sort Alphabetically"), this, &ShaderOverrideWidget::SortAlphabetically);
+  menu.addAction(tr("Show Enabled Codes First"), this,
+                 &ShaderOverrideWidget::SortEnabledCodesFirst);
+  menu.addAction(tr("Show Disabled Codes First"), this,
+                 &ShaderOverrideWidget::SortDisabledCodesFirst);
+
+  menu.exec(QCursor::pos());
+}
+
+void ShaderOverrideWidget::SortAlphabetically()
+{
+  m_code_list->sortItems();
+  OnListReordered();
+}
+
+void ShaderOverrideWidget::SortEnabledCodesFirst()
+{
+  std::ranges::stable_partition(m_overrides, std::identity{},
+                                &ShaderHunter::ShaderOverride::enabled);
+  UpdateList();
+  SaveOverrides();
+  ShaderHunter::GetInstance().LoadOverrides(m_game_id);
+}
+
+void ShaderOverrideWidget::SortDisabledCodesFirst()
+{
+  std::ranges::stable_partition(m_overrides, std::logical_not{},
+                                &ShaderHunter::ShaderOverride::enabled);
+  UpdateList();
+  SaveOverrides();
+  ShaderHunter::GetInstance().LoadOverrides(m_game_id);
+}
+
+void ShaderOverrideWidget::OnListReordered()
+{
+  std::vector<ShaderHunter::ShaderOverride> overrides;
+  overrides.reserve(m_overrides.size());
+
+  for (int i = 0; i < m_code_list->count(); ++i)
+  {
+    const int index = m_code_list->item(i)->data(Qt::UserRole).toInt();
+    overrides.push_back(std::move(m_overrides[index]));
+  }
+
+  m_overrides = std::move(overrides);
+
+  UpdateList();
+  SaveOverrides();
+  ShaderHunter::GetInstance().LoadOverrides(m_game_id);
 }
 
 std::vector<std::string> ShaderOverrideWidget::CollectAvailableFlags() const

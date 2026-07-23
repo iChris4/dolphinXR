@@ -6,10 +6,12 @@
 #include <algorithm>
 #include <string_view>
 
+#include <QCursor>
 #include <QDialog>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QPushButton>
 #include <QStringList>
 #include <QSignalBlocker>
@@ -43,6 +45,7 @@ ElementsGroupOverrideWidget::~ElementsGroupOverrideWidget() = default;
 void ElementsGroupOverrideWidget::CreateWidgets()
 {
   m_code_list = new QListWidget;
+  m_code_list->setContextMenuPolicy(Qt::CustomContextMenu);
 
   auto* info_label = new QLabel(
       tr("Elements Group Overrides use captured runtime draw signatures.\n"
@@ -79,6 +82,8 @@ void ElementsGroupOverrideWidget::ConnectWidgets()
   connect(m_code_list, &QListWidget::itemChanged, this, &ElementsGroupOverrideWidget::OnItemChanged);
   connect(m_code_list, &QListWidget::itemSelectionChanged, this,
           &ElementsGroupOverrideWidget::OnSelectionChanged);
+  connect(m_code_list, &QListWidget::customContextMenuRequested, this,
+          &ElementsGroupOverrideWidget::OnContextMenuRequested);
   connect(m_code_add, &QPushButton::clicked, this, &ElementsGroupOverrideWidget::OnAddClicked);
   connect(m_code_edit, &QPushButton::clicked, this, &ElementsGroupOverrideWidget::OnEditClicked);
   connect(m_code_remove, &QPushButton::clicked, this, &ElementsGroupOverrideWidget::OnRemoveClicked);
@@ -230,6 +235,62 @@ void ElementsGroupOverrideWidget::OnSelectionChanged()
   const bool has_selection = !m_code_list->selectedItems().empty();
   m_code_edit->setEnabled(has_selection);
   m_code_remove->setEnabled(has_selection);
+}
+
+void ElementsGroupOverrideWidget::OnContextMenuRequested()
+{
+  QMenu menu;
+
+  menu.addAction(tr("Sort Alphabetically"), this,
+                 &ElementsGroupOverrideWidget::SortAlphabetically);
+  menu.addAction(tr("Show Enabled Codes First"), this,
+                 &ElementsGroupOverrideWidget::SortEnabledCodesFirst);
+  menu.addAction(tr("Show Disabled Codes First"), this,
+                 &ElementsGroupOverrideWidget::SortDisabledCodesFirst);
+
+  menu.exec(QCursor::pos());
+}
+
+void ElementsGroupOverrideWidget::SortAlphabetically()
+{
+  m_code_list->sortItems();
+  OnListReordered();
+}
+
+void ElementsGroupOverrideWidget::SortEnabledCodesFirst()
+{
+  std::ranges::stable_partition(m_overrides, std::identity{},
+                                &ElementsGroupManager::ElementGroupOverride::enabled);
+  UpdateList();
+  SaveOverrides();
+  ElementsGroupManager::GetInstance().LoadOverrides(m_game_id);
+}
+
+void ElementsGroupOverrideWidget::SortDisabledCodesFirst()
+{
+  std::ranges::stable_partition(m_overrides, std::logical_not{},
+                                &ElementsGroupManager::ElementGroupOverride::enabled);
+  UpdateList();
+  SaveOverrides();
+  ElementsGroupManager::GetInstance().LoadOverrides(m_game_id);
+}
+
+void ElementsGroupOverrideWidget::OnListReordered()
+{
+  std::vector<ElementsGroupManager::ElementGroupOverride> overrides;
+  overrides.reserve(m_overrides.size());
+
+  for (int i = 0; i < m_code_list->count(); ++i)
+  {
+    const int index = m_code_list->item(i)->data(Qt::UserRole).toInt();
+    overrides.push_back(std::move(m_overrides[index]));
+  }
+
+  m_overrides = std::move(overrides);
+
+  UpdateList();
+  SaveOverrides();
+  ElementsGroupManager::GetInstance().LoadOverrides(m_game_id);
 }
 
 void ElementsGroupOverrideWidget::OnAddClicked()

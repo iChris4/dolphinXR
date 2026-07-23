@@ -6,11 +6,13 @@
 #include <algorithm>
 
 #include <QColor>
+#include <QCursor>
 #include <QDialog>
 #include <QDir>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QPushButton>
 #include <QShowEvent>
 #include <QStringList>
@@ -45,6 +47,7 @@ TextureElementOverrideWidget::~TextureElementOverrideWidget() = default;
 void TextureElementOverrideWidget::CreateWidgets()
 {
   m_code_list = new QListWidget;
+  m_code_list->setContextMenuPolicy(Qt::CustomContextMenu);
 
   auto* info_label = new QLabel(
       tr("Texture Element Overrides reclassify VR draws based purely on the bound texture hash,\n"
@@ -93,6 +96,8 @@ void TextureElementOverrideWidget::ConnectWidgets()
           &TextureElementOverrideWidget::OnItemChanged);
   connect(m_code_list, &QListWidget::itemSelectionChanged, this,
           &TextureElementOverrideWidget::OnSelectionChanged);
+  connect(m_code_list, &QListWidget::customContextMenuRequested, this,
+          &TextureElementOverrideWidget::OnContextMenuRequested);
   connect(m_code_add, &QPushButton::clicked, this, &TextureElementOverrideWidget::OnAddClicked);
   connect(m_code_edit, &QPushButton::clicked, this, &TextureElementOverrideWidget::OnEditClicked);
   connect(m_code_remove, &QPushButton::clicked, this,
@@ -224,6 +229,62 @@ void TextureElementOverrideWidget::OnSelectionChanged()
   const bool has_selection = !m_code_list->selectedItems().empty();
   m_code_remove->setEnabled(has_selection);
   m_code_edit->setEnabled(has_selection);
+}
+
+void TextureElementOverrideWidget::OnContextMenuRequested()
+{
+  QMenu menu;
+
+  menu.addAction(tr("Sort Alphabetically"), this,
+                 &TextureElementOverrideWidget::SortAlphabetically);
+  menu.addAction(tr("Show Enabled Codes First"), this,
+                 &TextureElementOverrideWidget::SortEnabledCodesFirst);
+  menu.addAction(tr("Show Disabled Codes First"), this,
+                 &TextureElementOverrideWidget::SortDisabledCodesFirst);
+
+  menu.exec(QCursor::pos());
+}
+
+void TextureElementOverrideWidget::SortAlphabetically()
+{
+  m_code_list->sortItems();
+  OnListReordered();
+}
+
+void TextureElementOverrideWidget::SortEnabledCodesFirst()
+{
+  std::ranges::stable_partition(m_overrides, std::identity{},
+                                &TextureElementOverride::enabled);
+  UpdateList();
+  SaveOverrides();
+  ReloadRuntime();
+}
+
+void TextureElementOverrideWidget::SortDisabledCodesFirst()
+{
+  std::ranges::stable_partition(m_overrides, std::logical_not{},
+                                &TextureElementOverride::enabled);
+  UpdateList();
+  SaveOverrides();
+  ReloadRuntime();
+}
+
+void TextureElementOverrideWidget::OnListReordered()
+{
+  std::vector<TextureElementOverride> overrides;
+  overrides.reserve(m_overrides.size());
+
+  for (int i = 0; i < m_code_list->count(); i++)
+  {
+    const int index = m_code_list->item(i)->data(Qt::UserRole).toInt();
+    overrides.push_back(std::move(m_overrides[index]));
+  }
+
+  m_overrides = std::move(overrides);
+
+  UpdateList();
+  SaveOverrides();
+  ReloadRuntime();
 }
 
 void TextureElementOverrideWidget::OnAddClicked()
