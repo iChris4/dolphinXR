@@ -46,7 +46,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hack_tab->setLayout(hack_layout);
   tools_tab->setLayout(tools_tab_layout);
   tabs->addTab(general_tab, tr("General"));
-  tabs->addTab(hack_tab, tr("Hacks"));
+  tabs->addTab(hack_tab, tr("Advanced"));
   tabs->addTab(tools_tab, tr("Tools"));
 
   auto* openxr_group = new QGroupBox(tr("OpenXR"));
@@ -280,6 +280,19 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   connect(m_forced_vbi_frequency, &QComboBox::currentIndexChanged, this,
           [](int) { Config::SetBaseOrCurrent(Config::GFX_VR_AUTO_VBI_FROM_HMD, false); });
 
+  m_eager_heartbeat =
+      new ConfigBool(tr("Eager Frame Heartbeat"), Config::GFX_VR_EAGER_HEARTBEAT);
+  m_eager_heartbeat->setToolTip(
+      tr("Controls how the VR pacing thread fills the headset's refresh rate when the game "
+         "renders slower than the display.<br><br>"
+         "<b>On</b> resubmits the last frame every headset refresh so every slot is filled. "
+         "Best for standalone runtimes with no motion smoothing (Quest).<br><br>"
+         "<b>Off</b> paces submissions to the game's real frame rate so the PC runtime's "
+         "own motion smoothing (SteamVR reprojection, Virtual Desktop SSW, Meta Link ASW) "
+         "engages — this removes head-tracking judder on PC. Recommended for all PC "
+         "runtimes.<br><br>Can be toggled while a game is running."));
+  framerate_layout->addWidget(m_eager_heartbeat, 3, 1, 1, 2);
+
   m_clear_efb_slider = new ConfigSlider(Config::GFX_VR_CLEAR_EFB_MIN,
                                         Config::GFX_VR_CLEAR_EFB_MAX,
                                         Config::GFX_VR_CLEAR_EFB_COPIES,
@@ -348,19 +361,6 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
          "rendering with many EFB copies per frame (it forces tiled GPUs out of direct "
          "rendering mode). Leave off unless a specific game benefits."));
   rendering_layout->addWidget(m_foveate_efb, 4, 1, 1, 2);
-
-  m_eager_heartbeat =
-      new ConfigBool(tr("Eager Frame Heartbeat"), Config::GFX_VR_EAGER_HEARTBEAT);
-  m_eager_heartbeat->setToolTip(
-      tr("Controls how the VR pacing thread fills the headset's refresh rate when the game "
-         "renders slower than the display.<br><br>"
-         "<b>On</b> resubmits the last frame every headset refresh so every slot is filled. "
-         "Best for standalone runtimes with no motion smoothing (Quest).<br><br>"
-         "<b>Off</b> paces submissions to the game's real frame rate so the PC runtime's "
-         "own motion smoothing (SteamVR reprojection, Virtual Desktop SSW, Meta Link ASW) "
-         "engages — this removes head-tracking judder on PC. Recommended for all PC "
-         "runtimes.<br><br>Can be toggled while a game is running."));
-  rendering_layout->addWidget(m_eager_heartbeat, 5, 1, 1, 2);
 
   // Exact Screen Depth
   m_exact_screen_depth =
