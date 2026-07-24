@@ -3,6 +3,9 @@
 
 #include "DolphinQt/Config/ShaderOverrideWidget.h"
 
+#include <algorithm>
+#include <unordered_map>
+
 #include <QColor>
 #include <QCursor>
 #include <QHBoxLayout>
@@ -13,13 +16,13 @@
 #include <QStringList>
 #include <QVBoxLayout>
 
-#include <unordered_map>
-
 #include "DolphinQt/Config/ShaderOverrideAddEditDialog.h"
 #include "DolphinQt/Debugger/ShaderHunterWidget.h"
 #include "DolphinQt/QtUtils/NonDefaultQPushButton.h"
 #include "DolphinQt/Settings.h"
+#include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/ShaderHunter.h"
+#include "VideoCommon/TextureElementManager.h"
 
 ShaderOverrideWidget::ShaderOverrideWidget(std::string game_id, std::optional<u16> revision)
     : m_game_id(std::move(game_id)), m_revision(revision)
@@ -378,14 +381,19 @@ void ShaderOverrideWidget::OnListReordered()
 std::vector<std::string> ShaderOverrideWidget::CollectAvailableFlags() const
 {
   std::vector<std::string> flags;
+  const auto append_flag = [&flags](const std::string& flag) {
+    if (!flag.empty() && std::find(flags.begin(), flags.end(), flag) == flags.end())
+      flags.push_back(flag);
+  };
+
   for (const auto& ovr : m_overrides)
-  {
-    if (!ovr.flag_group.empty())
-    {
-      if (std::find(flags.begin(), flags.end(), ovr.flag_group) == flags.end())
-        flags.push_back(ovr.flag_group);
-    }
-  }
+    append_flag(ovr.flag_group);
+  for (const auto& entry : ElementsGroupManager::LoadOverridesFromINI(m_game_id, m_revision))
+    append_flag(entry.flag_group);
+  for (const auto& entry : TextureElementManager::LoadOverridesFromINI(m_game_id, m_revision))
+    append_flag(entry.flag_group);
+
+  std::sort(flags.begin(), flags.end());
   return flags;
 }
 

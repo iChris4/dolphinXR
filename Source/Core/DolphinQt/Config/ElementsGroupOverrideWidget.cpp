@@ -22,6 +22,7 @@
 #include "DolphinQt/Config/ElementsHuntingDialog.h"
 #include "DolphinQt/QtUtils/NonDefaultQPushButton.h"
 #include "VideoCommon/ShaderHunter.h"
+#include "VideoCommon/TextureElementManager.h"
 
 namespace
 {
@@ -198,23 +199,20 @@ void ElementsGroupOverrideWidget::UpdateList()
 std::vector<std::string> ElementsGroupOverrideWidget::CollectAvailableFlags() const
 {
   std::vector<std::string> flags;
-  const auto shader_overrides = ShaderHunter::LoadOverridesFromINI(m_game_id);
+  const auto append_flag = [&flags](const std::string& flag) {
+    if (!flag.empty() && std::find(flags.begin(), flags.end(), flag) == flags.end())
+      flags.push_back(flag);
+  };
+
+  const auto shader_overrides = ShaderHunter::LoadOverridesFromINI(m_game_id, m_revision);
   for (const auto& entry : shader_overrides)
-  {
-    if (!entry.flag_group.empty() &&
-        std::find(flags.begin(), flags.end(), entry.flag_group) == flags.end())
-    {
-      flags.push_back(entry.flag_group);
-    }
-  }
+    append_flag(entry.flag_group);
   for (const auto& entry : m_overrides)
-  {
-    if (!entry.flag_group.empty() &&
-        std::find(flags.begin(), flags.end(), entry.flag_group) == flags.end())
-    {
-      flags.push_back(entry.flag_group);
-    }
-  }
+    append_flag(entry.flag_group);
+  for (const auto& entry : TextureElementManager::LoadOverridesFromINI(m_game_id, m_revision))
+    append_flag(entry.flag_group);
+
+  std::sort(flags.begin(), flags.end());
   return flags;
 }
 

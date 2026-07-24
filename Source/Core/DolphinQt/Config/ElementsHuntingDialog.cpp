@@ -31,6 +31,7 @@
 #include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/HideObjectEngine.h"
 #include "VideoCommon/ShaderHunter.h"
+#include "VideoCommon/TextureElementManager.h"
 
 namespace
 {
@@ -242,6 +243,16 @@ std::vector<std::string> CollectAvailableFlags(const std::string& game_id)
       flags.push_back(entry.flag_group);
     }
   }
+  const auto texture_overrides = TextureElementManager::LoadOverridesFromINI(game_id);
+  for (const auto& entry : texture_overrides)
+  {
+    if (!entry.flag_group.empty() &&
+        std::find(flags.begin(), flags.end(), entry.flag_group) == flags.end())
+    {
+      flags.push_back(entry.flag_group);
+    }
+  }
+  std::sort(flags.begin(), flags.end());
   return flags;
 }
 

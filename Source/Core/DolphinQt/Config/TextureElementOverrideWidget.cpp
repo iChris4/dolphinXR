@@ -28,6 +28,8 @@
 #include "DolphinQt/QtUtils/NonDefaultQPushButton.h"
 #include "DolphinQt/QtUtils/QtUtils.h"
 #include "DolphinQt/Settings.h"
+#include "VideoCommon/ElementsGroupManager.h"
+#include "VideoCommon/ShaderHunter.h"
 #include "VideoCommon/TextureElementManager.h"
 
 using HandlingType = TextureElementManager::HandlingType;
@@ -54,7 +56,9 @@ void TextureElementOverrideWidget::CreateWidgets()
          "across all shaders and elements. Use the Texture Hunter to identify a texture, then\n"
          "apply a handling to every draw that binds it.\n"
          "Handling: Skip = hide, Screen = world-fixed, Head Locked = follows head,\n"
-         "Fullscreen = no VR. Applied as a fallback after Shader and Elements Group overrides."));
+         "Fullscreen = no VR, Flag = detect texture presence for shared override conditions.\n"
+         "Handling changes are a fallback after Shader and Elements Group overrides; flags are\n"
+         "global and can condition overrides in all three tools."));
   info_label->setWordWrap(true);
 
   // Warning shown when neither the texture preview nor the Import Texture button can find any
@@ -151,6 +155,7 @@ void TextureElementOverrideWidget::UpdateList()
         ovr.handling == HandlingType::Fullscreen ||
                 ovr.handling == HandlingType::FullscreenMono ? "fullscreen" :
         ovr.handling == HandlingType::HeadLocked    ? "headlocked" :
+        ovr.handling == HandlingType::Flag          ? "flag" :
         ovr.handling == HandlingType::UnitsPerMeter ? "units_per_meter" :
         ovr.handling == HandlingType::Passthrough   ? "passthrough" :
         ovr.handling == HandlingType::CameraAnchor  ? "camera_anchor" :
@@ -161,6 +166,15 @@ void TextureElementOverrideWidget::UpdateList()
                         .arg(QString::fromStdString(ovr.name))
                         .arg(QString::fromLatin1(handling_str))
                         .arg(ovr.texture_hashes.size());
+
+    if (!ovr.flag_group.empty())
+      label += QStringLiteral(" flag:%1").arg(QString::fromStdString(ovr.flag_group));
+    if (!ovr.condition_flag.empty())
+    {
+      label += (ovr.condition_inverted ? QStringLiteral(" if-not:%1") :
+                                         QStringLiteral(" if:%1"))
+                   .arg(QString::fromStdString(ovr.condition_flag));
+    }
 
     if (ovr.handling == HandlingType::Screen || ovr.handling == HandlingType::HeadLocked)
     {
@@ -287,9 +301,28 @@ void TextureElementOverrideWidget::OnListReordered()
   ReloadRuntime();
 }
 
+std::vector<std::string> TextureElementOverrideWidget::CollectAvailableFlags() const
+{
+  std::vector<std::string> flags;
+  const auto append_flag = [&flags](const std::string& flag) {
+    if (!flag.empty() && std::find(flags.begin(), flags.end(), flag) == flags.end())
+      flags.push_back(flag);
+  };
+
+  for (const auto& entry : ShaderHunter::LoadOverridesFromINI(m_game_id, m_revision))
+    append_flag(entry.flag_group);
+  for (const auto& entry : ElementsGroupManager::LoadOverridesFromINI(m_game_id, m_revision))
+    append_flag(entry.flag_group);
+  for (const auto& entry : m_overrides)
+    append_flag(entry.flag_group);
+
+  std::sort(flags.begin(), flags.end());
+  return flags;
+}
+
 void TextureElementOverrideWidget::OnAddClicked()
 {
-  TextureElementOverrideAddEditDialog dialog(this, m_game_id, nullptr);
+  TextureElementOverrideAddEditDialog dialog(this, m_game_id, nullptr, CollectAvailableFlags());
   if (dialog.exec() != QDialog::Accepted)
     return;
 
@@ -309,7 +342,8 @@ void TextureElementOverrideWidget::OnEditClicked()
   if (idx < 0 || idx >= static_cast<int>(m_overrides.size()))
     return;
 
-  TextureElementOverrideAddEditDialog dialog(this, m_game_id, &m_overrides[idx]);
+  TextureElementOverrideAddEditDialog dialog(this, m_game_id, &m_overrides[idx],
+                                             CollectAvailableFlags());
   if (dialog.exec() != QDialog::Accepted)
     return;
 

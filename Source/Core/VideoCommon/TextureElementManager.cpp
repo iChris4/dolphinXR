@@ -133,6 +133,8 @@ const char* HandlingToString(HandlingType handling)
     return "fullscreen";
   case HandlingType::HeadLocked:
     return "headlocked";
+  case HandlingType::Flag:
+    return "flag";
   case HandlingType::UnitsPerMeter:
     return "units_per_meter";
   case HandlingType::Passthrough:
@@ -154,6 +156,8 @@ HandlingType HandlingFromString(const std::string& value)
     return HandlingType::Fullscreen;
   if (value == "headlocked")
     return HandlingType::HeadLocked;
+  if (value == "flag")
+    return HandlingType::Flag;
   if (value == "units_per_meter" || value == "unitspermeter" || value == "upm")
     return HandlingType::UnitsPerMeter;
   if (value == "passthrough")
@@ -288,6 +292,13 @@ ParsedTextureOverrideFile LoadTextureOverridesFromINIFile(const std::string& pat
         current.anchor_pitch_deg = std::stof(value);
       else if (key == "anchor_roll")
         current.anchor_roll_deg = std::stof(value);
+      else if (key == "flag")
+        current.flag_group = value;
+      else if (key == "condition")
+        current.condition_flag = value;
+      else if (key == "condition_mode")
+        current.condition_inverted =
+            (value == "deactivate" || value == "inactive" || value == "1" || value == "true");
       else if (key == "comments")
         current.comments = value;
       else if (key == "texture")
@@ -432,6 +443,13 @@ void TextureElementManager::SaveOverridesToINI(
       if (ovr.anchor_roll_deg != 0.0f)
         out << "anchor_roll=" << ovr.anchor_roll_deg << "\n";
     }
+    if (!ovr.flag_group.empty())
+      out << "flag=" << ovr.flag_group << "\n";
+    if (!ovr.condition_flag.empty())
+    {
+      out << "condition=" << ovr.condition_flag << "\n";
+      out << "condition_mode=" << (ovr.condition_inverted ? "deactivate" : "activate") << "\n";
+    }
     if (!ovr.comments.empty())
     {
       // Keep comments single-line so they don't corrupt the section.
@@ -455,6 +473,7 @@ void TextureElementManager::LoadOverrides(const std::string& game_id)
 
   m_overrides.clear();
   m_texture_handling.clear();
+  m_flag_rules.clear();
   m_loaded_game_id = game_id;
   m_has_overrides.store(false, std::memory_order_relaxed);
 
@@ -471,6 +490,12 @@ void TextureElementManager::LoadOverrides(const std::string& game_id)
 
     has_overrides = true;
 
+    if (!ovr.flag_group.empty())
+    {
+      m_flag_rules.push_back(
+          {ovr.flag_group, ovr.condition_flag, ovr.condition_inverted, ovr.texture_hashes});
+    }
+
     const ResolvedHandling resolved{
         ovr.handling, ovr.element_depth, ovr.units_per_meter,
         std::clamp(ovr.passthrough_opacity, 0.0f, 1.0f),
@@ -485,11 +510,13 @@ void TextureElementManager::LoadOverrides(const std::string& game_id)
             .rotation = ovr.anchor_rotation != AnchorRotationMode::Off,
             .yaw_deg = ovr.anchor_yaw_deg,
             .pitch_deg = ovr.anchor_pitch_deg,
-            .roll_deg = ovr.anchor_roll_deg}};
-    for (u64 texture_hash : ovr.texture_hashes)
+            .roll_deg = ovr.anchor_roll_deg},
+        ovr.condition_flag,
+        ovr.condition_inverted};
+    if (ovr.handling != HandlingType::Flag)
     {
-      // First enabled override that lists a texture wins.
-      m_texture_handling.emplace(texture_hash, resolved);
+      for (u64 texture_hash : ovr.texture_hashes)
+        m_texture_handling[texture_hash].push_back(resolved);
     }
 
     m_overrides.push_back(std::move(ovr));
@@ -522,6 +549,55 @@ bool TextureElementManager::NeedsTextureHashes() const
          m_hunter_active.load(std::memory_order_relaxed);
 }
 
+bool TextureElementManager::IsConditionMatch(const ResolvedHandling& resolved) const
+{
+  if (resolved.condition_flag.empty())
+    return true;
+
+  const bool active = ShaderHunter::GetInstance().IsFlagActive(resolved.condition_flag);
+  return resolved.condition_inverted ? !active : active;
+}
+
+const TextureElementManager::ResolvedHandling*
+TextureElementManager::FindFirstMatchingHandling(u64 texture_hash) const
+{
+  const auto it = m_texture_handling.find(texture_hash);
+  if (it == m_texture_handling.end())
+    return nullptr;
+
+  for (const ResolvedHandling& resolved : it->second)
+  {
+    if (IsConditionMatch(resolved))
+      return &resolved;
+  }
+  return nullptr;
+}
+
+void TextureElementManager::RegisterFlagsForTextures(const std::array<u64, 8>& bound) const
+{
+  for (const FlagRule& rule : m_flag_rules)
+  {
+    if (!rule.condition_flag.empty())
+    {
+      const bool active = ShaderHunter::GetInstance().IsFlagActive(rule.condition_flag);
+      if (rule.condition_inverted ? active : !active)
+        continue;
+    }
+
+    const bool texture_matches = std::any_of(bound.begin(), bound.end(), [&rule](u64 hash) {
+      return hash != 0 &&
+             std::find(rule.texture_hashes.begin(), rule.texture_hashes.end(), hash) !=
+                 rule.texture_hashes.end();
+    });
+    if (!texture_matches)
+      continue;
+
+    if (ShaderHunter::GetInstance().IsDebugLogging())
+      INFO_LOG_FMT(VIDEO, "TextureElementManager: Flag '{}' matched", rule.flag_group);
+    ShaderHunter::GetInstance().RegisterExternalFlag(rule.flag_group);
+  }
+}
+
 bool TextureElementManager::ShouldSkipByTexture(const std::array<u64, 8>& bound) const
 {
   if (m_texture_handling.empty())
@@ -531,8 +607,8 @@ bool TextureElementManager::ShouldSkipByTexture(const std::array<u64, 8>& bound)
   {
     if (hash == 0)
       continue;
-    const auto it = m_texture_handling.find(hash);
-    if (it != m_texture_handling.end() && it->second.handling == HandlingType::Skip)
+    const ResolvedHandling* resolved = FindFirstMatchingHandling(hash);
+    if (resolved != nullptr && resolved->handling == HandlingType::Skip)
       return true;
   }
   return false;
@@ -550,21 +626,22 @@ TextureElementManager::HandlingType TextureElementManager::GetHandlingForTexture
   {
     if (hash == 0)
       continue;
-    const auto it = m_texture_handling.find(hash);
-    if (it == m_texture_handling.end() || it->second.handling == HandlingType::Skip)
+    const ResolvedHandling* resolved = FindFirstMatchingHandling(hash);
+    if (resolved == nullptr || resolved->handling == HandlingType::Skip ||
+        resolved->handling == HandlingType::Flag)
       continue;
 
     if (element_depth != nullptr)
-      *element_depth = it->second.element_depth;
+      *element_depth = resolved->element_depth;
     if (units_per_meter != nullptr)
-      *units_per_meter = it->second.units_per_meter;
+      *units_per_meter = resolved->units_per_meter;
     if (passthrough_opacity != nullptr)
-      *passthrough_opacity = it->second.passthrough_opacity;
+      *passthrough_opacity = resolved->passthrough_opacity;
     if (anchor != nullptr)
-      *anchor = it->second.anchor;
+      *anchor = resolved->anchor;
     if (controller_anchor != nullptr)
-      *controller_anchor = it->second.controller_anchor;
-    return it->second.handling;
+      *controller_anchor = resolved->controller_anchor;
+    return resolved->handling;
   }
   return HandlingType::Skip;
 }

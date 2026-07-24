@@ -128,7 +128,8 @@ using AnchorRotationMode = TextureElementManager::AnchorRotationMode;
 using TextureElementOverride = TextureElementManager::TextureElementOverride;
 
 TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
-    QWidget* parent, std::string game_id, const TextureElementOverride* edit_override)
+    QWidget* parent, std::string game_id, const TextureElementOverride* edit_override,
+    const std::vector<std::string>& available_flags)
     : QDialog(parent), m_game_id(std::move(game_id))
 {
   setWindowTitle(edit_override ? tr("Edit Texture Element Override") :
@@ -154,6 +155,7 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   m_handling_combo->addItem(tr("Screen"), static_cast<int>(HandlingType::Screen));
   m_handling_combo->addItem(tr("Fullscreen"), static_cast<int>(HandlingType::Fullscreen));
   m_handling_combo->addItem(tr("Head Locked"), static_cast<int>(HandlingType::HeadLocked));
+  m_handling_combo->addItem(tr("Flag"), static_cast<int>(HandlingType::Flag));
   m_handling_combo->addItem(tr("Units per Meter"), static_cast<int>(HandlingType::UnitsPerMeter));
   m_handling_combo->addItem(tr("Passthrough"), static_cast<int>(HandlingType::Passthrough));
   m_handling_combo->addItem(tr("Camera Anchor"), static_cast<int>(HandlingType::CameraAnchor));
@@ -162,8 +164,32 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   m_handling_combo->setToolTip(
       tr("How every draw that binds a listed texture is handled in VR.\n"
          "Skip = hide, Screen = world-fixed, Head Locked = follows head, Fullscreen = no VR,\n"
+         "Flag = detect texture presence to conditionally enable overrides in any tool,\n"
          "Passthrough = pixels become a see-through window to the headset camera,\n"
          "Camera Anchor = the VR camera moves to the drawn element (first-person view)."));
+
+  m_flag_label = new QLabel(tr("Flag Group:"));
+  m_flag_edit = new QLineEdit;
+  m_flag_edit->setPlaceholderText(tr("e.g. gameplay"));
+  m_flag_edit->setToolTip(
+      tr("When a listed texture is bound, this named flag is set.\n"
+         "Shader, Elements Group, and Texture Element overrides can use it as a condition.\n"
+         "Optional for non-Flag handling (the texture acts as both override and flag)."));
+
+  m_condition_label = new QLabel(tr("Condition Flag:"));
+  m_condition_combo = new QComboBox;
+  m_condition_combo->setEditable(true);
+  m_condition_combo->addItem(QString());
+  for (const std::string& flag : available_flags)
+    m_condition_combo->addItem(QString::fromStdString(flag));
+  m_condition_combo->setToolTip(
+      tr("Only apply this texture override when the shared flag is active or inactive.\n"
+         "Flags may be produced by Shader, Elements Group, or Texture Element overrides."));
+
+  m_condition_mode_label = new QLabel(tr("Condition Mode:"));
+  m_condition_mode_combo = new QComboBox;
+  m_condition_mode_combo->addItem(tr("Activate"), false);
+  m_condition_mode_combo->addItem(tr("Deactivate"), true);
 
   m_element_depth_label = new QLabel(tr("Element Depth:"));
   m_element_depth_spin = new QDoubleSpinBox;
@@ -368,6 +394,22 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
       m_anchor_ctrl_pitch_spin->setValue(edit_override->anchor_pitch_deg);
       m_anchor_ctrl_roll_spin->setValue(edit_override->anchor_roll_deg);
     }
+    m_flag_edit->setText(QString::fromStdString(edit_override->flag_group));
+    {
+      const QString condition = QString::fromStdString(edit_override->condition_flag);
+      int idx = m_condition_combo->findText(condition);
+      if (idx < 0 && !condition.isEmpty())
+      {
+        m_condition_combo->addItem(condition);
+        idx = m_condition_combo->findText(condition);
+      }
+      m_condition_combo->setCurrentIndex(std::max(idx, 0));
+    }
+    {
+      const int idx = m_condition_mode_combo->findData(edit_override->condition_inverted);
+      if (idx >= 0)
+        m_condition_mode_combo->setCurrentIndex(idx);
+    }
 
     m_updating_texture_hash_fields = true;
     while (m_texture_hash_edits.size() < edit_override->texture_hashes.size())
@@ -386,6 +428,9 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   auto* form = new QFormLayout;
   form->addRow(tr("Name:"), m_name_edit);
   form->addRow(tr("Handling:"), m_handling_combo);
+  form->addRow(m_flag_label, m_flag_edit);
+  form->addRow(m_condition_label, m_condition_combo);
+  form->addRow(m_condition_mode_label, m_condition_mode_combo);
   form->addRow(m_element_depth_label, m_element_depth_spin);
   form->addRow(m_units_per_meter_label, m_units_per_meter_spin);
   form->addRow(m_passthrough_opacity_label, m_passthrough_opacity_spin);
@@ -412,6 +457,11 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
   connect(m_handling_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
           &TextureElementOverrideAddEditDialog::OnHandlingChanged);
+  connect(m_condition_combo, &QComboBox::currentTextChanged, this, [this](const QString& text) {
+    const bool has_condition = !text.trimmed().isEmpty();
+    m_condition_mode_label->setEnabled(has_condition);
+    m_condition_mode_combo->setEnabled(has_condition);
+  });
   connect(m_view_textures_button, &QPushButton::clicked, this,
           &TextureElementOverrideAddEditDialog::ShowTextureBrowser);
   connect(m_import_textures_button, &QPushButton::clicked, this,
@@ -422,6 +472,9 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   layout->addWidget(buttons);
   setLayout(layout);
 
+  const bool has_condition = !m_condition_combo->currentText().trimmed().isEmpty();
+  m_condition_mode_label->setEnabled(has_condition);
+  m_condition_mode_combo->setEnabled(has_condition);
   OnHandlingChanged();
 }
 
@@ -431,6 +484,13 @@ TextureElementOverride TextureElementOverrideAddEditDialog::GetResult() const
   result.name = m_name_edit->text().toStdString();
   result.comments = m_comments_edit->toPlainText().trimmed().toStdString();
   result.handling = static_cast<HandlingType>(m_handling_combo->currentData().toInt());
+  result.flag_group = m_flag_edit->text().trimmed().toStdString();
+  if (result.handling != HandlingType::Flag)
+  {
+    result.condition_flag = m_condition_combo->currentText().trimmed().toStdString();
+    result.condition_inverted =
+        !result.condition_flag.empty() && m_condition_mode_combo->currentData().toBool();
+  }
   result.element_depth = (result.handling == HandlingType::Screen ||
                           result.handling == HandlingType::HeadLocked) ?
                              static_cast<float>(m_element_depth_spin->value()) :
@@ -519,6 +579,12 @@ void TextureElementOverrideAddEditDialog::OnAccept()
   }
 
   const auto handling = static_cast<HandlingType>(m_handling_combo->currentData().toInt());
+  if (handling == HandlingType::Flag && m_flag_edit->text().trimmed().isEmpty())
+  {
+    QMessageBox::warning(this, tr("Validation Error"),
+                         tr("Flag handling requires a flag group name."));
+    return;
+  }
   if (handling == HandlingType::UnitsPerMeter && m_units_per_meter_spin->value() <= 0.0)
   {
     QMessageBox::warning(this, tr("Validation Error"),
@@ -539,6 +605,7 @@ void TextureElementOverrideAddEditDialog::OnHandlingChanged()
   const bool show_anchor = (handling == HandlingType::CameraAnchor);
   const bool show_controller_anchor = (handling == HandlingType::ControllerAnchor);
   const bool show_anchor_offsets = show_anchor || show_controller_anchor;
+  const bool is_flag = (handling == HandlingType::Flag);
 
   m_element_depth_label->setVisible(show_element_depth);
   m_element_depth_spin->setVisible(show_element_depth);
@@ -568,6 +635,14 @@ void TextureElementOverrideAddEditDialog::OnHandlingChanged()
   m_anchor_ctrl_pitch_spin->setVisible(show_controller_anchor);
   m_anchor_ctrl_roll_label->setVisible(show_controller_anchor);
   m_anchor_ctrl_roll_spin->setVisible(show_controller_anchor);
+  // A flag group can be combined with any handling. Conditions are hidden for Flag-only entries,
+  // matching the Shader and Elements Group editors.
+  m_flag_label->setVisible(true);
+  m_flag_edit->setVisible(true);
+  m_condition_label->setVisible(!is_flag);
+  m_condition_combo->setVisible(!is_flag);
+  m_condition_mode_label->setVisible(!is_flag);
+  m_condition_mode_combo->setVisible(!is_flag);
 }
 
 void TextureElementOverrideAddEditDialog::ShowTextureBrowser()

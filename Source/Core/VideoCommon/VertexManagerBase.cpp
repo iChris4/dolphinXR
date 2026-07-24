@@ -1275,6 +1275,8 @@ void VertexManagerBase::Flush()
             hunter.RegisterFlags(vs_hash, ps_hash, gs_hash);
           if (elements_runtime_active)
             elements.RegisterFlagsForDraw(*element_draw);
+          if (texmgr_has_overrides)
+            texmgr.RegisterFlagsForTextures(tex_hashes);
 
           if (!hunter_skip && !elements_skip && elements_has_overrides)
             elements_skip = elements.ShouldSkipByOverride(*element_draw);

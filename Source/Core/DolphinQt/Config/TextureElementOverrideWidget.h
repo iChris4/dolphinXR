@@ -37,6 +37,7 @@ private:
   void LoadOverrides();
   void SaveOverrides();
   void ReloadRuntime();
+  std::vector<std::string> CollectAvailableFlags() const;
   void UpdateDumpWarning();
   bool HasTextureDumps() const;
 

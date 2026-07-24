@@ -17,7 +17,8 @@
 #include "VideoCommon/ShaderHunter.h"
 
 // Texture Element Override: reclassify VR draws (Skip / Screen / Fullscreen / Head Locked / Units
-// per Meter) based purely on the bound texture hash, regardless of which shader draws it.
+// per Meter), or set a shared Flag, based purely on the bound texture hash, regardless of which
+// shader draws it.
 //
 // Unlike ShaderHunter's per-shader texture filter (which only applies in combination with a
 // specific shader hash), this matches across all shaders/elements: every draw that binds a
@@ -26,6 +27,7 @@
 //
 // Precedence at draw time: this is a fallback — Elements Group Override and Shader Override are
 // resolved first, and a Texture Element Override only applies when neither matched the draw.
+// Flag registration is independent of precedence and shared by all three override tools.
 //
 // Thread-safety mirrors ShaderHunter: LoadOverrides() (UI thread) locks; the per-draw match path
 // reads the lookup maps lock-free. The Texture Hunter capture/swap/query path is mutex-guarded
@@ -65,6 +67,11 @@ public:
     float anchor_pitch_deg = 0.0f;
     float anchor_roll_deg = 0.0f;
     std::vector<u64> texture_hashes;  // The group's textures (matched when any is bound)
+    // Shared override flags. A matching texture sets flag_group; condition_flag gates this
+    // override using the same frame-stable registry as Shader and Elements Group overrides.
+    std::string flag_group;
+    std::string condition_flag;
+    bool condition_inverted = false;
     bool enabled = true;
   };
 
@@ -84,6 +91,9 @@ public:
   bool NeedsTextureHashes() const;
 
   // --- Video-thread match path (bound = 8 currently-bound texture hashes) ---
+  // Register every flag whose texture group matches this draw. This is independent of handling
+  // precedence so texture flags remain available to Shader and Elements Group conditions.
+  void RegisterFlagsForTextures(const std::array<u64, 8>& bound) const;
   // True if any bound texture maps to a Skip override.
   bool ShouldSkipByTexture(const std::array<u64, 8>& bound) const;
   // Handling for the first bound texture with a non-Skip override (Skip if none). Out-params are
@@ -129,13 +139,29 @@ private:
     float passthrough_opacity = 0.0f;
     CameraAnchorParams anchor;
     ControllerAnchorParams controller_anchor;
+    std::string condition_flag;
+    bool condition_inverted = false;
   };
+
+  struct FlagRule
+  {
+    std::string flag_group;
+    std::string condition_flag;
+    bool condition_inverted = false;
+    std::vector<u64> texture_hashes;
+  };
+
+  bool IsConditionMatch(const ResolvedHandling& resolved) const;
+  const ResolvedHandling* FindFirstMatchingHandling(u64 texture_hash) const;
 
   mutable std::mutex m_mutex;
 
   // Lookup maps: written by LoadOverrides, read lock-free on the video thread.
   std::vector<TextureElementOverride> m_overrides;
-  std::unordered_map<u64, ResolvedHandling> m_texture_handling;  // texture hash -> handling
+  // Multiple ordered candidates are retained so a later entry can apply while an earlier
+  // conditional entry is inactive. The first condition-matching candidate wins.
+  std::unordered_map<u64, std::vector<ResolvedHandling>> m_texture_handling;
+  std::vector<FlagRule> m_flag_rules;
   std::string m_loaded_game_id;
   std::atomic_bool m_has_overrides = false;
 

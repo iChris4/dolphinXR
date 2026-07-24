@@ -35,7 +35,8 @@ public:
   // game_id is used to locate the game's texture dump directory for the Import Texture button.
   explicit TextureElementOverrideAddEditDialog(
       QWidget* parent, std::string game_id,
-      const TextureElementManager::TextureElementOverride* edit_override = nullptr);
+      const TextureElementManager::TextureElementOverride* edit_override = nullptr,
+      const std::vector<std::string>& available_flags = {});
 
   TextureElementManager::TextureElementOverride GetResult() const;
 
@@ -58,6 +59,12 @@ private:
   QLineEdit* m_name_edit;
   QPlainTextEdit* m_comments_edit;
   QComboBox* m_handling_combo;
+  QLabel* m_flag_label;
+  QLineEdit* m_flag_edit;
+  QLabel* m_condition_label;
+  QComboBox* m_condition_combo;
+  QLabel* m_condition_mode_label;
+  QComboBox* m_condition_mode_combo;
   QDoubleSpinBox* m_element_depth_spin;
   QLabel* m_element_depth_label;
   QDoubleSpinBox* m_units_per_meter_spin;
