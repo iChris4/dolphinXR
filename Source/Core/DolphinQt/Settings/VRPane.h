@@ -9,6 +9,7 @@
 class ConfigBool;
 class ConfigFloatSlider;
 class ConfigSlider;
+class QCheckBox;
 class QLabel;
 class QPushButton;
 class CullingCodeFinderWidget;
@@ -93,6 +94,7 @@ private:
   QLabel* m_hud_thickness_value = nullptr;
   QPushButton* m_reset_general_settings = nullptr;
   ConfigBool* m_load_custom_shaders = nullptr;
+  QCheckBox* m_debug_log_draws = nullptr;
   QPointer<CullingCodeFinderWidget> m_culling_finder_widget;
   QPointer<ShaderHunterWidget> m_shader_hunter_widget;
 };

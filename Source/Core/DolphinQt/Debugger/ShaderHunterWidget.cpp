@@ -152,16 +152,6 @@ void ShaderHunterWidget::CreateWidgets()
   hunting_option_layout->addWidget(m_hunting_option_combo);
   layout->addLayout(hunting_option_layout);
 
-  m_debug_log_checkbox = new QCheckBox(tr("Debug Log Draws"));
-  m_debug_log_checkbox->setToolTip(
-      tr("Log every draw call with projection, viewport, scissor, and shader hashes.\n"
-         "Also logs EFB copies, stereo palette conversions, fullscreen-effect textures, and "
-         "EFB clear operations.\n"
-         "Use to trace how visual elements are drawn and where stereo texture layers are lost.\n"
-         "Open Log Configuration and enable INFO for Video to see the output.\n"
-         "WARNING: generates a LOT of log output — enable briefly, then disable."));
-  layout->addWidget(m_debug_log_checkbox);
-
   auto* type_layout = new QHBoxLayout;
   type_layout->addWidget(new QLabel(tr("Shader Type:")));
   m_type_combo = new QComboBox;
@@ -265,9 +255,6 @@ void ShaderHunterWidget::ConnectSignals()
                 m_hunting_option_combo->currentData().toInt());
             hunter.SetHuntingOption(option);
           });
-  connect(m_debug_log_checkbox, &QCheckBox::toggled, this, [](bool checked) {
-    ShaderHunter::GetInstance().SetDebugLogging(checked);
-  });
   connect(m_type_combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
     m_saved_texture_filters.clear();
     SetSelectedTextureHashes({});

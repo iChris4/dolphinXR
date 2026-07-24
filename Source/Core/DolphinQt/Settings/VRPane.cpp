@@ -3,6 +3,7 @@
 
 #include "DolphinQt/Settings/VRPane.h"
 
+#include <QCheckBox>
 #include <QGroupBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -29,6 +30,7 @@
 #include "DolphinQt/Debugger/ShaderHunterWidget.h"
 #include "DolphinQt/Settings.h"
 #include "VideoCommon/HideObjectEngine.h"
+#include "VideoCommon/ShaderHunter.h"
 #include "VideoCommon/VideoConfig.h"
 
 VRPane::VRPane(QWidget* parent) : QWidget(parent)
@@ -594,6 +596,19 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   debug_layout->addWidget(m_reference_space_mode, 0, 1);
   debug_layout->addWidget(new QLabel(tr("Tracking Mode:")), 1, 0);
   debug_layout->addWidget(m_tracking_mode, 1, 1);
+
+  m_debug_log_draws = new QCheckBox(tr("Debug Log Draws"));
+  m_debug_log_draws->setToolTip(
+      tr("Log every draw call with projection, viewport, scissor, and shader hashes.\n"
+         "Also logs EFB copies, stereo palette conversions, fullscreen-effect textures, and "
+         "EFB clear operations.\n"
+         "Use to trace how visual elements are drawn and where stereo texture layers are lost.\n"
+         "Open Log Configuration and enable INFO for Video to see the output.\n"
+         "WARNING: generates a LOT of log output — enable briefly, then disable."));
+  m_debug_log_draws->setChecked(ShaderHunter::GetInstance().IsDebugLogging());
+  connect(m_debug_log_draws, &QCheckBox::toggled, this,
+          [](bool checked) { ShaderHunter::GetInstance().SetDebugLogging(checked); });
+  debug_layout->addWidget(m_debug_log_draws, 2, 0, 1, 2);
 
   general_layout->addStretch();
   hack_layout->addStretch();

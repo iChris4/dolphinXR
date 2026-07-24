@@ -41,7 +41,6 @@ private:
   QVBoxLayout* m_main_layout = nullptr;
   QCheckBox* m_enable_checkbox;
   QComboBox* m_hunting_option_combo;
-  QCheckBox* m_debug_log_checkbox;
   QComboBox* m_type_combo;
   QLabel* m_hash_label;
   QLabel* m_position_label;
