@@ -214,6 +214,7 @@ HideObjectAddEditDialog::HideObjectAddEditDialog(
 
   if (m_result.entries.empty())
     m_result.entries.push_back(m_current_entry);
+  m_entry_enabled.assign(m_result.entries.size(), true);
 
   setWindowTitle(m_is_edit ? tr("Edit Hide Object Code") : tr("Add Hide Object Code"));
   setMinimumWidth(560);
@@ -238,6 +239,8 @@ void HideObjectAddEditDialog::CreateWidgets()
   m_entry_list = new QListWidget;
   m_entry_list->setFont(QFont(QStringLiteral("Courier New"), 10));
   m_entry_list->setMinimumHeight(120);
+  m_entry_list->setToolTip(
+      tr("Unchecked lines are excluded while testing and are discarded when you click OK."));
 
   m_entry_add = new QPushButton(tr("Add Line"));
   m_entry_remove = new QPushButton(tr("Remove Line"));
@@ -310,6 +313,8 @@ void HideObjectAddEditDialog::ConnectWidgets()
           &HideObjectAddEditDialog::OnValueSliderChanged);
   connect(m_entry_list, &QListWidget::itemSelectionChanged, this,
           &HideObjectAddEditDialog::OnEntrySelectionChanged);
+  connect(m_entry_list, &QListWidget::itemChanged, this,
+          &HideObjectAddEditDialog::OnEntryCheckStateChanged);
   connect(m_entry_add, &QPushButton::clicked, this, &HideObjectAddEditDialog::OnAddEntryClicked);
   connect(m_entry_remove, &QPushButton::clicked, this,
           &HideObjectAddEditDialog::OnRemoveEntryClicked);
@@ -322,10 +327,14 @@ void HideObjectAddEditDialog::UpdateEntryList()
   const QSignalBlocker blocker(m_entry_list);
   m_entry_list->clear();
 
-  for (const auto& entry : m_result.entries)
+  for (size_t i = 0; i < m_result.entries.size(); ++i)
   {
-    m_entry_list->addItem(QStringLiteral("[%1] %2").arg(
+    const auto& entry = m_result.entries[i];
+    auto* item = new QListWidgetItem(QStringLiteral("[%1] %2").arg(
         QString::fromLatin1(HideObjectEngine::GetTypeName(entry.type)), FormatEntryValue(entry)));
+    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+    item->setCheckState(m_entry_enabled[i] ? Qt::Checked : Qt::Unchecked);
+    m_entry_list->addItem(item);
   }
 
   m_entry_list->setCurrentRow(static_cast<int>(m_current_entry_index));
@@ -481,6 +490,20 @@ void HideObjectAddEditDialog::OnEntrySelectionChanged()
   UpdateValueDisplay();
 }
 
+void HideObjectAddEditDialog::OnEntryCheckStateChanged(QListWidgetItem* item)
+{
+  const int row = m_entry_list->row(item);
+  if (row < 0 || row >= static_cast<int>(m_entry_enabled.size()))
+    return;
+
+  const bool enabled = item->checkState() == Qt::Checked;
+  if (m_entry_enabled[static_cast<size_t>(row)] == enabled)
+    return;
+
+  m_entry_enabled[static_cast<size_t>(row)] = enabled;
+  ApplyTemporarily();
+}
+
 void HideObjectAddEditDialog::OnAddEntryClicked()
 {
   if (!ParseValueFromUI())
@@ -491,6 +514,7 @@ void HideObjectAddEditDialog::OnAddEntryClicked()
   HideObjectEngine::HideObjectEntry entry;
   entry.type = HideObjectEngine::HideObjectType::Bits8;
   m_result.entries.push_back(entry);
+  m_entry_enabled.push_back(true);
   m_current_entry_index = m_result.entries.size() - 1;
   m_current_entry = entry;
 
@@ -508,6 +532,7 @@ void HideObjectAddEditDialog::OnRemoveEntryClicked()
     return;
 
   m_result.entries.erase(m_result.entries.begin() + m_current_entry_index);
+  m_entry_enabled.erase(m_entry_enabled.begin() + m_current_entry_index);
   if (m_current_entry_index >= m_result.entries.size())
     m_current_entry_index = m_result.entries.size() - 1;
   m_current_entry = m_result.entries[m_current_entry_index];
@@ -537,10 +562,16 @@ void HideObjectAddEditDialog::ApplyTemporarily()
 
   HideObjectEngine::HideObject temp_code;
   temp_code.name = "temp_brute_force";
-  temp_code.entries = m_result.entries;
+  temp_code.entries.reserve(m_result.entries.size());
+  for (size_t i = 0; i < m_result.entries.size(); ++i)
+  {
+    if (m_entry_enabled[i])
+      temp_code.entries.push_back(m_result.entries[i]);
+  }
   temp_code.active = true;
   temp_code.user_defined = false;
-  temp_list.push_back(std::move(temp_code));
+  if (!temp_code.entries.empty())
+    temp_list.push_back(std::move(temp_code));
 
   HideObjectEngine::Engine::GetInstance().ApplyCodes(temp_list);
 }
@@ -569,6 +600,31 @@ void HideObjectAddEditDialog::OnAccept()
     return;
 
   StoreCurrentEntry();
+
+  std::vector<HideObjectEngine::HideObjectEntry> enabled_entries;
+  enabled_entries.reserve(m_result.entries.size());
+  for (size_t i = 0; i < m_result.entries.size(); ++i)
+  {
+    if (m_entry_enabled[i])
+      enabled_entries.push_back(m_result.entries[i]);
+  }
+  if (enabled_entries.empty())
+  {
+    QMessageBox::warning(this, tr("Error"), tr("Please enable at least one code line to save."));
+    return;
+  }
+
+  if (enabled_entries.size() != m_result.entries.size() &&
+      QMessageBox::warning(this, tr("Unchecked Code Lines"),
+                           tr("Unchecked code lines will not be saved and will be removed from "
+                              "this code. Do you want to continue?"),
+                           QMessageBox::Yes | QMessageBox::No, QMessageBox::No) !=
+          QMessageBox::Yes)
+  {
+    return;
+  }
+
+  m_result.entries = std::move(enabled_entries);
   m_result.name = name.toStdString();
   m_result.active = true;
   m_result.user_defined = true;

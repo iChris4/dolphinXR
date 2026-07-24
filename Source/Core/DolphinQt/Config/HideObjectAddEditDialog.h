@@ -13,6 +13,7 @@
 class QComboBox;
 class QLineEdit;
 class QListWidget;
+class QListWidgetItem;
 class QPushButton;
 class QSlider;
 
@@ -38,6 +39,7 @@ private:
   void OnValueTextChanged();
   void OnValueSliderChanged(int value);
   void OnEntrySelectionChanged();
+  void OnEntryCheckStateChanged(QListWidgetItem* item);
   void OnAddEntryClicked();
   void OnRemoveEntryClicked();
   void OnAccept();
@@ -55,6 +57,7 @@ private:
 
   HideObjectEngine::HideObject m_result;
   HideObjectEngine::HideObjectEntry m_current_entry;
+  std::vector<bool> m_entry_enabled;
   size_t m_current_entry_index = 0;
   std::optional<size_t> m_existing_code_index;
 
