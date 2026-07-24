@@ -750,7 +750,7 @@ LoadElementGroupOverridesFromINIFile(const std::string& path)
       current.handling = value == "screen"          ? HandlingType::Screen :
                          value == "screen_pane"     ? HandlingType::ScreenPane :
                          value == "fullscreen"      ? HandlingType::Fullscreen :
-                         value == "fullscreen_mono" ? HandlingType::FullscreenMono :
+                         value == "fullscreen_mono" ? HandlingType::Fullscreen :
                          value == "headlocked"      ? HandlingType::HeadLocked :
                          value == "flag"            ? HandlingType::Flag :
                          value == "passthrough"     ? HandlingType::Passthrough :
@@ -759,6 +759,8 @@ LoadElementGroupOverridesFromINIFile(const std::string& path)
                          value == "units_per_meter" || value == "upm" ?
                              HandlingType::UnitsPerMeter :
                              HandlingType::Skip;
+    else if (key == "preserve_stereo_efb")
+      current.preserve_stereo_efb = (value == "1" || value == "true");
     // "layer" (manual depth layer) was removed along with Auto Layer Spread / Layer Offset —
     // silently ignored so older INIs still load. (Note: "sig_layer" is a different, still
     // supported key — it is part of the element signature, not the depth layering.)
@@ -953,6 +955,8 @@ void ElementsGroupManager::SaveOverridesToINI(const std::string& game_id,
         << (entry.match_kind == MatchKind::ProfileLayer ? "element_profile_v1" : "element_only_v6")
         << "\n";
     out << "handling=" << GetHandlingName(entry.handling) << "\n";
+    if (entry.handling == HandlingType::Fullscreen && entry.preserve_stereo_efb)
+      out << "preserve_stereo_efb=1\n";
     if (entry.element_depth >= 0.0f)
       out << "element_depth=" << entry.element_depth << "\n";
     if (entry.units_per_meter > 0.0f)
@@ -1933,8 +1937,11 @@ bool ElementsGroupManager::ShouldSkipByOverride(const DrawRecord& draw) const
 }
 
 ElementsGroupManager::HandlingType ElementsGroupManager::GetOverrideHandling(
-    const DrawRecord& draw) const
+    const DrawRecord& draw, bool* out_preserve_stereo_efb) const
 {
+  if (out_preserve_stereo_efb)
+    *out_preserve_stereo_efb = false;
+
   std::lock_guard lock(m_mutex);
   GetStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
@@ -1943,10 +1950,17 @@ ElementsGroupManager::HandlingType ElementsGroupManager::GetOverrideHandling(
       continue;
     if (DoesEntryMatch(entry, draw, true))
     {
+      const bool preserve_stereo_efb =
+          entry.handling == HandlingType::Fullscreen && entry.preserve_stereo_efb;
+      if (out_preserve_stereo_efb)
+        *out_preserve_stereo_efb = preserve_stereo_efb;
       if (ShaderHunter::GetInstance().IsDebugLogging())
       {
-        INFO_LOG_FMT(VIDEO, "ElementsGroup match(handling): '{}' draw#{} handling={}", entry.name,
-                     draw.draw_index + 1, static_cast<int>(entry.handling));
+        INFO_LOG_FMT(VIDEO,
+                     "ElementsGroup match(handling): '{}' draw#{} handling={} "
+                     "preserve_stereo_efb={}",
+                     entry.name, draw.draw_index + 1, static_cast<int>(entry.handling),
+                     preserve_stereo_efb);
       }
       return entry.handling;
     }

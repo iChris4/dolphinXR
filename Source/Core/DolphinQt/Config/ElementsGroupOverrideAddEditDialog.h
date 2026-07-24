@@ -63,6 +63,7 @@ private:
   QLabel* m_profile_layers_label = nullptr;
   QListWidget* m_profile_layers_list = nullptr;
   QComboBox* m_handling_combo = nullptr;
+  QCheckBox* m_preserve_stereo_efb_check = nullptr;
   QLabel* m_screen_pane_depth_label = nullptr;
   QComboBox* m_screen_pane_depth_combo = nullptr;
   QDoubleSpinBox* m_element_depth_spin = nullptr;

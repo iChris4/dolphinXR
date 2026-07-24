@@ -227,8 +227,6 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
                             static_cast<int>(ElementsGroupManager::HandlingType::ScreenPane));
   m_handling_combo->addItem(tr("Fullscreen"),
                             static_cast<int>(ElementsGroupManager::HandlingType::Fullscreen));
-  m_handling_combo->addItem(tr("Fullscreen Mono"),
-                            static_cast<int>(ElementsGroupManager::HandlingType::FullscreenMono));
   m_handling_combo->addItem(tr("Head Locked"),
                             static_cast<int>(ElementsGroupManager::HandlingType::HeadLocked));
   m_handling_combo->addItem(tr("Flag"),
@@ -243,6 +241,13 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
   m_handling_combo->addItem(
       tr("Controller Anchor"),
       static_cast<int>(ElementsGroupManager::HandlingType::ControllerAnchor));
+
+  m_preserve_stereo_efb_check = new QCheckBox(tr("Preserve Stereo EFB"));
+  m_preserve_stereo_efb_check->setToolTip(
+      tr("Preserve separate left- and right-eye EFB layers when this fullscreen draw uses a "
+         "one-layer texture partially updated from a stereo EFB copy.\n"
+         "Enable this only for effects that incorrectly duplicate the left eye into the right "
+         "eye."));
 
   m_screen_pane_depth_label = new QLabel(tr("Screen Pane Depth:"));
   m_screen_pane_depth_combo = new QComboBox;
@@ -486,6 +491,7 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
   form->addRow(m_profile_label, m_profile_combo);
   form->addRow(m_profile_layers_label, m_profile_layers_list);
   form->addRow(tr("Handling:"), m_handling_combo);
+  form->addRow(QString(), m_preserve_stereo_efb_check);
   form->addRow(m_screen_pane_depth_label, m_screen_pane_depth_combo);
   form->addRow(m_element_depth_label, m_element_depth_spin);
   form->addRow(m_units_per_meter_label, m_units_per_meter_spin);
@@ -591,10 +597,15 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
       SetProfileLayers(edit_override->profile_layers);
     }
     {
-      const int handling_idx = m_handling_combo->findData(static_cast<int>(edit_override->handling));
+      const auto handling =
+          edit_override->handling == ElementsGroupManager::HandlingType::FullscreenMono ?
+              ElementsGroupManager::HandlingType::Fullscreen :
+              edit_override->handling;
+      const int handling_idx = m_handling_combo->findData(static_cast<int>(handling));
       if (handling_idx >= 0)
         m_handling_combo->setCurrentIndex(handling_idx);
     }
+    m_preserve_stereo_efb_check->setChecked(edit_override->preserve_stereo_efb);
     {
       const int depth_idx =
           m_screen_pane_depth_combo->findData(static_cast<int>(edit_override->screen_pane_depth));
@@ -690,6 +701,9 @@ ElementsGroupManager::ElementGroupOverride ElementsGroupOverrideAddEditDialog::G
       m_match_kind_combo->currentData().toInt());
   result.handling = static_cast<ElementsGroupManager::HandlingType>(
       m_handling_combo->currentData().toInt());
+  result.preserve_stereo_efb =
+      result.handling == ElementsGroupManager::HandlingType::Fullscreen &&
+      m_preserve_stereo_efb_check->isChecked();
   result.screen_pane_depth = static_cast<ElementsGroupManager::ScreenPaneDepthMode>(
       m_screen_pane_depth_combo->currentData().toInt());
   result.runtime_element = m_runtime_element;
@@ -892,6 +906,8 @@ void ElementsGroupOverrideAddEditDialog::RefreshHandlingUi()
                                    handling == ElementsGroupManager::HandlingType::HeadLocked);
   const bool show_screen_pane_depth =
       handling == ElementsGroupManager::HandlingType::ScreenPane;
+  const bool show_preserve_stereo_efb =
+      handling == ElementsGroupManager::HandlingType::Fullscreen;
   const bool show_units_per_meter =
       (handling == ElementsGroupManager::HandlingType::UnitsPerMeter);
   const bool show_passthrough = (handling == ElementsGroupManager::HandlingType::Passthrough);
@@ -905,6 +921,7 @@ void ElementsGroupOverrideAddEditDialog::RefreshHandlingUi()
   m_element_depth_spin->setVisible(show_element_depth);
   m_screen_pane_depth_label->setVisible(show_screen_pane_depth);
   m_screen_pane_depth_combo->setVisible(show_screen_pane_depth);
+  m_preserve_stereo_efb_check->setVisible(show_preserve_stereo_efb);
   m_units_per_meter_label->setVisible(show_units_per_meter);
   m_units_per_meter_spin->setVisible(show_units_per_meter);
   m_passthrough_opacity_label->setVisible(show_passthrough);

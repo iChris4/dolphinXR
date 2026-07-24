@@ -367,18 +367,7 @@ RcTcacheEntry TextureCacheBase::ApplyPaletteToEntry(RcTcacheEntry& entry, const 
       g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
       (mp1_layered_palette_candidate ||
        ((vulkan_fix_enabled || d3d_fix_enabled) && mp2_highlight_palette_candidate));
-
-  // VR debug: log palette conversions of stereo EFB sources so missed layered-candidate
-  // sizes (e.g. per-game visor palette copy dimensions) can be identified from a log run.
-  if (ShaderHunter::GetInstance().IsDebugLogging() && entry->GetNumLayers() >= 2) [[unlikely]]
-  {
-    INFO_LOG_FMT(VIDEO,
-                 "VR_PALETTE: {}x{} layers={} tlutfmt={} layered={} "
-                 "(mp1_cand={} mp2_hl_cand={} vk_fix={} d3d_fix={})",
-                 entry->native_width, entry->native_height, entry->GetNumLayers(),
-                 static_cast<int>(tlutfmt), use_layered_pipeline, mp1_layered_palette_candidate,
-                 mp2_highlight_palette_candidate, vulkan_fix_enabled, d3d_fix_enabled);
-  }
+  const bool layered_pipeline_requested = use_layered_pipeline;
 
   const AbstractPipeline* pipeline =
       g_shader_cache->GetPaletteConversionPipeline(tlutfmt, use_layered_pipeline);
@@ -386,6 +375,24 @@ RcTcacheEntry TextureCacheBase::ApplyPaletteToEntry(RcTcacheEntry& entry, const 
   {
     use_layered_pipeline = false;
     pipeline = g_shader_cache->GetPaletteConversionPipeline(tlutfmt);
+  }
+
+  // VR debug: correlate palette conversion with the EFB-copy and consuming-draw diagnostics.
+  // Logging both the requested and selected paths exposes a missing layered pipeline as well as a
+  // per-game candidate gate that did not recognize the source dimensions.
+  if (ShaderHunter::GetInstance().IsDebugLogging() && entry->GetNumLayers() >= 2) [[unlikely]]
+  {
+    INFO_LOG_FMT(VIDEO,
+                 "VR_PALETTE: addr={:#010x} native={}x{} host={}x{} layers={} efb={} xfb={} "
+                 "stride={} texfmt={} tlutfmt={} layered_requested={} layered_selected={} "
+                 "fallback={} (mp1_cand={} mp2_hl_cand={} vk_fix={} d3d_fix={})",
+                 entry->addr, entry->native_width, entry->native_height, entry->GetWidth(),
+                 entry->GetHeight(), entry->GetNumLayers(), entry->is_efb_copy,
+                 entry->is_xfb_copy, entry->memory_stride, entry->format.texfmt, tlutfmt,
+                 layered_pipeline_requested, use_layered_pipeline,
+                 layered_pipeline_requested && !use_layered_pipeline,
+                 mp1_layered_palette_candidate, mp2_highlight_palette_candidate,
+                 vulkan_fix_enabled, d3d_fix_enabled);
   }
   if (!pipeline)
   {
@@ -1208,6 +1215,158 @@ bool TextureCacheBase::IsBoundEfbCopy(u32 stage, u32* native_width, u32* native_
 
   *native_width = entry->native_width;
   *native_height = entry->native_height;
+  return true;
+}
+
+void TextureCacheBase::LogVRFullscreenEffectTexture(u32 draw_index, u32 stage) const
+{
+  if (stage >= m_bound_textures.size() || !m_bound_textures[stage])
+  {
+    INFO_LOG_FMT(VIDEO, "VR_EFFECT_TEXTURE: draw#{} stage={} bound=false", draw_index, stage);
+    return;
+  }
+
+  const RcTcacheEntry& entry = m_bound_textures[stage];
+  const TextureConfig& config = entry->texture->GetConfig();
+
+  // ApplyPaletteToEntry intentionally turns its result into a normal cache entry. Find the source
+  // EFB entry retained at the same address/hash so the draw log still identifies palette-derived
+  // EFB textures without changing cache behavior or save-state data.
+  bool matching_efb_source = std::ranges::any_of(entry->references, [](const TCacheEntry* source) {
+    return source->texture && source->is_efb_copy && !source->is_xfb_copy;
+  });
+  const auto range = m_textures_by_address.equal_range(entry->addr);
+  for (auto iter = range.first; !matching_efb_source && iter != range.second; ++iter)
+  {
+    const RcTcacheEntry& candidate = iter->second;
+    if (candidate.get() != entry.get() && candidate->is_efb_copy &&
+        candidate->base_hash == entry->base_hash &&
+        candidate->native_width == entry->native_width &&
+        candidate->native_height == entry->native_height)
+    {
+      matching_efb_source = true;
+      break;
+    }
+  }
+
+  INFO_LOG_FMT(VIDEO,
+               "VR_EFFECT_TEXTURE: draw#{} stage={} addr={:#010x} native={}x{} host={}x{} "
+               "layers={} type={} render_target={} efb={} efb_source={} xfb={} stride={} "
+               "texfmt={} base_hash={:016x} hash={:016x} name='{}'",
+               draw_index, stage, entry->addr, entry->native_width, entry->native_height,
+               config.width, config.height, config.layers, config.type, config.IsRenderTarget(),
+               entry->is_efb_copy, matching_efb_source, entry->is_xfb_copy,
+               entry->memory_stride, entry->format.texfmt, entry->base_hash, entry->hash,
+               entry->texture_info_name);
+}
+
+bool TextureCacheBase::ApplyVRPreserveStereoEFBFix(u32 stage)
+{
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || stage >= m_bound_textures.size() ||
+      !m_bound_textures[stage])
+  {
+    return false;
+  }
+
+  RcTcacheEntry& destination = m_bound_textures[stage];
+
+  // A shared cache entry may be bound at more than one stage. If an earlier stage promoted it,
+  // make sure this stage no longer has the old one-layer resource bound.
+  if (destination->GetNumLayers() >= 2)
+  {
+    g_gfx->SetTexture(stage, destination->texture.get());
+    return false;
+  }
+  if (destination->IsLocked())
+    return false;
+
+  // DoPartialTextureUpdates links every successfully applied EFB source to its destination. The
+  // Skies of Arcadia effect is a same-address strided update: a 640x480 stereo copy is inserted at
+  // the origin of a padded 1024x512 texture. Requiring that relationship and layout keeps this
+  // draw-selected repair away from unrelated mono textures.
+  std::vector<TCacheEntry*> stereo_sources;
+  u32 target_layers = 1;
+  for (TCacheEntry* source : destination->references)
+  {
+    if (!source->texture || !source->is_efb_copy || source->is_xfb_copy ||
+        source->GetNumLayers() < 2 || source->addr != destination->addr ||
+        source->memory_stride != destination->memory_stride ||
+        !IsCompatibleTextureFormat(source->format.texfmt, destination->format.texfmt) ||
+        source->GetWidth() > destination->GetWidth() ||
+        source->GetHeight() > destination->GetHeight())
+    {
+      continue;
+    }
+
+    stereo_sources.push_back(source);
+    target_layers = std::max(target_layers, source->GetNumLayers());
+  }
+  if (stereo_sources.empty())
+    return false;
+
+  // Apply older sources first if more than one retained reference covers the same address. The
+  // newest EFB copy then wins, matching normal texture-cache update ordering.
+  std::ranges::sort(stereo_sources, {}, &TCacheEntry::id);
+
+  TextureConfig promoted_config = destination->texture->GetConfig();
+  promoted_config.layers = target_layers;
+  std::optional<TexPoolEntry> promoted = AllocateTexture(promoted_config);
+  if (!promoted)
+  {
+    WARN_LOG_FMT(VIDEO,
+                 "VR_PRESERVE_STEREO_EFB: stage={} failed to promote {}x{} texture to {} layers",
+                 stage, promoted_config.width, promoted_config.height, target_layers);
+    return false;
+  }
+
+  // Preserve all of the normal decoded texture (including padding) in every eye. Layer 0 already
+  // contains the partial update made by DoPartialTextureUpdates; layer 1 starts as that same image
+  // and receives the real right-eye EFB region below.
+  for (u32 layer = 0; layer < target_layers; ++layer)
+  {
+    for (u32 level = 0; level < promoted_config.levels; ++level)
+    {
+      const MathUtil::Rectangle<int> rect = promoted_config.GetMipRect(level);
+      promoted->texture->CopyRectangleFromTexture(destination->texture.get(), rect, 0, level, rect,
+                                                  layer, level);
+    }
+  }
+
+  destination->texture.swap(promoted->texture);
+  destination->framebuffer.swap(promoted->framebuffer);
+
+  // At this point promoted owns the old one-layer allocation, which can be reused by the pool.
+  const TextureConfig old_config = promoted->texture->GetConfig();
+  m_texture_pool.emplace(
+      old_config, TexPoolEntry(std::move(promoted->texture), std::move(promoted->framebuffer)));
+
+  for (const TCacheEntry* source : stereo_sources)
+  {
+    const MathUtil::Rectangle<int> source_rect = source->texture->GetConfig().GetRect();
+    const MathUtil::Rectangle<int> destination_rect(0, 0, source_rect.GetWidth(),
+                                                    source_rect.GetHeight());
+    const u32 layers_to_copy = std::min(source->GetNumLayers(), target_layers);
+    for (u32 layer = 1; layer < layers_to_copy; ++layer)
+    {
+      destination->texture->CopyRectangleFromTexture(source->texture.get(), source_rect, layer, 0,
+                                                     destination_rect, layer, 0);
+    }
+  }
+
+  destination->texture->FinishedRendering();
+  g_gfx->SetTexture(stage, destination->texture.get());
+
+  if (ShaderHunter::GetInstance().IsDebugLogging()) [[unlikely]]
+  {
+    INFO_LOG_FMT(VIDEO,
+                 "VR_PRESERVE_STEREO_EFB: stage={} addr={:#010x} native={}x{} host={}x{} "
+                 "layers=1->{} sources={} source_native={}x{} source_host={}x{} stride={}",
+                 stage, destination->addr, destination->native_width, destination->native_height,
+                 destination->GetWidth(), destination->GetHeight(), target_layers,
+                 stereo_sources.size(), stereo_sources.back()->native_width,
+                 stereo_sources.back()->native_height, stereo_sources.back()->GetWidth(),
+                 stereo_sources.back()->GetHeight(), destination->memory_stride);
+  }
   return true;
 }
 
@@ -2482,6 +2641,21 @@ void TextureCacheBase::CopyRenderTargetToTexture(
   const bool vram_linear_filter =
       linear_filter || (vram_source_rect && (vram_src_rect.GetWidth() != srcRect.GetWidth() ||
                                              vram_src_rect.GetHeight() != srcRect.GetHeight()));
+
+  if (ShaderHunter::GetInstance().IsDebugLogging() &&
+      g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !is_xfb_copy) [[unlikely]]
+  {
+    INFO_LOG_FMT(VIDEO,
+                 "VR_EFB_COPY: dst={:#010x} native={}x{} host={}x{} layers={} "
+                 "src=({},{} {}x{}) vram_src=({},{} {}x{}) dstfmt={} texfmt={} depth={} "
+                 "intensity={} half={} linear={} to_vram={} to_ram={} stride={} bytes_per_row={}",
+                 dstAddr, tex_w, tex_h, scaled_tex_w, scaled_tex_h,
+                 g_framebuffer_manager->GetEFBLayers(), srcRect.left, srcRect.top,
+                 srcRect.GetWidth(), srcRect.GetHeight(), vram_src_rect.left, vram_src_rect.top,
+                 vram_src_rect.GetWidth(), vram_src_rect.GetHeight(), dstFormat, baseFormat,
+                 is_depth_copy, isIntensity, scaleByHalf, vram_linear_filter, copy_to_vram,
+                 copy_to_ram, dstStride, bytes_per_row);
+  }
 
   RcTcacheEntry entry;
   if (copy_to_vram)

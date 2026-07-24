@@ -103,6 +103,10 @@ public:
     std::string credits;
     MatchKind match_kind = MatchKind::RuntimeSignature;
     HandlingType handling = HandlingType::Skip;
+    // Fullscreen handling: preserve separate eye layers when a one-layer texture was partially
+    // updated from a stereo EFB copy. Opt-in because most fullscreen effects are intentionally
+    // mono and do not need the extra texture allocation/copies.
+    bool preserve_stereo_efb = false;
     RuntimeElementSignature runtime_element;
     MetroidElementProfile profile_id = MetroidElementProfile::None;
     std::vector<MetroidElementLayer> profile_layers;
@@ -231,7 +235,8 @@ public:
 
   void RegisterFlagsForDraw(const DrawRecord& draw);
   bool ShouldSkipByOverride(const DrawRecord& draw) const;
-  HandlingType GetOverrideHandling(const DrawRecord& draw) const;
+  HandlingType GetOverrideHandling(const DrawRecord& draw,
+                                   bool* out_preserve_stereo_efb = nullptr) const;
   ScreenPaneDepthMode GetOverrideScreenPaneDepth(const DrawRecord& draw,
                                                  u64* out_group_id = nullptr) const;
   float GetOverrideElementDepth(const DrawRecord& draw) const;
