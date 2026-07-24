@@ -319,6 +319,7 @@ ShaderOverrideAddEditDialog::ShaderOverrideAddEditDialog(
     m_edit_family_signature = edit_override->family_signature;
     m_edit_family_version = edit_override->family_version;
     m_edit_original_hash = edit_override->hash;
+    m_edit_original_type = edit_override->type;
     m_name_edit->setText(QString::fromStdString(edit_override->name));
     m_comments_edit->setPlainText(QString::fromStdString(edit_override->comments));
     m_credits_edit->setText(QString::fromStdString(edit_override->credits));
@@ -479,13 +480,14 @@ ShaderHunter::ShaderOverride ShaderOverrideAddEditDialog::GetResult() const
   result.match_mode =
       static_cast<ShaderHunter::MatchMode>(m_match_mode_combo->currentData().toInt());
   result.hash_family_match = result.match_mode == ShaderHunter::MatchMode::ShaderFamily;
-  // Keep the stored family signature/scheme version (even for exact-hash entries, so the mode
-  // can be switched later without the game running); a hand-edited hash is assumed to come from
-  // the current build.
-  result.family_signature = m_edit_family_signature;
-  result.family_version = m_edit_family_version;
-  if (result.hash != m_edit_original_hash)
-    result.family_version = ShaderHunter::FAMILY_SCHEME_VERSION;
+  // Keep the stored family signature/scheme version only while the shader identity is unchanged.
+  // A signature belongs to both the hash's captured UID and its shader type.
+  const bool shader_identity_unchanged =
+      result.hash == m_edit_original_hash && result.type == m_edit_original_type;
+  result.family_signature = shader_identity_unchanged ? m_edit_family_signature : 0;
+  result.family_version = shader_identity_unchanged ?
+                              m_edit_family_version :
+                              ShaderHunter::FAMILY_SCHEME_VERSION;
 
   // When the game is running, re-resolve the family live — that always yields a current-scheme
   // signature and upgrades legacy entries in place.
@@ -594,6 +596,29 @@ void ShaderOverrideAddEditDialog::OnAccept()
     QMessageBox::warning(this, tr("Validation Error"),
                          tr("Hash must be at most 16 hex digits."));
     return;
+  }
+
+  const u64 hash = std::strtoull(hash_str.c_str(), nullptr, 16);
+  const auto shader_type =
+      static_cast<ShaderHunter::ShaderType>(m_type_combo->currentData().toInt());
+  const auto match_mode =
+      static_cast<ShaderHunter::MatchMode>(m_match_mode_combo->currentData().toInt());
+  if (match_mode == ShaderHunter::MatchMode::ShaderFamily)
+  {
+    const bool can_reuse_stored_signature =
+        m_edit_family_signature != 0 && hash == m_edit_original_hash &&
+        shader_type == m_edit_original_type;
+    if (!can_reuse_stored_signature &&
+        !ShaderHunter::GetInstance().GetShaderFamilySignature(shader_type, hash).has_value())
+    {
+      QMessageBox::warning(
+          this, tr("Validation Error"),
+          tr("No family signature has been captured for this shader hash and type. Run the game "
+             "and let this shader render, or capture it with Shader Hunter, then retry. You can "
+             "also select Exact Hash, but that override may not survive shader-generator "
+             "updates."));
+      return;
+    }
   }
 
   // Validate texture hash hex string (if provided)

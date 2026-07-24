@@ -152,6 +152,20 @@ void ShaderHunterWidget::CreateWidgets()
   hunting_option_layout->addWidget(m_hunting_option_combo);
   layout->addLayout(hunting_option_layout);
 
+  auto* match_mode_layout = new QHBoxLayout;
+  match_mode_layout->addWidget(new QLabel(tr("Match Type:")));
+  m_match_mode_combo = new QComboBox;
+  m_match_mode_combo->addItem(tr("Shader Family"),
+                              static_cast<int>(ShaderHunter::MatchMode::ShaderFamily));
+  m_match_mode_combo->addItem(tr("Exact Hash"),
+                              static_cast<int>(ShaderHunter::MatchMode::ExactHash));
+  m_match_mode_combo->setToolTip(
+      tr("Controls both the live Skip/Pink preview and the saved override.\n"
+         "Shader Family matches semantic shader variants and is more resilient to Dolphin "
+         "shader-generator updates."));
+  match_mode_layout->addWidget(m_match_mode_combo);
+  layout->addLayout(match_mode_layout);
+
   auto* type_layout = new QHBoxLayout;
   type_layout->addWidget(new QLabel(tr("Shader Type:")));
   m_type_combo = new QComboBox;
@@ -164,6 +178,10 @@ void ShaderHunterWidget::CreateWidgets()
   m_hash_label = new QLabel(tr("Hash: (none)"));
   m_hash_label->setFont(QFont(QStringLiteral("Courier")));
   layout->addWidget(m_hash_label);
+
+  m_family_signature_label = new QLabel(tr("Family: (none)"));
+  m_family_signature_label->setFont(QFont(QStringLiteral("Courier")));
+  layout->addWidget(m_family_signature_label);
 
   m_position_label = new QLabel(tr("- / -"));
   layout->addWidget(m_position_label);
@@ -255,6 +273,15 @@ void ShaderHunterWidget::ConnectSignals()
                 m_hunting_option_combo->currentData().toInt());
             hunter.SetHuntingOption(option);
           });
+  connect(m_match_mode_combo, qOverload<int>(&QComboBox::currentIndexChanged), this,
+          [this](int) {
+            m_saved_texture_filters.clear();
+            SetSelectedTextureHashes({});
+            auto& hunter = ShaderHunter::GetInstance();
+            hunter.SetHuntingMatchMode(static_cast<ShaderHunter::MatchMode>(
+                m_match_mode_combo->currentData().toInt()));
+            UpdateDisplay();
+          });
   connect(m_type_combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
     m_saved_texture_filters.clear();
     SetSelectedTextureHashes({});
@@ -294,6 +321,10 @@ void ShaderHunterWidget::ConnectSignals()
   const int hunting_idx = m_hunting_option_combo->findData(static_cast<int>(hunting_option));
   if (hunting_idx >= 0)
     m_hunting_option_combo->setCurrentIndex(hunting_idx);
+  const auto match_mode = ShaderHunter::GetInstance().GetHuntingMatchMode();
+  const int match_mode_idx = m_match_mode_combo->findData(static_cast<int>(match_mode));
+  if (match_mode_idx >= 0)
+    m_match_mode_combo->setCurrentIndex(match_mode_idx);
   m_hunting_option_combo->setEnabled(ShaderHunter::GetInstance().IsEnabled());
 }
 
@@ -303,16 +334,29 @@ void ShaderHunterWidget::UpdateDisplay()
   const int pos = hunter.GetSelectedPosition();
   const int total = hunter.GetTotalCount();
   const u64 hash = hunter.GetSelectedHash();
+  const auto family_signature = hunter.GetShaderFamilySignature(hunter.GetActiveType(), hash);
 
   if (pos >= 0 && total > 0)
   {
     m_hash_label->setText(
         tr("Hash: 0x%1").arg(static_cast<uint>(hash), 8, 16, QLatin1Char('0')).toUpper());
     m_position_label->setText(tr("%1 / %2").arg(pos + 1).arg(total));
+    if (family_signature.has_value())
+    {
+      m_family_signature_label->setText(
+          tr("Family: 0x%1")
+              .arg(static_cast<qulonglong>(*family_signature), 16, 16, QLatin1Char('0'))
+              .toUpper());
+    }
+    else
+    {
+      m_family_signature_label->setText(tr("Family: (unavailable)"));
+    }
   }
   else
   {
     m_hash_label->setText(tr("Hash: (none)"));
+    m_family_signature_label->setText(tr("Family: (none)"));
     m_position_label->setText(tr("- / %1").arg(total));
   }
 }
@@ -372,6 +416,18 @@ void ShaderHunterWidget::SaveCurrentShader()
 
   u64 hash = hunter.GetSelectedHash();
   auto type = hunter.GetActiveType();
+  const auto match_mode = static_cast<ShaderHunter::MatchMode>(
+      m_match_mode_combo->currentData().toInt());
+  const auto family_signature = hunter.GetShaderFamilySignature(type, hash);
+  if (match_mode == ShaderHunter::MatchMode::ShaderFamily && !family_signature.has_value())
+  {
+    QMessageBox::warning(
+        this, tr("Save Shader"),
+        tr("The selected shader family signature is not available yet. Let the shader render "
+           "again, then retry. The override was not saved as an exact hash because that would "
+           "not survive shader-generator updates."));
+    return;
+  }
   const auto handling =
       static_cast<ShaderHunter::HandlingType>(m_handling_combo->currentData().toInt());
 
@@ -380,6 +436,13 @@ void ShaderHunterWidget::SaveCurrentShader()
   entry.hash = hash;
   entry.type = type;
   entry.handling = handling;
+  entry.match_mode = match_mode;
+  entry.hash_family_match = match_mode == ShaderHunter::MatchMode::ShaderFamily;
+  if (family_signature.has_value())
+  {
+    entry.family_signature = *family_signature;
+    entry.family_version = ShaderHunter::FAMILY_SCHEME_VERSION;
+  }
   entry.enabled = true;
   entry.user_defined = true;
   if (handling == ShaderHunter::HandlingType::UnitsPerMeter)
@@ -422,11 +485,21 @@ void ShaderHunterWidget::SaveCurrentShader()
                                  "units_per_meter" :
                              handling == ShaderHunter::HandlingType::Passthrough ? "passthrough" :
                                                                                   "skip";
-  QString msg = tr("Saved shader override '%1' (%2, hash 0x%3, handling: %4)")
+  const QString match_mode_text = entry.hash_family_match ? tr("Shader Family") : tr("Exact Hash");
+  QString msg = tr("Saved shader override '%1' (%2, hash 0x%3, match: %4, handling: %5)")
       .arg(QString::fromStdString(name))
       .arg(QString::fromLatin1(type_str))
       .arg(static_cast<uint>(hash), 8, 16, QLatin1Char('0'))
+      .arg(match_mode_text)
       .arg(QString::fromLatin1(handling_str));
+
+  if (entry.family_signature != 0)
+  {
+    msg += tr("\nFamily signature: 0x%1 (scheme v%2)")
+               .arg(static_cast<qulonglong>(entry.family_signature), 16, 16,
+                    QLatin1Char('0'))
+               .arg(entry.family_version);
+  }
 
   if (handling == ShaderHunter::HandlingType::UnitsPerMeter && entry.units_per_meter > 0.0f)
     msg += tr("\nUnits per Meter: %1").arg(entry.units_per_meter, 0, 'f', 2);

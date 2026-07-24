@@ -306,6 +306,7 @@ void ShaderHunter::OnFrameEnd()
   {
     m_display[i] = std::move(m_collecting[i]);
     m_collecting[i].clear();
+    m_selected_pos[i] = GetHuntingCandidatePositionLocked(i, m_selected_hash[i]);
   }
 
   m_shader_texture_usage_display = std::move(m_shader_texture_usage_collecting);
@@ -331,16 +332,39 @@ bool ShaderHunter::ShouldSkipDraw(u64 vs_hash, u64 ps_hash, u64 gs_hash)
     return false;
   }
 
-  const u64 sel = m_selected_hash[t];
-  bool matches = false;
+  const u64 selected_hash = m_selected_hash[t];
+  u64 current_hash = 0;
+  u64 current_family = 0;
   switch (m_active_type)
   {
-  case ShaderType::Pixel:   matches = (ps_hash == sel); break;
-  case ShaderType::Vertex:  matches = (vs_hash == sel); break;
-  case ShaderType::Geometry: matches = (gs_hash == sel); break;
+  case ShaderType::Pixel:
+    current_hash = ps_hash;
+    current_family = m_current_ps_family;
+    break;
+  case ShaderType::Vertex:
+    current_hash = vs_hash;
+    current_family = m_current_vs_family;
+    break;
+  case ShaderType::Geometry:
+    current_hash = gs_hash;
+    current_family = m_current_gs_family;
+    break;
   default:
     m_should_highlight_selected_draw = false;
     return false;
+  }
+
+  bool matches = current_hash == selected_hash;
+  if (m_hunting_match_mode == MatchMode::ShaderFamily)
+  {
+    const auto family_it = m_shader_family_signatures[t].find(selected_hash);
+    const u64 selected_family = family_it == m_shader_family_signatures[t].end() ?
+                                    0 :
+                                    family_it->second;
+    // A family should be available for every shader registered while hunting. Keep exact-hash
+    // matching as a safe fallback for a stale selection or an unsupported UID layout.
+    if (selected_family != 0 && current_family != 0)
+      matches = selected_family == current_family;
   }
 
   if (!matches)
@@ -403,7 +427,7 @@ bool ShaderHunter::ShouldSkipDraw(u64 vs_hash, u64 ps_hash, u64 gs_hash)
   }
   else
   {
-    // Normal mode: target all draws with this selected hash.
+    // Normal mode: target all draws with this selected hash or family.
     selected_draw_matches_hunting = true;
   }
 
@@ -469,6 +493,32 @@ ShaderHunter::HuntingOption ShaderHunter::GetHuntingOption() const
   return m_hunting_option;
 }
 
+void ShaderHunter::SetHuntingMatchMode(MatchMode mode)
+{
+  if (mode == MatchMode::RuntimeElement)
+    mode = MatchMode::ShaderFamily;
+
+  std::lock_guard lock(m_mutex);
+  if (m_hunting_match_mode == mode)
+    return;
+
+  m_hunting_match_mode = mode;
+  for (int i = 0; i < TYPE_COUNT; i++)
+    m_selected_pos[i] = GetHuntingCandidatePositionLocked(i, m_selected_hash[i]);
+  m_texture_skip_filters.clear();
+  m_texture_skip_mode_active = false;
+  m_selected_texture_hash = 0;
+  m_texture_usage_collecting.clear();
+  m_texture_usage_display.clear();
+  m_selected_draw_signature = {};
+}
+
+ShaderHunter::MatchMode ShaderHunter::GetHuntingMatchMode() const
+{
+  std::lock_guard lock(m_mutex);
+  return m_hunting_match_mode;
+}
+
 bool ShaderHunter::ShouldHighlightSelectedDraw() const
 {
   std::lock_guard lock(m_mutex);
@@ -499,31 +549,16 @@ void ShaderHunter::NextShader()
 {
   std::lock_guard lock(m_mutex);
   const int t = static_cast<int>(m_active_type);
-  auto& visited = m_display[t];
-  if (visited.empty())
+  const auto candidates = GetHuntingCandidatesLocked(t);
+  if (candidates.empty())
     return;
 
-  auto it = visited.find(m_selected_hash[t]);
-  if (it != visited.end())
-  {
-    ++it;
-    if (it != visited.end())
-    {
-      m_selected_pos[t]++;
-    }
-    else
-    {
-      it = visited.begin();
-      m_selected_pos[t] = 0;
-    }
-  }
-  else
-  {
-    it = visited.begin();
-    m_selected_pos[t] = 0;
-  }
+  const int current_pos = GetHuntingCandidatePositionLocked(t, m_selected_hash[t]);
+  const int next_pos = current_pos < 0 ? 0 :
+                                        (current_pos + 1) % static_cast<int>(candidates.size());
   const u64 previous = m_selected_hash[t];
-  m_selected_hash[t] = *it;
+  m_selected_hash[t] = candidates[next_pos];
+  m_selected_pos[t] = next_pos;
   if (previous != m_selected_hash[t])
   {
     m_texture_skip_filters.clear();
@@ -539,31 +574,18 @@ void ShaderHunter::PrevShader()
 {
   std::lock_guard lock(m_mutex);
   const int t = static_cast<int>(m_active_type);
-  auto& visited = m_display[t];
-  if (visited.empty())
+  const auto candidates = GetHuntingCandidatesLocked(t);
+  if (candidates.empty())
     return;
 
-  auto it = visited.find(m_selected_hash[t]);
-  if (it != visited.end())
-  {
-    if (it != visited.begin())
-    {
-      --it;
-      m_selected_pos[t]--;
-    }
-    else
-    {
-      it = std::prev(visited.end());
-      m_selected_pos[t] = static_cast<int>(visited.size()) - 1;
-    }
-  }
-  else
-  {
-    it = std::prev(visited.end());
-    m_selected_pos[t] = static_cast<int>(visited.size()) - 1;
-  }
+  const int current_pos = GetHuntingCandidatePositionLocked(t, m_selected_hash[t]);
+  const int previous_pos =
+      current_pos < 0 ? static_cast<int>(candidates.size()) - 1 :
+                        (current_pos + static_cast<int>(candidates.size()) - 1) %
+                            static_cast<int>(candidates.size());
   const u64 previous = m_selected_hash[t];
-  m_selected_hash[t] = *it;
+  m_selected_hash[t] = candidates[previous_pos];
+  m_selected_pos[t] = previous_pos;
   if (previous != m_selected_hash[t])
   {
     m_texture_skip_filters.clear();
@@ -601,7 +623,7 @@ bool ShaderHunter::SelectShader(ShaderType type, u64 hash)
 
   m_active_type = type;
   m_selected_hash[t] = hash;
-  m_selected_pos[t] = static_cast<int>(std::distance(visited.begin(), it));
+  m_selected_pos[t] = GetHuntingCandidatePositionLocked(t, hash);
   return true;
 }
 
@@ -614,13 +636,73 @@ u64 ShaderHunter::GetSelectedHash() const
 int ShaderHunter::GetSelectedPosition() const
 {
   std::lock_guard lock(m_mutex);
-  return m_selected_pos[static_cast<int>(m_active_type)];
+  return GetHuntingCandidatePositionLocked(static_cast<int>(m_active_type),
+                                           m_selected_hash[static_cast<int>(m_active_type)]);
 }
 
 int ShaderHunter::GetTotalCount() const
 {
   std::lock_guard lock(m_mutex);
-  return static_cast<int>(m_display[static_cast<int>(m_active_type)].size());
+  return static_cast<int>(GetHuntingCandidatesLocked(static_cast<int>(m_active_type)).size());
+}
+
+std::vector<u64> ShaderHunter::GetHuntingCandidatesLocked(int type_index) const
+{
+  std::vector<u64> candidates;
+  if (type_index < 0 || type_index >= TYPE_COUNT)
+    return candidates;
+
+  const auto& visited = m_display[type_index];
+  candidates.reserve(visited.size());
+  if (m_hunting_match_mode == MatchMode::ExactHash)
+  {
+    candidates.assign(visited.begin(), visited.end());
+    return candidates;
+  }
+
+  // A family is presented once even when multiple exact shader variants from that family were
+  // used in the frame. Keep shaders without a known family as distinct exact-hash candidates.
+  std::unordered_set<u64> seen_families;
+  const auto& family_signatures = m_shader_family_signatures[type_index];
+  for (u64 hash : visited)
+  {
+    const auto family_it = family_signatures.find(hash);
+    const bool has_family = family_it != family_signatures.end() && family_it->second != 0;
+    if (has_family && !seen_families.insert(family_it->second).second)
+      continue;
+    candidates.push_back(hash);
+  }
+  return candidates;
+}
+
+int ShaderHunter::GetHuntingCandidatePositionLocked(int type_index, u64 hash) const
+{
+  if (hash == ~0ULL || type_index < 0 || type_index >= TYPE_COUNT)
+    return -1;
+
+  const auto candidates = GetHuntingCandidatesLocked(type_index);
+  const auto exact_it = std::find(candidates.begin(), candidates.end(), hash);
+  if (exact_it != candidates.end())
+    return static_cast<int>(std::distance(candidates.begin(), exact_it));
+
+  if (m_hunting_match_mode != MatchMode::ShaderFamily)
+    return -1;
+
+  const auto& family_signatures = m_shader_family_signatures[type_index];
+  const auto selected_family_it = family_signatures.find(hash);
+  if (selected_family_it == family_signatures.end() || selected_family_it->second == 0)
+    return -1;
+
+  for (size_t i = 0; i < candidates.size(); i++)
+  {
+    const auto candidate_family_it = family_signatures.find(candidates[i]);
+    if (candidate_family_it != family_signatures.end() &&
+        candidate_family_it->second == selected_family_it->second)
+    {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
 }
 
 void ShaderHunter::SetCurrentDrawTextures(const std::array<u64, 8>& hashes,
@@ -1016,11 +1098,20 @@ LoadShaderOverridesFromINIFile(const std::string& path)
         std::transform(mode.begin(), mode.end(), mode.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (mode == "runtime_element" || mode == "runtimeelement")
+        {
           current.match_mode = MatchMode::RuntimeElement;
+          current.hash_family_match = false;
+        }
         else if (mode == "shader_family" || mode == "shaderfamily" || mode == "family")
+        {
           current.match_mode = MatchMode::ShaderFamily;
+          current.hash_family_match = true;
+        }
         else
+        {
           current.match_mode = MatchMode::ExactHash;
+          current.hash_family_match = false;
+        }
       }
       else if (key == "hash_family")
       {
@@ -1029,8 +1120,8 @@ LoadShaderOverridesFromINIFile(const std::string& path)
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         current.hash_family_match = (mode == "1" || mode == "true" || mode == "yes" ||
                                      mode == "on" || mode == "family");
-        if (current.hash_family_match)
-          current.match_mode = MatchMode::ShaderFamily;
+        current.match_mode = current.hash_family_match ? MatchMode::ShaderFamily :
+                                                         MatchMode::ExactHash;
       }
       else if (key == "family_signature")
       {
@@ -1144,8 +1235,9 @@ void ShaderHunter::SaveOverridesToINI(const std::string& game_id,
     out << "$" << ovr.name << "\n";
     out << "Hash=" << fmt::format("{:016x}", ovr.hash) << "\n";
     out << "Type=" << type_str << "\n";
-    out << "match_mode="
-        << (ovr.match_mode == MatchMode::ShaderFamily ? "shader_family" : "exact_hash") << "\n";
+    const bool family_match =
+        ovr.match_mode == MatchMode::ShaderFamily || ovr.hash_family_match;
+    out << "match_mode=" << (family_match ? "shader_family" : "exact_hash") << "\n";
     out << "handling=" << handling_str << "\n";
     if (ovr.element_depth >= 0.0f)
       out << "element_depth=" << ovr.element_depth << "\n";
@@ -1198,7 +1290,7 @@ void ShaderHunter::SaveOverridesToINI(const std::string& game_id,
       out << "condition_mode=" << (ovr.condition_inverted ? "deactivate" : "activate") << "\n";
     }
     out << "family_version=" << ovr.family_version << "\n";
-    if (ovr.hash_family_match)
+    if (family_match)
       out << "hash_family=1\n";
     // Persist the family signature whenever we have one (even for exact-hash entries) so the
     // entry can be switched to family matching later without the game running.
@@ -1674,17 +1766,37 @@ bool ShaderHunter::ShouldBypassSelectedOverrideForTextureTool(u64 vs_hash, u64 p
     return false;
 
   const u64 selected_hash = m_selected_hash[active_type_index];
+  u64 current_hash = 0;
+  u64 current_family = 0;
   switch (m_active_type)
   {
   case ShaderType::Pixel:
-    return ps_hash == selected_hash;
+    current_hash = ps_hash;
+    current_family = m_current_ps_family;
+    break;
   case ShaderType::Vertex:
-    return vs_hash == selected_hash;
+    current_hash = vs_hash;
+    current_family = m_current_vs_family;
+    break;
   case ShaderType::Geometry:
-    return gs_hash == selected_hash;
+    current_hash = gs_hash;
+    current_family = m_current_gs_family;
+    break;
   default:
     return false;
   }
+
+  if (m_hunting_match_mode == MatchMode::ShaderFamily)
+  {
+    const auto family_it = m_shader_family_signatures[active_type_index].find(selected_hash);
+    if (family_it != m_shader_family_signatures[active_type_index].end() &&
+        family_it->second != 0 && current_family != 0)
+    {
+      return family_it->second == current_family;
+    }
+  }
+
+  return current_hash == selected_hash;
 }
 
 bool ShaderHunter::ShouldSkipByOverride(u64 vs_hash, u64 ps_hash, u64 gs_hash) const
@@ -2253,12 +2365,18 @@ ShaderHunter::HuntingStatus ShaderHunter::GetHuntingStatusForOSD() const
   HuntingStatus status;
   status.enabled = m_enabled;
   status.option = m_hunting_option;
+  status.match_mode = m_hunting_match_mode;
   status.active_type = m_active_type;
 
   const int t = static_cast<int>(m_active_type);
   status.selected_hash = m_selected_hash[t];
+  if (const auto it = m_shader_family_signatures[t].find(status.selected_hash);
+      it != m_shader_family_signatures[t].end())
+  {
+    status.selected_family_signature = it->second;
+  }
   status.selected_position = m_selected_pos[t];
-  status.selected_total = static_cast<int>(m_display[t].size());
+  status.selected_total = static_cast<int>(GetHuntingCandidatesLocked(t).size());
 
   const auto texture_hashes = GetSortedTextureHashes(m_texture_usage_display);
   if (!texture_hashes.empty())
@@ -2289,6 +2407,7 @@ ShaderHunter::GetSelectedRuntimeElementSignature() const
 bool ShaderHunter::SaveSelectedShaderOverride(const std::string& game_id, HandlingType handling)
 {
   ShaderType type = ShaderType::Pixel;
+  MatchMode match_mode = MatchMode::ShaderFamily;
   u64 hash = 0;
   u64 texture_hash = 0;
 
@@ -2299,9 +2418,14 @@ bool ShaderHunter::SaveSelectedShaderOverride(const std::string& game_id, Handli
       return false;
 
     type = m_active_type;
+    match_mode = m_hunting_match_mode;
     hash = m_selected_hash[t];
     texture_hash = m_selected_texture_hash;
   }
+
+  const auto family_signature = GetShaderFamilySignature(type, hash);
+  if (match_mode == MatchMode::ShaderFamily && !family_signature.has_value())
+    return false;
 
   auto all = LoadOverridesFromINI(game_id);
 
@@ -2310,6 +2434,13 @@ bool ShaderHunter::SaveSelectedShaderOverride(const std::string& game_id, Handli
   entry.hash = hash;
   entry.type = type;
   entry.handling = handling;
+  entry.match_mode = match_mode;
+  entry.hash_family_match = match_mode == MatchMode::ShaderFamily;
+  if (family_signature.has_value())
+  {
+    entry.family_signature = *family_signature;
+    entry.family_version = FAMILY_SCHEME_VERSION;
+  }
   entry.enabled = true;
   entry.user_defined = true;
   if (handling == HandlingType::Flag)
@@ -2318,15 +2449,6 @@ bool ShaderHunter::SaveSelectedShaderOverride(const std::string& game_id, Handli
     entry.units_per_meter = g_Config.vr_units_per_meter;
   if (texture_hash != 0)
     entry.texture_hashes.push_back(texture_hash);
-
-  // Prefer family matching so the override survives shader-generator updates; exact hashes embed
-  // code_version and break on every bump.
-  if (const auto family = GetShaderFamilySignature(type, hash))
-  {
-    entry.hash_family_match = true;
-    entry.match_mode = MatchMode::ShaderFamily;
-    entry.family_signature = *family;
-  }
 
   all.push_back(entry);
   SaveOverridesToINI(game_id, all);

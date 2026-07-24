@@ -97,4 +97,5 @@ private:
   u64 m_edit_family_signature = 0;
   u32 m_edit_family_version = ShaderHunter::FAMILY_SCHEME_VERSION;
   u64 m_edit_original_hash = 0;
+  ShaderHunter::ShaderType m_edit_original_type = ShaderHunter::ShaderType::Pixel;
 };

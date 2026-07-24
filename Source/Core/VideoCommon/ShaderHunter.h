@@ -167,6 +167,8 @@ public:
   bool IsEnabled() const;
   void SetHuntingOption(HuntingOption option);
   HuntingOption GetHuntingOption() const;
+  void SetHuntingMatchMode(MatchMode mode);
+  MatchMode GetHuntingMatchMode() const;
   bool ShouldHighlightSelectedDraw() const;
 
   void SetActiveType(ShaderType type);
@@ -285,8 +287,10 @@ public:
   {
     bool enabled = false;
     HuntingOption option = HuntingOption::Skip;
+    MatchMode match_mode = MatchMode::ShaderFamily;
     ShaderType active_type = ShaderType::Pixel;
     u64 selected_hash = 0;
+    u64 selected_family_signature = 0;
     int selected_position = -1;
     int selected_total = 0;
     u64 selected_texture_hash = 0;
@@ -337,6 +341,7 @@ private:
   mutable std::mutex m_mutex;
   bool m_enabled = false;
   HuntingOption m_hunting_option = HuntingOption::Skip;
+  MatchMode m_hunting_match_mode = MatchMode::ShaderFamily;
   bool m_should_highlight_selected_draw = false;
   ShaderType m_active_type = ShaderType::Pixel;
 
@@ -414,6 +419,8 @@ private:
   bool IsConditionFlagMatch(const ConditionalOverride& cond) const;
   bool IsConditionalHashMatch(const ConditionalOverride& cond, u64 vs_hash, u64 ps_hash,
                               u64 gs_hash) const;
+  std::vector<u64> GetHuntingCandidatesLocked(int type_index) const;
+  int GetHuntingCandidatePositionLocked(int type_index, u64 hash) const;
   u64 ResolveConditionalFamilySignature(const ConditionalOverride& cond,
                                         bool* out_legacy_scheme) const;
   bool ShouldBypassSelectedOverrideForTextureTool(u64 vs_hash, u64 ps_hash, u64 gs_hash) const;

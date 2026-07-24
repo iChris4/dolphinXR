@@ -384,16 +384,25 @@ void OnScreenUI::DrawDebugText()
     {
       const char* option_text =
           status.option == ShaderHunter::HuntingOption::Pink ? "Pink" : "Skip";
+      const char* match_text = status.match_mode == ShaderHunter::MatchMode::ShaderFamily ?
+                                   "Shader Family" :
+                                   "Exact Hash";
       const char* type_text = status.active_type == ShaderHunter::ShaderType::Vertex   ? "VS" :
                               status.active_type == ShaderHunter::ShaderType::Geometry ? "GS" :
                                                                                          "PS";
-      ImGui::Text("Shader Hunting: %s (%s)", status.enabled ? "ON" : "OFF", option_text);
+      ImGui::Text("Shader Hunting: %s (%s, %s)", status.enabled ? "ON" : "OFF", option_text,
+                  match_text);
 
       if (status.selected_position >= 0 && status.selected_total > 0 && status.selected_hash != ~0ULL)
       {
         ImGui::Text("Selected: %s %d/%d  0x%016llX", type_text, status.selected_position + 1,
                     status.selected_total,
                     static_cast<unsigned long long>(status.selected_hash));
+        if (status.selected_family_signature != 0)
+        {
+          ImGui::Text("Family: 0x%016llX",
+                      static_cast<unsigned long long>(status.selected_family_signature));
+        }
       }
       else
       {
