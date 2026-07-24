@@ -295,9 +295,6 @@ public:
   // Returns true if the texture bound to the given stage is an EFB copy (not an XFB copy),
   // reporting its native dimensions for the VR effect-buffer heuristic.
   bool IsBoundEfbCopy(u32 stage, u32* native_width, u32* native_height) const;
-  // Shader Hunter diagnostic for fullscreen VR effects. Logs the cache entry and any matching
-  // EFB source so palette-converted copies can be traced from creation to the consuming draw.
-  void LogVRFullscreenEffectTexture(u32 draw_index, u32 stage) const;
   // Fullscreen override opt-in: repair a one-layer texture which was partially updated from a
   // same-address stereo EFB copy, then rebind the promoted texture for the current draw.
   bool ApplyVRPreserveStereoEFBFix(u32 stage);

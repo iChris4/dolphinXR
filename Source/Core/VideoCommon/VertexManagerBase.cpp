@@ -1400,20 +1400,6 @@ void VertexManagerBase::Flush()
                 g_texture_cache->ApplyVRPreserveStereoEFBFix(i);
             }
 
-            if (hunter_debug_logging &&
-                (handling == ShaderHunter::HandlingType::Fullscreen ||
-                 handling == ShaderHunter::HandlingType::FullscreenMono)) [[unlikely]]
-            {
-              INFO_LOG_FMT(VIDEO,
-                           "VR_EFFECT_DRAW: draw#{} handling={} preserve_stereo_efb={}",
-                           m_draw_counter,
-                           handling == ShaderHunter::HandlingType::Fullscreen ? "fullscreen" :
-                                                                               "fullscreen_mono",
-                           preserve_stereo_efb);
-              for (const u32 i : used_textures)
-                g_texture_cache->LogVRFullscreenEffectTexture(m_draw_counter, i);
-            }
-
             if (handling == ShaderHunter::HandlingType::Screen)
             {
               geometry_shader_manager.vr_stereo_override = -1.0f;

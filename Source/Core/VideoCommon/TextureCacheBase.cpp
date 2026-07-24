@@ -367,7 +367,18 @@ RcTcacheEntry TextureCacheBase::ApplyPaletteToEntry(RcTcacheEntry& entry, const 
       g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
       (mp1_layered_palette_candidate ||
        ((vulkan_fix_enabled || d3d_fix_enabled) && mp2_highlight_palette_candidate));
-  const bool layered_pipeline_requested = use_layered_pipeline;
+
+  // VR debug: log palette conversions of stereo EFB sources so missed layered-candidate
+  // sizes (e.g. per-game visor palette copy dimensions) can be identified from a log run.
+  if (ShaderHunter::GetInstance().IsDebugLogging() && entry->GetNumLayers() >= 2) [[unlikely]]
+  {
+    INFO_LOG_FMT(VIDEO,
+                 "VR_PALETTE: {}x{} layers={} tlutfmt={} layered={} "
+                 "(mp1_cand={} mp2_hl_cand={} vk_fix={} d3d_fix={})",
+                 entry->native_width, entry->native_height, entry->GetNumLayers(),
+                 static_cast<int>(tlutfmt), use_layered_pipeline, mp1_layered_palette_candidate,
+                 mp2_highlight_palette_candidate, vulkan_fix_enabled, d3d_fix_enabled);
+  }
 
   const AbstractPipeline* pipeline =
       g_shader_cache->GetPaletteConversionPipeline(tlutfmt, use_layered_pipeline);
@@ -375,24 +386,6 @@ RcTcacheEntry TextureCacheBase::ApplyPaletteToEntry(RcTcacheEntry& entry, const 
   {
     use_layered_pipeline = false;
     pipeline = g_shader_cache->GetPaletteConversionPipeline(tlutfmt);
-  }
-
-  // VR debug: correlate palette conversion with the EFB-copy and consuming-draw diagnostics.
-  // Logging both the requested and selected paths exposes a missing layered pipeline as well as a
-  // per-game candidate gate that did not recognize the source dimensions.
-  if (ShaderHunter::GetInstance().IsDebugLogging() && entry->GetNumLayers() >= 2) [[unlikely]]
-  {
-    INFO_LOG_FMT(VIDEO,
-                 "VR_PALETTE: addr={:#010x} native={}x{} host={}x{} layers={} efb={} xfb={} "
-                 "stride={} texfmt={} tlutfmt={} layered_requested={} layered_selected={} "
-                 "fallback={} (mp1_cand={} mp2_hl_cand={} vk_fix={} d3d_fix={})",
-                 entry->addr, entry->native_width, entry->native_height, entry->GetWidth(),
-                 entry->GetHeight(), entry->GetNumLayers(), entry->is_efb_copy,
-                 entry->is_xfb_copy, entry->memory_stride, entry->format.texfmt, tlutfmt,
-                 layered_pipeline_requested, use_layered_pipeline,
-                 layered_pipeline_requested && !use_layered_pipeline,
-                 mp1_layered_palette_candidate, mp2_highlight_palette_candidate,
-                 vulkan_fix_enabled, d3d_fix_enabled);
   }
   if (!pipeline)
   {
@@ -1218,48 +1211,6 @@ bool TextureCacheBase::IsBoundEfbCopy(u32 stage, u32* native_width, u32* native_
   return true;
 }
 
-void TextureCacheBase::LogVRFullscreenEffectTexture(u32 draw_index, u32 stage) const
-{
-  if (stage >= m_bound_textures.size() || !m_bound_textures[stage])
-  {
-    INFO_LOG_FMT(VIDEO, "VR_EFFECT_TEXTURE: draw#{} stage={} bound=false", draw_index, stage);
-    return;
-  }
-
-  const RcTcacheEntry& entry = m_bound_textures[stage];
-  const TextureConfig& config = entry->texture->GetConfig();
-
-  // ApplyPaletteToEntry intentionally turns its result into a normal cache entry. Find the source
-  // EFB entry retained at the same address/hash so the draw log still identifies palette-derived
-  // EFB textures without changing cache behavior or save-state data.
-  bool matching_efb_source = std::ranges::any_of(entry->references, [](const TCacheEntry* source) {
-    return source->texture && source->is_efb_copy && !source->is_xfb_copy;
-  });
-  const auto range = m_textures_by_address.equal_range(entry->addr);
-  for (auto iter = range.first; !matching_efb_source && iter != range.second; ++iter)
-  {
-    const RcTcacheEntry& candidate = iter->second;
-    if (candidate.get() != entry.get() && candidate->is_efb_copy &&
-        candidate->base_hash == entry->base_hash &&
-        candidate->native_width == entry->native_width &&
-        candidate->native_height == entry->native_height)
-    {
-      matching_efb_source = true;
-      break;
-    }
-  }
-
-  INFO_LOG_FMT(VIDEO,
-               "VR_EFFECT_TEXTURE: draw#{} stage={} addr={:#010x} native={}x{} host={}x{} "
-               "layers={} type={} render_target={} efb={} efb_source={} xfb={} stride={} "
-               "texfmt={} base_hash={:016x} hash={:016x} name='{}'",
-               draw_index, stage, entry->addr, entry->native_width, entry->native_height,
-               config.width, config.height, config.layers, config.type, config.IsRenderTarget(),
-               entry->is_efb_copy, matching_efb_source, entry->is_xfb_copy,
-               entry->memory_stride, entry->format.texfmt, entry->base_hash, entry->hash,
-               entry->texture_info_name);
-}
-
 bool TextureCacheBase::ApplyVRPreserveStereoEFBFix(u32 stage)
 {
   if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || stage >= m_bound_textures.size() ||
@@ -1355,18 +1306,6 @@ bool TextureCacheBase::ApplyVRPreserveStereoEFBFix(u32 stage)
 
   destination->texture->FinishedRendering();
   g_gfx->SetTexture(stage, destination->texture.get());
-
-  if (ShaderHunter::GetInstance().IsDebugLogging()) [[unlikely]]
-  {
-    INFO_LOG_FMT(VIDEO,
-                 "VR_PRESERVE_STEREO_EFB: stage={} addr={:#010x} native={}x{} host={}x{} "
-                 "layers=1->{} sources={} source_native={}x{} source_host={}x{} stride={}",
-                 stage, destination->addr, destination->native_width, destination->native_height,
-                 destination->GetWidth(), destination->GetHeight(), target_layers,
-                 stereo_sources.size(), stereo_sources.back()->native_width,
-                 stereo_sources.back()->native_height, stereo_sources.back()->GetWidth(),
-                 stereo_sources.back()->GetHeight(), destination->memory_stride);
-  }
   return true;
 }
 
@@ -2641,21 +2580,6 @@ void TextureCacheBase::CopyRenderTargetToTexture(
   const bool vram_linear_filter =
       linear_filter || (vram_source_rect && (vram_src_rect.GetWidth() != srcRect.GetWidth() ||
                                              vram_src_rect.GetHeight() != srcRect.GetHeight()));
-
-  if (ShaderHunter::GetInstance().IsDebugLogging() &&
-      g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !is_xfb_copy) [[unlikely]]
-  {
-    INFO_LOG_FMT(VIDEO,
-                 "VR_EFB_COPY: dst={:#010x} native={}x{} host={}x{} layers={} "
-                 "src=({},{} {}x{}) vram_src=({},{} {}x{}) dstfmt={} texfmt={} depth={} "
-                 "intensity={} half={} linear={} to_vram={} to_ram={} stride={} bytes_per_row={}",
-                 dstAddr, tex_w, tex_h, scaled_tex_w, scaled_tex_h,
-                 g_framebuffer_manager->GetEFBLayers(), srcRect.left, srcRect.top,
-                 srcRect.GetWidth(), srcRect.GetHeight(), vram_src_rect.left, vram_src_rect.top,
-                 vram_src_rect.GetWidth(), vram_src_rect.GetHeight(), dstFormat, baseFormat,
-                 is_depth_copy, isIntensity, scaleByHalf, vram_linear_filter, copy_to_vram,
-                 copy_to_ram, dstStride, bytes_per_row);
-  }
 
   RcTcacheEntry entry;
   if (copy_to_vram)

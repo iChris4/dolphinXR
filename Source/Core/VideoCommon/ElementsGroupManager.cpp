@@ -1956,11 +1956,8 @@ ElementsGroupManager::HandlingType ElementsGroupManager::GetOverrideHandling(
         *out_preserve_stereo_efb = preserve_stereo_efb;
       if (ShaderHunter::GetInstance().IsDebugLogging())
       {
-        INFO_LOG_FMT(VIDEO,
-                     "ElementsGroup match(handling): '{}' draw#{} handling={} "
-                     "preserve_stereo_efb={}",
-                     entry.name, draw.draw_index + 1, static_cast<int>(entry.handling),
-                     preserve_stereo_efb);
+        INFO_LOG_FMT(VIDEO, "ElementsGroup match(handling): '{}' draw#{} handling={}", entry.name,
+                     draw.draw_index + 1, static_cast<int>(entry.handling));
       }
       return entry.handling;
     }
