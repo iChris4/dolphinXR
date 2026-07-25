@@ -52,6 +52,11 @@ struct MotionState : PositionalState, RotationalState
   float recenter_x = 0.0f;
   float recenter_y = 0.0f;
   bool recenter_button_held = false;
+
+  // Resting pointing distance (meters) that Distance Sensitivity amplifies around.
+  // Captured from the first absolute distance measurement and on recenter.
+  float distance_reference = 0.0f;
+  bool has_distance_reference = false;
 };
 
 // Note that 'gyroscope' is rotation of world around device.

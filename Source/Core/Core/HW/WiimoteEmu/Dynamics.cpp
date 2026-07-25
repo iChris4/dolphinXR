@@ -230,11 +230,17 @@ void EmulatePoint(MotionState* state, ControllerEmu::Cursor* ir_group,
   {
     const float recenter_x = state->recenter_x;
     const float recenter_y = state->recenter_y;
+    const float distance_reference = state->distance_reference;
+    const bool has_distance_reference = state->has_distance_reference;
 
     // Move the wiimote a kilometer forward so the sensor bar is always behind it.
     *state = {};
     state->recenter_x = recenter_x;
     state->recenter_y = recenter_y;
+    // The player hasn't moved just because the pointer left the screen: keep the resting
+    // distance so re-acquiring the screen doesn't re-baseline it somewhere else.
+    state->distance_reference = distance_reference;
+    state->has_distance_reference = has_distance_reference;
     state->position = {0, -1000, 0};
     return;
   }
@@ -251,15 +257,30 @@ void EmulatePoint(MotionState* state, ControllerEmu::Cursor* ir_group,
   const float yaw_scale = ir_group->GetTotalYaw() / 2;
   const float pitch_scale = ir_group->GetTotalPitch() / 2;
 
+  const bool recenter_pressed = ir_group->controls[5]->GetState<bool>();
+
   // Check for Z override (forward/backward distance from VR controllers).
-  // Z override is in [-1, 1] range: -1 = closest (1m), 0 = neutral (2m), +1 = farthest (3m).
+  // Z override is a physical offset in meters from NEUTRAL_DISTANCE: negative is closer to
+  // the sensor bar, positive is farther away.
   float distance = NEUTRAL_DISTANCE;
   if (override_func)
   {
     if (const auto z_override = override_func(ir_group->name,
         ControllerEmu::ReshapableInput::Z_INPUT_OVERRIDE, 0.0))
     {
-      distance = NEUTRAL_DISTANCE + static_cast<float>(*z_override);
+      const float measured = NEUTRAL_DISTANCE + static_cast<float>(*z_override);
+
+      // Distance Sensitivity amplifies movement around the resting distance rather than
+      // around NEUTRAL_DISTANCE: the player's hand rests well short of the virtual screen,
+      // so scaling the raw offset would drag the emulated remote to a clamp and stay there.
+      if (!state->has_distance_reference || recenter_pressed)
+      {
+        state->distance_reference = measured;
+        state->has_distance_reference = true;
+      }
+
+      const float sensitivity = static_cast<float>(ir_group->GetDistanceSensitivity());
+      distance = state->distance_reference + (measured - state->distance_reference) * sensitivity;
       distance = std::clamp(distance, 0.5f, 4.0f);
     }
   }
@@ -270,7 +291,6 @@ void EmulatePoint(MotionState* state, ControllerEmu::Cursor* ir_group,
   state->acceleration = {};
 
   float centered_x, centered_y;
-  const bool recenter_pressed = ir_group->controls[5]->GetState<bool>();
 
   if (override_func)
   {

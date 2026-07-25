@@ -66,6 +66,15 @@ Cursor::Cursor(std::string name_, std::string ui_name_)
                      "the same cursor distance.")},
              100, 10, 300);
 
+  AddSetting(&m_distance_sensitivity_setting,
+             {_trans("Distance Sensitivity"),
+              // i18n: The percent symbol.
+              _trans("%"),
+              _trans("Scales forward/backward pointing distance. Higher values need less "
+                     "controller movement toward or away from the screen. Only affects input "
+                     "sources that report an absolute pointing distance, e.g. VR controllers.")},
+             100, 10, 1000);
+
   AddSetting(&m_invert_x_setting, {_trans("Invert Left/Right")}, false);
   AddSetting(&m_relative_setting, {_trans("Relative Input")}, false);
   AddSetting(&m_autohide_setting, {_trans("Auto-Hide")}, false);
@@ -206,6 +215,11 @@ ControlState Cursor::GetTotalPitch() const
 ControlState Cursor::GetVerticalOffset() const
 {
   return m_vertical_offset_setting.GetValue() / 100;
+}
+
+ControlState Cursor::GetDistanceSensitivity() const
+{
+  return m_distance_sensitivity_setting.GetValue() / 100;
 }
 
 void Cursor::SetRelativeInput(bool value)

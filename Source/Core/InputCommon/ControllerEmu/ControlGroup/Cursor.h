@@ -40,6 +40,9 @@ public:
   // Vertical offset in meters.
   ControlState GetVerticalOffset() const;
 
+  // Gain applied to forward/backward pointing distance. 1.0 is a 1:1 physical mapping.
+  ControlState GetDistanceSensitivity() const;
+
   void SetRelativeInput(bool enabled);
 
 private:
@@ -67,6 +70,7 @@ private:
   SettingValue<double> m_pitch_setting;
   SettingValue<double> m_vertical_offset_setting;
   SettingValue<double> m_sensitivity_setting;
+  SettingValue<double> m_distance_sensitivity_setting;
   SettingValue<bool> m_invert_x_setting;
 
   SettingValue<bool> m_relative_setting;

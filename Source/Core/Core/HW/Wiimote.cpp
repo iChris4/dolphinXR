@@ -77,7 +77,7 @@ struct OpenXRWiimoteState
   Common::Vec3 angular_velocity{};
   float ir_x = std::numeric_limits<float>::quiet_NaN();
   float ir_y = 0.0f;
-  float ir_z = 0.0f;  // Forward/backward distance offset (-1 to +1)
+  float ir_z = 0.0f;  // Forward/backward distance offset from NEUTRAL_DISTANCE, in meters
 };
 
 // How far past the screen edge (in screen half-extents) the pointer stays tracked before
@@ -214,8 +214,11 @@ OpenXRWiimoteState BuildOpenXRState(const Common::VR::OpenXRControllerState& con
     out.ir_y = hit.v;
     // Emulated sensor-bar distance: EmulatePoint uses NEUTRAL_DISTANCE(2m) + ir_z.
     // Feed the real controller-to-screen distance so leaning in/out changes the
-    // virtual IR dot spacing physically.
-    out.ir_z = std::clamp(hit.distance_m - 2.0f, -1.0f, 1.0f);
+    // virtual IR dot spacing physically. The band here only rejects nonsense (screen
+    // behind the player, huge rooms) — EmulatePoint applies the Point group's Distance
+    // Sensitivity around the resting distance and clamps to the emulated remote's range,
+    // so this offset must keep headroom on both sides for that gain to have anywhere to go.
+    out.ir_z = std::clamp(hit.distance_m, 0.1f, 8.0f) - 2.0f;
   }
 
   return out;
