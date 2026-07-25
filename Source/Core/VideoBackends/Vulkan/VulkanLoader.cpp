@@ -41,6 +41,12 @@ static void ResetVulkanLibraryFunctionPointers()
 
 static Common::DynamicLibrary s_vulkan_module;
 
+// When set, UnloadVulkanLibrary() is a no-op. The Vulkan backend keeps a VkInstance/VkDevice alive
+// across VR games (see VKMain.cpp); the loader module must stay mapped for the whole time or those
+// persisted handles dangle. Without this, InitBackendInfo()'s temporary instance would unmap the
+// loader on runtimes that do not otherwise pin it (VDXR), crashing the next game's reuse.
+static bool s_vulkan_module_keep_loaded = false;
+
 static bool OpenVulkanLibrary(bool force_system_library)
 {
 #if defined(__APPLE__)
@@ -111,8 +117,16 @@ bool LoadVulkanLibrary(bool force_system_library)
   return true;
 }
 
+void KeepVulkanLibraryLoaded(bool keep)
+{
+  s_vulkan_module_keep_loaded = keep;
+}
+
 void UnloadVulkanLibrary()
 {
+  if (s_vulkan_module_keep_loaded)
+    return;
+
   s_vulkan_module.Close();
   if (!s_vulkan_module.IsOpen())
     ResetVulkanLibraryFunctionPointers();

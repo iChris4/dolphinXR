@@ -1,6 +1,9 @@
 // Copyright 2016 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <mutex>
+
 #include "VideoBackends/Vulkan/VideoBackend.h"
 
 #include "Common/Logging/Log.h"
@@ -98,8 +101,34 @@ static bool ShouldEnableDebugUtils(bool enable_validation_layers)
   return enable_validation_layers || IsHostGPULoggingEnabled();
 }
 
+// The SteamVR Vulkan compositor keeps referencing resources that lived on our VkDevice after a
+// game stops (it has no COM-refcount lifetime like the D3D paths). Destroying the device frees that
+// memory, and the next game hits a GPU page fault -> VK_ERROR_DEVICE_LOST. Keep the device (with
+// its instance and the loaded loader) alive across VR games so those pages stay mapped; only the
+// per-game objects (surface, swapchain, caches, command buffers, OpenXR session/instance) are
+// recreated. D3D11/D3D12 do not need this because their shared resources are ref-counted.
+// Never destroyed on process exit by design: the runtime may still reference it, and the OS
+// reclaims it anyway.
+#ifdef ENABLE_VR
+static std::unique_ptr<VulkanContext> s_persisted_vr_context;
+#endif
+
 bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
 {
+#ifdef ENABLE_VR
+  // A non-VR launch cannot use a persisted VR device: drop it, along with the loader reference the
+  // previous shutdown intentionally kept.
+  if (s_persisted_vr_context && !g_Config.VRSessionActive())
+  {
+    s_persisted_vr_context.reset();
+    KeepVulkanLibraryLoaded(false);
+    UnloadVulkanLibrary();
+  }
+#endif
+
+  // Always (re)resolve the module-level entry points. When a device is persisted the loader module
+  // is still mapped, but InitBackendInfo() runs on every game boot and its UnloadVulkanLibrary()
+  // nulls the global function pointers, so they have to be restored either way.
   if (!LoadVulkanLibrary())
   {
     PanicAlertFmt("Failed to load Vulkan library.");
@@ -126,6 +155,48 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
     if (!vr_extensions_queried)
       WARN_LOG_FMT(VIDEO, "OpenXR: Pre-query of Vulkan extensions failed; VR will not work.");
   }
+
+  // Reuse the device kept alive by the previous VR game. Only do so when it already has every
+  // device extension this runtime requires: the OpenXR runtime can differ from the one the device
+  // was created for (SteamVR/VDXR/Meta Link), and extensions cannot be added to an existing device.
+  bool reuse_vr_context = false;
+  if (s_persisted_vr_context && vr_extensions_queried)
+  {
+    reuse_vr_context = std::ranges::all_of(
+        vr_ext_requirements.device_extensions, [](const std::string& extension) {
+          return s_persisted_vr_context->SupportsDeviceExtension(extension.c_str());
+        });
+    if (!reuse_vr_context)
+    {
+      WARN_LOG_FMT(VIDEO, "OpenXR Vulkan: persisted device lacks an extension this runtime "
+                          "requires; recreating it.");
+    }
+  }
+
+  if (reuse_vr_context)
+  {
+    g_vulkan_context = std::move(s_persisted_vr_context);
+    // Restore the instance/device dispatch for the persisted objects. InitBackendInfo() repointed
+    // the globals at its own temporary instance and then nulled them.
+    if (!LoadVulkanInstanceFunctions(g_vulkan_context->GetVulkanInstance()) ||
+        !LoadVulkanDeviceFunctions(g_vulkan_context->GetDevice()))
+    {
+      PanicAlertFmt("Failed to reload Vulkan functions for the persisted device.");
+      g_vulkan_context.reset();
+      KeepVulkanLibraryLoaded(false);
+      UnloadVulkanLibrary();
+      return false;
+    }
+    INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: reusing the persisted Vulkan device for the next VR game.");
+  }
+  else if (s_persisted_vr_context)
+  {
+    // Incompatible with this runtime — destroy it and fall through to a normal fresh init.
+    s_persisted_vr_context.reset();
+    KeepVulkanLibraryLoaded(false);
+  }
+#else
+  constexpr bool reuse_vr_context = false;
 #endif
 
   // Create Vulkan instance, needed before we can create a surface, or enumerate devices.
@@ -133,44 +204,58 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
   bool enable_surface = wsi.type != WindowSystemType::Headless;
   bool enable_debug_utils = ShouldEnableDebugUtils(enable_validation_layer);
   u32 vk_api_version = 0;
-  VkInstance instance = VulkanContext::CreateVulkanInstance(
-      wsi.type, enable_debug_utils, enable_validation_layer, &vk_api_version
+  VkInstance instance = VK_NULL_HANDLE;
+  VulkanContext::GPUList gpu_list;
+  if (reuse_vr_context)
+  {
+    // The persisted device already owns the instance, function pointers, and GPU selection. Still
+    // repopulate the adapter list so g_backend_info matches a fresh init.
+    instance = g_vulkan_context->GetVulkanInstance();
+    gpu_list = VulkanContext::EnumerateGPUs(instance);
+    VulkanContext::PopulateBackendInfo(&g_backend_info);
+    VulkanContext::PopulateBackendInfoAdapters(&g_backend_info, gpu_list);
+  }
+  else
+  {
+    instance = VulkanContext::CreateVulkanInstance(
+        wsi.type, enable_debug_utils, enable_validation_layer, &vk_api_version
 #ifdef ENABLE_VR
-      ,
-      vr_extensions_queried ? vr_ext_requirements.instance_extensions : std::vector<std::string>{},
-      vr_extensions_queried ? vr_ext_requirements.max_api_version : 0
+        ,
+        vr_extensions_queried ? vr_ext_requirements.instance_extensions : std::vector<std::string>{},
+        vr_extensions_queried ? vr_ext_requirements.max_api_version : 0
 #endif
-  );
-  if (instance == VK_NULL_HANDLE)
-  {
-    PanicAlertFmt("Failed to create Vulkan instance.");
-    UnloadVulkanLibrary();
-    return false;
-  }
+    );
+    if (instance == VK_NULL_HANDLE)
+    {
+      PanicAlertFmt("Failed to create Vulkan instance.");
+      UnloadVulkanLibrary();
+      return false;
+    }
 
-  // Load instance function pointers.
-  if (!LoadVulkanInstanceFunctions(instance))
-  {
-    PanicAlertFmt("Failed to load Vulkan instance functions.");
-    vkDestroyInstance(instance, nullptr);
-    UnloadVulkanLibrary();
-    return false;
-  }
+    // Load instance function pointers.
+    if (!LoadVulkanInstanceFunctions(instance))
+    {
+      PanicAlertFmt("Failed to load Vulkan instance functions.");
+      vkDestroyInstance(instance, nullptr);
+      UnloadVulkanLibrary();
+      return false;
+    }
 
-  // Obtain a list of physical devices (GPUs) from the instance.
-  // We'll re-use this list later when creating the device.
-  VulkanContext::GPUList gpu_list = VulkanContext::EnumerateGPUs(instance);
-  if (gpu_list.empty())
-  {
-    PanicAlertFmt("No Vulkan physical devices available.");
-    vkDestroyInstance(instance, nullptr);
-    UnloadVulkanLibrary();
-    return false;
-  }
+    // Obtain a list of physical devices (GPUs) from the instance.
+    // We'll re-use this list later when creating the device.
+    gpu_list = VulkanContext::EnumerateGPUs(instance);
+    if (gpu_list.empty())
+    {
+      PanicAlertFmt("No Vulkan physical devices available.");
+      vkDestroyInstance(instance, nullptr);
+      UnloadVulkanLibrary();
+      return false;
+    }
 
-  // Populate BackendInfo with as much information as we can at this point.
-  VulkanContext::PopulateBackendInfo(&g_backend_info);
-  VulkanContext::PopulateBackendInfoAdapters(&g_backend_info, gpu_list);
+    // Populate BackendInfo with as much information as we can at this point.
+    VulkanContext::PopulateBackendInfo(&g_backend_info);
+    VulkanContext::PopulateBackendInfoAdapters(&g_backend_info, gpu_list);
+  }
 
   // We need the surface before we can create a device, as some parameters depend on it.
   VkSurfaceKHR surface = VK_NULL_HANDLE;
@@ -180,35 +265,49 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
     if (surface == VK_NULL_HANDLE)
     {
       PanicAlertFmt("Failed to create Vulkan surface.");
-      vkDestroyInstance(instance, nullptr);
+      if (reuse_vr_context)
+      {
+        // The reused device owns the instance; drop it rather than leaving a half-initialized
+        // backend behind, and stop pinning the loader.
+        g_vulkan_context.reset();
+        KeepVulkanLibraryLoaded(false);
+      }
+      else
+      {
+        vkDestroyInstance(instance, nullptr);
+      }
       UnloadVulkanLibrary();
       return false;
     }
   }
 
-  // Since we haven't called InitializeShared yet, iAdapter may be out of range,
-  // so we have to check it ourselves.
-  size_t selected_adapter_index = static_cast<size_t>(g_Config.iAdapter);
-  if (selected_adapter_index >= gpu_list.size())
+  if (!reuse_vr_context)
   {
-    WARN_LOG_FMT(VIDEO, "Vulkan adapter index out of range, selecting first adapter.");
-    selected_adapter_index = 0;
-  }
+    // Since we haven't called InitializeShared yet, iAdapter may be out of range,
+    // so we have to check it ourselves.
+    size_t selected_adapter_index = static_cast<size_t>(g_Config.iAdapter);
+    if (selected_adapter_index >= gpu_list.size())
+    {
+      WARN_LOG_FMT(VIDEO, "Vulkan adapter index out of range, selecting first adapter.");
+      selected_adapter_index = 0;
+    }
 
-  // Now we can create the Vulkan device. VulkanContext takes ownership of the instance and surface.
-  g_vulkan_context = VulkanContext::Create(
-      instance, gpu_list[selected_adapter_index], surface, enable_debug_utils,
-      enable_validation_layer, vk_api_version
+    // Now we can create the Vulkan device. VulkanContext takes ownership of the instance and
+    // surface.
+    g_vulkan_context = VulkanContext::Create(
+        instance, gpu_list[selected_adapter_index], surface, enable_debug_utils,
+        enable_validation_layer, vk_api_version
 #ifdef ENABLE_VR
-      ,
-      vr_extensions_queried ? vr_ext_requirements.device_extensions : std::vector<std::string>{}
+        ,
+        vr_extensions_queried ? vr_ext_requirements.device_extensions : std::vector<std::string>{}
 #endif
-  );
-  if (!g_vulkan_context)
-  {
-    PanicAlertFmt("Failed to create Vulkan device");
-    UnloadVulkanLibrary();
-    return false;
+    );
+    if (!g_vulkan_context)
+    {
+      PanicAlertFmt("Failed to create Vulkan device");
+      UnloadVulkanLibrary();
+      return false;
+    }
   }
 
   // Since VulkanContext maintains a copy of the device features and properties, we can use this
@@ -319,8 +418,29 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
 
 void VideoBackend::Shutdown()
 {
-  if (g_vulkan_context)
+#ifdef ENABLE_VR
+  // Whether VR actually ran this session. Captured before the OpenXR objects are torn down so the
+  // persist decision below can tell a VR game stop from a plain non-VR shutdown.
+  const bool vr_active = Vulkan::g_openxr_vk != nullptr;
+
+  // The OpenXR pacing thread can be inside xrEndFrame(), where the runtime accesses our graphics
+  // queue. Stop it before waiting on the Vulkan device: vkDeviceWaitIdle() must not race an
+  // externally synchronized queue access.
+  if (Vulkan::g_openxr_vk && VR::g_openxr)
+  {
+    VR::g_openxr->SetSwapchain(nullptr);
+    INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: pacing stopped before backend device idle.");
+  }
+#endif
+
+  const bool device_lost = g_command_buffer_mgr && g_command_buffer_mgr->IsDeviceLost();
+
+  if (g_vulkan_context && !device_lost)
+  {
+    auto queue_lock = g_command_buffer_mgr ? g_command_buffer_mgr->AcquireQueueLock() :
+                                             std::unique_lock<std::mutex>{};
     vkDeviceWaitIdle(g_vulkan_context->GetDevice());
+  }
 
 #ifdef ENABLE_VR
   // Shut down VR before the Vulkan device is destroyed.
@@ -339,6 +459,23 @@ void VideoBackend::Shutdown()
   g_object_cache.reset();
   StateTracker::DestroyInstance();
   g_command_buffer_mgr.reset();
+
+#ifdef ENABLE_VR
+  // Keep the device (and loader) alive for the next VR game so the compositor never writes into
+  // freed memory. Only a healthy device can be reused; a lost one is destroyed normally. The next
+  // VR Initialize() reuses it; a non-VR Initialize() or an incompatible runtime discards it.
+  if (vr_active && !device_lost && g_vulkan_context)
+  {
+    // Keep the loader mapped so the persisted instance/device handles stay valid even when
+    // InitBackendInfo() tears its temporary instance down before the next game.
+    KeepVulkanLibraryLoaded(true);
+    s_persisted_vr_context = std::move(g_vulkan_context);
+    INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: persisted the Vulkan device for the next VR game.");
+    return;
+  }
+#endif
+
+  KeepVulkanLibraryLoaded(false);
   g_vulkan_context.reset();
   UnloadVulkanLibrary();
 }

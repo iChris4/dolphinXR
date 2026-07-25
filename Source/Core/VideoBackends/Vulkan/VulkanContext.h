@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -81,8 +82,7 @@ public:
   static VkInstance CreateVulkanInstance(
       WindowSystemType wstype, bool enable_debug_utils, bool enable_validation_layer,
       u32* out_vk_api_version,
-      const std::vector<std::string>& extra_instance_extensions = {},
-      u32 max_api_version = 0);
+      const std::vector<std::string>& extra_instance_extensions = {}, u32 max_api_version = 0);
 
   // Returns a list of Vulkan-compatible GPUs.
   using GPUList = std::vector<VkPhysicalDevice>;
@@ -138,6 +138,15 @@ public:
   // True when fragmentDensityMapNonSubsampledImages is enabled: FDM render passes may
   // target ordinary (non-subsampled) images such as the EFB.
   bool SupportsNonSubsampledFragmentDensityMap() const { return m_fdm_non_subsampled_enabled; }
+
+  // Dumps VK_EXT_device_fault diagnostics after VK_ERROR_DEVICE_LOST when the driver supports it.
+  void LogDeviceFaultInfo() const;
+
+  // VK_EXT_device_address_binding_report hook: the driver reports every GPU virtual-address
+  // bind/unbind through the debug messenger so a device fault can be correlated to the resource
+  // that owned the faulting page. Called from the messenger callback on arbitrary threads.
+  void RecordAddressBinding(u64 base, u64 size, u32 binding_type, u32 flags, int object_type,
+                            u64 object_handle);
 
   // Lightweight CPU-side perf counters for diagnosing VR frame cost. Accumulated by the
   // backend, dumped and reset periodically by CommandBufferManager on present.
@@ -210,6 +219,32 @@ private:
   bool m_timeline_semaphore_enabled = false;
   bool m_fragment_density_map_enabled = false;
   bool m_fdm_non_subsampled_enabled = false;
+  bool m_device_fault_enabled = false;
+
+  // VK_EXT_device_address_binding_report diagnostics (paired with VK_EXT_device_fault). A dedicated
+  // debug messenger records recent GPU-VA bind/unbind events into a ring buffer; on device loss the
+  // events whose range covers the fault address are dumped to identify the resource.
+  bool EnableAddressBindingReport();
+  void DisableAddressBindingReport();
+  void LogAddressBindingsForFault(u64 fault_address) const;
+
+  struct AddressBindingEvent
+  {
+    u64 base = 0;
+    u64 size = 0;
+    u64 seq = 0;
+    u64 object_handle = 0;
+    u32 binding_type = 0;
+    u32 flags = 0;
+    int object_type = 0;
+  };
+  VkDebugUtilsMessengerEXT m_address_binding_messenger = VK_NULL_HANDLE;
+  bool m_address_binding_report_enabled = false;
+  mutable std::mutex m_address_binding_mutex;
+  std::vector<AddressBindingEvent> m_address_binding_events;
+  size_t m_address_binding_write = 0;
+  std::atomic<u64> m_address_binding_seq{0};
+
   PerfCounters m_perf_counters;
 };
 

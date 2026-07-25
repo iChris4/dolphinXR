@@ -461,20 +461,7 @@ OpenXRManager::OpenXRManager() = default;
 
 OpenXRManager::~OpenXRManager()
 {
-  StopFrameThread();
-  DestroyInputActions();
-  ResetInputActionsState();
-  DestroyFBPassthrough();
-
-  if (m_reference_space != XR_NULL_HANDLE)
-    xrDestroySpace(m_reference_space);
-
-  if (m_session != XR_NULL_HANDLE)
-  {
-    if (m_session_running)
-      xrEndSession(m_session);
-    xrDestroySession(m_session);
-  }
+  DestroySession();
 
   if (m_instance != XR_NULL_HANDLE)
     xrDestroyInstance(m_instance);
@@ -1080,6 +1067,112 @@ void OpenXRManager::StopFrameThread()
   m_frame_thread.join();
   m_frame_thread_running.store(false, std::memory_order_release);
   INFO_LOG_FMT(OPENXR, "OpenXR: XR pacing thread stopped.");
+}
+
+void OpenXRManager::ShutdownSession()
+{
+  StopFrameThread();
+
+  if (m_session == XR_NULL_HANDLE || !m_session_running.load(std::memory_order_acquire))
+    return;
+
+  INFO_LOG_FMT(OPENXR, "OpenXR: Requesting running session exit before teardown.");
+  const XrResult request_result = xrRequestExitSession(m_session);
+  if (XR_FAILED(request_result))
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: xrRequestExitSession failed during teardown ({}).",
+                 static_cast<int>(request_result));
+    return;
+  }
+
+  // xrRequestExitSession is asynchronous. Give the runtime enough time to report STOPPING,
+  // whose event handler performs the only spec-valid xrEndSession call, and then EXITING. Waiting
+  // for the terminal event is important on PC runtimes: the compositor can still be consuming the
+  // last submitted swapchain image after xrEndSession has merely made the session non-running.
+  // Destruction remains legal from any state, so a misbehaving runtime cannot hang shutdown.
+  constexpr auto shutdown_timeout = std::chrono::milliseconds(500);
+  const auto deadline = std::chrono::steady_clock::now() + shutdown_timeout;
+  while (m_session_state != XR_SESSION_STATE_EXITING &&
+         m_session_state != XR_SESSION_STATE_LOSS_PENDING &&
+         std::chrono::steady_clock::now() < deadline)
+  {
+    PollEvents();
+    if (m_session_state != XR_SESSION_STATE_EXITING &&
+        m_session_state != XR_SESSION_STATE_LOSS_PENDING)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+  if (m_session_state != XR_SESSION_STATE_EXITING &&
+      m_session_state != XR_SESSION_STATE_LOSS_PENDING)
+  {
+    WARN_LOG_FMT(OPENXR,
+                 "OpenXR: Runtime did not finish session exit within 500 ms (state={}); "
+                 "continuing bounded teardown.",
+                 static_cast<int>(m_session_state));
+  }
+}
+
+void OpenXRManager::DestroySession()
+{
+  SetSwapchain(nullptr);
+  ShutdownSession();
+  DestroyInputActions();
+  ResetInputActionsState();
+  DestroyFBPassthrough();
+
+  if (m_reference_space != XR_NULL_HANDLE)
+  {
+    xrDestroySpace(m_reference_space);
+    m_reference_space = XR_NULL_HANDLE;
+  }
+
+  if (m_session != XR_NULL_HANDLE)
+  {
+    xrDestroySession(m_session);
+    m_session = XR_NULL_HANDLE;
+  }
+
+  // Everything below belongs to a session or its frame loop. Keep only the instance/system and
+  // instance-level extension state so a subsequent game starts from the same state as a newly
+  // constructed manager without forcing the runtime through VR_Shutdown/VR_Init again.
+  m_session_state = XR_SESSION_STATE_UNKNOWN;
+  m_session_running.store(false, std::memory_order_release);
+  m_session_focused.store(false, std::memory_order_release);
+  m_exit_render_loop = false;
+  m_frame_state = {XR_TYPE_FRAME_STATE};
+  m_view_state_flags = 0;
+  m_predicted_display_time_snapshot.store(0, std::memory_order_release);
+  m_predicted_display_period_snapshot.store(0, std::memory_order_release);
+  m_should_render_snapshot.store(false, std::memory_order_release);
+  m_last_predicted_display_time = 0;
+  m_estimated_display_period_ms.store(0.0, std::memory_order_release);
+  m_startup_display_refresh_rate_hz = 0.0f;
+
+  {
+    std::lock_guard<std::mutex> lock(m_publish_mutex);
+    m_published_frame = {};
+    m_published_frame.quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    m_publish_serial = 0;
+  }
+  m_video_handoff_active.store(0, std::memory_order_release);
+
+  m_views = {};
+  m_eye_views = {};
+  m_rendered_eye_views = {};
+  m_submitted_eye_views = {};
+  m_present_eye_views = {};
+  m_present_eye_views_valid = false;
+  m_xfb_pose_stamps = {};
+  m_xfb_pose_stamp_next = 0;
+  m_xfb_pose_stamp_serial = 0;
+  m_logged_interaction_profiles = {XR_NULL_PATH, XR_NULL_PATH};
+  m_home_set = false;
+  m_home_position = {0.f, 0.f, 0.f};
+  m_recenter_requested.store(false, std::memory_order_release);
+  m_flat_screen_pose_valid = false;
+  m_flat_screen_pose = {{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
+  m_flat_quad_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+  m_controller_anchor_cache_valid = {false, false};
 }
 
 void OpenXRManager::PublishFrame(const std::array<XrCompositionLayerProjectionView, 2>& views,
@@ -2259,16 +2352,24 @@ void OpenXRManager::HandleSessionStateChange(XrSessionState new_state)
     break;
 
   case XR_SESSION_STATE_STOPPING:
-    xrEndSession(m_session);
+  {
+    const XrResult end_result = xrEndSession(m_session);
+    if (XR_FAILED(end_result))
+    {
+      WARN_LOG_FMT(OPENXR, "OpenXR: xrEndSession failed in STOPPING state ({}).",
+                   static_cast<int>(end_result));
+    }
     m_session_running = false;
     m_session_focused = false;
     ResetInputActionsState();
     INFO_LOG_FMT(OPENXR, "OpenXR: Session stopped.");
     break;
+  }
 
   case XR_SESSION_STATE_LOSS_PENDING:
   case XR_SESSION_STATE_EXITING:
     m_exit_render_loop = true;
+    m_session_running = false;
     m_session_focused = false;
     ResetInputActionsState();
     break;

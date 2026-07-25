@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <atomic>
 #include <array>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string_view>
 #include <vector>
 
 #include <Common/WorkQueueThread.h>
@@ -77,11 +79,16 @@ public:
   // Also invokes callbacks for completion.
   void WaitForFenceCounter(u64 fence_counter);
 
-  void SubmitCommandBuffer(bool submit_on_worker_thread, bool wait_for_completion,
+  // Returns false after the Vulkan device has been lost. Once that happens no more work is
+  // submitted: repeatedly touching a lost NVIDIA device can turn a recoverable game stop into a
+  // crash inside the driver.
+  bool SubmitCommandBuffer(bool submit_on_worker_thread, bool wait_for_completion,
                            bool advance_to_next_frame = false,
                            VkSwapchainKHR present_swap_chain = VK_NULL_HANDLE,
                            uint32_t present_image_index = 0xFFFFFFFF,
                            std::function<void()> post_submit_callback = {});
+
+  bool IsDeviceLost() const { return m_device_lost.load(std::memory_order_acquire); }
 
   // Vulkan queues require external synchronization when accessed from multiple threads. OpenXR
   // may also access the graphics queue for Vulkan sessions, so callers that invoke those OpenXR
@@ -111,9 +118,10 @@ private:
   bool CreateSubmitThread();
 
   void WaitForCommandBufferCompletion(u32 command_buffer_index);
-  void SubmitCommandBuffer(u32 command_buffer_index, VkSwapchainKHR present_swap_chain,
-                           u32 present_image_index);
+  VkResult SubmitCommandBuffer(u32 command_buffer_index, VkSwapchainKHR present_swap_chain,
+                               u32 present_image_index);
   void BeginCommandBuffer();
+  void HandleDeviceLost(std::string_view operation);
 
   VkDescriptorPool CreateDescriptorPool(u32 descriptor_sizes);
 
@@ -168,6 +176,7 @@ private:
   std::vector<VkSemaphore> m_present_semaphores = {};
   Common::Flag m_last_present_failed;
   VkResult m_last_present_result = VK_SUCCESS;
+  std::atomic<bool> m_device_lost{false};
   bool m_use_threaded_submission = false;
   u32 m_descriptor_set_count = DESCRIPTOR_SETS_PER_POOL;
   std::mutex m_queue_mutex;

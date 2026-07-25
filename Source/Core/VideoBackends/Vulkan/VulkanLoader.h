@@ -90,6 +90,10 @@ bool LoadVulkanInstanceFunctions(VkInstance instance);
 bool LoadVulkanDeviceFunctions(VkDevice device);
 void UnloadVulkanLibrary();
 
+// While set, UnloadVulkanLibrary() does nothing, keeping the loader module mapped and its function
+// pointers intact. Used to persist a VkInstance/VkDevice across VR games.
+void KeepVulkanLibraryLoaded(bool keep);
+
 #ifdef ANDROID
 bool SupportsCustomDriver();
 #endif

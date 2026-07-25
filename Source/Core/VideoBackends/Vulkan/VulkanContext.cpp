@@ -206,6 +206,8 @@ VulkanContext::~VulkanContext()
   if (m_device != VK_NULL_HANDLE)
     vkDestroyDevice(m_device, nullptr);
 
+  DisableAddressBindingReport();
+
   if (m_debug_utils_messenger != VK_NULL_HANDLE)
     DisableDebugUtils();
 
@@ -333,7 +335,7 @@ VkInstance VulkanContext::CreateVulkanInstance(
     instance_create_info.ppEnabledLayerNames = &VALIDATION_LAYER_NAME;
   }
 
-  VkInstance instance;
+  VkInstance instance = VK_NULL_HANDLE;
   VkResult res = vkCreateInstance(&instance_create_info, nullptr, &instance);
   if (res != VK_SUCCESS)
   {
@@ -724,6 +726,11 @@ std::unique_ptr<VulkanContext> VulkanContext::Create(
     return nullptr;
   }
 
+  // Records a ring buffer entry per GPU allocation, so only run it when GPU debugging is on.
+  // Without it a device fault still reports its address, just not the owning resource.
+  if (enable_debug_utils)
+    context->EnableAddressBindingReport();
+
   return context;
 }
 
@@ -783,6 +790,14 @@ bool VulkanContext::SelectDeviceExtensions(bool enable_surface)
   // VR foveation: XR_FB_foveation_vulkan hands us runtime-owned fragment density maps
   // that our render passes read via VK_EXT_fragment_density_map (Quest-class devices).
   AddExtension(VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME, false);
+
+  // Diagnostic data for the restart-only OpenXR device loss. This is inert until a device fault
+  // occurs, at which point it can expose NVIDIA fault addresses and vendor fault codes.
+  AddExtension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, false);
+
+  // Reports every GPU virtual-address bind/unbind so a device fault address can be traced back to
+  // the resource that owned it. Diagnostic companion to VK_EXT_device_fault.
+  AddExtension(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME, false);
 #endif
 
   if (!DriverDetails::HasBug(DriverDetails::BUG_BROKEN_DEPTH_CLAMP_CONTROL))
@@ -941,6 +956,10 @@ bool VulkanContext::CreateDevice(VkSurfaceKHR surface, bool enable_validation_la
   VkPhysicalDeviceFeatures2 features2 = {};
   VkPhysicalDeviceMultiviewFeatures multiview_features = {};
   VkPhysicalDeviceTimelineSemaphoreFeatures timeline_semaphore_features = {};
+  VkPhysicalDeviceFaultFeaturesEXT device_fault_features = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT};
+  VkPhysicalDeviceAddressBindingReportFeaturesEXT address_binding_features = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT};
   const bool use_multiview =
       m_device_info.apiVersion >= VK_API_VERSION_1_1 && m_device_info.multiview;
   // OpenXR runtimes (e.g. Virtual Desktop) that list VK_KHR_timeline_semaphore as a
@@ -958,6 +977,27 @@ bool VulkanContext::CreateDevice(VkSurfaceKHR surface, bool enable_validation_la
   const bool use_fragment_density_map =
       m_device_info.fragmentDensityMap && m_device_info.apiVersion >= VK_API_VERSION_1_1 &&
       Common::Contains(m_device_extensions, VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME);
+  bool use_device_fault = false;
+  if (m_device_info.apiVersion >= VK_API_VERSION_1_1 && vkGetPhysicalDeviceFeatures2 &&
+      Common::Contains(m_device_extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME))
+  {
+    VkPhysicalDeviceFeatures2 fault_query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    fault_query.pNext = &device_fault_features;
+    vkGetPhysicalDeviceFeatures2(m_physical_device, &fault_query);
+    use_device_fault = device_fault_features.deviceFault == VK_TRUE;
+    device_fault_features.deviceFault = use_device_fault ? VK_TRUE : VK_FALSE;
+    device_fault_features.deviceFaultVendorBinary = VK_FALSE;
+  }
+  bool use_address_binding = false;
+  if (m_device_info.apiVersion >= VK_API_VERSION_1_1 && vkGetPhysicalDeviceFeatures2 &&
+      Common::Contains(m_device_extensions, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME))
+  {
+    VkPhysicalDeviceFeatures2 binding_query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    binding_query.pNext = &address_binding_features;
+    vkGetPhysicalDeviceFeatures2(m_physical_device, &binding_query);
+    use_address_binding = address_binding_features.reportAddressBinding == VK_TRUE;
+    address_binding_features.reportAddressBinding = use_address_binding ? VK_TRUE : VK_FALSE;
+  }
   if (use_fragment_density_map)
   {
     fdm_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT;
@@ -966,7 +1006,8 @@ bool VulkanContext::CreateDevice(VkSurfaceKHR surface, bool enable_validation_la
     fdm_features.fragmentDensityMapNonSubsampledImages =
         m_device_info.fragmentDensityMapNonSubsampled ? VK_TRUE : VK_FALSE;
   }
-  if (use_multiview || use_timeline_semaphore || use_fragment_density_map)
+  if (use_multiview || use_timeline_semaphore || use_fragment_density_map || use_device_fault ||
+      use_address_binding)
   {
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.features = device_features;
@@ -995,6 +1036,18 @@ bool VulkanContext::CreateDevice(VkSurfaceKHR surface, bool enable_validation_la
                           "(nonSubsampledImages: {}).",
                    m_fdm_non_subsampled_enabled ? "yes - EFB foveation available" :
                                                   "no - swapchain foveation only");
+    }
+    if (use_device_fault)
+    {
+      InsertIntoChain(&features2, &device_fault_features);
+      m_device_fault_enabled = true;
+      INFO_LOG_FMT(VIDEO, "Vulkan: Enabling VK_EXT_device_fault diagnostics.");
+    }
+    if (use_address_binding)
+    {
+      InsertIntoChain(&features2, &address_binding_features);
+      m_address_binding_report_enabled = true;
+      INFO_LOG_FMT(VIDEO, "Vulkan: Enabling VK_EXT_device_address_binding_report diagnostics.");
     }
     device_info.pNext = &features2;
     device_info.pEnabledFeatures = nullptr;
@@ -1029,6 +1082,96 @@ bool VulkanContext::CreateDevice(VkSurfaceKHR surface, bool enable_validation_la
     vkGetDeviceQueue(m_device, m_present_queue_family_index, 0, &m_present_queue);
   }
   return true;
+}
+
+void VulkanContext::LogDeviceFaultInfo() const
+{
+  if (!m_device_fault_enabled || m_device == VK_NULL_HANDLE)
+  {
+    ERROR_LOG_FMT(VIDEO, "Vulkan device fault diagnostics were not available on this device.");
+    return;
+  }
+
+  const auto get_fault_info = reinterpret_cast<PFN_vkGetDeviceFaultInfoEXT>(
+      vkGetDeviceProcAddr(m_device, "vkGetDeviceFaultInfoEXT"));
+  if (!get_fault_info)
+  {
+    ERROR_LOG_FMT(VIDEO, "Vulkan device fault function could not be loaded.");
+    return;
+  }
+
+  VkDeviceFaultCountsEXT counts{VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT};
+  VkResult result = get_fault_info(m_device, &counts, nullptr);
+  if (result != VK_SUCCESS)
+  {
+    ERROR_LOG_FMT(VIDEO, "Vulkan device fault count query failed: {} ({}).",
+                  VkResultToString(result), static_cast<int>(result));
+    return;
+  }
+
+  ERROR_LOG_FMT(VIDEO,
+                "Vulkan device fault counts: addresses={} vendor_records={} vendor_binary={} bytes.",
+                counts.addressInfoCount, counts.vendorInfoCount,
+                static_cast<unsigned long long>(counts.vendorBinarySize));
+
+  std::vector<VkDeviceFaultAddressInfoEXT> addresses(counts.addressInfoCount);
+  std::vector<VkDeviceFaultVendorInfoEXT> vendor_info(counts.vendorInfoCount);
+  // Do not request the vendor binary blob on the second call. NVIDIA's driver writes
+  // vendorBinarySize bytes to pVendorBinaryData even when it is null, so leaving the size at the
+  // value reported by the count query crashes the process before the fault address is logged. We
+  // only need the address records, so zero the size here.
+  counts.vendorBinarySize = 0;
+  VkDeviceFaultInfoEXT info{VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT};
+  info.pAddressInfos = addresses.empty() ? nullptr : addresses.data();
+  info.pVendorInfos = vendor_info.empty() ? nullptr : vendor_info.data();
+  info.pVendorBinaryData = nullptr;
+  result = get_fault_info(m_device, &counts, &info);
+  if (result != VK_SUCCESS && result != VK_INCOMPLETE)
+  {
+    ERROR_LOG_FMT(VIDEO, "Vulkan device fault detail query failed: {} ({}).",
+                  VkResultToString(result), static_cast<int>(result));
+    return;
+  }
+
+  const auto address_type_name = [](VkDeviceFaultAddressTypeEXT type) -> const char* {
+    switch (type)
+    {
+    case VK_DEVICE_FAULT_ADDRESS_TYPE_READ_INVALID_EXT:
+      return "read-invalid";
+    case VK_DEVICE_FAULT_ADDRESS_TYPE_WRITE_INVALID_EXT:
+      return "write-invalid";
+    case VK_DEVICE_FAULT_ADDRESS_TYPE_EXECUTE_INVALID_EXT:
+      return "execute-invalid";
+    case VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_UNKNOWN_EXT:
+      return "instruction-pointer-unknown";
+    case VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_INVALID_EXT:
+      return "instruction-pointer-invalid";
+    case VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_FAULT_EXT:
+      return "instruction-pointer-fault";
+    default:
+      return "none";
+    }
+  };
+
+  ERROR_LOG_FMT(VIDEO, "Vulkan device fault description: {}", info.description);
+  for (size_t i = 0; i < addresses.size(); ++i)
+  {
+    const auto& address = addresses[i];
+    ERROR_LOG_FMT(VIDEO,
+                  "Vulkan device fault address[{}]: type={} ({}) address={:#018x} precision={:#x}.",
+                  i, static_cast<int>(address.addressType), address_type_name(address.addressType),
+                  static_cast<unsigned long long>(address.reportedAddress),
+                  static_cast<unsigned long long>(address.addressPrecision));
+    LogAddressBindingsForFault(address.reportedAddress);
+  }
+  for (size_t i = 0; i < vendor_info.size(); ++i)
+  {
+    const auto& vendor = vendor_info[i];
+    ERROR_LOG_FMT(VIDEO,
+                  "Vulkan device fault vendor[{}]: code={:#018x} data={:#018x} description={}.",
+                  i, static_cast<unsigned long long>(vendor.vendorFaultCode),
+                  static_cast<unsigned long long>(vendor.vendorFaultData), vendor.description);
+  }
 }
 
 bool VulkanContext::CreateAllocator(u32 vk_api_version)
@@ -1120,6 +1263,159 @@ void VulkanContext::DisableDebugUtils()
   {
     vkDestroyDebugUtilsMessengerEXT(m_instance, m_debug_utils_messenger, nullptr);
     m_debug_utils_messenger = VK_NULL_HANDLE;
+  }
+}
+
+namespace
+{
+constexpr size_t ADDRESS_BINDING_LOG_CAPACITY = 16384;
+
+VKAPI_ATTR VkBool32 VKAPI_CALL AddressBindingCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT, VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+    const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
+{
+  if ((messageTypes & VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT) == 0)
+    return VK_FALSE;
+
+  auto* context = static_cast<VulkanContext*>(pUserData);
+  if (context == nullptr || pCallbackData == nullptr)
+    return VK_FALSE;
+
+  const VkDeviceAddressBindingCallbackDataEXT* binding = nullptr;
+  for (const auto* next = static_cast<const VkBaseInStructure*>(pCallbackData->pNext);
+       next != nullptr; next = next->pNext)
+  {
+    if (next->sType == VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT)
+    {
+      binding = reinterpret_cast<const VkDeviceAddressBindingCallbackDataEXT*>(next);
+      break;
+    }
+  }
+  if (binding == nullptr)
+    return VK_FALSE;
+
+  int object_type = VK_OBJECT_TYPE_UNKNOWN;
+  u64 object_handle = 0;
+  if (pCallbackData->objectCount > 0 && pCallbackData->pObjects != nullptr)
+  {
+    object_type = static_cast<int>(pCallbackData->pObjects[0].objectType);
+    object_handle = pCallbackData->pObjects[0].objectHandle;
+  }
+
+  context->RecordAddressBinding(
+      static_cast<u64>(binding->baseAddress), static_cast<u64>(binding->size),
+      static_cast<u32>(binding->bindingType), static_cast<u32>(binding->flags), object_type,
+      object_handle);
+  return VK_FALSE;
+}
+}  // namespace
+
+bool VulkanContext::EnableAddressBindingReport()
+{
+  if (!m_address_binding_report_enabled)
+    return false;
+  if (m_address_binding_messenger != VK_NULL_HANDLE)
+    return true;
+  if (!vkCreateDebugUtilsMessengerEXT || !vkDestroyDebugUtilsMessengerEXT)
+    return false;
+
+  {
+    std::lock_guard<std::mutex> lock(m_address_binding_mutex);
+    m_address_binding_events.assign(ADDRESS_BINDING_LOG_CAPACITY, AddressBindingEvent{});
+    m_address_binding_write = 0;
+  }
+
+  VkDebugUtilsMessengerCreateInfoEXT messenger_info = {
+      VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
+  messenger_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+                                   VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
+  messenger_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT;
+  messenger_info.pfnUserCallback = AddressBindingCallback;
+  messenger_info.pUserData = this;
+
+  const VkResult res = vkCreateDebugUtilsMessengerEXT(m_instance, &messenger_info, nullptr,
+                                                      &m_address_binding_messenger);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "vkCreateDebugUtilsMessengerEXT (address binding) failed: ");
+    m_address_binding_messenger = VK_NULL_HANDLE;
+    return false;
+  }
+
+  INFO_LOG_FMT(VIDEO, "Vulkan: VK_EXT_device_address_binding_report capture active.");
+  return true;
+}
+
+void VulkanContext::DisableAddressBindingReport()
+{
+  if (m_address_binding_messenger != VK_NULL_HANDLE)
+  {
+    vkDestroyDebugUtilsMessengerEXT(m_instance, m_address_binding_messenger, nullptr);
+    m_address_binding_messenger = VK_NULL_HANDLE;
+  }
+}
+
+void VulkanContext::RecordAddressBinding(u64 base, u64 size, u32 binding_type, u32 flags,
+                                         int object_type, u64 object_handle)
+{
+  const u64 seq = m_address_binding_seq.fetch_add(1, std::memory_order_relaxed) + 1;
+
+  std::lock_guard<std::mutex> lock(m_address_binding_mutex);
+  if (m_address_binding_events.empty())
+    return;
+
+  AddressBindingEvent& slot = m_address_binding_events[m_address_binding_write];
+  slot.base = base;
+  slot.size = size;
+  slot.seq = seq;
+  slot.object_handle = object_handle;
+  slot.binding_type = binding_type;
+  slot.flags = flags;
+  slot.object_type = object_type;
+  m_address_binding_write = (m_address_binding_write + 1) % m_address_binding_events.size();
+}
+
+void VulkanContext::LogAddressBindingsForFault(u64 fault_address) const
+{
+  // Only meaningful when the capture messenger actually ran (Host GPU logging enabled).
+  if (!m_address_binding_report_enabled || m_address_binding_messenger == VK_NULL_HANDLE)
+    return;
+
+  std::lock_guard<std::mutex> lock(m_address_binding_mutex);
+
+  std::vector<const AddressBindingEvent*> matches;
+  for (const auto& event : m_address_binding_events)
+  {
+    if (event.seq == 0 || event.size == 0)
+      continue;
+    if (fault_address >= event.base && fault_address < event.base + event.size)
+      matches.push_back(&event);
+  }
+
+  if (matches.empty())
+  {
+    ERROR_LOG_FMT(VIDEO,
+                  "  No recorded GPU address binding covers {:#018x}. The faulting resource "
+                  "belonged to a previous device/session or to the runtime/compositor.",
+                  static_cast<unsigned long long>(fault_address));
+    return;
+  }
+
+  std::sort(matches.begin(), matches.end(),
+            [](const AddressBindingEvent* a, const AddressBindingEvent* b) {
+              return a->seq < b->seq;
+            });
+  for (const auto* event : matches)
+  {
+    ERROR_LOG_FMT(
+        VIDEO,
+        "  GPU address binding seq={} {} range=[{:#018x}, {:#018x}) object_type={} handle={:#018x}{}.",
+        event->seq,
+        event->binding_type == VK_DEVICE_ADDRESS_BINDING_TYPE_UNBIND_EXT ? "UNBIND" : "BIND",
+        static_cast<unsigned long long>(event->base),
+        static_cast<unsigned long long>(event->base + event->size), event->object_type,
+        static_cast<unsigned long long>(event->object_handle),
+        (event->flags & VK_DEVICE_ADDRESS_BINDING_INTERNAL_OBJECT_BIT_EXT) ? " internal" : "");
   }
 }
 

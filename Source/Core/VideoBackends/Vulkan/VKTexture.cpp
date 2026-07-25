@@ -46,14 +46,28 @@ VKTexture::VKTexture(const TextureConfig& tex_config, VmaAllocation alloc, VkIma
 
 VKTexture::~VKTexture()
 {
-  StateTracker::GetInstance()->UnbindTexture(m_view);
-  g_command_buffer_mgr->DeferImageViewDestruction(m_view);
+  if (m_view != VK_NULL_HANDLE)
+  {
+    StateTracker::GetInstance()->UnbindTexture(m_view);
+    g_command_buffer_mgr->DeferImageViewDestruction(m_view);
+  }
 
   // If we don't have device memory allocated, the image is not owned by us (e.g. swapchain)
   if (m_alloc != VK_NULL_HANDLE)
   {
     g_command_buffer_mgr->DeferImageDestruction(m_image, m_alloc);
   }
+}
+
+VkImageView VKTexture::ReleaseView()
+{
+  if (m_view == VK_NULL_HANDLE)
+    return VK_NULL_HANDLE;
+
+  StateTracker::GetInstance()->UnbindTexture(m_view);
+  const VkImageView view = m_view;
+  m_view = VK_NULL_HANDLE;
+  return view;
 }
 
 std::unique_ptr<VKTexture> VKTexture::Create(const TextureConfig& tex_config, std::string_view name)
@@ -1081,7 +1095,15 @@ VKFramebuffer::VKFramebuffer(VKTexture* color_attachment, VKTexture* depth_attac
 
 VKFramebuffer::~VKFramebuffer()
 {
-  g_command_buffer_mgr->DeferFramebufferDestruction(m_fb);
+  if (m_fb != VK_NULL_HANDLE)
+    g_command_buffer_mgr->DeferFramebufferDestruction(m_fb);
+}
+
+VkFramebuffer VKFramebuffer::ReleaseHandle()
+{
+  const VkFramebuffer framebuffer = m_fb;
+  m_fb = VK_NULL_HANDLE;
+  return framebuffer;
 }
 
 static std::unique_ptr<VKFramebuffer>

@@ -16,6 +16,7 @@
 #include "Common/Thread.h"
 #include "Common/Timer.h"
 
+#include "Core/Core.h"
 #include "Core/Config/GraphicsSettings.h"
 
 #include "VideoBackends/Vulkan/VulkanContext.h"
@@ -364,6 +365,9 @@ void CommandBufferManager::WaitForFenceCounter(u64 fence_counter)
 
 void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
 {
+  if (IsDeviceLost())
+    return;
+
   const u64 perf_start_us = Common::Timer::NowUs();
   CmdBufferResources& resources = m_command_buffers[index];
 
@@ -379,7 +383,12 @@ void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
   VkResult res =
       vkWaitForFences(g_vulkan_context->GetDevice(), 1, &resources.fence, VK_TRUE, UINT64_MAX);
   if (res != VK_SUCCESS)
+  {
     LOG_VULKAN_ERROR(res, "vkWaitForFences failed: ");
+    if (res == VK_ERROR_DEVICE_LOST)
+      HandleDeviceLost("vkWaitForFences");
+    return;
+  }
 
   // Clean up any resources for command buffers between the last known completed buffer and this
   // now-completed command buffer. If we use >2 buffers, this may be more than one buffer.
@@ -406,12 +415,15 @@ void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
       Common::Timer::NowUs() - perf_start_us, std::memory_order_relaxed);
 }
 
-void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
-                                               bool wait_for_completion, bool advance_to_next_frame,
-                                               VkSwapchainKHR present_swap_chain,
-                                               uint32_t present_image_index,
-                                               std::function<void()> post_submit_callback)
+bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
+                                                bool wait_for_completion, bool advance_to_next_frame,
+                                                VkSwapchainKHR present_swap_chain,
+                                                uint32_t present_image_index,
+                                                std::function<void()> post_submit_callback)
 {
+  if (IsDeviceLost())
+    return false;
+
   // End the current command buffer.
   CmdBufferResources& resources = GetCurrentCmdBufferResources();
   for (VkCommandBuffer command_buffer : resources.command_buffers)
@@ -478,11 +490,16 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
     WaitForWorkerThreadIdle();
 
     // Pass through to normal submission path.
-    SubmitCommandBuffer(m_current_cmd_buffer, present_swap_chain, present_image_index);
+    const VkResult submit_result =
+        SubmitCommandBuffer(m_current_cmd_buffer, present_swap_chain, present_image_index);
     if (post_submit_callback)
       post_submit_callback();
+    if (submit_result != VK_SUCCESS)
+      return false;
     if (wait_for_completion)
       WaitForCommandBufferCompletion(m_current_cmd_buffer);
+    if (IsDeviceLost())
+      return false;
   }
 
   // VR perf diagnostics: once per ~5 s of presented frames, dump where the GPU thread's
@@ -538,6 +555,9 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
       cmd_buffer_index = (cmd_buffer_index + 1) % NUM_COMMAND_BUFFERS;
     }
 
+    if (IsDeviceLost())
+      return false;
+
     // Reset the descriptor pools
     FrameResources& frame_resources = GetCurrentFrameResources();
 
@@ -565,12 +585,16 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
 
   // Switch to next cmdbuffer.
   BeginCommandBuffer();
+  return !IsDeviceLost();
 }
 
-void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
-                                               VkSwapchainKHR present_swap_chain,
-                                               u32 present_image_index)
+VkResult CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
+                                                    VkSwapchainKHR present_swap_chain,
+                                                    u32 present_image_index)
 {
+  if (IsDeviceLost())
+    return VK_ERROR_DEVICE_LOST;
+
   const u64 perf_start_us = Common::Timer::NowUs();
   CmdBufferResources& resources = m_command_buffers[command_buffer_index];
 
@@ -613,8 +637,16 @@ void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
     if (res != VK_SUCCESS)
     {
       LOG_VULKAN_ERROR(res, "vkQueueSubmit failed: ");
-      PanicAlertFmt("Failed to submit command buffer: {} ({})", VkResultToString(res),
-                    static_cast<int>(res));
+      if (res == VK_ERROR_DEVICE_LOST)
+      {
+        HandleDeviceLost("vkQueueSubmit");
+      }
+      else
+      {
+        PanicAlertFmt("Failed to submit command buffer: {} ({})", VkResultToString(res),
+                      static_cast<int>(res));
+      }
+      return res;
     }
 
     // Do we have a swap chain to present?
@@ -639,6 +671,8 @@ void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
             m_last_present_result != VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT)
         {
           LOG_VULKAN_ERROR(m_last_present_result, "vkQueuePresentKHR failed: ");
+          if (m_last_present_result == VK_ERROR_DEVICE_LOST)
+            HandleDeviceLost("vkQueuePresentKHR");
         }
 
         // Don't treat VK_SUBOPTIMAL_KHR as fatal on Android. Android 10+ requires prerotation.
@@ -656,10 +690,14 @@ void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
   auto& perf = g_vulkan_context->GetPerfCounters();
   perf.submit_us.fetch_add(Common::Timer::NowUs() - perf_start_us, std::memory_order_relaxed);
   perf.submit_count.fetch_add(1, std::memory_order_relaxed);
+  return IsDeviceLost() ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
 }
 
 void CommandBufferManager::BeginCommandBuffer()
 {
+  if (IsDeviceLost())
+    return;
+
   // Move to the next command buffer.
   const u32 next_buffer_index = (m_current_cmd_buffer + 1) % NUM_COMMAND_BUFFERS;
   CmdBufferResources& resources = m_command_buffers[next_buffer_index];
@@ -667,6 +705,8 @@ void CommandBufferManager::BeginCommandBuffer()
   // Wait for the GPU to finish with all resources for this command buffer.
   if (resources.fence_counter > m_completed_fence_counter)
     WaitForCommandBufferCompletion(next_buffer_index);
+  if (IsDeviceLost())
+    return;
 
   // Reset fence to unsignaled before starting.
   VkResult res = vkResetFences(g_vulkan_context->GetDevice(), 1, &resources.fence);
@@ -694,6 +734,25 @@ void CommandBufferManager::BeginCommandBuffer()
   resources.fence_counter = m_next_fence_counter++;
   resources.frame_index = m_current_frame;
   m_current_cmd_buffer = next_buffer_index;
+}
+
+void CommandBufferManager::HandleDeviceLost(std::string_view operation)
+{
+  if (m_device_lost.exchange(true, std::memory_order_acq_rel))
+    return;
+
+  ERROR_LOG_FMT(VIDEO,
+                "Vulkan device lost in {}. Stopping emulation and suppressing further GPU "
+                "submissions to protect the graphics driver.",
+                operation);
+  ERROR_LOG_FMT(VIDEO,
+                "Vulkan device loss state: current_cmd={} current_frame={} next_fence={} "
+                "completed_fence={} last_present={}.",
+                m_current_cmd_buffer, m_current_frame, m_next_fence_counter,
+                m_completed_fence_counter, static_cast<int>(m_last_present_result));
+  if (g_vulkan_context)
+    g_vulkan_context->LogDeviceFaultInfo();
+  Core::QueueHostJob([](Core::System& system) { Core::Stop(system); }, true);
 }
 
 void CommandBufferManager::DeferBufferViewDestruction(VkBufferView object)

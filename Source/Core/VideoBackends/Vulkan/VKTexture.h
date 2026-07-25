@@ -52,6 +52,10 @@ public:
 
   VkImage GetImage() const { return m_image; }
   VkImageView GetView() const { return m_view; }
+  // Relinquishes the image view without putting it on the deferred-destruction queue.
+  // Used for externally owned images whose owner must not destroy the image before its
+  // Dolphin-created view has actually been destroyed.
+  VkImageView ReleaseView();
   VkImageLayout GetLayout() const { return m_layout; }
   VkFormat GetVkFormat() const
   {
@@ -142,6 +146,8 @@ public:
   ~VKFramebuffer() override;
 
   VkFramebuffer GetFB() const { return m_fb; }
+  // See VKTexture::ReleaseView(). The caller becomes responsible for destroying the handle.
+  VkFramebuffer ReleaseHandle();
   VkRect2D GetRect() const { return VkRect2D{{0, 0}, {m_width, m_height}}; }
 
   VkRenderPass GetLoadRenderPass() const { return m_load_render_pass; }

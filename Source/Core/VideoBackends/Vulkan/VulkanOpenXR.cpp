@@ -28,6 +28,7 @@
 #include "VideoBackends/Vulkan/StateTracker.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
+#include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/TextureConfig.h"
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/OnScreenDisplay.h"
@@ -53,6 +54,41 @@ uint64_t ElapsedUs(uint64_t start_us, uint64_t end_us)
     return 0;
 
   return end_us - start_us;
+}
+
+template <typename T>
+void DestroySwapchainVulkanObjects(T& swapchain)
+{
+  const VkDevice device = g_vulkan_context->GetDevice();
+
+  // VKFramebuffer/VKTexture normally defer destruction until a command buffer is recycled.
+  // OpenXR owns the VkImages, however, and xrDestroySwapchain may destroy them immediately.
+  // Destroy our dependent Vulkan objects synchronously before returning ownership to OpenXR.
+  for (auto& framebuffer : swapchain.framebuffers)
+  {
+    if (framebuffer)
+    {
+      const VkFramebuffer handle = framebuffer->ReleaseHandle();
+      if (handle != VK_NULL_HANDLE)
+        vkDestroyFramebuffer(device, handle, nullptr);
+    }
+  }
+  swapchain.framebuffers.clear();
+
+  for (auto& texture : swapchain.textures)
+  {
+    if (texture)
+    {
+      const VkImageView view = texture->ReleaseView();
+      if (view != VK_NULL_HANDLE)
+        vkDestroyImageView(device, view, nullptr);
+    }
+  }
+  swapchain.textures.clear();
+
+  for (VkImageView view : swapchain.fdm_views)
+    vkDestroyImageView(device, view, nullptr);
+  swapchain.fdm_views.clear();
 }
 
 static void AppendOptionalOpenXRExtensions(std::vector<const char*>* extensions)
@@ -225,7 +261,7 @@ static XrResult SafeCreateSession(XrInstance instance, const XrSessionCreateInfo
 }
 #else
 static XrResult SafeCreateSession(XrInstance instance, const XrSessionCreateInfo* info,
-                                   XrSession* session)
+                                  XrSession* session)
 {
   return xrCreateSession(instance, info, session);
 }
@@ -389,8 +425,13 @@ bool VulkanOpenXR::PreQueryVulkanExtensions(VulkanExtensionRequirements& out)
 {
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Pre-querying required Vulkan extensions...");
 
-  auto mgr = std::make_unique<VR::OpenXRManager>();
+  // Dolphin owns VkInstance/VkDevice creation and the runtime only binds to them at
+  // xrCreateSession. The runtime-assisted XR_KHR_vulkan_enable2 path
+  // (xrCreateVulkanInstanceKHR/xrCreateVulkanDeviceKHR) is deliberately not used: creating a
+  // second device against the same XrInstance crashes inside SteamVR's Vulkan interop.
+  INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Using {}.", XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
 
+  auto mgr = std::make_unique<VR::OpenXRManager>();
   std::vector<const char*> extensions = {XR_KHR_VULKAN_ENABLE_EXTENSION_NAME};
   AppendOptionalOpenXRExtensions(&extensions);
 #if defined(ANDROID)
@@ -598,10 +639,15 @@ void VulkanOpenXR::Shutdown()
     VR::g_openxr->SetSwapchain(nullptr);
 
   DestroySwapchains();
-  VR::g_openxr.reset();
+  // Fully tear down the runtime between games, mirroring the D3D11 backend. ~OpenXRManager() runs
+  // DestroySession() (ordered session exit) before destroying the XrInstance, so the next game
+  // starts from a clean runtime state instead of a retained instance bound to a dead device.
+  if (VR::g_openxr)
+    VR::g_openxr.reset();
 
-  // Wait for all GPU work to finish before the Vulkan device is destroyed.
-  if (g_vulkan_context)
+  // Wait for all GPU work to finish before the Vulkan device is destroyed. Once the device has
+  // already been lost, another wait only re-enters the failing driver path.
+  if (g_vulkan_context && (!g_command_buffer_mgr || !g_command_buffer_mgr->IsDeviceLost()))
     vkDeviceWaitIdle(g_vulkan_context->GetDevice());
 
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Shut down.");
@@ -618,13 +664,14 @@ bool VulkanOpenXR::CreateSessionVulkan()
   // --- Query Vulkan graphics requirements (mandatory before session creation) ---
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Querying graphics requirements...");
   PFN_xrGetVulkanGraphicsRequirementsKHR pfnGetVulkanRequirements = nullptr;
+  const char* const requirements_function = "xrGetVulkanGraphicsRequirementsKHR";
   XrResult result = xrGetInstanceProcAddr(
-      xr_instance, "xrGetVulkanGraphicsRequirementsKHR",
+      xr_instance, requirements_function,
       reinterpret_cast<PFN_xrVoidFunction*>(&pfnGetVulkanRequirements));
 
   if (XR_FAILED(result) || pfnGetVulkanRequirements == nullptr)
   {
-    ERROR_LOG_FMT(VIDEO, "OpenXR: Could not load xrGetVulkanGraphicsRequirementsKHR.");
+    ERROR_LOG_FMT(VIDEO, "OpenXR: Could not load {}.", requirements_function);
     return false;
   }
 
@@ -666,10 +713,6 @@ bool VulkanOpenXR::CreateSessionVulkan()
       pfnGetInstanceExts(xr_instance, xr_system, ext_len, &ext_len, ext_str.data());
       INFO_LOG_FMT(VIDEO, "OpenXR: Required Vulkan instance extensions: {}", ext_str);
     }
-    else
-    {
-      INFO_LOG_FMT(VIDEO, "OpenXR: No additional Vulkan instance extensions required.");
-    }
   }
 
   // --- Query required Vulkan device extensions ---
@@ -687,36 +730,26 @@ bool VulkanOpenXR::CreateSessionVulkan()
       pfnGetDeviceExts(xr_instance, xr_system, ext_len, &ext_len, ext_str.data());
       INFO_LOG_FMT(VIDEO, "OpenXR: Required Vulkan device extensions: {}", ext_str);
     }
-    else
-    {
-      INFO_LOG_FMT(VIDEO, "OpenXR: No additional Vulkan device extensions required.");
-    }
   }
 
   // --- Verify the physical device matches what the runtime expects ---
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Checking physical device...");
+  VkPhysicalDevice xr_physical_device = VK_NULL_HANDLE;
   PFN_xrGetVulkanGraphicsDeviceKHR pfnGetVulkanDevice = nullptr;
   result = xrGetInstanceProcAddr(xr_instance, "xrGetVulkanGraphicsDeviceKHR",
                                  reinterpret_cast<PFN_xrVoidFunction*>(&pfnGetVulkanDevice));
   if (XR_SUCCEEDED(result) && pfnGetVulkanDevice != nullptr)
   {
-    VkPhysicalDevice xr_physical_device = VK_NULL_HANDLE;
-    result = pfnGetVulkanDevice(xr_instance, xr_system,
-                                g_vulkan_context->GetVulkanInstance(), &xr_physical_device);
-    if (XR_SUCCEEDED(result))
-    {
-      if (xr_physical_device != g_vulkan_context->GetPhysicalDevice())
-      {
-        WARN_LOG_FMT(VIDEO,
-                     "OpenXR: Runtime wants a different VkPhysicalDevice than Dolphin selected. "
-                     "VR may not work correctly.");
-      }
-      else
-      {
-        INFO_LOG_FMT(VIDEO, "OpenXR: VkPhysicalDevice matches runtime expectation.");
-      }
-    }
+    pfnGetVulkanDevice(xr_instance, xr_system, g_vulkan_context->GetVulkanInstance(),
+                       &xr_physical_device);
   }
+  if (xr_physical_device != VK_NULL_HANDLE &&
+      xr_physical_device != g_vulkan_context->GetPhysicalDevice())
+  {
+    ERROR_LOG_FMT(VIDEO, "OpenXR: Active VkPhysicalDevice differs from the runtime selection.");
+    return false;
+  }
+  INFO_LOG_FMT(VIDEO, "OpenXR: VkPhysicalDevice matches runtime expectation.");
 
   // --- Create XrSession bound to the active Vulkan device ---
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Creating XrSession with Vulkan binding...");
@@ -893,11 +926,7 @@ bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format)
   sc.height = view_cfgs[0].recommendedImageRectHeight;
 
   auto cleanup = [&sc]() {
-    sc.framebuffers.clear();
-    sc.textures.clear();
-    for (VkImageView view : sc.fdm_views)
-      vkDestroyImageView(g_vulkan_context->GetDevice(), view, nullptr);
-    sc.fdm_views.clear();
+    DestroySwapchainVulkanObjects(sc);
     if (sc.swapchain != XR_NULL_HANDLE)
     {
       xrDestroySwapchain(sc.swapchain);
@@ -1187,8 +1216,13 @@ bool VulkanOpenXR::CreateEyeSwapchains(int64_t swapchain_format)
 
 void VulkanOpenXR::DestroySwapchains()
 {
-  // Wait for the GPU to finish all pending work before destroying resources.
-  if (g_vulkan_context)
+  // Finish and submit the current command buffer as well as waiting for queued GPU work. A plain
+  // vkDeviceWaitIdle does not make it safe to destroy objects referenced by an unsubmitted buffer.
+  // Do not submit again after VK_ERROR_DEVICE_LOST; the command buffer manager has already queued
+  // a clean emulation stop and further driver calls can make the failure cascade.
+  if (g_gfx && (!g_command_buffer_mgr || !g_command_buffer_mgr->IsDeviceLost()))
+    g_gfx->WaitForGPUIdle();
+  else if (g_vulkan_context && (!g_command_buffer_mgr || !g_command_buffer_mgr->IsDeviceLost()))
     vkDeviceWaitIdle(g_vulkan_context->GetDevice());
 
   if (m_layered_image_acquired && m_layered_swapchain.swapchain != XR_NULL_HANDLE)
@@ -1208,27 +1242,6 @@ void VulkanOpenXR::DestroySwapchains()
     }
     m_layered_image_acquired = false;
   }
-
-  m_layered_swapchain.framebuffers.clear();
-  m_layered_swapchain.textures.clear();
-  for (VkImageView view : m_layered_swapchain.fdm_views)
-    vkDestroyImageView(g_vulkan_context->GetDevice(), view, nullptr);
-  m_layered_swapchain.fdm_views.clear();
-
-  if (m_layered_swapchain.swapchain != XR_NULL_HANDLE)
-  {
-    const XrResult destroy_result = xrDestroySwapchain(m_layered_swapchain.swapchain);
-    if (XR_FAILED(destroy_result))
-    {
-      WARN_LOG_FMT(VIDEO, "OpenXR: xrDestroySwapchain failed for layered swapchain ({}).",
-                   static_cast<int>(destroy_result));
-    }
-    m_layered_swapchain.swapchain = XR_NULL_HANDLE;
-  }
-  m_layered_swapchain.width = 0;
-  m_layered_swapchain.height = 0;
-  m_use_layered_swapchain = false;
-  m_frame_uses_layered_swapchain = false;
 
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
@@ -1250,14 +1263,37 @@ void VulkanOpenXR::DestroySwapchains()
       }
       m_image_acquired[eye] = false;
     }
+  }
 
-    // Release Dolphin wrappers before destroying the swapchain so the
-    // runtime's VkImages are only freed after our views are gone.
-    sc.framebuffers.clear();
-    sc.textures.clear();
-    for (VkImageView view : sc.fdm_views)
-      vkDestroyImageView(g_vulkan_context->GetDevice(), view, nullptr);
-    sc.fdm_views.clear();
+  // The compositor may still be consuming the last submitted layers while the session is
+  // FOCUSED. Complete the requested STOPPING -> xrEndSession -> EXITING transition before
+  // destroying the swapchains referenced by those layers.
+  if (VR::g_openxr)
+    VR::g_openxr->ShutdownSession();
+
+  DestroySwapchainVulkanObjects(m_layered_swapchain);
+
+  if (m_layered_swapchain.swapchain != XR_NULL_HANDLE)
+  {
+    const XrResult destroy_result = xrDestroySwapchain(m_layered_swapchain.swapchain);
+    if (XR_FAILED(destroy_result))
+    {
+      WARN_LOG_FMT(VIDEO, "OpenXR: xrDestroySwapchain failed for layered swapchain ({}).",
+                   static_cast<int>(destroy_result));
+    }
+    m_layered_swapchain.swapchain = XR_NULL_HANDLE;
+  }
+  m_layered_swapchain.width = 0;
+  m_layered_swapchain.height = 0;
+  m_use_layered_swapchain = false;
+  m_frame_uses_layered_swapchain = false;
+
+  for (uint32_t eye = 0; eye < 2; ++eye)
+  {
+    auto& sc = m_eye_swapchains[eye];
+
+    // Release Dolphin framebuffers and views synchronously before the runtime destroys its images.
+    DestroySwapchainVulkanObjects(sc);
 
     if (sc.swapchain != XR_NULL_HANDLE)
     {

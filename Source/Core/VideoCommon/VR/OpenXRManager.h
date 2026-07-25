@@ -164,6 +164,15 @@ public:
   void SetSwapchain(IOpenXRSwapchain* swapchain);
   IOpenXRSwapchain* GetSwapchain() const { return m_swapchain; }
 
+  // Gracefully leaves a running session. Stops the frame loop, requests the runtime's
+  // STOPPING transition, and pumps events until xrEndSession has been issued or a short
+  // timeout expires. Safe to call repeatedly and from the destructor.
+  void ShutdownSession();
+
+  // Destroys all objects owned by the current session while retaining the XrInstance and system.
+  // This permits a new graphics session to be created without reconnecting the runtime.
+  void DestroySession();
+
   // Step 4: Create the local reference space used for head tracking.
   bool CreateReferenceSpace();
 
