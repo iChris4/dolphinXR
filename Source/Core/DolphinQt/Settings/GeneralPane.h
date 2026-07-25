@@ -47,6 +47,7 @@ private:
   ToolTipComboBox* m_combobox_update_track;
   ToolTipComboBox* m_combobox_fallback_region;
   ConfigBool* m_checkbox_dualcore;
+  ConfigBool* m_checkbox_emulate_disc_speed;
   ConfigBool* m_checkbox_cheats;
   ConfigBool* m_checkbox_load_games_into_memory;
   ConfigBool* m_checkbox_override_region_settings;

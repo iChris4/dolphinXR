@@ -142,6 +142,10 @@ void GeneralPane::CreateBasic()
   m_checkbox_dualcore = new ConfigBool(tr("Enable Dual Core (speedhack)"), Config::MAIN_CPU_THREAD);
   basic_group_layout->addWidget(m_checkbox_dualcore);
 
+  m_checkbox_emulate_disc_speed =
+      new ConfigBool(tr("Emulate Disc Speed"), Config::MAIN_FAST_DISC_SPEED, true);
+  basic_group_layout->addWidget(m_checkbox_emulate_disc_speed);
+
   m_checkbox_cheats = new ConfigBool(tr("Enable Cheats"), Config::MAIN_ENABLE_CHEATS);
   basic_group_layout->addWidget(m_checkbox_cheats);
 
@@ -381,6 +385,11 @@ void GeneralPane::AddDescriptions()
                  "improves performance. However, it can result in glitches and crashes."
                  "<br><br>This setting cannot be changed while emulation is active."
                  "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
+  static constexpr char TR_EMULATE_DISC_SPEED_DESCRIPTION[] = QT_TR_NOOP(
+      "Enables emulated disc speed, matching the read speed of the original disc drive. "
+      "Disabling this removes the read speed limit, which can cause crashes and other problems "
+      "in some games. (ON = Compatible, OFF = Unlocked)"
+      "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
   static constexpr char TR_CHEATS_DESCRIPTION[] = QT_TR_NOOP(
       "Enables the use of AR and Gecko cheat codes which can be used to modify games' behavior. "
       "These codes can be configured with the Cheats Manager in the Tools menu."
@@ -441,6 +450,8 @@ void GeneralPane::AddDescriptions()
 #endif
 
   m_checkbox_dualcore->SetDescription(tr(TR_DUALCORE_DESCRIPTION));
+
+  m_checkbox_emulate_disc_speed->SetDescription(tr(TR_EMULATE_DISC_SPEED_DESCRIPTION));
 
   m_checkbox_cheats->SetDescription(tr(TR_CHEATS_DESCRIPTION));
 

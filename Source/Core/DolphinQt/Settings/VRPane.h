@@ -43,10 +43,13 @@ private:
   ConfigChoiceMap<OpenXRTrackingMode>* m_tracking_mode = nullptr;
   ConfigFloatSlider* m_units_per_meter = nullptr;
   QLabel* m_units_per_meter_value = nullptr;
+  ConfigBool* m_enable_lean_back_angle = nullptr;
   ConfigFloatSlider* m_lean_back_angle = nullptr;
   QLabel* m_lean_back_angle_value = nullptr;
+  ConfigBool* m_enable_camera_forward = nullptr;
   ConfigFloatSlider* m_camera_forward = nullptr;
   QLabel* m_camera_forward_value = nullptr;
+  ConfigBool* m_enable_camera_height = nullptr;
   ConfigFloatSlider* m_camera_height = nullptr;
   QLabel* m_camera_height_value = nullptr;
   ConfigBool* m_enable_camera_anchor = nullptr;

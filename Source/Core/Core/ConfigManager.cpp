@@ -159,6 +159,7 @@ static void ClearAppliedVRSettings()
   ClearAppliedVRSetting("EnableOpenXR", Config::GFX_VR_ENABLE_OPENXR);
   ClearAppliedVRSetting("FlatScreen", Config::GFX_VR_FLAT_SCREEN);
   ClearAppliedVRSetting("UnitsPerMeter", Config::GFX_VR_UNITS_PER_METER);
+  ClearAppliedVRSetting("EnableLeanBackAngle", Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE);
   ClearAppliedVRSetting("LeanBackAngle", Config::GFX_VR_LEAN_BACK_ANGLE);
   ClearAppliedVRSetting("EnableCameraForward", Config::GFX_VR_ENABLE_CAMERA_FORWARD);
   ClearAppliedVRSetting("CameraForward", Config::GFX_VR_CAMERA_FORWARD);
@@ -237,6 +238,7 @@ static void ApplyGameVRConfigOverrides(std::string_view game_id, std::optional<u
   ApplyVRSetting(values, "EnableOpenXR", Config::GFX_VR_ENABLE_OPENXR);
   ApplyVRSetting(values, "FlatScreen", Config::GFX_VR_FLAT_SCREEN);
   ApplyVRSetting(values, "UnitsPerMeter", Config::GFX_VR_UNITS_PER_METER);
+  ApplyVRSetting(values, "EnableLeanBackAngle", Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE);
   ApplyVRSetting(values, "LeanBackAngle", Config::GFX_VR_LEAN_BACK_ANGLE);
   ApplyVRSetting(values, "EnableCameraForward", Config::GFX_VR_ENABLE_CAMERA_FORWARD);
   ApplyVRSetting(values, "CameraForward", Config::GFX_VR_CAMERA_FORWARD);

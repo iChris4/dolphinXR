@@ -3297,7 +3297,9 @@ void OpenXRManager::GetEyeProjectionRows(
 {
   const float s = std::max(units_per_meter, 0.0001f);
   constexpr float DEG_TO_RAD = 0.01745329252f;
-  const float lean_back_rad = g_ActiveConfig.vr_lean_back_angle * DEG_TO_RAD;
+  const float lean_back_rad =
+      g_ActiveConfig.vr_enable_lean_back_angle ? g_ActiveConfig.vr_lean_back_angle * DEG_TO_RAD :
+                                                 0.0f;
   // Positive UI values should move the camera forward.
   // In this projection path, decreasing eye-space Z corresponds to moving forward.
   const float camera_forward_units =

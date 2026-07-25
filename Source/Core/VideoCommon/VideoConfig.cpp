@@ -190,6 +190,7 @@ void VideoConfig::Refresh()
   vr_units_per_meter = std::clamp(Config::Get(Config::GFX_VR_UNITS_PER_METER),
                                   Config::GFX_VR_UNITS_PER_METER_MIN,
                                   Config::GFX_VR_UNITS_PER_METER_MAX);
+  vr_enable_lean_back_angle = Config::Get(Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE);
   vr_lean_back_angle = std::clamp(Config::Get(Config::GFX_VR_LEAN_BACK_ANGLE),
                                   Config::GFX_VR_LEAN_BACK_ANGLE_MIN,
                                   Config::GFX_VR_LEAN_BACK_ANGLE_MAX);

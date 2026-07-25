@@ -10,7 +10,6 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QAbstractSlider>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -91,16 +90,30 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
                                             Config::GFX_VR_UNITS_PER_METER_STEP, nullptr,
                                             ConfigFloatSlider::ScaleMode::Exponential);
   m_units_per_meter_value = new QLabel();
+  m_enable_lean_back_angle =
+      new ConfigBool(tr("Lean Back Angle (deg)"), Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE);
+  m_enable_lean_back_angle->setToolTip(
+      tr("When unchecked, ignores the Lean Back Angle value below and applies no pitch offset."));
   m_lean_back_angle = new ConfigFloatSlider(Config::GFX_VR_LEAN_BACK_ANGLE_MIN,
                                             Config::GFX_VR_LEAN_BACK_ANGLE_MAX,
                                             Config::GFX_VR_LEAN_BACK_ANGLE,
                                             Config::GFX_VR_LEAN_BACK_ANGLE_STEP);
   m_lean_back_angle_value = new QLabel();
+  m_enable_camera_forward =
+      new ConfigBool(tr("Camera Forward (m)"), Config::GFX_VR_ENABLE_CAMERA_FORWARD);
+  m_enable_camera_forward->setToolTip(
+      tr("When unchecked, ignores the Camera Forward value below and applies no "
+         "forward/backward offset."));
   m_camera_forward = new ConfigFloatSlider(Config::GFX_VR_CAMERA_FORWARD_MIN,
                                            Config::GFX_VR_CAMERA_FORWARD_MAX,
                                            Config::GFX_VR_CAMERA_FORWARD,
                                            Config::GFX_VR_CAMERA_FORWARD_STEP);
   m_camera_forward_value = new QLabel();
+  m_enable_camera_height =
+      new ConfigBool(tr("Camera Height (m)"), Config::GFX_VR_ENABLE_CAMERA_HEIGHT);
+  m_enable_camera_height->setToolTip(
+      tr("When unchecked, ignores the Camera Height value below and applies no vertical "
+         "offset."));
   m_camera_height = new ConfigFloatSlider(Config::GFX_VR_CAMERA_HEIGHT_MIN,
                                           Config::GFX_VR_CAMERA_HEIGHT_MAX,
                                           Config::GFX_VR_CAMERA_HEIGHT,
@@ -168,14 +181,13 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
 
   openxr_layout->addWidget(m_flat_screen, 3, 0, 1, 3);
 
-  camera_layout->addWidget(new ConfigFloatLabel(tr("Lean Back Angle (deg):"), m_lean_back_angle), 0,
-                           0);
+  camera_layout->addWidget(m_enable_lean_back_angle, 0, 0);
   camera_layout->addWidget(m_lean_back_angle, 0, 1);
   camera_layout->addWidget(m_lean_back_angle_value, 0, 2);
-  camera_layout->addWidget(new ConfigFloatLabel(tr("Camera Forward (m):"), m_camera_forward), 1, 0);
+  camera_layout->addWidget(m_enable_camera_forward, 1, 0);
   camera_layout->addWidget(m_camera_forward, 1, 1);
   camera_layout->addWidget(m_camera_forward_value, 1, 2);
-  camera_layout->addWidget(new ConfigFloatLabel(tr("Camera Height (m):"), m_camera_height), 2, 0);
+  camera_layout->addWidget(m_enable_camera_height, 2, 0);
   camera_layout->addWidget(m_camera_height, 2, 1);
   camera_layout->addWidget(m_camera_height_value, 2, 2);
   camera_layout->addWidget(m_enable_camera_anchor, 3, 0);
@@ -201,15 +213,9 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   connect(m_camera_forward, &ConfigFloatSlider::valueChanged, this, [this] {
     m_camera_forward_value->setText(QString::asprintf("%.1f", m_camera_forward->GetValue()));
   });
-  connect(m_camera_forward, &QAbstractSlider::actionTriggered, this, [](int) {
-    Config::SetBaseOrCurrent(Config::GFX_VR_ENABLE_CAMERA_FORWARD, true);
-  });
   m_camera_height_value->setText(QString::asprintf("%.1f", m_camera_height->GetValue()));
   connect(m_camera_height, &ConfigFloatSlider::valueChanged, this, [this] {
     m_camera_height_value->setText(QString::asprintf("%.1f", m_camera_height->GetValue()));
-  });
-  connect(m_camera_height, &QAbstractSlider::actionTriggered, this, [](int) {
-    Config::SetBaseOrCurrent(Config::GFX_VR_ENABLE_CAMERA_HEIGHT, true);
   });
   m_camera_anchor_smoothing_value->setText(
       QString::asprintf("%.2f", m_camera_anchor_smoothing->GetValue()));
@@ -288,11 +294,15 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
       tr("Controls how the VR pacing thread fills the headset's refresh rate when the game "
          "renders slower than the display.<br><br>"
          "<b>On</b> resubmits the last frame every headset refresh so every slot is filled. "
-         "Best for standalone runtimes with no motion smoothing (Quest).<br><br>"
-         "<b>Off</b> paces submissions to the game's real frame rate so the PC runtime's "
-         "own motion smoothing (SteamVR reprojection, Virtual Desktop SSW, Meta Link ASW) "
-         "engages — this removes head-tracking judder on PC. Recommended for all PC "
-         "runtimes.<br><br>Can be toggled while a game is running."));
+         "Best for standalone runtimes with no motion smoothing (Quest). On PC, this also "
+         "prevents the runtime's own motion smoothing (SteamVR reprojection, Virtual Desktop "
+         "SSW, Meta Link ASW) from engaging in the first place, which avoids that smoothing's "
+         "own warping/ghosting artifacts — useful if you find those more distracting than the "
+         "judder it's meant to hide.<br><br>"
+         "<b>Off</b> paces submissions to the game's real frame rate so the PC runtime's own "
+         "motion smoothing can engage — this removes head-tracking judder on PC at the cost of "
+         "possible smoothing artifacts.<br><br>"
+         "Can be toggled while a game is running."));
   framerate_layout->addWidget(m_eager_heartbeat, 3, 1, 1, 2);
 
   m_clear_efb_slider = new ConfigSlider(Config::GFX_VR_CLEAR_EFB_MIN,
@@ -870,6 +880,8 @@ void VRPane::ResetGeneralSettings()
                            Config::GFX_VR_TRACKING_MODE.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_UNITS_PER_METER,
                            Config::GFX_VR_UNITS_PER_METER.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE,
+                           Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_LEAN_BACK_ANGLE,
                            Config::GFX_VR_LEAN_BACK_ANGLE.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_ENABLE_CAMERA_FORWARD,
@@ -913,4 +925,38 @@ void VRPane::ResetGeneralSettings()
                            Config::GFX_VR_METROID_THERMAL_VISOR_FIX.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX,
                            Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX.GetDefaultValue());
+
+  // Advanced tab
+  Config::SetBaseOrCurrent(Config::GFX_VR_USE_VULKAN_MULTIVIEW,
+                           Config::GFX_VR_USE_VULKAN_MULTIVIEW.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_DONT_CLEAR_SCREEN,
+                           Config::GFX_VR_DONT_CLEAR_SCREEN.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_DISABLE_CPU_CULL,
+                           Config::GFX_VR_DISABLE_CPU_CULL.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_REMOVE_BARS,
+                           Config::GFX_VR_REMOVE_BARS.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_FRAME_SIZE_FROM_XFB,
+                           Config::GFX_VR_FRAME_SIZE_FROM_XFB.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_PANES_ON_SCREEN,
+                           Config::GFX_VR_PANES_ON_SCREEN.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_DETECT_RENDER_TARGETS,
+                           Config::GFX_VR_DETECT_RENDER_TARGETS.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_ORTHO_SCISSOR_FIX,
+                           Config::GFX_VR_ORTHO_SCISSOR_FIX.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_DETECT_SKYBOX,
+                           Config::GFX_VR_DETECT_SKYBOX.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_EAGER_HEARTBEAT,
+                           Config::GFX_VR_EAGER_HEARTBEAT.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_LOAD_CUSTOM_SHADERS,
+                           Config::GFX_VR_LOAD_CUSTOM_SHADERS.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_PASSTHROUGH,
+                           Config::GFX_VR_PASSTHROUGH.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_PASSTHROUGH_REMOVE_BLACK_BG,
+                           Config::GFX_VR_PASSTHROUGH_REMOVE_BLACK_BG.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_PASSTHROUGH_REMOVE_BLACK_CLEARS,
+                           Config::GFX_VR_PASSTHROUGH_REMOVE_BLACK_CLEARS.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_PASSTHROUGH_SCENE_OPACITY,
+                           Config::GFX_VR_PASSTHROUGH_SCENE_OPACITY.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_PASSTHROUGH_COVERAGE_MODE,
+                           Config::GFX_VR_PASSTHROUGH_COVERAGE_MODE.GetDefaultValue());
 }

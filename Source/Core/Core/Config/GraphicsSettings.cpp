@@ -190,21 +190,22 @@ const Info<bool> GFX_VR_ENABLE_OPENXR{{System::GFX, "VR", "EnableOpenXR"}, true}
 // per-eye stereoscopic 3D (the "Launch games in VR" off / cinema path).
 const Info<bool> GFX_VR_FLAT_SCREEN{{System::GFX, "VR", "FlatScreen"}, false};
 const Info<float> GFX_VR_UNITS_PER_METER{{System::GFX, "VR", "UnitsPerMeter"}, 1.0f};
+const Info<bool> GFX_VR_ENABLE_LEAN_BACK_ANGLE{{System::GFX, "VR", "EnableLeanBackAngle"}, true};
 const Info<float> GFX_VR_LEAN_BACK_ANGLE{{System::GFX, "VR", "LeanBackAngle"}, 0.0f};
 const Info<bool> GFX_VR_ENABLE_CAMERA_FORWARD{{System::GFX, "VR", "EnableCameraForward"}, true};
 const Info<float> GFX_VR_CAMERA_FORWARD{{System::GFX, "VR", "CameraForward"}, 0.0f};
 const Info<bool> GFX_VR_ENABLE_CAMERA_HEIGHT{{System::GFX, "VR", "EnableCameraHeight"}, true};
 const Info<float> GFX_VR_CAMERA_HEIGHT{{System::GFX, "VR", "CameraHeight"}, 0.0f};
-const Info<bool> GFX_VR_ENABLE_CAMERA_ANCHOR{{System::GFX, "VR", "EnableCameraAnchor"}, true};
+const Info<bool> GFX_VR_ENABLE_CAMERA_ANCHOR{{System::GFX, "VR", "EnableCameraAnchor"}, false};
 const Info<float> GFX_VR_CAMERA_ANCHOR_SMOOTHING{{System::GFX, "VR", "CameraAnchorSmoothing"},
                                                  0.85f};
 const Info<bool> GFX_VR_ENABLE_CONTROLLER_ANCHOR{{System::GFX, "VR", "EnableControllerAnchor"},
-                                                 true};
+                                                 false};
 const Info<bool> GFX_VR_VIRTUAL_SCREEN{{System::GFX, "VR", "VirtualScreen"}, true};
 const Info<float> GFX_VR_SCREEN_DISTANCE{{System::GFX, "VR", "ScreenDistance"}, 1.5f};
 const Info<float> GFX_VR_SCREEN_SIZE{{System::GFX, "VR", "ScreenSize"}, 1.5f};
 const Info<float> GFX_VR_HEAD_LOCKED_CURVATURE{{System::GFX, "VR", "HeadLockedCurvature"}, 0.0f};
-const Info<bool> GFX_VR_DONT_CLEAR_SCREEN{{System::GFX, "VR", "DontClearScreen"}, false};
+const Info<bool> GFX_VR_DONT_CLEAR_SCREEN{{System::GFX, "VR", "DontClearScreen"}, true};
 const Info<bool> GFX_VR_LOAD_CUSTOM_SHADERS{{System::GFX, "VR", "LoadCustomShaders"}, false};
 const Info<bool> GFX_VR_DISABLE_CPU_CULL{{System::GFX, "VR", "DisableCPUCull"}, false};
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},
@@ -223,15 +224,7 @@ constexpr bool DEFAULT_VR_PIN_EMULATION_CORES = false;
 #endif
 const Info<bool> GFX_VR_PIN_EMULATION_CORES{{System::GFX, "VR", "PinEmulationCores"},
                                             DEFAULT_VR_PIN_EMULATION_CORES};
-#if defined(__ANDROID__) && defined(ENABLE_VR)
-// Standalone runtimes have no automatic motion smoothing, so fill every compositor slot.
-constexpr bool DEFAULT_VR_EAGER_HEARTBEAT = true;
-#else
-// PC runtimes (SteamVR, Virtual Desktop, Meta Link) have SSW/ASW; pace to the game.
-constexpr bool DEFAULT_VR_EAGER_HEARTBEAT = false;
-#endif
-const Info<bool> GFX_VR_EAGER_HEARTBEAT{{System::GFX, "VR", "EagerHeartbeat"},
-                                        DEFAULT_VR_EAGER_HEARTBEAT};
+const Info<bool> GFX_VR_EAGER_HEARTBEAT{{System::GFX, "VR", "EagerHeartbeat"}, true};
 #if defined(__ANDROID__) && defined(ENABLE_VR)
 constexpr bool DEFAULT_VR_ANDROID_DIRECT_TO_HMD = true;
 constexpr bool DEFAULT_IMMEDIATE_XFB = true;

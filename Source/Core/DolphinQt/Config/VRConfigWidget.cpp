@@ -347,15 +347,21 @@ void VRConfigWidget::CreateWidgets()
 
   auto* camera_group = new QGroupBox(tr("Camera"));
   auto* camera_layout = new QGridLayout(camera_group);
-  add_float(camera_layout, 0, tr("Lean Back Angle (deg):"), Config::GFX_VR_LEAN_BACK_ANGLE_MIN,
+  camera_layout->addWidget(
+      make_bool(tr("Lean Back Angle (deg)"), Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE), 0, 0);
+  add_float(camera_layout, 0, QString{}, Config::GFX_VR_LEAN_BACK_ANGLE_MIN,
             Config::GFX_VR_LEAN_BACK_ANGLE_MAX, Config::GFX_VR_LEAN_BACK_ANGLE,
             Config::GFX_VR_LEAN_BACK_ANGLE_STEP,
             [](float value) { return QString::asprintf("%.1f", value); });
-  add_float(camera_layout, 1, tr("Camera Forward (m):"), Config::GFX_VR_CAMERA_FORWARD_MIN,
+  camera_layout->addWidget(
+      make_bool(tr("Camera Forward (m)"), Config::GFX_VR_ENABLE_CAMERA_FORWARD), 1, 0);
+  add_float(camera_layout, 1, QString{}, Config::GFX_VR_CAMERA_FORWARD_MIN,
             Config::GFX_VR_CAMERA_FORWARD_MAX, Config::GFX_VR_CAMERA_FORWARD,
             Config::GFX_VR_CAMERA_FORWARD_STEP,
             [](float value) { return QString::asprintf("%.1f", value); });
-  add_float(camera_layout, 2, tr("Camera Height (m):"), Config::GFX_VR_CAMERA_HEIGHT_MIN,
+  camera_layout->addWidget(
+      make_bool(tr("Camera Height (m)"), Config::GFX_VR_ENABLE_CAMERA_HEIGHT), 2, 0);
+  add_float(camera_layout, 2, QString{}, Config::GFX_VR_CAMERA_HEIGHT_MIN,
             Config::GFX_VR_CAMERA_HEIGHT_MAX, Config::GFX_VR_CAMERA_HEIGHT,
             Config::GFX_VR_CAMERA_HEIGHT_STEP,
             [](float value) { return QString::asprintf("%.1f", value); });
@@ -419,8 +425,6 @@ void VRConfigWidget::CreateWidgets()
   rendering_layout->addWidget(make_bool(tr("Dynamic"), Config::GFX_VR_FOVEATION_DYNAMIC), 3, 2);
   rendering_layout->addWidget(
       make_bool(tr("Foveate Game Render (EFB)"), Config::GFX_VR_EFB_FOVEATION), 4, 1, 1, 2);
-  rendering_layout->addWidget(
-      make_bool(tr("Eager Frame Heartbeat"), Config::GFX_VR_EAGER_HEARTBEAT), 5, 1, 1, 2);
 
   general_layout->addWidget(openxr_group);
   general_layout->addWidget(camera_group);
@@ -463,6 +467,8 @@ void VRConfigWidget::CreateWidgets()
                                Config::GFX_VR_FORCED_VBI_FREQUENCY, layer, m_global_layer.get()));
   framerate_layout->addWidget(new QLabel(tr("Forced VBI Frequency:")), 0, 0);
   framerate_layout->addWidget(forced_vbi, 0, 1);
+  framerate_layout->addWidget(
+      make_bool(tr("Eager Frame Heartbeat"), Config::GFX_VR_EAGER_HEARTBEAT), 1, 0, 1, 2);
 
   auto* shaders_group = new QGroupBox(tr("Shaders"));
   auto* shaders_layout = new QVBoxLayout(shaders_group);
