@@ -135,7 +135,19 @@ public:
 
 private:
   // Number of command lists. One is being built while the other(s) are executed.
-  static const u32 NUM_COMMAND_LISTS = 3;
+  //
+  // Every ExecuteCommandList rotates this ring and blocks until the slot being reused has
+  // finished on the GPU, so the ring has to span more wall time than the GPU's completion
+  // latency or that wait becomes the dominant cost. Workloads submitting many times per frame
+  // reach that point easily: CPU EFB access is the big one (each peek batch is a submit), and
+  // VR adds the eye-swapchain release on top — measured at ~13 submits/frame in Mario Galaxy.
+  // At the old value of 3 the ring wrapped into unfinished work constantly (40-54% of wall
+  // spent stalled on PSVR2/SteamVR); 16 drops that to zero. Vulkan has always run 8 buffers
+  // in flight (NUM_COMMAND_BUFFERS in Vulkan/Constants.h).
+  //
+  // Each slot costs one shader-visible descriptor heap of TEMPORARY_SLOTS entries (~2MB). The
+  // 1M descriptor cap is per heap rather than aggregate, so that memory is the only cost.
+  static const u32 NUM_COMMAND_LISTS = 16;
 
   // Textures that don't fit into this buffer will be uploaded with a staging buffer.
   static const u32 TEXTURE_UPLOAD_BUFFER_SIZE = 32 * 1024 * 1024;
