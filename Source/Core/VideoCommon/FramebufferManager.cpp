@@ -451,7 +451,13 @@ void FramebufferManager::BindEFBCoverageFramebuffer()
 
 void FramebufferManager::ClearEFBForOpenXR()
 {
-  g_gfx->SetAndClearFramebuffer(m_efb_framebuffer.get(), {0.f, 0.f, 0.f, 0.f}, 0.f);
+  // Depth must be cleared to the backend's "far" value, which flips with the depth-range
+  // convention: reversed-range backends (Vulkan) store far as 1.0, inverted-range ones
+  // (D3D11/D3D12, and GL in VR) store it as 0.0. Hardcoding 0.0 filled the Vulkan depth
+  // buffer with *near*, so every depth-tested draw of the frame failed the test and only
+  // depth-test-disabled 2D/HUD content survived.
+  g_gfx->SetAndClearFramebuffer(m_efb_framebuffer.get(), {0.f, 0.f, 0.f, 0.f},
+                                g_backend_info.bSupportsReversedDepthRange ? 1.0f : 0.0f);
   if (HasEFBCoverage())
   {
     const u32 coverage_color =
