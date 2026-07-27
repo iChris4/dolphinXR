@@ -11,7 +11,10 @@
 
 #include "Common/Assert.h"
 #include "Common/DynamicLibrary.h"
+#include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
+
+#include "Core/Config/GraphicsSettings.h"
 
 #include "VideoBackends/D3D12/Common.h"
 #include "VideoBackends/D3D12/D3D12StreamBuffer.h"
@@ -130,6 +133,21 @@ bool DXContext::Create(u32 adapter_index, bool enable_debug_layer)
 
 bool DXContext::CreateGlobalResources()
 {
+  // Size the command list ring first: deferred-destruction helpers index m_command_lists via
+  // m_current_command_list, so it must be valid before any other resource is created.
+  const int configured = Config::Get(Config::GFX_COMMAND_BUFFERS_IN_FLIGHT);
+  g_dx_context->m_num_command_lists = static_cast<u32>(
+      std::clamp(configured, Config::GFX_COMMAND_BUFFERS_IN_FLIGHT_MIN,
+                 Config::GFX_COMMAND_BUFFERS_IN_FLIGHT_MAX));
+  if (static_cast<u32>(configured) != g_dx_context->m_num_command_lists)
+  {
+    WARN_LOG_FMT(VIDEO, "D3D12: Command list count {} out of range; clamped to {}.", configured,
+                 g_dx_context->m_num_command_lists);
+  }
+  g_dx_context->m_command_lists.resize(g_dx_context->m_num_command_lists);
+  g_dx_context->m_current_command_list = g_dx_context->m_num_command_lists - 1;
+  INFO_LOG_FMT(VIDEO, "D3D12: Using {} command lists.", g_dx_context->m_num_command_lists);
+
   return g_dx_context->CreateDescriptorHeaps() && g_dx_context->CreateRootSignatures() &&
          g_dx_context->CreateTextureUploadBuffer() && g_dx_context->CreateCommandLists();
 }
@@ -444,7 +462,7 @@ bool DXContext::CreateCommandLists()
   static constexpr size_t MAX_DRAWS_PER_FRAME = 8192;
   static constexpr size_t TEMPORARY_SLOTS = MAX_DRAWS_PER_FRAME * 8;
 
-  for (u32 i = 0; i < NUM_COMMAND_LISTS; i++)
+  for (u32 i = 0; i < m_num_command_lists; i++)
   {
     CommandListResources& res = m_command_lists[i];
     HRESULT hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -481,7 +499,7 @@ bool DXContext::CreateCommandLists()
 
 void DXContext::MoveToNextCommandList()
 {
-  m_current_command_list = (m_current_command_list + 1) % NUM_COMMAND_LISTS;
+  m_current_command_list = (m_current_command_list + 1) % m_num_command_lists;
   m_current_fence_value++;
 
   // We may have to wait if this command list hasn't finished on the GPU.
@@ -577,15 +595,15 @@ void DXContext::WaitForFence(u64 fence)
   }
 
   // Release resources for as many command lists which have completed.
-  u32 index = (m_current_command_list + 1) % NUM_COMMAND_LISTS;
-  for (u32 i = 0; i < NUM_COMMAND_LISTS; i++)
+  u32 index = (m_current_command_list + 1) % m_num_command_lists;
+  for (u32 i = 0; i < m_num_command_lists; i++)
   {
     CommandListResources& res = m_command_lists[index];
     if (m_completed_fence_value < res.ready_fence_value)
       break;
 
     DestroyPendingResources(res);
-    index = (index + 1) % NUM_COMMAND_LISTS;
+    index = (index + 1) % m_num_command_lists;
   }
 }
 }  // namespace DX12

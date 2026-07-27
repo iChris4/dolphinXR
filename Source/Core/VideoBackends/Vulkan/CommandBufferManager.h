@@ -160,7 +160,11 @@ private:
   u64 m_completed_fence_counter = 0;
 
   std::array<FrameResources, NUM_FRAMES_IN_FLIGHT> m_frame_resources;
-  std::array<CmdBufferResources, NUM_COMMAND_BUFFERS> m_command_buffers;
+  // Sized from Config::GFX_COMMAND_BUFFERS_IN_FLIGHT at init, then fixed for this manager's
+  // lifetime. CmdBufferResources holds an atomic, so it is neither copyable nor movable and
+  // cannot live in a resizable container.
+  std::unique_ptr<CmdBufferResources[]> m_command_buffers;
+  u32 m_num_command_buffers = 0;
   u32 m_current_frame = 0;
   u32 m_current_cmd_buffer = 0;
 

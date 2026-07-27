@@ -181,6 +181,16 @@ void AdvancedWidget::CreateWidgets()
   misc_layout->addWidget(m_borderless_fullscreen, 2, 1);
 #endif
 
+  m_command_buffers_in_flight = new ConfigInteger(Config::GFX_COMMAND_BUFFERS_IN_FLIGHT_MIN,
+                                                 Config::GFX_COMMAND_BUFFERS_IN_FLIGHT_MAX,
+                                                 Config::GFX_COMMAND_BUFFERS_IN_FLIGHT,
+                                                 m_game_layer);
+  m_command_buffers_in_flight->SetTitle(tr("Command Buffers in Flight"));
+  m_command_buffers_in_flight_label = new QLabel(tr("Command Buffers in Flight:"));
+
+  misc_layout->addWidget(m_command_buffers_in_flight_label, 3, 0);
+  misc_layout->addWidget(m_command_buffers_in_flight, 3, 1);
+
   // Experimental.
   auto* experimental_box = new QGroupBox(tr("Experimental"));
   auto* experimental_layout = new QGridLayout();
@@ -226,6 +236,14 @@ void AdvancedWidget::OnBackendChanged()
   m_backend_multithreading->setEnabled(g_backend_info.bSupportsMultithreading);
   m_prefer_vs_for_point_line_expansion->setEnabled(g_backend_info.bSupportsGeometryShaders &&
                                                    g_backend_info.bSupportsVSLinePointExpand);
+
+  // Only D3D12 and Vulkan build into a rotating ring of command lists/buffers. Compare the
+  // backend's config name rather than APIType, which lumps D3D11 and D3D12 together.
+  const std::string backend = Config::Get(Config::MAIN_GFX_BACKEND);
+  const bool has_command_ring = backend == "D3D12" || backend == "Vulkan";
+  m_command_buffers_in_flight->setEnabled(has_command_ring);
+  m_command_buffers_in_flight_label->setEnabled(has_command_ring);
+
   AddDescriptions();
 }
 
@@ -340,6 +358,15 @@ void AdvancedWidget::AddDescriptions()
       QT_TR_NOOP("Cull vertices on the CPU to reduce the number of draw calls required.  "
                  "May affect performance and draw statistics.<br><br>"
                  "<dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
+  static const char TR_COMMAND_BUFFERS_IN_FLIGHT_DESCRIPTION[] = QT_TR_NOOP(
+      "How many command lists (D3D12) or command buffers (Vulkan) the backend keeps in flight. "
+      "Each time one is submitted, Dolphin reuses the oldest and must wait for it to finish on "
+      "the GPU, so a shallow ring stalls whenever the GPU is slower to complete work than Dolphin "
+      "is to queue it. Raising this can recover a lot of performance in games that submit many "
+      "times per frame, such as those needing CPU EFB Access, and in VR.<br><br>Higher values cost "
+      "a little memory and let the CPU run further ahead of the GPU, which adds latency if you are "
+      "GPU-bound. Has no effect on other backends. Takes effect the next time emulation "
+      "starts.<br><br><dolphin_emphasis>If unsure, leave this at 16.</dolphin_emphasis>");
   static const char TR_DEFER_EFB_ACCESS_INVALIDATION_DESCRIPTION[] = QT_TR_NOOP(
       "Defers invalidation of the EFB access cache until a GPU synchronization command "
       "is executed. If disabled, the cache will be invalidated with every draw call. "
@@ -406,6 +433,7 @@ void AdvancedWidget::AddDescriptions()
 #ifdef _WIN32
   m_borderless_fullscreen->SetDescription(tr(TR_BORDERLESS_FULLSCREEN_DESCRIPTION));
 #endif
+  m_command_buffers_in_flight->SetDescription(tr(TR_COMMAND_BUFFERS_IN_FLIGHT_DESCRIPTION));
   m_defer_efb_access_invalidation->SetDescription(tr(TR_DEFER_EFB_ACCESS_INVALIDATION_DESCRIPTION));
   m_manual_texture_sampling->SetDescription(tr(TR_MANUAL_TEXTURE_SAMPLING_DESCRIPTION));
 }

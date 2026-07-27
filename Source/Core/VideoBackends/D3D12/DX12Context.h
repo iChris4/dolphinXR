@@ -5,6 +5,7 @@
 
 #include <array>
 #include <memory>
+#include <vector>
 
 #include "Common/CommonTypes.h"
 #include "Common/HRWrap.h"
@@ -133,21 +134,27 @@ public:
   // Re-creates the root signature. Call when the host config changes (e.g. bbox/per-pixel shading).
   void RecreateGXRootSignature();
 
+public:
+  // How many command lists this device was created with. Bounded by
+  // Config::GFX_COMMAND_BUFFERS_IN_FLIGHT_MIN/MAX.
+  //
+  // Command lists are the ring Dolphin builds into. One is being built while the others are
+  // executed, and every ExecuteCommandList rotates the ring and blocks until the slot being
+  // reused has finished on the GPU. The ring therefore has to span more wall time than the
+  // GPU's completion latency, or that wait becomes the dominant cost. Workloads submitting
+  // many times per frame reach that point easily: CPU EFB access is the big one (each peek
+  // batch is a submit), and VR adds the eye-swapchain release on top — measured at ~13
+  // submits/frame in Mario Galaxy. At the old fixed value of 3 the ring wrapped into
+  // unfinished work constantly (40-54% of wall spent stalled on PSVR2/SteamVR); 16 drops that
+  // to zero. Vulkan's command buffer ring is sized from the same setting.
+  //
+  // Each slot costs one shader-visible descriptor heap of TEMPORARY_SLOTS entries (~2MB) plus a
+  // command allocator. The 1M descriptor cap is per heap rather than aggregate, so that memory
+  // is the only cost of a deeper ring — with the caveat that a deeper ring lets the CPU run
+  // further ahead of the GPU, which is latency if you are actually GPU-bound.
+  u32 GetCommandListCount() const { return m_num_command_lists; }
+
 private:
-  // Number of command lists. One is being built while the other(s) are executed.
-  //
-  // Every ExecuteCommandList rotates this ring and blocks until the slot being reused has
-  // finished on the GPU, so the ring has to span more wall time than the GPU's completion
-  // latency or that wait becomes the dominant cost. Workloads submitting many times per frame
-  // reach that point easily: CPU EFB access is the big one (each peek batch is a submit), and
-  // VR adds the eye-swapchain release on top — measured at ~13 submits/frame in Mario Galaxy.
-  // At the old value of 3 the ring wrapped into unfinished work constantly (40-54% of wall
-  // spent stalled on PSVR2/SteamVR); 16 drops that to zero. Vulkan has always run 8 buffers
-  // in flight (NUM_COMMAND_BUFFERS in Vulkan/Constants.h).
-  //
-  // Each slot costs one shader-visible descriptor heap of TEMPORARY_SLOTS entries (~2MB). The
-  // 1M descriptor cap is per heap rather than aggregate, so that memory is the only cost.
-  static const u32 NUM_COMMAND_LISTS = 16;
 
   // Textures that don't fit into this buffer will be uploaded with a staging buffer.
   static const u32 TEXTURE_UPLOAD_BUFFER_SIZE = 32 * 1024 * 1024;
@@ -189,8 +196,11 @@ private:
   u32 m_current_fence_value = 0;
   u64 m_completed_fence_value = 0;
 
-  std::array<CommandListResources, NUM_COMMAND_LISTS> m_command_lists;
-  u32 m_current_command_list = NUM_COMMAND_LISTS - 1;
+  // Sized from Config::GFX_COMMAND_BUFFERS_IN_FLIGHT at device init; fixed for the device's life,
+  // so changing the setting takes effect on the next emulation start.
+  std::vector<CommandListResources> m_command_lists;
+  u32 m_num_command_lists = 0;
+  u32 m_current_command_list = 0;
 
   DescriptorHeapManager m_descriptor_heap_manager;
   DescriptorHeapManager m_rtv_heap_manager;

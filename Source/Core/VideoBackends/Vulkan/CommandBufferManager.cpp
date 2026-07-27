@@ -89,8 +89,25 @@ bool CommandBufferManager::CreateCommandBuffers(size_t swapchain_image_count)
   VkDevice device = g_vulkan_context->GetDevice();
   VkResult res;
 
-  for (CmdBufferResources& resources : m_command_buffers)
+  // Each buffer submitted rotates this ring, and BeginCommandBuffer blocks until the slot being
+  // reused has finished on the GPU. A ring that spans less wall time than the GPU's completion
+  // latency stalls on every rotation, which bites hardest in workloads that submit many times
+  // per frame (CPU EFB access, VR). See Config::GFX_COMMAND_BUFFERS_IN_FLIGHT.
+  const int configured = Config::Get(Config::GFX_COMMAND_BUFFERS_IN_FLIGHT);
+  m_num_command_buffers =
+      static_cast<u32>(std::clamp(configured, Config::GFX_COMMAND_BUFFERS_IN_FLIGHT_MIN,
+                                  Config::GFX_COMMAND_BUFFERS_IN_FLIGHT_MAX));
+  if (static_cast<u32>(configured) != m_num_command_buffers)
   {
+    WARN_LOG_FMT(VIDEO, "Vulkan: Command buffer count {} out of range; clamped to {}.", configured,
+                 m_num_command_buffers);
+  }
+  m_command_buffers = std::make_unique<CmdBufferResources[]>(m_num_command_buffers);
+  INFO_LOG_FMT(VIDEO, "Vulkan: Using {} command buffers.", m_num_command_buffers);
+
+  for (u32 i = 0; i < m_num_command_buffers; i++)
+  {
+    CmdBufferResources& resources = m_command_buffers[i];
     resources.init_command_buffer_used = false;
     resources.semaphore_used = false;
 
@@ -147,7 +164,7 @@ bool CommandBufferManager::CreateCommandBuffers(size_t swapchain_image_count)
   }
 
   // Activate the first command buffer. BeginCommandBuffer moves forward, so start with the last
-  m_current_cmd_buffer = static_cast<u32>(m_command_buffers.size()) - 1;
+  m_current_cmd_buffer = m_num_command_buffers - 1;
   BeginCommandBuffer();
   return true;
 }
@@ -156,8 +173,9 @@ void CommandBufferManager::DestroyCommandBuffers()
 {
   VkDevice device = g_vulkan_context->GetDevice();
 
-  for (CmdBufferResources& resources : m_command_buffers)
+  for (u32 i = 0; i < m_num_command_buffers; i++)
   {
+    CmdBufferResources& resources = m_command_buffers[i];
     // The Vulkan spec section 5.2 says: "When a pool is destroyed, all command buffers allocated
     // from the pool are freed.". So we don't need to free the command buffers, just the pools.
     // We destroy the command pool first, to avoid any warnings from the validation layers about
@@ -350,13 +368,13 @@ void CommandBufferManager::WaitForFenceCounter(u64 fence_counter)
     return;
 
   // Find the first command buffer which covers this counter value.
-  u32 index = (m_current_cmd_buffer + 1) % NUM_COMMAND_BUFFERS;
+  u32 index = (m_current_cmd_buffer + 1) % m_num_command_buffers;
   while (index != m_current_cmd_buffer)
   {
     if (m_command_buffers[index].fence_counter >= fence_counter)
       break;
 
-    index = (index + 1) % NUM_COMMAND_BUFFERS;
+    index = (index + 1) % m_num_command_buffers;
   }
 
   ASSERT(index != m_current_cmd_buffer);
@@ -393,7 +411,7 @@ void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
   // Clean up any resources for command buffers between the last known completed buffer and this
   // now-completed command buffer. If we use >2 buffers, this may be more than one buffer.
   const u64 now_completed_counter = resources.fence_counter;
-  u32 cleanup_index = (m_current_cmd_buffer + 1) % NUM_COMMAND_BUFFERS;
+  u32 cleanup_index = (m_current_cmd_buffer + 1) % m_num_command_buffers;
   while (cleanup_index != m_current_cmd_buffer)
   {
     CmdBufferResources& cleanup_resources = m_command_buffers[cleanup_index];
@@ -407,7 +425,7 @@ void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
       cleanup_resources.cleanup_resources.clear();
     }
 
-    cleanup_index = (cleanup_index + 1) % NUM_COMMAND_BUFFERS;
+    cleanup_index = (cleanup_index + 1) % m_num_command_buffers;
   }
 
   m_completed_fence_counter = now_completed_counter;
@@ -543,7 +561,7 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
     m_current_frame = (m_current_frame + 1) % NUM_FRAMES_IN_FLIGHT;
 
     // Wait for all command buffers that used the descriptor pool to finish
-    u32 cmd_buffer_index = (m_current_cmd_buffer + 1) % NUM_COMMAND_BUFFERS;
+    u32 cmd_buffer_index = (m_current_cmd_buffer + 1) % m_num_command_buffers;
     while (cmd_buffer_index != m_current_cmd_buffer)
     {
       CmdBufferResources& cmd_buffer = m_command_buffers[cmd_buffer_index];
@@ -552,7 +570,7 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
       {
         WaitForCommandBufferCompletion(cmd_buffer_index);
       }
-      cmd_buffer_index = (cmd_buffer_index + 1) % NUM_COMMAND_BUFFERS;
+      cmd_buffer_index = (cmd_buffer_index + 1) % m_num_command_buffers;
     }
 
     if (IsDeviceLost())
@@ -699,7 +717,7 @@ void CommandBufferManager::BeginCommandBuffer()
     return;
 
   // Move to the next command buffer.
-  const u32 next_buffer_index = (m_current_cmd_buffer + 1) % NUM_COMMAND_BUFFERS;
+  const u32 next_buffer_index = (m_current_cmd_buffer + 1) % m_num_command_buffers;
   CmdBufferResources& resources = m_command_buffers[next_buffer_index];
 
   // Wait for the GPU to finish with all resources for this command buffer.

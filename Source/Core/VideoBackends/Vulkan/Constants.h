@@ -11,8 +11,8 @@
 
 namespace Vulkan
 {
-// Number of command buffers.
-constexpr size_t NUM_COMMAND_BUFFERS = 8;
+// Number of command buffers is Config::GFX_COMMAND_BUFFERS_IN_FLIGHT, read by
+// CommandBufferManager::CreateCommandBuffers.
 
 // Number of frames in flight, will be used to decide how many descriptor pools are used
 constexpr size_t NUM_FRAMES_IN_FLIGHT = 2;

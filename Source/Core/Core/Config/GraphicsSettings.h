@@ -96,6 +96,11 @@ extern const Info<bool> GFX_BORDERLESS_FULLSCREEN;
 extern const Info<bool> GFX_ENABLE_VALIDATION_LAYER;
 extern const Info<bool> GFX_BACKEND_MULTITHREADING;
 extern const Info<int> GFX_COMMAND_BUFFER_EXECUTE_INTERVAL;
+// Depth of the backend's command list/buffer ring (D3D12 command lists, Vulkan command
+// buffers). Read once at device init, so a change applies on the next emulation start.
+extern const Info<int> GFX_COMMAND_BUFFERS_IN_FLIGHT;
+constexpr int GFX_COMMAND_BUFFERS_IN_FLIGHT_MIN = 2;
+constexpr int GFX_COMMAND_BUFFERS_IN_FLIGHT_MAX = 32;
 extern const Info<bool> GFX_SHADER_CACHE;
 extern const Info<bool> GFX_WAIT_FOR_SHADERS_BEFORE_STARTING;
 extern const Info<ShaderCompilationMode> GFX_SHADER_COMPILATION_MODE;

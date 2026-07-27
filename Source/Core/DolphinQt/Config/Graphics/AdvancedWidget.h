@@ -9,6 +9,7 @@ class ConfigBool;
 class ConfigChoice;
 class ConfigInteger;
 class GraphicsPane;
+class QLabel;
 
 namespace Config
 {
@@ -60,6 +61,8 @@ private:
   ConfigBool* m_prefer_vs_for_point_line_expansion;
   ConfigBool* m_cpu_cull;
   ConfigBool* m_borderless_fullscreen;
+  ConfigInteger* m_command_buffers_in_flight;
+  QLabel* m_command_buffers_in_flight_label;
 
   // Experimental
   ConfigBool* m_defer_efb_access_invalidation;
