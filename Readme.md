@@ -6,8 +6,17 @@ Dolphin is an emulator for running GameCube and Wii games on Windows,
 Linux, macOS, and recent Android devices. It's licensed under the terms
 of the GNU General Public License, version 2 or later (GPLv2+).
 
-This fork adds OpenXR support to Dolphin so users can play in VR on supported
-Windows builds and was developed with the use of AI tools.
+This fork adds OpenXR support to Dolphin so users can play in VR on Windows,
+desktop Linux, and standalone Meta Quest headsets, and was developed with the
+use of AI tools.
+
+* **Windows** — VR runs on the Direct3D 11, Direct3D 12, Vulkan, and OpenGL
+  backends with any OpenXR runtime (SteamVR, Oculus/Meta Link, VDXR, etc.).
+* **Linux** — VR runs on the Vulkan and OpenGL backends and requires a working
+  system OpenXR runtime such as Monado or SteamVR.
+* **Meta Quest** — a standalone Android build (Quest 2, Quest 3, Quest 3S, and
+  Quest Pro) renders natively in the headset on the Vulkan and OpenGL ES
+  backends, with OpenXR controller support.
 
 Please read the [FAQ](https://dolphin-emu.org/docs/faq/) before using Dolphin.
 
@@ -39,6 +48,19 @@ Please read the [FAQ](https://dolphin-emu.org/docs/faq/) before using Dolphin.
 
 Dolphin can only be installed on devices that satisfy the above requirements. Attempting to install on an unsupported device will fail and display an error message.
 
+### VR (OpenXR)
+
+* Windows
+    * An OpenXR runtime (SteamVR, Oculus/Meta Link, VDXR, etc.) and a headset it supports.
+    * Direct3D 11, Direct3D 12, Vulkan, or OpenGL backend.
+* Linux
+    * An OpenXR runtime such as Monado or SteamVR.
+    * Vulkan (recommended) or OpenGL backend.
+* Meta Quest
+    * Quest 2, Quest 3, Quest 3S, or Quest Pro, running the standalone `quest` build.
+    * Vulkan or OpenGL ES backend.
+* VR is not supported on macOS.
+
 ## Building for Windows
 
 Use the solution file `Source/dolphin-emu.sln` to build Dolphin on Windows.
@@ -54,19 +76,14 @@ git submodule update --init --recursive
 
 ### Building the OpenXR VR version
 
-To build the VR-enabled version of this fork, OpenXR support must be enabled.
-On desktop Linux, OpenXR VR is Vulkan-only and requires a working system OpenXR
-runtime such as Monado or SteamVR.
+To build the VR-enabled version of this fork, OpenXR support must be enabled
+with `-DENABLE_VR=ON`. VR is supported on Windows, desktop Linux, and Android
+(Meta Quest); see the Linux and Android sections below for those platforms.
 
 If you are generating a Visual Studio build with CMake, configure with
 `-DENABLE_VR=ON`:
 ```sh
 cmake -S . -B Build-vs2022 -G "Visual Studio 17 2022" -A x64 -DENABLE_VR=ON
-```
-
-On desktop Linux, configure with OpenXR and Vulkan enabled:
-```sh
-cmake -S . -B Build -DENABLE_VR=ON -DENABLE_VULKAN=ON
 ```
 
 When using the Visual Studio generator, build the OpenXR loader first:
@@ -98,6 +115,20 @@ Make sure to pull submodules before building:
 ```sh
 git submodule update --init --recursive
 ```
+
+### Building the OpenXR VR version on Linux:
+
+OpenXR VR is available on desktop Linux (it is not supported on macOS). It
+requires a working system OpenXR runtime such as Monado or SteamVR, and runs on
+the Vulkan and OpenGL backends. Configure with OpenXR and Vulkan enabled:
+
+```sh
+cmake -S . -B Build -DENABLE_VR=ON -DENABLE_VULKAN=ON
+cmake --build Build --target dolphin-emu -j $(nproc)
+```
+
+OpenGL (GLX) is always built on desktop Linux, so VR remains usable even
+without `-DENABLE_VULKAN=ON`, though Vulkan is recommended.
 
 ### macOS Build Steps:
 
@@ -169,6 +200,35 @@ If using Android Studio, import the Gradle project located in `./Source/Android`
 Android apps are compiled using a build system called Gradle. Dolphin's native component,
 however, is compiled using CMake. The Gradle script will attempt to run a CMake build
 automatically while building the Java code.
+
+### Building the Meta Quest VR version
+
+The Android project has two product flavors on the `device` dimension:
+`standard` (phones and tablets, built with `-DENABLE_VR=OFF`) and `quest`
+(standalone headsets, built with `-DENABLE_VR=ON`). The `quest` flavor is
+arm64-only, installs under the application ID `org.dolphinemu.dolphinemu.quest`
+so it can live alongside a standard install, and declares the OpenXR manifest
+entries required by Quest 2, Quest 3, Quest 3S, and Quest Pro.
+
+Build it with Gradle from `Source/Android`:
+```sh
+./gradlew assembleQuestDebug     # or assembleQuestRelease
+```
+
+Helper scripts are also provided for Windows:
+```powershell
+.\Source\Android\build-quest.ps1          # debug APK
+.\Source\Android\build-quest-release.ps1  # release APK (needs signing properties)
+```
+
+Install the resulting APK on a headset with adb:
+```sh
+adb install -r Source/Android/app/build/outputs/apk/quest/debug/app-quest-debug.apk
+```
+
+VR settings for the headset (launch in VR, resolution scale, reference space,
+controller bindings, and so on) live under the OpenXR section of the in-app
+settings.
 
 ## Uninstalling
 
