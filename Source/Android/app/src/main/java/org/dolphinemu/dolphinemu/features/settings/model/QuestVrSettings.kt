@@ -8,9 +8,9 @@ import org.dolphinemu.dolphinemu.features.input.model.controlleremu.EmulatedCont
 object QuestVrSettings {
     const val STEREO_MODE_OPENXR = 6
 
-    private const val GC_PROFILE_NAME = "Quest Touch GameCube.ini"
-    private const val WIIMOTE_PROFILE_NAME = "OpenXR Wii Remote.ini"
-    private const val HOTKEY_PROFILE_NAME = "Quest.ini"
+    const val GC_PROFILE_NAME = "Quest Touch GameCube.ini"
+    const val WIIMOTE_PROFILE_NAME = "OpenXR Wii Remote.ini"
+    const val HOTKEY_PROFILE_NAME = "Quest.ini"
     private const val OPENXR_DEVICE = "OpenXR/0/OpenXR Controller"
     private const val VR_SECTION = "VR"
 
@@ -43,15 +43,36 @@ object QuestVrSettings {
 
     fun showMirrorSurfaceSetting() = androidBooleanSetting("QuestShowMirrorSurface", false)
 
-    fun autoVbiFromHmdSetting() = vrBooleanSetting("AutoVBIFromHMD", false)
+    // Superseded by ForcedVBIFrequency; kept only so an explicit choice can clear a stale value.
+    private fun autoVbiFromHmdSetting() = vrBooleanSetting("AutoVBIFromHMD", false)
+
+    fun forcedVbiFrequencySetting(): AbstractIntSetting = ForcedVbiFrequencySetting
+
+    fun eagerHeartbeatSetting() = vrBooleanSetting("EagerHeartbeat", false)
+
+    fun referenceSpaceModeSetting() = vrIntSetting("ReferenceSpaceMode", 0)
+
+    fun trackingModeSetting() = vrIntSetting("TrackingMode", 0)
 
     fun unitsPerMeterSetting(): AbstractFloatSetting = FloatSetting.GFX_VR_UNITS_PER_METER
 
+    fun enableLeanBackAngleSetting() = vrBooleanSetting("EnableLeanBackAngle", true)
+
     fun leanBackAngleSetting() = vrFloatSetting("LeanBackAngle", 0.0f)
+
+    fun enableCameraForwardSetting() = vrBooleanSetting("EnableCameraForward", true)
 
     fun cameraForwardSetting() = vrFloatSetting("CameraForward", 0.0f)
 
+    fun enableCameraHeightSetting() = vrBooleanSetting("EnableCameraHeight", true)
+
     fun cameraHeightSetting() = vrFloatSetting("CameraHeight", 0.0f)
+
+    fun enableCameraAnchorSetting() = vrBooleanSetting("EnableCameraAnchor", false)
+
+    fun cameraAnchorSmoothingSetting() = vrFloatSetting("CameraAnchorSmoothing", 0.85f)
+
+    fun enableControllerAnchorSetting() = vrBooleanSetting("EnableControllerAnchor", false)
 
     fun detectSkyboxSetting() = vrBooleanSetting("DetectSkybox", false)
 
@@ -65,11 +86,28 @@ object QuestVrSettings {
 
     fun passthroughSceneOpacitySetting() = vrFloatSetting("PassthroughSceneOpacity", 1.0f)
 
+    fun passthroughCoverageModeSetting() = vrIntSetting("PassthroughCoverageMode", 0)
+
     fun vrGammaSetting() = vrFloatSetting("Gamma", 1.0f)
 
     fun exactScreenDepthSetting() = vrBooleanSetting("ExactScreenDepth", true)
 
+    fun autoNativeEfbEffectsSetting() = vrBooleanSetting("AutoNativeEfbEffects", true)
+
+    fun hudThicknessSetting() = vrFloatSetting("HudThickness", 0.0f)
+
     fun removeBarsSetting() = vrBooleanSetting("RemoveCinematicBars", true)
+
+    fun frameSizeFromXfbSetting() = vrBooleanSetting("FrameSizeFromXFB", true)
+
+    fun panesOnScreenSetting() = vrBooleanSetting("SmallViewportsOnScreen", true)
+
+    fun detectRenderTargetsSetting() = vrBooleanSetting("DetectRenderTargets", false)
+
+    fun orthoScissorFixSetting() = vrBooleanSetting("OrthoScissorFix", true)
+
+    // The PC VRPane exposes one checkbox that drives both the Vulkan and the D3D palette key.
+    fun layeredPaletteConversionSetting(): AbstractBooleanSetting = LayeredPaletteConversionSetting
 
     fun useVulkanMultiviewSetting() = vrBooleanSetting("UseVulkanMultiview", true)
 
@@ -103,6 +141,60 @@ object QuestVrSettings {
 
     fun loadCustomShadersSetting() = vrBooleanSetting("LoadCustomShaders", false)
 
+
+    /**
+     * AutoVBIFromHMD is the legacy boolean that ForcedVBIFrequency replaced (SConfig::LoadSettings
+     * migrates it to 90 Hz on startup). While it is set it pins the effective rate to 90 Hz even
+     * when the frequency reads "Off", so clear it whenever an explicit choice is made — same as the
+     * PC VRPane does.
+     */
+    private object ForcedVbiFrequencySetting : AbstractIntSetting {
+        private val backing = vrIntSetting("ForcedVBIFrequency", 0)
+
+        override val isOverridden: Boolean
+            get() = backing.isOverridden
+
+        override val isRuntimeEditable: Boolean
+            get() = backing.isRuntimeEditable
+
+        override fun delete(settings: Settings): Boolean = backing.delete(settings)
+
+        override val int: Int
+            get() = backing.int
+
+        override fun setInt(settings: Settings, newValue: Int) {
+            backing.setInt(settings, newValue)
+            autoVbiFromHmdSetting().setBoolean(settings, false)
+        }
+    }
+
+    /**
+     * The layered palette conversion path has a separate key per backend family; the PC VRPane
+     * keeps them in sync behind a single checkbox, so do the same here.
+     */
+    private object LayeredPaletteConversionSetting : AbstractBooleanSetting {
+        private val vulkanKey = vrBooleanSetting("MetroidThermalVisorFix", true)
+        private val d3dKey = vrBooleanSetting("MetroidD3DThermalPaletteFix", true)
+
+        override val isOverridden: Boolean
+            get() = vulkanKey.isOverridden
+
+        override val isRuntimeEditable: Boolean
+            get() = vulkanKey.isRuntimeEditable
+
+        override fun delete(settings: Settings): Boolean {
+            val deletedD3d = d3dKey.delete(settings)
+            return vulkanKey.delete(settings) || deletedD3d
+        }
+
+        override val boolean: Boolean
+            get() = vulkanKey.boolean
+
+        override fun setBoolean(settings: Settings, newValue: Boolean) {
+            vulkanKey.setBoolean(settings, newValue)
+            d3dKey.setBoolean(settings, newValue)
+        }
+    }
 
     private fun openXrRuntimeSetting() = vrBooleanSetting("EnableOpenXR", false)
 
@@ -155,6 +247,82 @@ object QuestVrSettings {
         backendMultithreadingReenabledSetting().setBoolean(settings, true)
     }
 
+    /**
+     * Restores every setting on the OpenXR screen to its built-in default, mirroring the PC
+     * VRPane's "Reset VR Settings" button.
+     *
+     * Deletes the keys instead of writing values so the platform's compiled-in defaults apply —
+     * several of them differ on Android (e.g. ResolutionScale 0.85, FoveationLevel 2,
+     * AndroidDirectToHMD on). Non-VR graphics settings (backend, EFB scale) and controller
+     * mappings are deliberately left alone; they do not belong to this screen.
+     */
+    fun resetOpenXrSettings(settings: Settings) {
+        val resettable: List<AbstractSetting> = listOf(
+            // Runtime
+            openXrEnabledSetting(),
+            launchInVrSetting(),
+            flatScreenSetting(),
+            recenterOnLaunchSetting(),
+            unitsPerMeterSetting(),
+            // Camera
+            enableLeanBackAngleSetting(),
+            leanBackAngleSetting(),
+            enableCameraForwardSetting(),
+            cameraForwardSetting(),
+            enableCameraHeightSetting(),
+            cameraHeightSetting(),
+            enableCameraAnchorSetting(),
+            cameraAnchorSmoothingSetting(),
+            enableControllerAnchorSetting(),
+            // Virtual screen
+            virtualScreenSetting(),
+            exactScreenDepthSetting(),
+            autoNativeEfbEffectsSetting(),
+            screenDistanceSetting(),
+            screenSizeSetting(),
+            hudThicknessSetting(),
+            headLockedCurvatureSetting(),
+            // Rendering
+            resolutionScaleSetting(),
+            foveationLevelSetting(),
+            dynamicFoveationSetting(),
+            foveateEfbSetting(),
+            clearEfbCopiesSetting(),
+            vrGammaSetting(),
+            // Framerate
+            forcedVbiFrequencySetting(),
+            autoVbiFromHmdSetting(),
+            eagerHeartbeatSetting(),
+            // VR hacks
+            useVulkanMultiviewSetting(),
+            dontClearScreenSetting(),
+            disableCpuCullSetting(),
+            removeBarsSetting(),
+            frameSizeFromXfbSetting(),
+            panesOnScreenSetting(),
+            detectRenderTargetsSetting(),
+            orthoScissorFixSetting(),
+            detectSkyboxSetting(),
+            layeredPaletteConversionSetting(),
+            // Passthrough
+            passthroughSetting(),
+            passthroughRevealUnrenderedSetting(),
+            passthroughRemoveBlackClearsSetting(),
+            passthroughSceneOpacitySetting(),
+            passthroughCoverageModeSetting(),
+            // Comfort and debug
+            leftHandedSetting(),
+            showMirrorSurfaceSetting(),
+            androidDirectToHmdSetting(),
+            cpuLevel5HintSetting(),
+            loadCustomShadersSetting(),
+            referenceSpaceModeSetting(),
+            trackingModeSetting()
+        )
+
+        resettable.forEach { it.delete(settings) }
+    }
+
     fun shouldAskAboutControllerSetup(): Boolean {
         return BuildConfig.IS_QUEST && !controllerSetupAskedSetting().boolean
     }
@@ -171,6 +339,25 @@ object QuestVrSettings {
     }
 
     /**
+     * Points [controller] at the stock Quest OpenXR profile named [profileName].
+     *
+     * Also used by the mapping screen's "Default" action: Dolphin's built-in defaults target a
+     * touchscreen or physical pad that does not exist on Quest, so the OpenXR profile is the only
+     * meaningful default there.
+     *
+     * @return false on non-Quest builds, so callers can fall back to Dolphin's own defaults.
+     */
+    fun loadStockProfile(controller: EmulatedController, profileName: String): Boolean {
+        if (!BuildConfig.IS_QUEST) {
+            return false
+        }
+
+        controller.loadProfile(controller.getSysProfileDirectoryPath() + profileName)
+        controller.setDefaultDevice(OPENXR_DEVICE)
+        return true
+    }
+
+    /**
      * Installs the stock Quest mappings without making the user choose between Wii and GameCube.
      * The appropriate controller will be used automatically for each emulated console.
      */
@@ -179,17 +366,9 @@ object QuestVrSettings {
             return
         }
 
-        val gcPad = EmulatedController.getGcPad(0)
-        gcPad.loadProfile(gcPad.getSysProfileDirectoryPath() + GC_PROFILE_NAME)
-        gcPad.setDefaultDevice(OPENXR_DEVICE)
-
-        val wiimote = EmulatedController.getWiimote(0)
-        wiimote.loadProfile(wiimote.getSysProfileDirectoryPath() + WIIMOTE_PROFILE_NAME)
-        wiimote.setDefaultDevice(OPENXR_DEVICE)
-
-        val hotkeys = EmulatedController.getHotkeys()
-        hotkeys.loadProfile(hotkeys.getSysProfileDirectoryPath() + HOTKEY_PROFILE_NAME)
-        hotkeys.setDefaultDevice(OPENXR_DEVICE)
+        loadStockProfile(EmulatedController.getGcPad(0), GC_PROFILE_NAME)
+        loadStockProfile(EmulatedController.getWiimote(0), WIIMOTE_PROFILE_NAME)
+        loadStockProfile(EmulatedController.getHotkeys(), HOTKEY_PROFILE_NAME)
 
         // 6 is an emulated Standard Controller and 3 is an OpenXR Wii Remote.
         IntSetting.MAIN_SI_DEVICE_0.setInt(settings, 6)

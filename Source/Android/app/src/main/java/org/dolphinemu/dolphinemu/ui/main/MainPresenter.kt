@@ -16,6 +16,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.dolphinemu.dolphinemu.BuildConfig
 import org.dolphinemu.dolphinemu.R
 import org.dolphinemu.dolphinemu.activities.EmulationActivity
+import org.dolphinemu.dolphinemu.dialogs.QuestControllerSetupDialog
 import org.dolphinemu.dolphinemu.features.settings.model.BooleanSetting
 import org.dolphinemu.dolphinemu.features.settings.ui.MenuTag
 import org.dolphinemu.dolphinemu.features.sysupdate.ui.SystemMenuNotInstalledDialogFragment
@@ -167,6 +168,13 @@ class MainPresenter(private val mainView: MainView, private val activity: Fragme
             true
         }
 
+        R.id.menu_quest_controller_presets -> {
+            AfterDirectoryInitializationRunner().runWithLifecycle(
+                activity
+            ) { showQuestControllerSetupDialog(activity) }
+            true
+        }
+
         R.id.menu_install_wad -> {
             AfterDirectoryInitializationRunner().runWithLifecycle(
                 activity
@@ -194,6 +202,14 @@ class MainPresenter(private val mainView: MainView, private val activity: Fragme
         }
 
         else -> false
+    }
+
+    private fun showQuestControllerSetupDialog(activity: ComponentActivity) {
+        val fragmentManager = (activity as? FragmentActivity)?.supportFragmentManager ?: return
+        if (fragmentManager.findFragmentByTag(QuestControllerSetupDialog.TAG) == null) {
+            QuestControllerSetupDialog.newInstance(false)
+                .show(fragmentManager, QuestControllerSetupDialog.TAG)
+        }
     }
 
     fun onResume() {

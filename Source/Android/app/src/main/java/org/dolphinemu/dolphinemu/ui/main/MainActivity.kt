@@ -16,6 +16,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout.OnRefreshListener
 import com.google.android.material.appbar.AppBarLayout
 import com.google.android.material.tabs.TabLayout
+import org.dolphinemu.dolphinemu.BuildConfig
 import org.dolphinemu.dolphinemu.NativeLibrary
 import org.dolphinemu.dolphinemu.R
 import org.dolphinemu.dolphinemu.adapters.PlatformPagerAdapter
@@ -131,6 +132,7 @@ class MainActivity : AppCompatActivity(), MainView, OnRefreshListener, ThemeProv
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_game_grid, menu)
         this.menu = menu
+        menu.findItem(R.id.menu_quest_controller_presets).isVisible = BuildConfig.IS_QUEST
         return true
     }
 

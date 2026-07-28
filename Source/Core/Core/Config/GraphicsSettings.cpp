@@ -259,10 +259,10 @@ const Info<bool> GFX_VR_PASSTHROUGH_REMOVE_BLACK_CLEARS{
 const Info<float> GFX_VR_PASSTHROUGH_SCENE_OPACITY{
     {System::GFX, "VR", "PassthroughSceneOpacity"}, 1.0f};
 const Info<VRPassthroughCoverageMode> GFX_VR_PASSTHROUGH_COVERAGE_MODE{
-    {System::GFX, "VR", "PassthroughCoverageMode"}, VRPassthroughCoverageMode::Exact};
+    {System::GFX, "VR", "PassthroughCoverageMode"}, VRPassthroughCoverageMode::Fast};
 const Info<float> GFX_VR_GAMMA{{System::GFX, "VR", "Gamma"}, 1.0f};
 const Info<int> GFX_VR_CLEAR_EFB_COPIES{{System::GFX, "VR", "ClearEFBCopies"}, 0};
-const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW{{System::GFX, "VR", "UseVulkanMultiview"}, false};
+const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW{{System::GFX, "VR", "UseVulkanMultiview"}, true};
 const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD{{System::GFX, "VR", "AndroidDirectToHMD"},
                                               DEFAULT_VR_ANDROID_DIRECT_TO_HMD};
 const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT{{System::GFX, "VR", "QuestCpuLevel5Hint"},

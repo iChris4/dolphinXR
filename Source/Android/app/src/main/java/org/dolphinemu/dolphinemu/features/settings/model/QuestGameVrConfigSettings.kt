@@ -11,29 +11,53 @@ object QuestGameVrConfigSettings {
     private const val VR_SECTION = "Graphics.VR"
     private const val LEGACY_VR_SECTION = "GFX.VR"
 
+    // Every key the VR Config screen can read back. A key missing here is dropped while parsing,
+    // so a stored per-game value would silently read as the global default.
     private val knownKeys = setOf(
         "EnableOpenXR",
         "UnitsPerMeter",
+        "EnableLeanBackAngle",
         "LeanBackAngle",
+        "EnableCameraForward",
         "CameraForward",
+        "EnableCameraHeight",
         "CameraHeight",
+        "EnableCameraAnchor",
+        "CameraAnchorSmoothing",
+        "EnableControllerAnchor",
         "VirtualScreen",
         "ScreenDistance",
         "ScreenSize",
+        "HudThickness",
         "HeadLockedCurvature",
+        "ExactScreenDepth",
+        "AutoNativeEfbEffects",
         "DontClearScreen",
         "LoadCustomShaders",
         "DisableCPUCull",
+        "RemoveCinematicBars",
+        "FrameSizeFromXFB",
+        "SmallViewportsOnScreen",
+        "DetectRenderTargets",
+        "OrthoScissorFix",
         "DetectSkybox",
+        "MetroidThermalVisorFix",
+        "MetroidD3DThermalPaletteFix",
         "ForcedVBIFrequency",
-        "AutoVBIFromHMD",
+        "EagerHeartbeat",
         "ClearEFBCopies",
+        "Gamma",
+        "ResolutionScale",
+        "FoveationLevel",
+        "DynamicFoveation",
+        "FoveateEFB",
         "UseVulkanMultiview",
         "AndroidDirectToHMD",
         "Passthrough",
         "PassthroughRemoveBlackBackground",
         "PassthroughRemoveBlackEFBClears",
-        "PassthroughSceneOpacity"
+        "PassthroughSceneOpacity",
+        "PassthroughCoverageMode"
     )
 
     fun getStoredKeys(gameId: String, revision: Int): Set<String> =

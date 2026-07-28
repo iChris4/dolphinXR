@@ -14,7 +14,7 @@ object FirstLaunchDialogs {
             if (QuestVrSettings.shouldAskAboutControllerSetup()) {
                 val fragmentManager = activity.supportFragmentManager
                 if (fragmentManager.findFragmentByTag(QuestControllerSetupDialog.TAG) == null) {
-                    QuestControllerSetupDialog().show(
+                    QuestControllerSetupDialog.newInstance(true).show(
                         fragmentManager,
                         QuestControllerSetupDialog.TAG
                     )

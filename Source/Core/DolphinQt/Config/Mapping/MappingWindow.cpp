@@ -80,6 +80,8 @@
 namespace
 {
 constexpr const char* OPENXR_WIIMOTE_DEFAULT_PROFILE = "OpenXR Wii Remote.ini";
+constexpr const char* OPENXR_GCPAD_DEFAULT_PROFILE = "Quest Touch GameCube.ini";
+constexpr const char* OPENXR_HOTKEY_DEFAULT_PROFILE = "Quest.ini";
 constexpr const char* OPENXR_CONTROLLER_DEVICE = "OpenXR/0/OpenXR Controller";
 }
 
@@ -723,15 +725,37 @@ void MappingWindow::OnDefaultFieldsPressed()
 
 bool MappingWindow::LoadOpenXRDefaultProfile()
 {
-  if (m_mapping_type != Type::MAPPING_WIIMOTE_EMU || !m_is_openxr_wiimote)
+  const char* profile_name = nullptr;
+  switch (m_mapping_type)
+  {
+  case Type::MAPPING_WIIMOTE_EMU:
+    profile_name = OPENXR_WIIMOTE_DEFAULT_PROFILE;
+    break;
+  case Type::MAPPING_GCPAD:
+    profile_name = OPENXR_GCPAD_DEFAULT_PROFILE;
+    break;
+  case Type::MAPPING_HOTKEYS:
+    profile_name = OPENXR_HOTKEY_DEFAULT_PROFILE;
+    break;
+  default:
+    return false;
+  }
+
+  // Dolphin's built-in defaults target a keyboard or physical pad, which is useless once the
+  // VR controllers are the input device, so "Default" restores the stock OpenXR profile instead.
+  // The Wii Remote has a dedicated OpenXR source: honour that even before a device is selected.
+  const bool openxr_selected =
+      (m_mapping_type == Type::MAPPING_WIIMOTE_EMU && m_is_openxr_wiimote) ||
+      m_controller->GetDefaultDevice().ToString() == OPENXR_CONTROLLER_DEVICE;
+  if (!openxr_selected)
     return false;
 
   Common::IniFile ini;
-  const std::string profile_path =
-      m_config->GetSysProfileDirectoryPath() + OPENXR_WIIMOTE_DEFAULT_PROFILE;
+  const std::string profile_path = m_config->GetSysProfileDirectoryPath() + profile_name;
   if (!ini.Load(profile_path))
     return false;
 
+  // The profile's own "Device" key points the controller back at the OpenXR device.
   m_controller->LoadConfig(ini.GetOrCreateSection("Profile"));
   return true;
 }

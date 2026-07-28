@@ -352,6 +352,52 @@
         <item>3</item>
     </integer-array>
 
+    <string-array name="questForcedVbiFrequencyEntries">
+        <item>@string/quest_forced_vbi_auto</item>
+        <item>@string/off</item>
+        <item>@string/quest_forced_vbi_72</item>
+        <item>@string/quest_forced_vbi_90</item>
+        <item>@string/quest_forced_vbi_120</item>
+    </string-array>
+    <integer-array name="questForcedVbiFrequencyValues">
+        <item>-1</item>
+        <item>0</item>
+        <item>72</item>
+        <item>90</item>
+        <item>120</item>
+    </integer-array>
+
+    <string-array name="questReferenceSpaceModeEntries">
+        <item>@string/quest_reference_space_local</item>
+        <item>@string/quest_reference_space_stage_height</item>
+        <item>@string/quest_reference_space_stage</item>
+    </string-array>
+    <integer-array name="questReferenceSpaceModeValues">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </integer-array>
+
+    <string-array name="questTrackingModeEntries">
+        <item>@string/quest_tracking_mode_6dof</item>
+        <item>@string/quest_tracking_mode_3dof</item>
+        <item>@string/none</item>
+    </string-array>
+    <integer-array name="questTrackingModeValues">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </integer-array>
+
+    <string-array name="questPassthroughCoverageModeEntries">
+        <item>@string/quest_passthrough_coverage_exact</item>
+        <item>@string/quest_passthrough_coverage_fast</item>
+    </string-array>
+    <integer-array name="questPassthroughCoverageModeValues">
+        <item>0</item>
+        <item>1</item>
+    </integer-array>
+
     <!-- Aspect Ratio Preference -->
     <string-array name="aspectRatioEntries">
         <item>@string/aspect_ratio_auto</item>

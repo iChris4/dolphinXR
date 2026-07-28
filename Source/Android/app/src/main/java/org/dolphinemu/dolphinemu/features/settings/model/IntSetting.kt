@@ -100,6 +100,13 @@ enum class IntSetting(
         "PNGCompressionLevel",
         6
     ),
+    // Default must match GFX_COMMAND_BUFFERS_IN_FLIGHT in GraphicsSettings.cpp.
+    GFX_COMMAND_BUFFERS_IN_FLIGHT(
+        Settings.FILE_GFX,
+        Settings.SECTION_GFX_SETTINGS,
+        "CommandBuffersInFlight",
+        8
+    ),
     GFX_MSAA(Settings.FILE_GFX, Settings.SECTION_GFX_SETTINGS, "MSAA", 1),
     GFX_EFB_SCALE(Settings.FILE_GFX, Settings.SECTION_GFX_SETTINGS, "InternalResolution", 1),
     GFX_SHADER_COMPILATION_MODE(

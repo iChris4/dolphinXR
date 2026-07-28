@@ -144,7 +144,21 @@ class SettingsFragmentPresenter(
                 sl,
                 QuestGameOverrideSettings.Category.TEXTURE_ELEMENT_OVERRIDES
             )
+            MenuTag.QUEST_VR_CAMERA -> addQuestVrCameraSettings(sl)
+            MenuTag.QUEST_VR_VIRTUAL_SCREEN -> addQuestVrVirtualScreenSettings(sl)
+            MenuTag.QUEST_VR_RENDERING -> addQuestVrRenderingSettings(sl)
+            MenuTag.QUEST_VR_FRAMERATE -> addQuestVrFramerateSettings(sl)
+            MenuTag.QUEST_VR_HACKS -> addQuestVrHackSettings(sl)
+            MenuTag.QUEST_VR_PASSTHROUGH -> addQuestVrPassthroughSettings(sl)
+            MenuTag.QUEST_VR_DEBUG -> addQuestVrDebugSettings(sl)
             MenuTag.QUEST_VR_CONFIG -> addQuestGameVrConfigSettings(sl)
+            MenuTag.QUEST_VR_CONFIG_CAMERA -> addQuestGameVrCameraSettings(sl)
+            MenuTag.QUEST_VR_CONFIG_VIRTUAL_SCREEN -> addQuestGameVrVirtualScreenSettings(sl)
+            MenuTag.QUEST_VR_CONFIG_RENDERING -> addQuestGameVrRenderingSettings(sl)
+            MenuTag.QUEST_VR_CONFIG_FRAMERATE -> addQuestGameVrFramerateSettings(sl)
+            MenuTag.QUEST_VR_CONFIG_HACKS -> addQuestGameVrHackSettings(sl)
+            MenuTag.QUEST_VR_CONFIG_PASSTHROUGH -> addQuestGameVrPassthroughSettings(sl)
+            MenuTag.QUEST_VR_CONFIG_DEBUG -> addQuestGameVrDebugSettings(sl)
             MenuTag.CONFIG_LOG -> addLogConfigurationSettings(sl)
             MenuTag.DEBUG -> addDebugSettings(sl)
             MenuTag.GCPAD_1,
@@ -2078,6 +2092,18 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(
+            IntSliderSetting(
+                context,
+                IntSetting.GFX_COMMAND_BUFFERS_IN_FLIGHT,
+                R.string.command_buffers_in_flight,
+                R.string.command_buffers_in_flight_description,
+                2,
+                32,
+                "",
+                1
+            )
+        )
+        sl.add(
             SwitchSetting(
                 context,
                 BooleanSetting.GFX_PREFER_VS_FOR_LINE_POINT_EXPANSION,
@@ -2472,27 +2498,26 @@ class SettingsFragmentPresenter(
         }
     }
 
-    private fun addQuestGameVrConfigSettings(sl: ArrayList<SettingsItem>) {
-        val currentGameId = gameId
-        if (currentGameId.isNullOrEmpty()) {
-            sl.add(HeaderSetting(context, R.string.quest_no_stored_vr_config, 0))
-            return
-        }
-
-        sl.add(HeaderSetting(context, R.string.quest_vr_config_description, 0))
-
-        fun addBoolean(key: String, defaultValue: Boolean, titleId: Int, descriptionId: Int) {
+    /**
+     * Builds the per-game VR Config rows for one group. Holds the game identity so each group
+     * function reads like the global OpenXR screen instead of repeating the setting plumbing.
+     */
+    private inner class QuestGameVrConfigBuilder(
+        private val sl: ArrayList<SettingsItem>,
+        private val gameId: String
+    ) {
+        fun boolean(key: String, defaultValue: Boolean, titleId: Int, descriptionId: Int) {
             sl.add(
                 SwitchSetting(
                     context,
-                    QuestGameVrConfigBooleanSetting(currentGameId, revision, key, defaultValue),
+                    QuestGameVrConfigBooleanSetting(gameId, revision, key, defaultValue),
                     titleId,
                     descriptionId
                 )
             )
         }
 
-        fun addFloat(
+        fun float(
             key: String,
             defaultValue: Float,
             titleId: Int,
@@ -2504,7 +2529,7 @@ class SettingsFragmentPresenter(
             sl.add(
                 FloatSliderSetting(
                     context,
-                    QuestGameVrConfigFloatSetting(currentGameId, revision, key, defaultValue),
+                    QuestGameVrConfigFloatSetting(gameId, revision, key, defaultValue),
                     titleId,
                     descriptionId,
                     min,
@@ -2516,7 +2541,7 @@ class SettingsFragmentPresenter(
             )
         }
 
-        fun addIntSlider(
+        fun intSlider(
             key: String,
             defaultValue: Int,
             titleId: Int,
@@ -2528,7 +2553,7 @@ class SettingsFragmentPresenter(
             sl.add(
                 IntSliderSetting(
                     context,
-                    QuestGameVrConfigIntSetting(currentGameId, revision, key, defaultValue),
+                    QuestGameVrConfigIntSetting(gameId, revision, key, defaultValue),
                     titleId,
                     descriptionId,
                     min,
@@ -2539,19 +2564,47 @@ class SettingsFragmentPresenter(
             )
         }
 
-        addBoolean(
+        fun choice(
+            key: String,
+            defaultValue: Int,
+            titleId: Int,
+            descriptionId: Int,
+            entriesId: Int,
+            valuesId: Int
+        ) {
+            sl.add(
+                SingleChoiceSetting(
+                    context,
+                    QuestGameVrConfigIntSetting(gameId, revision, key, defaultValue),
+                    titleId,
+                    descriptionId,
+                    entriesId,
+                    valuesId
+                )
+            )
+        }
+    }
+
+    private fun questGameVrConfigBuilder(sl: ArrayList<SettingsItem>): QuestGameVrConfigBuilder? {
+        val currentGameId = gameId
+        if (currentGameId.isNullOrEmpty()) {
+            sl.add(HeaderSetting(context, R.string.quest_no_stored_vr_config, 0))
+            return null
+        }
+        return QuestGameVrConfigBuilder(sl, currentGameId)
+    }
+
+    private fun addQuestGameVrConfigSettings(sl: ArrayList<SettingsItem>) {
+        val builder = questGameVrConfigBuilder(sl) ?: return
+
+        sl.add(HeaderSetting(context, R.string.quest_vr_config_description, 0))
+        builder.boolean(
             "EnableOpenXR",
             false,
             R.string.quest_enable_openxr,
             R.string.quest_enable_openxr_description
         )
-        addBoolean(
-            "AutoVBIFromHMD",
-            false,
-            R.string.quest_force_vbi_from_hmd,
-            R.string.quest_force_vbi_from_hmd_description
-        )
-        addFloat(
+        builder.float(
             "UnitsPerMeter",
             1.0f,
             R.string.quest_units_per_meter,
@@ -2560,7 +2613,43 @@ class SettingsFragmentPresenter(
             500.0f,
             0.1f
         )
-        addFloat(
+
+        sl.add(HeaderSetting(context, R.string.quest_vr_groups, 0))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_camera, MenuTag.QUEST_VR_CONFIG_CAMERA))
+        sl.add(
+            SubmenuSetting(
+                context,
+                R.string.quest_vr_virtual_screen,
+                MenuTag.QUEST_VR_CONFIG_VIRTUAL_SCREEN
+            )
+        )
+        sl.add(
+            SubmenuSetting(context, R.string.quest_vr_rendering, MenuTag.QUEST_VR_CONFIG_RENDERING)
+        )
+        sl.add(
+            SubmenuSetting(context, R.string.quest_vr_framerate, MenuTag.QUEST_VR_CONFIG_FRAMERATE)
+        )
+        sl.add(SubmenuSetting(context, R.string.quest_vr_hacks, MenuTag.QUEST_VR_CONFIG_HACKS))
+        sl.add(
+            SubmenuSetting(
+                context,
+                R.string.quest_vr_passthrough,
+                MenuTag.QUEST_VR_CONFIG_PASSTHROUGH
+            )
+        )
+        sl.add(SubmenuSetting(context, R.string.quest_vr_debug, MenuTag.QUEST_VR_CONFIG_DEBUG))
+    }
+
+    private fun addQuestGameVrCameraSettings(sl: ArrayList<SettingsItem>) {
+        val builder = questGameVrConfigBuilder(sl) ?: return
+
+        builder.boolean(
+            "EnableLeanBackAngle",
+            true,
+            R.string.quest_enable_lean_back_angle,
+            R.string.quest_enable_lean_back_angle_description
+        )
+        builder.float(
             "LeanBackAngle",
             0.0f,
             R.string.quest_lean_back_angle,
@@ -2569,7 +2658,13 @@ class SettingsFragmentPresenter(
             45.0f,
             0.1f
         )
-        addFloat(
+        builder.boolean(
+            "EnableCameraForward",
+            true,
+            R.string.quest_enable_camera_forward,
+            R.string.quest_enable_camera_forward_description
+        )
+        builder.float(
             "CameraForward",
             0.0f,
             R.string.quest_camera_forward,
@@ -2578,7 +2673,13 @@ class SettingsFragmentPresenter(
             20.0f,
             0.1f
         )
-        addFloat(
+        builder.boolean(
+            "EnableCameraHeight",
+            true,
+            R.string.quest_enable_camera_height,
+            R.string.quest_enable_camera_height_description
+        )
+        builder.float(
             "CameraHeight",
             0.0f,
             R.string.quest_camera_height,
@@ -2587,13 +2688,51 @@ class SettingsFragmentPresenter(
             20.0f,
             0.1f
         )
-        addBoolean(
+        builder.boolean(
+            "EnableCameraAnchor",
+            false,
+            R.string.quest_enable_camera_anchor,
+            R.string.quest_enable_camera_anchor_description
+        )
+        builder.float(
+            "CameraAnchorSmoothing",
+            0.85f,
+            R.string.quest_camera_anchor_smoothing,
+            R.string.quest_camera_anchor_smoothing_description,
+            0.0f,
+            0.95f,
+            0.05f
+        )
+        builder.boolean(
+            "EnableControllerAnchor",
+            false,
+            R.string.quest_enable_controller_anchor,
+            R.string.quest_enable_controller_anchor_description
+        )
+    }
+
+    private fun addQuestGameVrVirtualScreenSettings(sl: ArrayList<SettingsItem>) {
+        val builder = questGameVrConfigBuilder(sl) ?: return
+
+        builder.boolean(
             "VirtualScreen",
             true,
             R.string.quest_virtual_screen,
             R.string.quest_virtual_screen_description
         )
-        addFloat(
+        builder.boolean(
+            "ExactScreenDepth",
+            true,
+            R.string.quest_exact_screen_depth,
+            R.string.quest_exact_screen_depth_description
+        )
+        builder.boolean(
+            "AutoNativeEfbEffects",
+            true,
+            R.string.quest_auto_native_efb_effects,
+            R.string.quest_auto_native_efb_effects_description
+        )
+        builder.float(
             "ScreenDistance",
             1.5f,
             R.string.quest_screen_distance,
@@ -2602,7 +2741,7 @@ class SettingsFragmentPresenter(
             10.0f,
             0.1f
         )
-        addFloat(
+        builder.float(
             "ScreenSize",
             1.5f,
             R.string.quest_screen_size,
@@ -2611,7 +2750,16 @@ class SettingsFragmentPresenter(
             5.0f,
             0.1f
         )
-        addFloat(
+        builder.float(
+            "HudThickness",
+            0.0f,
+            R.string.quest_hud_thickness,
+            R.string.quest_hud_thickness_description,
+            0.0f,
+            1.0f,
+            0.02f
+        )
+        builder.float(
             "HeadLockedCurvature",
             0.0f,
             R.string.quest_head_locked_curvature,
@@ -2620,52 +2768,12 @@ class SettingsFragmentPresenter(
             5.0f,
             0.01f
         )
-        addBoolean(
-            "DontClearScreen",
-            false,
-            R.string.quest_dont_clear_screen,
-            R.string.quest_dont_clear_screen_description
-        )
-        addBoolean(
-            "LoadCustomShaders",
-            false,
-            R.string.quest_load_custom_shaders,
-            R.string.quest_load_custom_shaders_description
-        )
-        addBoolean(
-            "DisableCPUCull",
-            false,
-            R.string.quest_disable_cpu_culling,
-            R.string.quest_disable_cpu_culling_description
-        )
-        addBoolean(
-            "DetectSkybox",
-            false,
-            R.string.quest_detect_skybox,
-            R.string.quest_detect_skybox_description
-        )
-        addBoolean(
-            "ExactScreenDepth",
-            true,
-            R.string.quest_exact_screen_depth,
-            R.string.quest_exact_screen_depth_description
-        )
-        addIntSlider(
-            "ClearEFBCopies",
-            0,
-            R.string.quest_clear_efb_copies,
-            R.string.quest_clear_efb_copies_description,
-            0,
-            640,
-            10
-        )
-        addBoolean(
-            "UseVulkanMultiview",
-            true,
-            R.string.quest_use_vulkan_multiview,
-            R.string.quest_use_vulkan_multiview_description
-        )
-        addFloat(
+    }
+
+    private fun addQuestGameVrRenderingSettings(sl: ArrayList<SettingsItem>) {
+        val builder = questGameVrConfigBuilder(sl) ?: return
+
+        builder.float(
             "ResolutionScale",
             0.85f,
             R.string.quest_resolution_scale,
@@ -2674,53 +2782,152 @@ class SettingsFragmentPresenter(
             1.5f,
             0.05f
         )
-        sl.add(
-            SingleChoiceSetting(
-                context,
-                QuestGameVrConfigIntSetting(currentGameId, revision, "FoveationLevel", 2),
-                R.string.quest_foveation_level,
-                R.string.quest_foveation_level_description,
-                R.array.questFoveationLevelEntries,
-                R.array.questFoveationLevelValues
-            )
+        builder.choice(
+            "FoveationLevel",
+            2,
+            R.string.quest_foveation_level,
+            R.string.quest_foveation_level_description,
+            R.array.questFoveationLevelEntries,
+            R.array.questFoveationLevelValues
         )
-        addBoolean(
+        builder.boolean(
             "DynamicFoveation",
             true,
             R.string.quest_dynamic_foveation,
             R.string.quest_dynamic_foveation_description
         )
-        addBoolean(
+        builder.boolean(
             "FoveateEFB",
             false,
             R.string.quest_foveate_efb,
             R.string.quest_foveate_efb_description
         )
-        addBoolean(
-            "AndroidDirectToHMD",
-            false,
-            R.string.quest_android_direct_to_hmd,
-            R.string.quest_android_direct_to_hmd_description
+        builder.intSlider(
+            "ClearEFBCopies",
+            0,
+            R.string.quest_clear_efb_copies,
+            R.string.quest_clear_efb_copies_description,
+            0,
+            640,
+            10
         )
-        addBoolean(
+        builder.float(
+            "Gamma",
+            1.0f,
+            R.string.quest_vr_gamma,
+            R.string.quest_vr_gamma_description,
+            1.0f,
+            3.0f,
+            0.1f
+        )
+    }
+
+    private fun addQuestGameVrFramerateSettings(sl: ArrayList<SettingsItem>) {
+        val builder = questGameVrConfigBuilder(sl) ?: return
+
+        builder.choice(
+            "ForcedVBIFrequency",
+            0,
+            R.string.quest_forced_vbi_frequency,
+            R.string.quest_forced_vbi_frequency_description,
+            R.array.questForcedVbiFrequencyEntries,
+            R.array.questForcedVbiFrequencyValues
+        )
+        builder.boolean(
+            "EagerHeartbeat",
+            false,
+            R.string.quest_eager_heartbeat,
+            R.string.quest_eager_heartbeat_description
+        )
+    }
+
+    private fun addQuestGameVrHackSettings(sl: ArrayList<SettingsItem>) {
+        val builder = questGameVrConfigBuilder(sl) ?: return
+
+        builder.boolean(
+            "UseVulkanMultiview",
+            true,
+            R.string.quest_use_vulkan_multiview,
+            R.string.quest_use_vulkan_multiview_description
+        )
+        builder.boolean(
+            "DontClearScreen",
+            false,
+            R.string.quest_dont_clear_screen,
+            R.string.quest_dont_clear_screen_description
+        )
+        builder.boolean(
+            "DisableCPUCull",
+            false,
+            R.string.quest_disable_cpu_culling,
+            R.string.quest_disable_cpu_culling_description
+        )
+        builder.boolean(
+            "RemoveCinematicBars",
+            true,
+            R.string.quest_remove_cinematic_bars,
+            R.string.quest_remove_cinematic_bars_description
+        )
+        builder.boolean(
+            "FrameSizeFromXFB",
+            true,
+            R.string.quest_frame_size_from_xfb,
+            R.string.quest_frame_size_from_xfb_description
+        )
+        builder.boolean(
+            "SmallViewportsOnScreen",
+            true,
+            R.string.quest_small_viewports_on_screen,
+            R.string.quest_small_viewports_on_screen_description
+        )
+        builder.boolean(
+            "DetectRenderTargets",
+            false,
+            R.string.quest_detect_render_targets,
+            R.string.quest_detect_render_targets_description
+        )
+        builder.boolean(
+            "OrthoScissorFix",
+            true,
+            R.string.quest_ortho_scissor_fix,
+            R.string.quest_ortho_scissor_fix_description
+        )
+        builder.boolean(
+            "DetectSkybox",
+            false,
+            R.string.quest_detect_skybox,
+            R.string.quest_detect_skybox_description
+        )
+        builder.boolean(
+            "MetroidThermalVisorFix",
+            true,
+            R.string.quest_layered_palette_conversion,
+            R.string.quest_layered_palette_conversion_description
+        )
+    }
+
+    private fun addQuestGameVrPassthroughSettings(sl: ArrayList<SettingsItem>) {
+        val builder = questGameVrConfigBuilder(sl) ?: return
+
+        builder.boolean(
             "Passthrough",
             false,
             R.string.quest_passthrough,
             R.string.quest_passthrough_description
         )
-        addBoolean(
+        builder.boolean(
             "PassthroughRemoveBlackBackground",
             true,
             R.string.quest_passthrough_reveal_unrendered,
             R.string.quest_passthrough_reveal_unrendered_description
         )
-        addBoolean(
+        builder.boolean(
             "PassthroughRemoveBlackEFBClears",
             true,
             R.string.quest_passthrough_remove_black_clears,
             R.string.quest_passthrough_remove_black_clears_description
         )
-        addFloat(
+        builder.float(
             "PassthroughSceneOpacity",
             1.0f,
             R.string.quest_passthrough_scene_opacity,
@@ -2728,6 +2935,31 @@ class SettingsFragmentPresenter(
             0.0f,
             1.0f,
             0.05f
+        )
+        builder.choice(
+            "PassthroughCoverageMode",
+            0,
+            R.string.quest_passthrough_coverage_mode,
+            R.string.quest_passthrough_coverage_mode_description,
+            R.array.questPassthroughCoverageModeEntries,
+            R.array.questPassthroughCoverageModeValues
+        )
+    }
+
+    private fun addQuestGameVrDebugSettings(sl: ArrayList<SettingsItem>) {
+        val builder = questGameVrConfigBuilder(sl) ?: return
+
+        builder.boolean(
+            "AndroidDirectToHMD",
+            false,
+            R.string.quest_android_direct_to_hmd,
+            R.string.quest_android_direct_to_hmd_description
+        )
+        builder.boolean(
+            "LoadCustomShaders",
+            false,
+            R.string.quest_load_custom_shaders,
+            R.string.quest_load_custom_shaders_description
         )
     }
 
@@ -2758,21 +2990,210 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.unitsPerMeterSetting(),
+                R.string.quest_units_per_meter,
+                R.string.quest_units_per_meter_description,
+                0.1f,
+                500.0f,
+                "",
+                0.1f,
+                true
+            )
+        )
+
+        sl.add(HeaderSetting(context, R.string.quest_vr_groups, 0))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_camera, MenuTag.QUEST_VR_CAMERA))
+        sl.add(
+            SubmenuSetting(
+                context,
+                R.string.quest_vr_virtual_screen,
+                MenuTag.QUEST_VR_VIRTUAL_SCREEN
+            )
+        )
+        sl.add(SubmenuSetting(context, R.string.quest_vr_rendering, MenuTag.QUEST_VR_RENDERING))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_framerate, MenuTag.QUEST_VR_FRAMERATE))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_hacks, MenuTag.QUEST_VR_HACKS))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_passthrough, MenuTag.QUEST_VR_PASSTHROUGH))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_debug, MenuTag.QUEST_VR_DEBUG))
+    }
+
+    private fun addQuestVrCameraSettings(sl: ArrayList<SettingsItem>) {
+        sl.add(
             SwitchSetting(
                 context,
-                QuestVrSettings.autoVbiFromHmdSetting(),
-                R.string.quest_force_vbi_from_hmd,
-                R.string.quest_force_vbi_from_hmd_description
+                QuestVrSettings.enableLeanBackAngleSetting(),
+                R.string.quest_enable_lean_back_angle,
+                R.string.quest_enable_lean_back_angle_description
+            )
+        )
+        sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.leanBackAngleSetting(),
+                R.string.quest_lean_back_angle,
+                R.string.quest_lean_back_angle_description,
+                -45.0f,
+                45.0f,
+                "",
+                0.1f,
+                true
             )
         )
         sl.add(
             SwitchSetting(
                 context,
-                QuestVrSettings.cpuLevel5HintSetting(),
-                R.string.quest_cpu_level_5_hint,
-                R.string.quest_cpu_level_5_hint_description
+                QuestVrSettings.enableCameraForwardSetting(),
+                R.string.quest_enable_camera_forward,
+                R.string.quest_enable_camera_forward_description
             )
         )
+        sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.cameraForwardSetting(),
+                R.string.quest_camera_forward,
+                R.string.quest_camera_forward_description,
+                -20.0f,
+                20.0f,
+                "",
+                0.1f,
+                true
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.enableCameraHeightSetting(),
+                R.string.quest_enable_camera_height,
+                R.string.quest_enable_camera_height_description
+            )
+        )
+        sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.cameraHeightSetting(),
+                R.string.quest_camera_height,
+                R.string.quest_camera_height_description,
+                -20.0f,
+                20.0f,
+                "",
+                0.1f,
+                true
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.enableCameraAnchorSetting(),
+                R.string.quest_enable_camera_anchor,
+                R.string.quest_enable_camera_anchor_description
+            )
+        )
+        sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.cameraAnchorSmoothingSetting(),
+                R.string.quest_camera_anchor_smoothing,
+                R.string.quest_camera_anchor_smoothing_description,
+                0.0f,
+                0.95f,
+                "",
+                0.05f,
+                true
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.enableControllerAnchorSetting(),
+                R.string.quest_enable_controller_anchor,
+                R.string.quest_enable_controller_anchor_description
+            )
+        )
+    }
+
+    private fun addQuestVrVirtualScreenSettings(sl: ArrayList<SettingsItem>) {
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.virtualScreenSetting(),
+                R.string.quest_virtual_screen,
+                R.string.quest_virtual_screen_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.exactScreenDepthSetting(),
+                R.string.quest_exact_screen_depth,
+                R.string.quest_exact_screen_depth_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.autoNativeEfbEffectsSetting(),
+                R.string.quest_auto_native_efb_effects,
+                R.string.quest_auto_native_efb_effects_description
+            )
+        )
+        sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.screenDistanceSetting(),
+                R.string.quest_screen_distance,
+                R.string.quest_screen_distance_description,
+                0.5f,
+                10.0f,
+                "",
+                0.1f,
+                true
+            )
+        )
+        sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.screenSizeSetting(),
+                R.string.quest_screen_size,
+                R.string.quest_screen_size_description,
+                0.5f,
+                5.0f,
+                "",
+                0.1f,
+                true
+            )
+        )
+        sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.hudThicknessSetting(),
+                R.string.quest_hud_thickness,
+                R.string.quest_hud_thickness_description,
+                0.0f,
+                1.0f,
+                "",
+                0.02f,
+                true
+            )
+        )
+        sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.headLockedCurvatureSetting(),
+                R.string.quest_head_locked_curvature,
+                R.string.quest_head_locked_curvature_description,
+                0.0f,
+                5.0f,
+                "",
+                0.01f,
+                true
+            )
+        )
+    }
+
+    private fun addQuestVrRenderingSettings(sl: ArrayList<SettingsItem>) {
         sl.add(
             FloatSliderSetting(
                 context,
@@ -2813,6 +3234,119 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(
+            IntSliderSetting(
+                context,
+                QuestVrSettings.clearEfbCopiesSetting(),
+                R.string.quest_clear_efb_copies,
+                R.string.quest_clear_efb_copies_description,
+                0,
+                640,
+                "",
+                10
+            )
+        )
+        sl.add(
+            FloatSliderSetting(
+                context,
+                QuestVrSettings.vrGammaSetting(),
+                R.string.quest_vr_gamma,
+                R.string.quest_vr_gamma_description,
+                1.0f,
+                3.0f,
+                "",
+                0.1f,
+                true
+            )
+        )
+    }
+
+    private fun addQuestVrFramerateSettings(sl: ArrayList<SettingsItem>) {
+        sl.add(
+            SingleChoiceSetting(
+                context,
+                QuestVrSettings.forcedVbiFrequencySetting(),
+                R.string.quest_forced_vbi_frequency,
+                R.string.quest_forced_vbi_frequency_description,
+                R.array.questForcedVbiFrequencyEntries,
+                R.array.questForcedVbiFrequencyValues
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.eagerHeartbeatSetting(),
+                R.string.quest_eager_heartbeat,
+                R.string.quest_eager_heartbeat_description
+            )
+        )
+    }
+
+    private fun addQuestVrHackSettings(sl: ArrayList<SettingsItem>) {
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.useVulkanMultiviewSetting(),
+                R.string.quest_use_vulkan_multiview,
+                R.string.quest_use_vulkan_multiview_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.dontClearScreenSetting(),
+                R.string.quest_dont_clear_screen,
+                R.string.quest_dont_clear_screen_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.disableCpuCullSetting(),
+                R.string.quest_disable_cpu_culling,
+                R.string.quest_disable_cpu_culling_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.removeBarsSetting(),
+                R.string.quest_remove_cinematic_bars,
+                R.string.quest_remove_cinematic_bars_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.frameSizeFromXfbSetting(),
+                R.string.quest_frame_size_from_xfb,
+                R.string.quest_frame_size_from_xfb_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.panesOnScreenSetting(),
+                R.string.quest_small_viewports_on_screen,
+                R.string.quest_small_viewports_on_screen_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.detectRenderTargetsSetting(),
+                R.string.quest_detect_render_targets,
+                R.string.quest_detect_render_targets_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.orthoScissorFixSetting(),
+                R.string.quest_ortho_scissor_fix,
+                R.string.quest_ortho_scissor_fix_description
+            )
+        )
+        sl.add(
             SwitchSetting(
                 context,
                 QuestVrSettings.detectSkyboxSetting(),
@@ -2821,57 +3355,16 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(
-            FloatSliderSetting(
+            SwitchSetting(
                 context,
-                QuestVrSettings.unitsPerMeterSetting(),
-                R.string.quest_units_per_meter,
-                R.string.quest_units_per_meter_description,
-                0.1f,
-                500.0f,
-                "",
-                0.1f,
-                true
+                QuestVrSettings.layeredPaletteConversionSetting(),
+                R.string.quest_layered_palette_conversion,
+                R.string.quest_layered_palette_conversion_description
             )
         )
-        sl.add(
-            FloatSliderSetting(
-                context,
-                QuestVrSettings.leanBackAngleSetting(),
-                R.string.quest_lean_back_angle,
-                R.string.quest_lean_back_angle_description,
-                -45.0f,
-                45.0f,
-                "",
-                0.1f,
-                true
-            )
-        )
-        sl.add(
-            FloatSliderSetting(
-                context,
-                QuestVrSettings.cameraForwardSetting(),
-                R.string.quest_camera_forward,
-                R.string.quest_camera_forward_description,
-                -20.0f,
-                20.0f,
-                "",
-                0.1f,
-                true
-            )
-        )
-        sl.add(
-            FloatSliderSetting(
-                context,
-                QuestVrSettings.cameraHeightSetting(),
-                R.string.quest_camera_height,
-                R.string.quest_camera_height_description,
-                -20.0f,
-                20.0f,
-                "",
-                0.1f,
-                true
-            )
-        )
+    }
+
+    private fun addQuestVrPassthroughSettings(sl: ArrayList<SettingsItem>) {
         sl.add(
             SwitchSetting(
                 context,
@@ -2910,107 +3403,18 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(
-            FloatSliderSetting(
+            SingleChoiceSetting(
                 context,
-                QuestVrSettings.vrGammaSetting(),
-                R.string.quest_vr_gamma,
-                R.string.quest_vr_gamma_description,
-                1.0f,
-                3.0f,
-                "",
-                0.1f,
-                true
+                QuestVrSettings.passthroughCoverageModeSetting(),
+                R.string.quest_passthrough_coverage_mode,
+                R.string.quest_passthrough_coverage_mode_description,
+                R.array.questPassthroughCoverageModeEntries,
+                R.array.questPassthroughCoverageModeValues
             )
         )
+    }
 
-        sl.add(HeaderSetting(context, R.string.quest_vr_virtual_screen, 0))
-        sl.add(
-            SwitchSetting(
-                context,
-                QuestVrSettings.virtualScreenSetting(),
-                R.string.quest_virtual_screen,
-                R.string.quest_virtual_screen_description
-            )
-        )
-        sl.add(
-            FloatSliderSetting(
-                context,
-                QuestVrSettings.screenDistanceSetting(),
-                R.string.quest_screen_distance,
-                R.string.quest_screen_distance_description,
-                0.5f,
-                10.0f,
-                "",
-                0.1f,
-                true
-            )
-        )
-        sl.add(
-            FloatSliderSetting(
-                context,
-                QuestVrSettings.screenSizeSetting(),
-                R.string.quest_screen_size,
-                R.string.quest_screen_size_description,
-                0.5f,
-                5.0f,
-                "",
-                0.1f,
-                true
-            )
-        )
-        sl.add(
-            FloatSliderSetting(
-                context,
-                QuestVrSettings.headLockedCurvatureSetting(),
-                R.string.quest_head_locked_curvature,
-                R.string.quest_head_locked_curvature_description,
-                0.0f,
-                5.0f,
-                "",
-                0.01f,
-                true
-            )
-        )
-        sl.add(
-            SwitchSetting(
-                context,
-                QuestVrSettings.exactScreenDepthSetting(),
-                R.string.quest_exact_screen_depth,
-                R.string.quest_exact_screen_depth_description
-            )
-        )
-
-        sl.add(HeaderSetting(context, R.string.quest_vr_presets, 0))
-        sl.add(
-            RunRunnable(
-                context,
-                R.string.quest_apply_controller_preset,
-                R.string.quest_apply_controller_preset_description,
-                0,
-                R.string.quest_controller_preset_applied,
-                false
-            ) {
-                runQuestSettingsMutation { settings ->
-                    QuestVrSettings.applyDefaultControllerSetup(settings)
-                }
-            }
-        )
-        sl.add(
-            RunRunnable(
-                context,
-                R.string.quest_apply_recommended_defaults,
-                R.string.quest_apply_recommended_defaults_description,
-                0,
-                R.string.quest_recommended_defaults_applied,
-                false
-            ) {
-                runQuestSettingsMutation { settings ->
-                    QuestVrSettings.applyRecommendedDefaults(settings)
-                }
-            }
-        )
-
-        sl.add(HeaderSetting(context, R.string.quest_vr_debug, 0))
+    private fun addQuestVrDebugSettings(sl: ArrayList<SettingsItem>) {
         sl.add(
             SwitchSetting(
                 context,
@@ -3038,53 +3442,17 @@ class SettingsFragmentPresenter(
         sl.add(
             SwitchSetting(
                 context,
-                QuestVrSettings.removeBarsSetting(),
-                R.string.quest_remove_cinematic_bars,
-                R.string.quest_remove_cinematic_bars_description
-            )
-        )
-        sl.add(
-            SwitchSetting(
-                context,
-                QuestVrSettings.useVulkanMultiviewSetting(),
-                R.string.quest_use_vulkan_multiview,
-                R.string.quest_use_vulkan_multiview_description
-            )
-        )
-        sl.add(
-            SwitchSetting(
-                context,
                 QuestVrSettings.androidDirectToHmdSetting(),
                 R.string.quest_android_direct_to_hmd,
                 R.string.quest_android_direct_to_hmd_description
             )
         )
         sl.add(
-            IntSliderSetting(
-                context,
-                QuestVrSettings.clearEfbCopiesSetting(),
-                R.string.quest_clear_efb_copies,
-                R.string.quest_clear_efb_copies_description,
-                0,
-                640,
-                "",
-                10
-            )
-        )
-        sl.add(
             SwitchSetting(
                 context,
-                QuestVrSettings.dontClearScreenSetting(),
-                R.string.quest_dont_clear_screen,
-                R.string.quest_dont_clear_screen_description
-            )
-        )
-        sl.add(
-            SwitchSetting(
-                context,
-                QuestVrSettings.disableCpuCullSetting(),
-                R.string.quest_disable_cpu_culling,
-                R.string.quest_disable_cpu_culling_description
+                QuestVrSettings.cpuLevel5HintSetting(),
+                R.string.quest_cpu_level_5_hint,
+                R.string.quest_cpu_level_5_hint_description
             )
         )
         sl.add(
@@ -3096,6 +3464,26 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(
+            SingleChoiceSetting(
+                context,
+                QuestVrSettings.referenceSpaceModeSetting(),
+                R.string.quest_reference_space_mode,
+                R.string.quest_reference_space_mode_description,
+                R.array.questReferenceSpaceModeEntries,
+                R.array.questReferenceSpaceModeValues
+            )
+        )
+        sl.add(
+            SingleChoiceSetting(
+                context,
+                QuestVrSettings.trackingModeSetting(),
+                R.string.quest_tracking_mode,
+                R.string.quest_tracking_mode_description,
+                R.array.questTrackingModeEntries,
+                R.array.questTrackingModeValues
+            )
+        )
+        sl.add(
             RunRunnable(
                 context,
                 R.string.quest_recenter_now,
@@ -3104,6 +3492,20 @@ class SettingsFragmentPresenter(
                 0,
                 true
             ) { NativeLibrary.RequestOpenXRRecenter() }
+        )
+        sl.add(
+            RunRunnable(
+                context,
+                R.string.quest_reset_openxr_settings,
+                R.string.quest_reset_openxr_settings_description,
+                R.string.quest_reset_openxr_settings_confirmation,
+                R.string.quest_openxr_settings_reset,
+                false
+            ) {
+                runQuestSettingsMutation { settings ->
+                    QuestVrSettings.resetOpenXrSettings(settings)
+                }
+            }
         )
     }
 
@@ -3152,7 +3554,7 @@ class SettingsFragmentPresenter(
                 if (!TextUtils.isEmpty(gameId)) {
                     addControllerPerGameSettings(sl, gcPad, gcPadNumber)
                 } else {
-                    addControllerMetaSettings(sl, gcPad)
+                    addControllerMetaSettings(sl, gcPad, QuestVrSettings.GC_PROFILE_NAME)
                     if (BuildConfig.IS_QUEST && gcPad.getDefaultDevice() == OPENXR_CONTROLLER_DEVICE) {
                         addOpenXRControllerMapperSetting(
                             sl,
@@ -3203,7 +3605,7 @@ class SettingsFragmentPresenter(
         if (!TextUtils.isEmpty(gameId)) {
             addControllerPerGameSettings(sl, wiimote, wiimoteNumber)
         } else {
-            addControllerMetaSettings(sl, wiimote)
+            addControllerMetaSettings(sl, wiimote, QuestVrSettings.WIIMOTE_PROFILE_NAME)
 
             val sourceSetting = when (wiimoteNumber) {
                 0 -> IntSetting.WIIMOTE_1_SOURCE
@@ -3341,7 +3743,7 @@ class SettingsFragmentPresenter(
 
     private fun addHotkeySettings(sl: ArrayList<SettingsItem>) {
         val hotkeys = EmulatedController.getHotkeys()
-        addControllerMetaSettings(sl, hotkeys)
+        addControllerMetaSettings(sl, hotkeys, QuestVrSettings.HOTKEY_PROFILE_NAME)
         if (BuildConfig.IS_QUEST && hotkeys.getDefaultDevice() == OPENXR_CONTROLLER_DEVICE) {
             addOpenXRControllerMapperSetting(
                 sl,
@@ -3419,12 +3821,15 @@ class SettingsFragmentPresenter(
      * Adds settings and actions that apply to a controller as a whole.
      * For instance, the device setting and the Clear action.
      *
-     * @param sl         The list to place controller settings into.
-     * @param controller The controller to add settings for.
+     * @param sl                  The list to place controller settings into.
+     * @param controller          The controller to add settings for.
+     * @param questDefaultProfile Stock OpenXR profile that "Default" restores on Quest builds.
+     *                            Null keeps Dolphin's built-in defaults.
      */
     private fun addControllerMetaSettings(
         sl: ArrayList<SettingsItem>,
-        controller: EmulatedController
+        controller: EmulatedController,
+        questDefaultProfile: String? = null
     ) {
         sl.add(
             InputDeviceSetting(
@@ -3461,7 +3866,7 @@ class SettingsFragmentPresenter(
                 R.string.input_reset_warning,
                 0,
                 true
-            ) { loadDefaultControllerSettings(controller) })
+            ) { loadDefaultControllerSettings(controller, questDefaultProfile) })
         sl.add(
             RunRunnable(
                 context,
@@ -3596,8 +4001,16 @@ class SettingsFragmentPresenter(
         fragmentView.setOldControllerSettingsWarningVisibility(hasOldControllerSettings)
     }
 
-    private fun loadDefaultControllerSettings(controller: EmulatedController) {
-        controller.loadDefaultSettings()
+    private fun loadDefaultControllerSettings(
+        controller: EmulatedController,
+        questDefaultProfile: String? = null
+    ) {
+        // loadStockProfile is a no-op off Quest, where Dolphin's own defaults are the right ones.
+        val loadedStockProfile = questDefaultProfile != null &&
+                QuestVrSettings.loadStockProfile(controller, questDefaultProfile)
+        if (!loadedStockProfile) {
+            controller.loadDefaultSettings()
+        }
         fragmentView.onControllerSettingsChanged()
     }
 
