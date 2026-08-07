@@ -19,7 +19,7 @@ namespace VideoCommon
 // As pipelines encompass both shader UIDs and render states, changes to either of these should
 // also increment the pipeline UID version. Incrementing the UID version will cause all UID
 // caches to be invalidated.
-constexpr u32 GX_PIPELINE_UID_VERSION = 13;  // Last changed for VR exact virtual-screen depth
+constexpr u32 GX_PIPELINE_UID_VERSION = 14;  // Last changed in PR 14789 (DolphinXR numbering; upstream 9)
 
 struct GXPipelineUid
 {

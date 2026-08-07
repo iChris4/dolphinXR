@@ -19,6 +19,7 @@
 #include "VideoCommon/PixelShaderGen.h"
 #include "VideoCommon/ShaderGenCommon.h"
 #include "VideoCommon/VertexShaderGen.h"
+#include "VideoCommon/XFMemory.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace
@@ -94,27 +95,55 @@ u64 ComputeVertexFamilySignature(const vertex_shader_uid_data& uid)
   // updates and match across devices: code_version (bumped on every generator change), vs_expand
   // (backend capability, differs between PC and Quest), and lighting.light_mask (scene-variant as
   // games toggle lights at runtime).
-  MixFamilyHash(signature, uid.components);
+  //
+  // Upstream repacked vertex_shader_uid_data (PR 14789: 28 bytes, per-texgen union, UV presence
+  // folded into texcoord_elem_count). Family signatures are persisted in VR profiles
+  // (family_version 2), so the pre-repack field values are reconstructed here and hashed in the
+  // original order; the resulting values are unchanged for every draw except the rare case of
+  // dual-texture-transform with no regular texgen (upstream no longer records
+  // dualTexTrans_enabled for those).
+  const u32 texgen_count = std::min<u32>(uid.numTexGens, 8);
+
+  // Old 23-bit components layout: POSMTXIDX=bit1, TEXMTXIDX0-7=bits2-9, NORMAL=10, TANGENT=11,
+  // BINORMAL=12, COL0=13, COL1=14, UV0-7=bits15-22. New layout: TEXMTXIDX0-7=bits0-7,
+  // POSMTXIDX=8, NORMAL=9, TANGENT=10, BINORMAL=11, COL0=12, COL1=13; UVs live in texGenInfo.
+  const u32 c = uid.components;
+  u32 old_components = ((c & 0xff) << 2) | (((c >> 8) & 1) << 1) | (((c >> 9) & 0x1f) << 10);
+  u32 old_texcoord_elem_count = 0;
+  u32 old_texmtxinfo_n_projection = 0;
+  for (u32 i = 0; i < 8; ++i)
+  {
+    const auto& texinfo = uid.texGenInfo[i];
+    if (texinfo.texcoord_elem_count != 0)
+      old_components |= 1u << (15 + i);
+    // The old field was only populated by the VS line/point-expansion driver path.
+    if (uid.vs_expand != VSExpand::None)
+      old_texcoord_elem_count |= static_cast<u32>(texinfo.texcoord_elem_count) << (i * 2);
+    if (i < texgen_count && texinfo.is_regular_texgen)
+      old_texmtxinfo_n_projection |= static_cast<u32>(texinfo.regular.projection) << i;
+  }
+
+  MixFamilyHash(signature, old_components);
   MixFamilyHash(signature, uid.numTexGens);
   MixFamilyHash(signature, uid.numColorChans);
   MixFamilyHash(signature, uid.dualTexTrans_enabled);
   MixFamilyHash(signature, uid.position_has_3_elems);
-  MixFamilyHash(signature, uid.texcoord_elem_count);
-  MixFamilyHash(signature, uid.texMtxInfo_n_projection);
+  MixFamilyHash(signature, old_texcoord_elem_count);
+  MixFamilyHash(signature, old_texmtxinfo_n_projection);
 
-  const u32 texgen_count = std::min<u32>(uid.numTexGens, 8);
   for (u32 i = 0; i < texgen_count; ++i)
   {
-    const auto& texinfo = uid.texMtxInfo[i];
+    const auto& texinfo = uid.texGenInfo[i];
+    const bool regular = texinfo.is_regular_texgen;
     MixFamilyHash(signature, static_cast<u64>(texinfo.inputform));
-    MixFamilyHash(signature, static_cast<u64>(texinfo.texgentype));
+    MixFamilyHash(signature,
+                  static_cast<u64>(regular ? TexGenType::Regular : texinfo.other.texgentype));
     MixFamilyHash(signature, static_cast<u64>(texinfo.sourcerow));
-    MixFamilyHash(signature, texinfo.embosssourceshift);
-    MixFamilyHash(signature, texinfo.embosslightshift);
+    MixFamilyHash(signature, regular ? 0u : static_cast<u32>(texinfo.other.emboss_sourceshift));
+    MixFamilyHash(signature, regular ? 0u : static_cast<u32>(texinfo.other.emboss_lightshift));
 
-    const auto& postinfo = uid.postMtxInfo[i];
-    MixFamilyHash(signature, postinfo.index);
-    MixFamilyHash(signature, postinfo.normalize);
+    MixFamilyHash(signature, regular ? static_cast<u32>(texinfo.regular.postmtx_index) : 0u);
+    MixFamilyHash(signature, regular ? static_cast<u32>(texinfo.regular.postmtx_normalize) : 0u);
   }
 
   MixFamilyHash(signature, uid.lighting.matsource);
