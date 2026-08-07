@@ -279,6 +279,7 @@ if(MSVC)
 
   # Additional warnings
   add_compile_options(
+    /w15262 # Unannotated fallthrough between switch labels
     /w44263 # Non-virtual member function hides base class virtual function
     /w44265 # Class has virtual functions, but destructor is not virtual
     /w44946 # Reinterpret cast between related types
