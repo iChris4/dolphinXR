@@ -5,6 +5,9 @@ RUN apt-get update \
     build-essential \
     clang \
     cmake \
+    qt6-base-dev \
+    qt6-base-private-dev \
+    qt6-svg-dev \
     pkg-config \
     libgl1-mesa-dev \
     libx11-dev \
@@ -19,7 +22,6 @@ RUN apt-get update \
     libudev-dev \
     libevdev-dev \
     libsdl3-dev \
-    libfmt-dev \
     glslang-dev \
     glslang-tools \
     libpugixml-dev \
@@ -45,22 +47,16 @@ RUN apt-get update \
     libpulse-dev \
     llvm-dev \
     libbluetooth-dev \
-    qt6-base-dev \
-    qt6-base-private-dev \
-    qt6-svg-dev \
     gettext \
     libvulkan-dev \
     vulkan-tools
+    ## fmt that comes with ubuntu 26 also seems incorrect.
+    # libfmt-dev \
 
 RUN mkdir -p /app/dolphinxr
 WORKDIR /app/dolphinxr
 
-# Folders except Externals
-COPY .tx CMake Data docs Flatpak Installer Languages LICENSES Source Tools ./
-# TopLevel files
-COPY .dockerignore .editorconfig .git-blame-ignore-revs .gitattributes .gitignore .gitmodules .mailmap AndroidSetup.md BuildMacOSUniversalBinary.py CMakeLists.txt CMakeSettings.json CODE_OF_CONDUCT.md Contributing.md COPYING Dockerfile Readme.md ./
-# Externals
-COPY Externals Externals
+COPY . .
 
 RUN mkdir Build \
   && cd Build \

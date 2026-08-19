@@ -29,13 +29,9 @@ Source/Core/Common/scmrev.h
 /Source/enc_temp_folder/
 # Ignore build info file created by QtCreator
 CMakeLists.txt.user
-# Ignore files created by posix people
-*~
+
 # Ignore vim swapfiles
 *.swp
-# Ignore emacs temp files
-\#*\#
-.\#*
 # Ignore kdevelop files/dirs
 *.kdev4
 # Ignore IDEA/Clion files/dirs

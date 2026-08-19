@@ -13,7 +13,7 @@ endif()
 # This is inserted into the Info.plist as well.
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0.0" CACHE STRING "")
 
-set(CMAKE_USER_MAKE_RULES_OVERRIDE "${CMAKE_CURRENT_SOURCE_DIR}/CMake/FlagsOverride.cmake")
+set(CMAKE_USER_MAKE_RULES_OVERRIDE "CMake/FlagsOverride.cmake")
 
 # CMake 3.28 and later scan c++ source files for module imports by default. Since we don't use
 # modules scanning is pointless, so disable it. This also prevents Clang from generating an error
@@ -490,6 +490,13 @@ endif()
 # TODO: We should have options for dependencies included in the externals to
 # override autodetection of system libraries and force the usage of the
 # externals.
+if (ENABLE_QT AND MSVC)
+  # Windows has no system Qt6 package, so use the vendored one from Externals/Qt (locked to 6.5.1).
+  # On Linux we use the system Qt6 package instead: mixing the vendored Qt6.5.1 (which lacks a DBus
+  # module) with a system Qt6 for DBus fails, since CMake's Qt6 package requires all found
+  # components to share the exact same version.
+  list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/Externals/Qt/Qt6.5.1/x64")
+endif()
 include(CheckLib)
 include(CheckCXXSourceRuns)
 
