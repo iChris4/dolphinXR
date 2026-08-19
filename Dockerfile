@@ -5,6 +5,7 @@ RUN apt-get update \
     build-essential \
     clang \
     cmake \
+    file \
     qt6-base-dev \
     qt6-base-private-dev \
     qt6-svg-dev \
