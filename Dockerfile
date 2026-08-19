@@ -61,6 +61,6 @@ COPY . .
 
 RUN mkdir Build \
   && cd Build \
-  && cmake .. -DENABLE_VR=ON -DENABLE_VULKAN=ON -DLINUX_LOCAL_DEV=true -DUSE_SYSTEM_MBEDTLS=OFF -DUSE_SYSTEM_LIBMGBA=OFF \
+  && cmake .. -DENABLE_VR=ON -DENABLE_VULKAN=ON -DUSE_SYSTEM_MBEDTLS=OFF -DUSE_SYSTEM_LIBMGBA=OFF \
   && cd .. \
   && cmake --build Build --target dolphin-emu -j $(nproc)
