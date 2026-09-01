@@ -331,6 +331,14 @@ public:
   static SamplerState GetSamplerState(u32 index, float custom_tex_scale, bool custom_tex,
                                       bool has_arbitrary_mips);
 
+  // VR: true when a stereo EFB-copy source must be palette-converted per layer (Metroid visors).
+  static bool ShouldUseLayeredPaletteConversion(const TCacheEntry& source, TLUTFormat tlutfmt);
+  static void RenderPaletteEntry(u32 texel_buffer_offset, const RcTcacheEntry& entry,
+                                 AbstractTexture* texture, TLUTFormat tlutfmt,
+                                 bool use_layered_pipeline = false);
+  static void RenderReinterpretEntry(const RcTcacheEntry& entry, AbstractTexture* texture,
+                                     TextureFormat old_format, TextureFormat new_format);
+
 protected:
   // Decodes the specified data to the GPU texture specified by entry.
   // Returns false if the configuration is not supported.
@@ -377,9 +385,11 @@ private:
 
   RcTcacheEntry GetXFBFromCache(u32 address, u32 width, u32 height, u32 stride);
 
-  RcTcacheEntry ApplyPaletteToEntry(RcTcacheEntry& entry, const u8* palette, TLUTFormat tlutfmt);
+  std::pair<RcTcacheEntry, u32> CreatePaletteEntryWithOffset(const RcTcacheEntry& entry,
+                                                             const u8* palette);
 
-  RcTcacheEntry ReinterpretEntry(const RcTcacheEntry& existing_entry, TextureFormat new_format);
+  RcTcacheEntry CreateReinterpretEntry(const RcTcacheEntry& existing_entry,
+                                       TextureFormat new_format);
 
   RcTcacheEntry DoPartialTextureUpdates(RcTcacheEntry& entry_to_update, const u8* palette,
                                         TLUTFormat tlutfmt);

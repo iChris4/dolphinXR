@@ -343,55 +343,10 @@ bool TextureCacheBase::DidLinkedAssetsChange(const TCacheEntry& entry)
   return resource->GetLoadTime() > entry.last_load_time;
 }
 
-RcTcacheEntry TextureCacheBase::ApplyPaletteToEntry(RcTcacheEntry& entry, const u8* palette,
-                                                    TLUTFormat tlutfmt)
+std::pair<RcTcacheEntry, u32>
+TextureCacheBase::CreatePaletteEntryWithOffset(const RcTcacheEntry& entry, const u8* palette)
 {
   DEBUG_ASSERT(g_backend_info.bSupportsPaletteConversion);
-
-  const bool vulkan_fix_enabled =
-      g_backend_info.api_type == APIType::Vulkan &&
-      g_ActiveConfig.vr_metroid_thermal_visor_fix && IsMetroidVulkanPaletteFixGame();
-  const bool d3d_fix_enabled =
-      g_backend_info.api_type == APIType::D3D &&
-      g_ActiveConfig.vr_metroid_d3d_thermal_palette_fix && IsMetroidD3DPaletteFixGame();
-  const bool mp1_layered_palette_candidate =
-      IsMetroidPrime1ThermalStereoSourceCandidate(entry->native_width, entry->native_height,
-                                                  entry->GetNumLayers(), false,
-                                                  entry->is_xfb_copy);
-  const bool mp2_highlight_palette_candidate =
-      IsMetroidPrime2DarkHighlightTextureCandidate(entry->native_width, entry->native_height,
-                                                   entry->GetNumLayers(), false,
-                                                   entry->is_xfb_copy);
-  bool use_layered_pipeline =
-      (vulkan_fix_enabled || d3d_fix_enabled) &&
-      g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
-      (mp1_layered_palette_candidate ||
-       ((vulkan_fix_enabled || d3d_fix_enabled) && mp2_highlight_palette_candidate));
-
-  // VR debug: log palette conversions of stereo EFB sources so missed layered-candidate
-  // sizes (e.g. per-game visor palette copy dimensions) can be identified from a log run.
-  if (ShaderHunter::GetInstance().IsDebugLogging() && entry->GetNumLayers() >= 2) [[unlikely]]
-  {
-    INFO_LOG_FMT(VIDEO,
-                 "VR_PALETTE: {}x{} layers={} tlutfmt={} layered={} "
-                 "(mp1_cand={} mp2_hl_cand={} vk_fix={} d3d_fix={})",
-                 entry->native_width, entry->native_height, entry->GetNumLayers(),
-                 static_cast<int>(tlutfmt), use_layered_pipeline, mp1_layered_palette_candidate,
-                 mp2_highlight_palette_candidate, vulkan_fix_enabled, d3d_fix_enabled);
-  }
-
-  const AbstractPipeline* pipeline =
-      g_shader_cache->GetPaletteConversionPipeline(tlutfmt, use_layered_pipeline);
-  if (!pipeline && use_layered_pipeline)
-  {
-    use_layered_pipeline = false;
-    pipeline = g_shader_cache->GetPaletteConversionPipeline(tlutfmt);
-  }
-  if (!pipeline)
-  {
-    ERROR_LOG_FMT(VIDEO, "Failed to get conversion pipeline for format {}", tlutfmt);
-    return {};
-  }
 
   TextureConfig new_config = entry->texture->GetConfig();
   new_config.levels = 1;
@@ -399,7 +354,7 @@ RcTcacheEntry TextureCacheBase::ApplyPaletteToEntry(RcTcacheEntry& entry, const 
 
   RcTcacheEntry decoded_entry = AllocateCacheEntry(new_config);
   if (!decoded_entry)
-    return decoded_entry;
+    return {nullptr, 0};
 
   decoded_entry->SetGeneralParameters(entry->addr, entry->size_in_bytes, entry->format,
                                       entry->should_force_safe_hashing);
@@ -410,58 +365,99 @@ RcTcacheEntry TextureCacheBase::ApplyPaletteToEntry(RcTcacheEntry& entry, const 
   decoded_entry->SetNotCopy();
   decoded_entry->may_have_overlapping_textures = entry->may_have_overlapping_textures;
 
-  g_gfx->BeginUtilityDrawing();
-
   const u32 palette_size = entry->format == TextureFormat::I4 ? 32 : 512;
   u32 texel_buffer_offset;
-  if (g_vertex_manager->UploadTexelBuffer(palette, palette_size,
-                                          TexelBufferFormat::TEXEL_BUFFER_FORMAT_R16_UINT,
-                                          &texel_buffer_offset))
-  {
-    struct Uniforms
-    {
-      float multiplier;
-      u32 texel_buffer_offset;
-      u32 pad[2];
-    };
-    static_assert(std::is_standard_layout<Uniforms>::value);
-    Uniforms uniforms = {};
-    uniforms.multiplier = entry->format == TextureFormat::I4 ? 15.0f : 255.0f;
-    uniforms.texel_buffer_offset = texel_buffer_offset;
-    g_vertex_manager->UploadUtilityUniforms(&uniforms, sizeof(uniforms));
-
-    g_gfx->SetAndDiscardFramebuffer(decoded_entry->framebuffer.get());
-    g_gfx->SetViewportAndScissor(decoded_entry->texture->GetRect());
-    g_gfx->SetPipeline(pipeline);
-    g_gfx->SetTexture(1, entry->texture.get());
-    g_gfx->SetSamplerState(1, RenderState::GetPointSamplerState());
-    g_gfx->Draw(0, 3);
-    g_gfx->EndUtilityDrawing();
-    decoded_entry->texture->FinishedRendering();
-  }
-  else
+  if (!g_vertex_manager->UploadTexelBuffer(palette, palette_size,
+                                           TexelBufferFormat::TEXEL_BUFFER_FORMAT_R16_UINT,
+                                           &texel_buffer_offset))
   {
     ERROR_LOG_FMT(VIDEO, "Texel buffer upload of {} bytes failed", palette_size);
-    g_gfx->EndUtilityDrawing();
   }
 
   m_textures_by_address.emplace(decoded_entry->addr, decoded_entry);
 
-  return decoded_entry;
+  return {decoded_entry, texel_buffer_offset};
 }
 
-RcTcacheEntry TextureCacheBase::ReinterpretEntry(const RcTcacheEntry& existing_entry,
-                                                 TextureFormat new_format)
+bool TextureCacheBase::ShouldUseLayeredPaletteConversion(const TCacheEntry& source,
+                                                          TLUTFormat tlutfmt)
+{
+  // VR: palette conversion of a stereo (2-layer) EFB-copy source must keep both eyes for the
+  // Metroid Prime visor effects; the regular pipeline would collapse it to a mono texture.
+  const bool vulkan_fix_enabled =
+      g_backend_info.api_type == APIType::Vulkan &&
+      g_ActiveConfig.vr_metroid_thermal_visor_fix && IsMetroidVulkanPaletteFixGame();
+  const bool d3d_fix_enabled =
+      g_backend_info.api_type == APIType::D3D &&
+      g_ActiveConfig.vr_metroid_d3d_thermal_palette_fix && IsMetroidD3DPaletteFixGame();
+  const bool mp1_layered_palette_candidate =
+      IsMetroidPrime1ThermalStereoSourceCandidate(source.native_width, source.native_height,
+                                                  source.GetNumLayers(), false,
+                                                  source.is_xfb_copy);
+  const bool mp2_highlight_palette_candidate =
+      IsMetroidPrime2DarkHighlightTextureCandidate(source.native_width, source.native_height,
+                                                   source.GetNumLayers(), false,
+                                                   source.is_xfb_copy);
+  bool use_layered_pipeline =
+      (vulkan_fix_enabled || d3d_fix_enabled) &&
+      g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+      (mp1_layered_palette_candidate ||
+       ((vulkan_fix_enabled || d3d_fix_enabled) && mp2_highlight_palette_candidate));
+
+  // VR debug: log palette conversions of stereo EFB sources so missed layered-candidate
+  // sizes (e.g. per-game visor palette copy dimensions) can be identified from a log run.
+  if (ShaderHunter::GetInstance().IsDebugLogging() && source.GetNumLayers() >= 2) [[unlikely]]
+  {
+    INFO_LOG_FMT(VIDEO,
+                 "VR_PALETTE: {}x{} layers={} tlutfmt={} layered={} "
+                 "(mp1_cand={} mp2_hl_cand={} vk_fix={} d3d_fix={})",
+                 source.native_width, source.native_height, source.GetNumLayers(),
+                 static_cast<int>(tlutfmt), use_layered_pipeline, mp1_layered_palette_candidate,
+                 mp2_highlight_palette_candidate, vulkan_fix_enabled, d3d_fix_enabled);
+  }
+  return use_layered_pipeline;
+}
+
+void TextureCacheBase::RenderPaletteEntry(u32 texel_buffer_offset, const RcTcacheEntry& entry,
+                                          AbstractTexture* texture, TLUTFormat tlutfmt,
+                                          bool use_layered_pipeline)
 {
   const AbstractPipeline* pipeline =
-      g_shader_cache->GetTextureReinterpretPipeline(existing_entry->format.texfmt, new_format);
+      g_shader_cache->GetPaletteConversionPipeline(tlutfmt, use_layered_pipeline);
+  if (!pipeline && use_layered_pipeline)
+    pipeline = g_shader_cache->GetPaletteConversionPipeline(tlutfmt);
   if (!pipeline)
   {
-    ERROR_LOG_FMT(VIDEO, "Failed to obtain texture reinterpreting pipeline from format {} to {}",
-                  existing_entry->format.texfmt, new_format);
-    return {};
+    ERROR_LOG_FMT(VIDEO, "Failed to get conversion pipeline for format {}", tlutfmt);
+    return;
   }
 
+  struct Uniforms
+  {
+    float multiplier;
+    u32 texel_buffer_offset;
+    u32 pad[2];
+  };
+  static_assert(std::is_standard_layout<Uniforms>::value);
+  Uniforms uniforms = {};
+  uniforms.multiplier = entry->format == TextureFormat::I4 ? 15.0f : 255.0f;
+  uniforms.texel_buffer_offset = texel_buffer_offset;
+  g_vertex_manager->UploadUtilityUniforms(&uniforms, sizeof(uniforms));
+
+  g_gfx->BeginUtilityDrawing();
+  g_gfx->SetAndDiscardFramebuffer(entry->framebuffer.get());
+  g_gfx->SetViewportAndScissor(entry->texture->GetRect());
+  g_gfx->SetPipeline(pipeline);
+  g_gfx->SetTexture(1, texture);
+  g_gfx->SetSamplerState(1, RenderState::GetPointSamplerState());
+  g_gfx->Draw(0, 3);
+  g_gfx->EndUtilityDrawing();
+  entry->texture->FinishedRendering();
+}
+
+RcTcacheEntry TextureCacheBase::CreateReinterpretEntry(const RcTcacheEntry& existing_entry,
+                                                       TextureFormat new_format)
+{
   TextureConfig new_config = existing_entry->texture->GetConfig();
   new_config.levels = 1;
   new_config.flags |= AbstractTextureFlag_RenderTarget;
@@ -481,19 +477,32 @@ RcTcacheEntry TextureCacheBase::ReinterpretEntry(const RcTcacheEntry& existing_e
   reinterpreted_entry->may_have_overlapping_textures =
       existing_entry->may_have_overlapping_textures;
 
-  g_gfx->BeginUtilityDrawing();
-  g_gfx->SetAndDiscardFramebuffer(reinterpreted_entry->framebuffer.get());
-  g_gfx->SetViewportAndScissor(reinterpreted_entry->texture->GetRect());
-  g_gfx->SetPipeline(pipeline);
-  g_gfx->SetTexture(0, existing_entry->texture.get());
-  g_gfx->SetSamplerState(1, RenderState::GetPointSamplerState());
-  g_gfx->Draw(0, 3);
-  g_gfx->EndUtilityDrawing();
-  reinterpreted_entry->texture->FinishedRendering();
-
   m_textures_by_address.emplace(reinterpreted_entry->addr, reinterpreted_entry);
 
   return reinterpreted_entry;
+}
+
+void TextureCacheBase::RenderReinterpretEntry(const RcTcacheEntry& entry, AbstractTexture* texture,
+                                              TextureFormat old_format, TextureFormat new_format)
+{
+  const AbstractPipeline* pipeline =
+      g_shader_cache->GetTextureReinterpretPipeline(old_format, new_format);
+  if (!pipeline)
+  {
+    ERROR_LOG_FMT(VIDEO, "Failed to obtain texture reinterpreting pipeline from format {} to {}",
+                  old_format, new_format);
+    return;
+  }
+
+  g_gfx->BeginUtilityDrawing();
+  g_gfx->SetAndDiscardFramebuffer(entry->framebuffer.get());
+  g_gfx->SetViewportAndScissor(entry->texture->GetRect());
+  g_gfx->SetPipeline(pipeline);
+  g_gfx->SetTexture(0, texture);
+  g_gfx->SetSamplerState(1, RenderState::GetPointSamplerState());
+  g_gfx->Draw(0, 3);
+  g_gfx->EndUtilityDrawing();
+  entry->texture->FinishedRendering();
 }
 
 void TextureCacheBase::ScaleTextureCacheEntryTo(RcTcacheEntry& entry, u32 new_width, u32 new_height)
@@ -966,14 +975,19 @@ RcTcacheEntry TextureCacheBase::DoPartialTextureUpdates(RcTcacheEntry& entry_to_
             continue;
           }
 
-          auto reinterpreted_entry = ReinterpretEntry(entry, entry_to_update->format.texfmt);
+          auto reinterpreted_entry = CreateReinterpretEntry(entry, entry_to_update->format.texfmt);
+          RenderReinterpretEntry(reinterpreted_entry, entry->texture.get(), entry->format.texfmt,
+                                 reinterpreted_entry->format.texfmt);
           if (reinterpreted_entry)
             entry = reinterpreted_entry;
         }
 
         if (isPaletteTexture)
         {
-          auto decoded_entry = ApplyPaletteToEntry(entry, palette, tlutfmt);
+          const auto [decoded_entry, texel_buffer_offset] =
+              CreatePaletteEntryWithOffset(entry, palette);
+          RenderPaletteEntry(texel_buffer_offset, decoded_entry, entry->texture.get(), tlutfmt,
+                             ShouldUseLayeredPaletteConversion(*entry, tlutfmt));
           if (decoded_entry)
           {
             // Link the efb copy with the partially updated texture, so we won't apply this partial
@@ -1767,12 +1781,23 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
   if (unreinterpreted_copy != m_textures_by_address.end())
   {
     auto decoded_entry =
-        ReinterpretEntry(unreinterpreted_copy->second, texture_info.GetTextureFormat());
+        CreateReinterpretEntry(unreinterpreted_copy->second, texture_info.GetTextureFormat());
+    RenderReinterpretEntry(decoded_entry, unreinterpreted_copy->second->texture.get(),
+                           unreinterpreted_copy->second->format.texfmt,
+                           decoded_entry->format.texfmt);
 
     // It's possible to combine reinterpreted textures + palettes.
     if (unreinterpreted_copy == unconverted_copy && decoded_entry)
-      decoded_entry = ApplyPaletteToEntry(decoded_entry, texture_info.GetTlutAddress(),
-                                          texture_info.GetTlutFormat());
+    {
+      auto existing_entry = decoded_entry;
+      u32 texel_buffer_offset = 0;
+      std::tie(decoded_entry, texel_buffer_offset) =
+          CreatePaletteEntryWithOffset(decoded_entry, texture_info.GetTlutAddress());
+      RenderPaletteEntry(texel_buffer_offset, decoded_entry, existing_entry->texture.get(),
+                         texture_info.GetTlutFormat(),
+                         ShouldUseLayeredPaletteConversion(*existing_entry,
+                                                           texture_info.GetTlutFormat()));
+    }
 
     if (decoded_entry)
       return decoded_entry;
@@ -1780,8 +1805,12 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
 
   if (unconverted_copy != m_textures_by_address.end())
   {
-    auto decoded_entry = ApplyPaletteToEntry(
-        unconverted_copy->second, texture_info.GetTlutAddress(), texture_info.GetTlutFormat());
+    const auto [decoded_entry, texel_buffer_offset] =
+        CreatePaletteEntryWithOffset(unconverted_copy->second, texture_info.GetTlutAddress());
+    RenderPaletteEntry(texel_buffer_offset, decoded_entry, unconverted_copy->second->texture.get(),
+                       texture_info.GetTlutFormat(),
+                       ShouldUseLayeredPaletteConversion(*unconverted_copy->second,
+                                                         texture_info.GetTlutFormat()));
 
     if (decoded_entry)
     {
