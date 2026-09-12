@@ -16,7 +16,7 @@ finish-args:
   - --filesystem=xdg-run/app/com.discordapp.Discord:create
   # also consider Discord Canary for rich presence
   - --filesystem=xdg-run/app/com.discordapp.DiscordCanary:create
-  - --filesystem=xdg-run/discord-ipc-0:create
+  - --filesystem=xdg-run/discord-ipc-0
   # required to disable the screensaver in various desktops
   - --talk-name=org.freedesktop.ScreenSaver
   - --talk-name=org.xfce.ScreenSaver
