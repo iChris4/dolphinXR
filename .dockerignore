@@ -1,3 +1,4 @@
+### Copy of gitignore
 # Ignore image thumbnail files created by windows
 Thumbs.db
 # Ignore Finder view option files created by OS X
@@ -8,8 +9,8 @@ Source/Core/Common/scmrev.h
 # Ignore files output by build
 /cmake-build-debug
 /cmake-build-release
-/[Bb]uild*/
-/[Bb]inary*/
+/[Bb]uild/
+/[Bb]inary/
 /obj/
 # Ignore files output by Android cmake build
 /Source/Android/app/.cxx/
@@ -28,13 +29,9 @@ Source/Core/Common/scmrev.h
 /Source/enc_temp_folder/
 # Ignore build info file created by QtCreator
 CMakeLists.txt.user
-# Ignore files created by posix people
-*~
+
 # Ignore vim swapfiles
 *.swp
-# Ignore emacs temp files
-\#*\#
-.\#*
 # Ignore kdevelop files/dirs
 *.kdev4
 # Ignore IDEA/Clion files/dirs
@@ -52,4 +49,4 @@ vulkan_pipeline_failures_latest2/
 quest_first_mv_vs.glsl
 quest_mv_vs.glsl
 
-dist/*
+### Changes from gitignore

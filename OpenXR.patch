@@ -1,0 +1,18 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 7efde81..9d5e1fd 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -163,8 +163,12 @@ option(BUILD_ALL_EXTENSIONS "Build loader and layers with all extensions" OFF)
+ option(
+     BUILD_LOADER_WITH_EXCEPTION_HANDLING
+     "Enable exception handling in the loader. Leave this on unless your standard library is built to not throw."
+-    ON
++    OFF
+ )
++if(NOT BUILD_LOADER_WITH_EXCEPTION_HANDLING)                                                                                    
++    add_definitions(-DXRLOADER_DISABLE_EXCEPTION_HANDLING)                                                                      
++    add_definitions(-DJSON_USE_EXCEPTIONS=0)                                                                                    
++endif()
+ 
+ if(WIN32)
+     set(OPENXR_DEBUG_POSTFIX
