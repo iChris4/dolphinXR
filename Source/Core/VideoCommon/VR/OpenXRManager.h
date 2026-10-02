@@ -621,7 +621,10 @@ private:
   std::array<XrPath, 2> m_input_hand_paths{XR_NULL_PATH, XR_NULL_PATH};
   XrAction m_action_primary_click = XR_NULL_HANDLE;
   XrAction m_action_secondary_click = XR_NULL_HANDLE;
+  XrAction m_action_button_3_click = XR_NULL_HANDLE;
+  XrAction m_action_button_4_click = XR_NULL_HANDLE;
   XrAction m_action_menu_click = XR_NULL_HANDLE;
+  XrAction m_action_shoulder_click = XR_NULL_HANDLE;
   XrAction m_action_thumbstick_click = XR_NULL_HANDLE;
   XrAction m_action_trigger_click = XR_NULL_HANDLE;
   XrAction m_action_squeeze_click = XR_NULL_HANDLE;

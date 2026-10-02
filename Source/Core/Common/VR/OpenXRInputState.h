@@ -44,7 +44,10 @@ struct OpenXRControllerState
   bool connected = false;
   bool primary_button = false;
   bool secondary_button = false;
+  bool button_3 = false;
+  bool button_4 = false;
   bool menu_button = false;
+  bool shoulder_button = false;
   bool trigger_button = false;
   bool squeeze_button = false;
   bool thumbstick_button = false;

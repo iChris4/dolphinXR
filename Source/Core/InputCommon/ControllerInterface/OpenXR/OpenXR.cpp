@@ -142,7 +142,10 @@ private:
   {
     AddInput(new DigitalInput(this, hand, DigitalControl::Primary));
     AddInput(new DigitalInput(this, hand, DigitalControl::Secondary));
+    AddInput(new DigitalInput(this, hand, DigitalControl::Button3));
+    AddInput(new DigitalInput(this, hand, DigitalControl::Button4));
     AddInput(new DigitalInput(this, hand, DigitalControl::Menu));
+    AddInput(new DigitalInput(this, hand, DigitalControl::Shoulder));
     AddInput(new DigitalInput(this, hand, DigitalControl::Trigger));
     AddInput(new DigitalInput(this, hand, DigitalControl::Squeeze));
     AddInput(new DigitalInput(this, hand, DigitalControl::Thumbstick));
@@ -160,7 +163,10 @@ private:
   {
     Primary,
     Secondary,
+    Button3,
+    Button4,
     Menu,
+    Shoulder,
     Trigger,
     Squeeze,
     Thumbstick,
@@ -212,8 +218,14 @@ private:
         return prefix + (m_hand == Hand::Left ? " Button X" : " Button A");
       case DigitalControl::Secondary:
         return prefix + (m_hand == Hand::Left ? " Button Y" : " Button B");
+      case DigitalControl::Button3:
+        return prefix + " Button 3";
+      case DigitalControl::Button4:
+        return prefix + " Button 4";
       case DigitalControl::Menu:
         return prefix + " Button Menu";
+      case DigitalControl::Shoulder:
+        return prefix + " Button Shoulder";
       case DigitalControl::Trigger:
         return prefix + " Button Trigger";
       case DigitalControl::Squeeze:
@@ -237,8 +249,14 @@ private:
         return state.primary_button ? 1.0 : 0.0;
       case DigitalControl::Secondary:
         return state.secondary_button ? 1.0 : 0.0;
+      case DigitalControl::Button3:
+        return state.button_3 ? 1.0 : 0.0;
+      case DigitalControl::Button4:
+        return state.button_4 ? 1.0 : 0.0;
       case DigitalControl::Menu:
         return state.menu_button ? 1.0 : 0.0;
+      case DigitalControl::Shoulder:
+        return state.shoulder_button ? 1.0 : 0.0;
       case DigitalControl::Trigger:
         return state.trigger_button ? 1.0 : 0.0;
       case DigitalControl::Squeeze:

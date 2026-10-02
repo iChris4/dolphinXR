@@ -323,10 +323,11 @@ std::vector<const char*> OpenXRManager::GetAvailableControllerExtensions()
     return {};
 #endif
 
-  static const std::array<const char*, 3> s_optional = {
+    static const std::array<const char*, 4> s_optional = {
       XR_FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME,
       XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME,
       XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME,
+      "XR_VALVE_frame_controller_interaction",
   };
 
   uint32_t ext_count = 0;
@@ -1512,8 +1513,14 @@ bool OpenXRManager::InitializeInputActions()
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_secondary_click, "secondary_click", "Secondary Button",
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
+      !create_action(&m_action_button_3_click, "button_3_click", "Button 3",
+           XR_ACTION_TYPE_BOOLEAN_INPUT) ||
+      !create_action(&m_action_button_4_click, "button_4_click", "Button 4",
+           XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_menu_click, "menu_click", "Menu Button",
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
+      !create_action(&m_action_shoulder_click, "shoulder_click", "Shoulder Button",
+           XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_thumbstick_click, "thumbstick_click", "Thumbstick Click",
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_trigger_click, "trigger_click", "Trigger Click",
@@ -1743,6 +1750,45 @@ bool OpenXRManager::InitializeInputActions()
                        {m_action_haptic, "/user/hand/right/output/haptic"},
                    });
 
+  if (IsExtensionEnabled("XR_VALVE_frame_controller_interaction"))
+  {
+    suggest_bindings("/interaction_profiles/valve/frame_controller_valve",
+                     {
+                         {m_action_primary_click, "/user/hand/left/input/dpad_right/click"},
+                         {m_action_secondary_click, "/user/hand/left/input/dpad_up/click"},
+                         {m_action_button_3_click, "/user/hand/left/input/dpad_down/click"},
+                         {m_action_button_4_click, "/user/hand/left/input/dpad_left/click"},
+                         {m_action_menu_click, "/user/hand/left/input/view/click"},
+                         {m_action_shoulder_click, "/user/hand/left/input/shoulder/click"},
+                         {m_action_thumbstick_click, "/user/hand/left/input/thumbstick/click"},
+                         {m_action_thumbstick_x, "/user/hand/left/input/thumbstick/x"},
+                         {m_action_thumbstick_y, "/user/hand/left/input/thumbstick/y"},
+                         {m_action_trigger_click, "/user/hand/left/input/trigger/click"},
+                         {m_action_trigger_value, "/user/hand/left/input/trigger/value"},
+                         {m_action_squeeze_click, "/user/hand/left/input/squeeze/click"},
+                         {m_action_squeeze_value, "/user/hand/left/input/squeeze/value"},
+                         {m_action_aim_pose, "/user/hand/left/input/aim/pose"},
+                         {m_action_grip_pose, "/user/hand/left/input/grip/pose"},
+                         {m_action_primary_click, "/user/hand/right/input/a/click"},
+                         {m_action_secondary_click, "/user/hand/right/input/b/click"},
+                         {m_action_button_3_click, "/user/hand/right/input/y/click"},
+                         {m_action_button_4_click, "/user/hand/right/input/x/click"},
+                         {m_action_menu_click, "/user/hand/right/input/menu/click"},
+                         {m_action_shoulder_click, "/user/hand/right/input/shoulder/click"},
+                         {m_action_thumbstick_click, "/user/hand/right/input/thumbstick/click"},
+                         {m_action_thumbstick_x, "/user/hand/right/input/thumbstick/x"},
+                         {m_action_thumbstick_y, "/user/hand/right/input/thumbstick/y"},
+                         {m_action_trigger_click, "/user/hand/right/input/trigger/click"},
+                         {m_action_trigger_value, "/user/hand/right/input/trigger/value"},
+                         {m_action_squeeze_click, "/user/hand/right/input/squeeze/click"},
+                         {m_action_squeeze_value, "/user/hand/right/input/squeeze/value"},
+                         {m_action_aim_pose, "/user/hand/right/input/aim/pose"},
+                         {m_action_grip_pose, "/user/hand/right/input/grip/pose"},
+                         {m_action_haptic, "/user/hand/left/output/haptic"},
+                         {m_action_haptic, "/user/hand/right/output/haptic"},
+                     });
+  }
+
   // ByteDance Pico controllers require XR_BD_controller_interaction extension.
   if (IsExtensionEnabled(XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME))
   {
@@ -1889,7 +1935,7 @@ bool OpenXRManager::InitializeInputActions()
   }
 
   INFO_LOG_FMT(OPENXR, "OpenXR: Input action system initialized — "
-                        "action set 'dolphin_input' with 14 actions, spaces created for both hands.");
+                        "action set 'dolphin_input' with 17 actions, spaces created for both hands.");
   return true;
 }
 
@@ -1917,7 +1963,10 @@ void OpenXRManager::DestroyInputActions()
   m_input_hand_paths = {XR_NULL_PATH, XR_NULL_PATH};
   m_action_primary_click = XR_NULL_HANDLE;
   m_action_secondary_click = XR_NULL_HANDLE;
+  m_action_button_3_click = XR_NULL_HANDLE;
+  m_action_button_4_click = XR_NULL_HANDLE;
   m_action_menu_click = XR_NULL_HANDLE;
+  m_action_shoulder_click = XR_NULL_HANDLE;
   m_action_thumbstick_click = XR_NULL_HANDLE;
   m_action_trigger_click = XR_NULL_HANDLE;
   m_action_squeeze_click = XR_NULL_HANDLE;
@@ -2148,7 +2197,10 @@ void OpenXRManager::UpdateInputActions()
 
     controller.primary_button = get_boolean(m_action_primary_click);
     controller.secondary_button = get_boolean(m_action_secondary_click);
+    controller.button_3 = get_boolean(m_action_button_3_click);
+    controller.button_4 = get_boolean(m_action_button_4_click);
     controller.menu_button = get_boolean(m_action_menu_click);
+    controller.shoulder_button = get_boolean(m_action_shoulder_click);
     controller.thumbstick_button = get_boolean(m_action_thumbstick_click);
 
     const bool trigger_click = get_boolean(m_action_trigger_click);
