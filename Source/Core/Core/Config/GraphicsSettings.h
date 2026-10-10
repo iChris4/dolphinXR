@@ -237,6 +237,7 @@ extern const Info<bool> GFX_VR_PANES_ON_SCREEN;
 extern const Info<bool> GFX_VR_DETECT_RENDER_TARGETS;
 extern const Info<bool> GFX_VR_ORTHO_SCISSOR_FIX;
 extern const Info<bool> GFX_VR_DETECT_SKYBOX;
+extern const Info<bool> GFX_VR_SKIP_BACKGROUND_FILL;
 extern const Info<bool> GFX_VR_METROID_THERMAL_VISOR_FIX;
 extern const Info<bool> GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX;
 extern const Info<bool> GFX_VR_PASSTHROUGH;

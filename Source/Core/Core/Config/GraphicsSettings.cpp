@@ -247,6 +247,7 @@ const Info<bool> GFX_VR_PANES_ON_SCREEN{{System::GFX, "VR", "SmallViewportsOnScr
 const Info<bool> GFX_VR_DETECT_RENDER_TARGETS{{System::GFX, "VR", "DetectRenderTargets"}, false};
 const Info<bool> GFX_VR_ORTHO_SCISSOR_FIX{{System::GFX, "VR", "OrthoScissorFix"}, true};
 const Info<bool> GFX_VR_DETECT_SKYBOX{{System::GFX, "VR", "DetectSkybox"}, false};
+const Info<bool> GFX_VR_SKIP_BACKGROUND_FILL{{System::GFX, "VR", "SkipBackgroundFill"}, false};
 const Info<bool> GFX_VR_METROID_THERMAL_VISOR_FIX{
     {System::GFX, "VR", "MetroidThermalVisorFix"}, true};
 const Info<bool> GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX{

@@ -1734,6 +1734,22 @@ void VertexManagerBase::Flush()
           }
         }
 
+        // Background fill: an opaque untextured quad drawn last, depth-tested against the scene
+        // without writing depth, so on a flat screen it only colours the empty background (PSO
+        // does this every frame). Reprojected in stereo it lands in front of the scene and
+        // becomes an opaque panel, so drop it; the VR eye buffers are already cleared.
+        if (g_ActiveConfig.vr_skip_background_fill &&
+            g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !vr_flat_mode && !hunter_skip &&
+            !elements_skip && !texmgr_skip && used_textures.Count() == 0 &&
+            !bpmem.blendmode.blend_enable && !bpmem.blendmode.subtract && bpmem.zmode.test_enable &&
+            bpmem.zmode.func != CompareMode::Always && !bpmem.zmode.update_enable &&
+            m_index_generator.GetIndexLen() == 6)
+        {
+          hunter_skip = true;
+          if (hunter_debug_logging) [[unlikely]]
+            INFO_LOG_FMT(VIDEO, "VR_DRAW #{}: skipped as background fill", m_draw_counter);
+        }
+
         // Auto-detect EFB-copy effects: bloom, motion blur, and post-processing draw as ortho
         // quads sampling textures the game just copied out of the EFB, so the virtual-screen
         // path would capture them and smear a whole-scene effect across the 2D screen. When

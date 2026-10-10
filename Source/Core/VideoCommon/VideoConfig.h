@@ -399,6 +399,9 @@ struct VideoConfig final
   bool vr_panes_on_screen = true;   // Route sub-screen 3D viewports (menu panes) to the screen
   bool vr_detect_render_targets = false;  // Exempt square render-to-texture passes from VR
   bool vr_ortho_scissor_fix = true;  // Expand scissor for orthographic VR draws
+  // Skip opaque untextured full-screen quads drawn behind the scene (depth-tested background
+  // fill, e.g. Phantasy Star Online). Reprojected in stereo they become an opaque near panel.
+  bool vr_skip_background_fill = false;
   bool vr_detect_skybox = false;     // Treat objects drawn at camera origin (0,0,0) as skyboxes
   bool vr_metroid_thermal_visor_fix = false;  // Preserve thermal EFB copy layers for MP1 Vulkan
   bool vr_metroid_d3d_thermal_palette_fix = false;  // Layered MP1 thermal palette conversion on D3D11
