@@ -64,6 +64,10 @@ public:
   // override share one reference W for the frame, preserving their original relative Z positions.
   u64 vr_pane_group_override = 0;
 
+  // Per-draw HudPlane route (set by VertexManagerBase, consumed in SetConstants): plane depth in
+  // game units for a perspective HUD draw flattened onto one plane; -1 = not a HudPlane draw.
+  float vr_hud_plane_depth = -1.0f;
+
   // Per-draw element depth override from shader overrides (-1 = use global setting).
   float vr_element_depth_override = -1.0f;
 

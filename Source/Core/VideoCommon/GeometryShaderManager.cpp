@@ -3,9 +3,10 @@
 
 #include "VideoCommon/GeometryShaderManager.h"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -187,6 +188,7 @@ void GeometryShaderManager::Init()
   m_vr_pane_frame_reference_w.clear();
   vr_pane_group_override = 0;
   vr_flat_screen_pane_override = false;
+  vr_hud_plane_depth = -1.0f;
 
   // Init any initial constants which aren't zero when bpmem is zero.
   SetViewportChanged();
@@ -245,12 +247,15 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         constants.head_locked_params = {};
         constants.pixel_center_correction = {};
         constants.vr_pane_remap = {1.0f, 1.0f, 0.0f, 0.0f};
+        constants.vr_pane_clip = {-1.0e6f, 1.0e6f, -1.0e6f, 1.0e6f};
         const bool pane_screen_override = vr_pane_screen_override;
         vr_pane_screen_override = false;  // consume
         const bool flat_screen_pane_override = vr_flat_screen_pane_override;
         vr_flat_screen_pane_override = false;  // consume
         const u64 pane_group_override = vr_pane_group_override;
         vr_pane_group_override = 0;  // consume
+        const float hud_plane_depth = vr_hud_plane_depth;
+        vr_hud_plane_depth = -1.0f;  // consume
         const float upm_override = vr_units_per_meter_override;
         vr_units_per_meter_override = -1.0f;  // consume
         const float headlocked_projection_scale_x = vr_headlocked_projection_scale_x;
@@ -506,6 +511,46 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
             }
           }
 
+          // HudPlane: same pane branch, but every vertex lands on one plane at the given depth
+          // (head_locked_params.w < 0 selects the flat scale in the shader). The plane spans the
+          // draw's own frustum at that depth (x = depth * ndc / P00), so an element appears at the
+          // same angular spot it occupies on the flat screen; the pane remap moves panes the game
+          // shifted with the scissor offset back into place.
+          if (perspective && hud_plane_depth > 0.0f)
+          {
+            const int pane_x_off = bpmem.scissorOffset.x << 1;
+            const int pane_y_off = bpmem.scissorOffset.y << 1;
+            const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
+            const float* p = xfmem.projection.rawProjection.data();
+            if (frame.valid && p[0] != 0.0f && p[2] != 0.0f)
+            {
+              constants.stereoparams[3] = VR_STEREO_SCREEN_PANE_3D_VR_DEPTH;
+              constants.vr_pane_remap =
+                  VR::CalculateVRPaneRemap(xfmem.viewport, pane_x_off, pane_y_off, frame);
+              constants.vr_screen = {hud_plane_depth / p[0], hud_plane_depth / p[2],
+                                     hud_plane_depth, 0.0f};
+              constants.head_locked_params[3] = -1.0f;
+              // The raster scissor is opened to the whole frame (Screen Pane path), so a scissor
+              // smaller than the frame (PSO's minimap window) becomes a clip rectangle in frame
+              // NDC, same convention as the pane remap (y up).
+              const int sc_left = static_cast<int>(bpmem.scissorTL.x) - pane_x_off;
+              const int sc_top = static_cast<int>(bpmem.scissorTL.y) - pane_y_off;
+              const int sc_right = static_cast<int>(bpmem.scissorBR.x) - pane_x_off + 1;
+              const int sc_bottom = static_cast<int>(bpmem.scissorBR.y) - pane_y_off + 1;
+              if (sc_left > frame.left || sc_top > frame.top ||
+                  sc_right < frame.left + frame.width || sc_bottom < frame.top + frame.height)
+              {
+                const float frame_half_w = static_cast<float>(frame.width) * 0.5f;
+                const float frame_half_h = static_cast<float>(frame.height) * 0.5f;
+                const float frame_center_x = static_cast<float>(frame.left) + frame_half_w;
+                const float frame_center_y = static_cast<float>(frame.top) + frame_half_h;
+                constants.vr_pane_clip = {(sc_left - frame_center_x) / frame_half_w,
+                                          (sc_right - frame_center_x) / frame_half_w,
+                                          -(sc_bottom - frame_center_y) / frame_half_h,
+                                          -(sc_top - frame_center_y) / frame_half_h};
+              }
+            }
+          }
         }
 
         // Per-draw VR stereo override (screen/fullscreen handling from shader overrides)
@@ -769,7 +814,9 @@ void GeometryShaderManager::DoState(PointerWrap& p)
   p.Do(m_projection_changed);
   p.Do(m_viewport_changed);
 
-  p.Do(constants);
+  // vr_pane_clip is rebuilt for every draw: leave it out so existing savestates keep their layout.
+  p.DoArray(reinterpret_cast<u8*>(&constants),
+            static_cast<u32>(offsetof(GeometryShaderConstants, vr_pane_clip)));
 
   if (p.IsReadMode())
   {
@@ -779,6 +826,7 @@ void GeometryShaderManager::DoState(PointerWrap& p)
     vr_pane_screen_override = false;
     vr_flat_screen_pane_override = false;
     vr_pane_group_override = 0;
+    vr_hud_plane_depth = -1.0f;
     m_vr_pane_frame_reference_w.clear();
   }
 }

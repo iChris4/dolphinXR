@@ -155,6 +155,7 @@ void TextureElementOverrideWidget::UpdateList()
         ovr.handling == HandlingType::Fullscreen ||
                 ovr.handling == HandlingType::FullscreenMono ? "fullscreen" :
         ovr.handling == HandlingType::HeadLocked    ? "headlocked" :
+        ovr.handling == HandlingType::HudPlane      ? "hud_plane" :
         ovr.handling == HandlingType::Flag          ? "flag" :
         ovr.handling == HandlingType::UnitsPerMeter ? "units_per_meter" :
         ovr.handling == HandlingType::Passthrough   ? "passthrough" :
@@ -176,7 +177,8 @@ void TextureElementOverrideWidget::UpdateList()
                    .arg(QString::fromStdString(ovr.condition_flag));
     }
 
-    if (ovr.handling == HandlingType::Screen || ovr.handling == HandlingType::HeadLocked)
+    if (ovr.handling == HandlingType::Screen || ovr.handling == HandlingType::HeadLocked ||
+        ovr.handling == HandlingType::HudPlane)
     {
       if (ovr.element_depth >= 0.0f)
         label += QStringLiteral(" D%1").arg(ovr.element_depth, 0, 'f', 4);

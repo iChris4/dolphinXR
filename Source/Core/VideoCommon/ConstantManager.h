@@ -161,4 +161,8 @@ struct alignas(16) GeometryShaderConstants
   // (cvr_pane_remap in shaders): ndc_frame = ndc_pane * xy + zw.
   // Identity {1,1,0,0} for every draw whose NDC already spans the full screen.
   float4 vr_pane_remap{1.0f, 1.0f, 0.0f, 0.0f};
+  // HudPlane clip rectangle in frame NDC (cvr_pane_clip in shaders): {left, right, bottom, top}.
+  // The game's scissor cannot clip a plane seen in perspective, so the GS turns it into clip
+  // distances. Wide open for every other draw.
+  float4 vr_pane_clip{-1.0e6f, 1.0e6f, -1.0e6f, 1.0e6f};
 };

@@ -155,6 +155,7 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   m_handling_combo->addItem(tr("Screen"), static_cast<int>(HandlingType::Screen));
   m_handling_combo->addItem(tr("Fullscreen"), static_cast<int>(HandlingType::Fullscreen));
   m_handling_combo->addItem(tr("Head Locked"), static_cast<int>(HandlingType::HeadLocked));
+  m_handling_combo->addItem(tr("HUD Plane"), static_cast<int>(HandlingType::HudPlane));
   m_handling_combo->addItem(tr("Flag"), static_cast<int>(HandlingType::Flag));
   m_handling_combo->addItem(tr("Units per Meter"), static_cast<int>(HandlingType::UnitsPerMeter));
   m_handling_combo->addItem(tr("Passthrough"), static_cast<int>(HandlingType::Passthrough));
@@ -491,10 +492,11 @@ TextureElementOverride TextureElementOverrideAddEditDialog::GetResult() const
     result.condition_inverted =
         !result.condition_flag.empty() && m_condition_mode_combo->currentData().toBool();
   }
-  result.element_depth = (result.handling == HandlingType::Screen ||
-                          result.handling == HandlingType::HeadLocked) ?
-                             static_cast<float>(m_element_depth_spin->value()) :
-                             -1.0f;
+  result.element_depth =
+      (result.handling == HandlingType::Screen || result.handling == HandlingType::HeadLocked ||
+       result.handling == HandlingType::HudPlane) ?
+          static_cast<float>(m_element_depth_spin->value()) :
+          -1.0f;
   result.units_per_meter = result.handling == HandlingType::UnitsPerMeter ?
                                static_cast<float>(m_units_per_meter_spin->value()) :
                                -1.0f;
@@ -599,7 +601,8 @@ void TextureElementOverrideAddEditDialog::OnHandlingChanged()
 {
   const auto handling = static_cast<HandlingType>(m_handling_combo->currentData().toInt());
   const bool show_element_depth =
-      (handling == HandlingType::Screen || handling == HandlingType::HeadLocked);
+      (handling == HandlingType::Screen || handling == HandlingType::HeadLocked ||
+       handling == HandlingType::HudPlane);
   const bool show_units_per_meter = (handling == HandlingType::UnitsPerMeter);
   const bool show_passthrough = (handling == HandlingType::Passthrough);
   const bool show_anchor = (handling == HandlingType::CameraAnchor);

@@ -118,6 +118,7 @@ void ElementsGroupOverrideWidget::UpdateList()
                         .arg(QString::fromStdString(entry.name))
                         .arg(QString::fromLatin1(entry.handling == ShaderHunter::HandlingType::Screen       ? "screen" :
                                                  entry.handling == ShaderHunter::HandlingType::ScreenPane   ? "screen_pane" :
+                                                 entry.handling == ShaderHunter::HandlingType::HudPlane     ? "hud_plane" :
                                                  entry.handling == ShaderHunter::HandlingType::Fullscreen   ? "fullscreen" :
                                                  entry.handling == ShaderHunter::HandlingType::FullscreenMono ? "fullscreen_mono" :
                                                  entry.handling == ShaderHunter::HandlingType::HeadLocked   ? "headlocked" :

@@ -14,7 +14,7 @@
 
 namespace UberShader
 {
-static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 4;
+static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 5;
 
 VertexShaderUid GetVertexShaderUid()
 {
@@ -577,6 +577,13 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
   {
     out.Write("gl_ClipDistance[0] = clipDist0;\n"
               "gl_ClipDistance[1] = clipDist1;\n");
+    if (vr_multiview_vs)
+    {
+      out.Write("gl_ClipDistance[2] = vr_pane_clip_dist.x;\n"
+                "gl_ClipDistance[3] = vr_pane_clip_dist.y;\n"
+                "gl_ClipDistance[4] = vr_pane_clip_dist.z;\n"
+                "gl_ClipDistance[5] = vr_pane_clip_dist.w;\n");
+    }
   }
 
   // Vulkan NDC space has Y pointing down (right-handed NDC space).

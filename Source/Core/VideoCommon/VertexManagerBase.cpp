@@ -1326,7 +1326,8 @@ void VertexManagerBase::Flush()
                     elements.GetOverrideScreenPaneDepth(*element_draw, &screen_pane_group);
               }
               else if (handling == ShaderHunter::HandlingType::Screen ||
-                  handling == ShaderHunter::HandlingType::HeadLocked)
+                       handling == ShaderHunter::HandlingType::HeadLocked ||
+                       handling == ShaderHunter::HandlingType::HudPlane)
               {
                 element_depth = elements.GetOverrideElementDepth(*element_draw);
               }
@@ -1437,6 +1438,21 @@ void VertexManagerBase::Flush()
                     screen_pane_depth == ElementsGroupManager::ScreenPaneDepthMode::VR ?
                         screen_pane_group :
                         0;
+              }
+            }
+            else if (handling == ShaderHunter::HandlingType::HudPlane)
+            {
+              // Flatten onto one plane in front of the camera (GeometryShaderManager), with
+              // the full-frame raster state of the Screen Pane path so the game's pane
+              // scissor doesn't clip the reprojected element.
+              constexpr float DEFAULT_HUD_PLANE_DEPTH = 3.0f;  // game units
+              manual_screen_pane = g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+                                   VR::GetVRFrameRegion().valid &&
+                                   xfmem.projection.type == ProjectionType::Perspective;
+              if (manual_screen_pane)
+              {
+                geometry_shader_manager.vr_hud_plane_depth =
+                    element_depth > 0.0f ? element_depth : DEFAULT_HUD_PLANE_DEPTH;
               }
             }
             else if (handling == ShaderHunter::HandlingType::Fullscreen)

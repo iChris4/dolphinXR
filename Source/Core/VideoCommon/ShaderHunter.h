@@ -50,7 +50,12 @@ public:
     ControllerAnchor = 9,
     // World-fixed virtual-screen routing for a perspective draw which occupies a deliberate
     // sub-region. Unlike Screen, this preserves both the pane's position and its model depth.
-    ScreenPane = 10
+    ScreenPane = 10,
+    // Perspective HUD flattened onto one plane in front of the camera (element_depth = plane
+    // depth in game units). Keeps each element's on-screen place, including scissor-offset
+    // shifted panes, so layers drawn at unrelated depths (PSO's minimap frame, map, compass)
+    // stay together in stereo.
+    HudPlane = 11
   };
 
   // CameraAnchor handling: how much of the anchor element's orientation the camera follows.

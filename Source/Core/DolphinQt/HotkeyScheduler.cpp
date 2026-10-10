@@ -686,6 +686,8 @@ void HotkeyScheduler::Run()
           return "Screen";
         case ShaderHunter::HandlingType::ScreenPane:
           return "Screen Pane";
+        case ShaderHunter::HandlingType::HudPlane:
+          return "HUD Plane";
         case ShaderHunter::HandlingType::HeadLocked:
           return "Head Locked";
         case ShaderHunter::HandlingType::Fullscreen:

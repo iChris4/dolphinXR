@@ -14,7 +14,7 @@
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
 
-static constexpr u32 VERTEX_SHADER_CODE_VERSION = 21;
+static constexpr u32 VERTEX_SHADER_CODE_VERSION = 22;
 
 VertexShaderUid GetVertexShaderUid()
 {
@@ -365,6 +365,8 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
                                      std::string_view view_space_pos)
 {
   out.Write("\tbool vr_pos_replaced = false;\n");
+  // HudPlane clip rectangle as user clip distances (left, right, bottom, top); see cvr_pane_clip.
+  out.Write("\tfloat4 vr_pane_clip_dist = float4(1.0, 1.0, 1.0, 1.0);\n");
   out.Write("\t{{\n");
   out.Write("\tuint eye = gl_ViewIndex;\n");
   out.Write("\tbool right_eye = eye != 0u;\n");
@@ -379,11 +381,16 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
   out.Write("\t\tfloat pane_game_ndc_z = clamp(" I_PIXELCENTERCORRECTION
             ".w - pane_console_ndc_z * " I_PIXELCENTERCORRECTION ".z, -1.0, 1.0);\n");
   out.Write("\t\tfloat pane_reference_w = max(" I_HEAD_PARAMS ".w, 1.0e-4);\n");
-  out.Write("\t\tfloat pane_depth_scale = max(pane_game_w / pane_reference_w, 0.001);\n");
+  // HudPlane (head_locked_params.w < 0): no per-vertex depth, the whole draw on one plane.
+  out.Write("\t\tfloat pane_depth_scale = (" I_HEAD_PARAMS ".w < 0.0) ? 1.0 : "
+            "max(pane_game_w / pane_reference_w, 0.001);\n");
   out.Write("\t\tfloat ndc_x = o.pos.x / pane_game_w;\n");
   out.Write("\t\tfloat ndc_y = o.pos.y / pane_game_w;\n");
   out.Write("\t\tndc_x = ndc_x * " I_VR_PANE_REMAP ".x + " I_VR_PANE_REMAP ".z;\n");
   out.Write("\t\tndc_y = ndc_y * " I_VR_PANE_REMAP ".y + " I_VR_PANE_REMAP ".w;\n");
+  // Exact on the flat HudPlane: frame NDC is affine in the plane position, so linear in clip space.
+  out.Write("\t\tvr_pane_clip_dist = float4(ndc_x - " I_VR_PANE_CLIP ".x, " I_VR_PANE_CLIP
+            ".y - ndc_x, ndc_y - " I_VR_PANE_CLIP ".z, " I_VR_PANE_CLIP ".w - ndc_y);\n");
   out.Write("\t\tfloat4 panePos = float4(\n");
   out.Write("\t\t\tndc_x * " I_VR_SCREEN ".x * pane_depth_scale,\n");
   out.Write("\t\t\tndc_y * " I_VR_SCREEN ".y * pane_depth_scale,\n");
@@ -1175,6 +1182,13 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
   {
     out.Write("gl_ClipDistance[0] = clipDist0;\n"
               "gl_ClipDistance[1] = clipDist1;\n");
+    if (UseVRMultiviewVSProjection(api_type, host_config))
+    {
+      out.Write("gl_ClipDistance[2] = vr_pane_clip_dist.x;\n"
+                "gl_ClipDistance[3] = vr_pane_clip_dist.y;\n"
+                "gl_ClipDistance[4] = vr_pane_clip_dist.z;\n"
+                "gl_ClipDistance[5] = vr_pane_clip_dist.w;\n");
+    }
   }
 
   // Vulkan NDC space has Y pointing down (right-handed NDC space).

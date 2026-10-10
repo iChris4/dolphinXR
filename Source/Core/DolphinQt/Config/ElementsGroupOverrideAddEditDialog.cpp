@@ -225,6 +225,8 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
                             static_cast<int>(ElementsGroupManager::HandlingType::Screen));
   m_handling_combo->addItem(tr("Screen Pane"),
                             static_cast<int>(ElementsGroupManager::HandlingType::ScreenPane));
+  m_handling_combo->addItem(tr("HUD Plane"),
+                            static_cast<int>(ElementsGroupManager::HandlingType::HudPlane));
   m_handling_combo->addItem(tr("Fullscreen"),
                             static_cast<int>(ElementsGroupManager::HandlingType::Fullscreen));
   m_handling_combo->addItem(tr("Head Locked"),
@@ -903,7 +905,8 @@ void ElementsGroupOverrideAddEditDialog::RefreshHandlingUi()
   const auto handling = static_cast<ElementsGroupManager::HandlingType>(
       m_handling_combo->currentData().toInt());
   const bool show_element_depth = (handling == ElementsGroupManager::HandlingType::Screen ||
-                                   handling == ElementsGroupManager::HandlingType::HeadLocked);
+                                   handling == ElementsGroupManager::HandlingType::HeadLocked ||
+                                   handling == ElementsGroupManager::HandlingType::HudPlane);
   const bool show_screen_pane_depth =
       handling == ElementsGroupManager::HandlingType::ScreenPane;
   const bool show_preserve_stereo_efb =

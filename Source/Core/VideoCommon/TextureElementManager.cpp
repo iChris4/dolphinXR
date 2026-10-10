@@ -133,6 +133,8 @@ const char* HandlingToString(HandlingType handling)
     return "fullscreen";
   case HandlingType::HeadLocked:
     return "headlocked";
+  case HandlingType::HudPlane:
+    return "hud_plane";
   case HandlingType::Flag:
     return "flag";
   case HandlingType::UnitsPerMeter:
@@ -156,6 +158,8 @@ HandlingType HandlingFromString(const std::string& value)
     return HandlingType::Fullscreen;
   if (value == "headlocked")
     return HandlingType::HeadLocked;
+  if (value == "hud_plane")
+    return HandlingType::HudPlane;
   if (value == "flag")
     return HandlingType::Flag;
   if (value == "units_per_meter" || value == "unitspermeter" || value == "upm")

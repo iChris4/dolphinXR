@@ -269,7 +269,9 @@ ShaderCode GenerateGeometryShaderCode(APIType api_type, const ShaderHostConfig& 
       // depth of the reprojected pane geometry (correct depth from oblique VR viewpoints).
       out.Write("\t\tfloat pane_game_ndc_z = clamp(f.pos.z / pane_game_w, -1.0, 1.0);\n");
       out.Write("\t\tfloat pane_reference_w = max(" I_HEAD_PARAMS ".w, 1.0e-4);\n");
-      out.Write("\t\tfloat pane_depth_scale = max(pane_game_w / pane_reference_w, 0.001);\n");
+      // HudPlane (head_locked_params.w < 0): no per-vertex depth, the whole draw on one plane.
+      out.Write("\t\tfloat pane_depth_scale = (" I_HEAD_PARAMS ".w < 0.0) ? 1.0 : "
+                "max(pane_game_w / pane_reference_w, 0.001);\n");
       out.Write("\t\tfloat ndc_x = f.pos.x / pane_game_w;\n");
       out.Write("\t\tfloat ndc_y = f.pos.y / pane_game_w;\n");
       out.Write("\t\tndc_x = ndc_x * " I_VR_PANE_REMAP ".x + " I_VR_PANE_REMAP ".z;\n");
