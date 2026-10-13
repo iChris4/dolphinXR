@@ -129,6 +129,9 @@ android {
             versionNameSuffix = "-quest"
             buildConfigField("boolean", "IS_QUEST", "true")
             manifestPlaceholders["questSupportedDevices"] = "quest2|quest3|quest3s|questpro"
+            // com.oculus.trade_cpu_for_gpu_amount; -PquestTradeCpuForGpu=1 builds the A/B variant.
+            manifestPlaceholders["questTradeCpuForGpu"] =
+                (project.findProperty("questTradeCpuForGpu") ?: "-1").toString()
             ndk {
                 abiFilters += listOf("arm64-v8a")
             }

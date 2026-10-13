@@ -1,3 +1,11 @@
+# -TradeCpuForGpu: com.oculus.trade_cpu_for_gpu_amount for this APK (Quest 3/3S): 1 = one GPU
+# performance level more and one CPU level less, -1 the reverse, 0 neither. Default: the
+# Gradle default (-1).
+param(
+    [ValidateSet(-1, 0, 1)]
+    [Nullable[int]]$TradeCpuForGpu = $null
+)
+
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -35,7 +43,11 @@ $env:Path = (($pathPrefixes -join ";") + ";" + $env:Path)
 
 Push-Location $scriptDir
 try {
-    & ".\gradlew.bat" "app:assembleQuestDebug"
+    $gradleArgs = @("app:assembleQuestDebug")
+    if ($null -ne $TradeCpuForGpu) {
+        $gradleArgs += "-PquestTradeCpuForGpu=$TradeCpuForGpu"
+    }
+    & ".\gradlew.bat" @gradleArgs
 }
 finally {
     Pop-Location

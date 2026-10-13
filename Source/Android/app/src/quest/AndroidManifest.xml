@@ -36,9 +36,12 @@
         <meta-data
             android:name="com.oculus.vr.focusaware"
             android:value="true" />
+        <!-- Quest 3/3S: 1 = one GPU performance level more and one CPU level less, -1 the reverse,
+             0 neither. Set by the questTradeCpuForGpu Gradle property (default -1: emulation is
+             CPU-heavy). -->
         <meta-data
             android:name="com.oculus.trade_cpu_for_gpu_amount"
-            android:value="-1" />
+            android:value="${questTradeCpuForGpu}" />
 
         <activity
             android:name=".activities.EmulationActivity"
