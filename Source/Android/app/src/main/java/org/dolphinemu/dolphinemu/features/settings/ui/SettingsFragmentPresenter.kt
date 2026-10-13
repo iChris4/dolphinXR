@@ -76,6 +76,13 @@ import org.dolphinemu.dolphinemu.utils.GpuDriverInstallResult
 import org.dolphinemu.dolphinemu.utils.ThemeHelper
 import org.dolphinemu.dolphinemu.utils.ThreadUtil
 import org.dolphinemu.dolphinemu.utils.WiiUtils
+import org.dolphinemu.dolphinemu.utils.Log
+import org.dolphinemu.dolphinemu.features.settings.model.QuestGameOverrideEnabledSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestGameOverrideSettings
+import org.dolphinemu.dolphinemu.features.settings.model.QuestGameVrConfigBooleanSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestGameVrConfigFloatSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestGameVrConfigIntSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestVrSettings
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
