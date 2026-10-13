@@ -167,7 +167,13 @@ struct TCacheEntry
   u32 pending_efb_copy_width = 0;
   u32 pending_efb_copy_height = 0;
 
-  std::string texture_info_name = "";
+  // The texture dump name. Assign through SetTextureInfoName so the parsed dump-name hash
+  // stays in sync; GetOverrideHash() is read for every bound texture of every draw.
+  void SetTextureInfoName(std::string name);
+  const std::string& GetTextureInfoName() const { return m_texture_info_name; }
+  // XXH64 from the dump name when it has one (matches dump filenames and override INIs),
+  // otherwise the live content hash, which changes with EFB/palette content.
+  u64 GetOverrideHash() const { return m_texture_name_hash != 0 ? m_texture_name_hash : hash; }
 
   VideoCommon::CustomAsset::TimeType last_load_time;
   std::shared_ptr<HiresTexture> hires_texture;
@@ -238,6 +244,11 @@ struct TCacheEntry
   u32 GetNumLayers() const { return texture->GetConfig().layers; }
   AbstractTextureFormat GetFormat() const { return texture->GetConfig().format; }
   void DoState(PointerWrap& p);
+
+private:
+  std::string m_texture_info_name;
+  // Only the parsed dump-name hash is cached; the fallback content hash is always read live.
+  u64 m_texture_name_hash = 0;
 };
 
 using RcTcacheEntry = std::shared_ptr<TCacheEntry>;

@@ -999,9 +999,9 @@ void VertexManagerBase::Flush()
         const auto cache_entry = g_texture_cache->Load(i);
         if (cache_entry)
         {
-          if (!Common::Contains(texture_names, cache_entry->texture_info_name))
+          if (!Common::Contains(texture_names, cache_entry->GetTextureInfoName()))
           {
-            texture_names.push_back(cache_entry->texture_info_name);
+            texture_names.push_back(cache_entry->GetTextureInfoName());
             texture_units.push_back(i);
           }
 
@@ -1128,12 +1128,16 @@ void VertexManagerBase::Flush()
           const auto& vs = m_current_pipeline_config.vs_uid;
           const auto& ps = m_current_pipeline_config.ps_uid;
           const auto& gs = m_current_pipeline_config.gs_uid;
-          const u64 vs_hash =
-              Common::ComputeCRC32(vs.GetUidDataRaw(), static_cast<u32>(vs.GetUidDataSize()));
-          const u64 ps_hash =
-              Common::ComputeCRC32(ps.GetUidDataRaw(), static_cast<u32>(ps.GetUidDataSize()));
-          const u64 gs_hash =
-              Common::ComputeCRC32(gs.GetUidDataRaw(), static_cast<u32>(gs.GetUidDataSize()));
+          // CRC32s (and below, family signatures) of the current UIDs, cached until the UID
+          // changes in UpdatePipelineConfig.
+          const auto uid_crc = [](CachedShaderIds& ids, const u8* data, size_t size) {
+            if (!ids.crc)
+              ids.crc = Common::ComputeCRC32(data, static_cast<u32>(size));
+            return *ids.crc;
+          };
+          const u64 vs_hash = uid_crc(m_vs_override_ids, vs.GetUidDataRaw(), vs.GetUidDataSize());
+          const u64 ps_hash = uid_crc(m_ps_override_ids, ps.GetUidDataRaw(), ps.GetUidDataSize());
+          const u64 gs_hash = uid_crc(m_gs_override_ids, gs.GetUidDataRaw(), gs.GetUidDataSize());
 
           std::array<u64, 8> tex_hashes{};
           std::array<std::string, 8> tex_names{};
@@ -1163,12 +1167,22 @@ void VertexManagerBase::Flush()
           u64 gs_family = 0;
           if (hunter_enabled || hunter_needs_families || elements_runtime_active)
           {
-            vs_family = hunter.RegisterShader(ShaderHunter::ShaderType::Vertex, vs_hash,
-                                              vs.GetUidDataRaw(), vs.GetUidDataSize());
-            ps_family = hunter.RegisterShader(ShaderHunter::ShaderType::Pixel, ps_hash,
-                                              ps.GetUidDataRaw(), ps.GetUidDataSize());
-            gs_family = hunter.RegisterShader(ShaderHunter::ShaderType::Geometry, gs_hash,
-                                              gs.GetUidDataRaw(), gs.GetUidDataSize());
+            const auto uid_family = [](CachedShaderIds& ids, ShaderHunter::ShaderType type,
+                                       const u8* data, size_t size) {
+              if (!ids.family)
+                ids.family = ShaderHunter::ComputeFamilySignature(type, data, size);
+              return *ids.family;
+            };
+            vs_family = uid_family(m_vs_override_ids, ShaderHunter::ShaderType::Vertex,
+                                   vs.GetUidDataRaw(), vs.GetUidDataSize());
+            ps_family = uid_family(m_ps_override_ids, ShaderHunter::ShaderType::Pixel,
+                                   ps.GetUidDataRaw(), ps.GetUidDataSize());
+            gs_family = uid_family(m_gs_override_ids, ShaderHunter::ShaderType::Geometry,
+                                   gs.GetUidDataRaw(), gs.GetUidDataSize());
+            hunter.RegisterDrawShaders(
+                {vs_hash, vs_family, vs.GetUidDataRaw(), vs.GetUidDataSize()},
+                {ps_hash, ps_family, ps.GetUidDataRaw(), ps.GetUidDataSize()},
+                {gs_hash, gs_family, gs.GetUidDataRaw(), gs.GetUidDataSize()});
             hunter.SetCurrentDrawShaderFamilies(vs_family, ps_family, gs_family);
           }
 
@@ -1278,8 +1292,14 @@ void VertexManagerBase::Flush()
           if (texmgr_has_overrides)
             texmgr.RegisterFlagsForTextures(tex_hashes);
 
+          // All Elements override decisions for this draw, under one lock. Resolved eagerly; each
+          // result below is still only consumed under the conditions it always was.
+          ElementsGroupManager::DrawResolution element_overrides;
+          if (elements_has_overrides)
+            element_overrides = elements.ResolveOverrides(*element_draw);
+
           if (!hunter_skip && !elements_skip && elements_has_overrides)
-            elements_skip = elements.ShouldSkipByOverride(*element_draw);
+            elements_skip = element_overrides.skip;
 
           if (!hunter_skip && !elements_skip && metroid_profile_active)
             elements_skip = GetMetroidLayerBehavior(metroid_layer).skip;
@@ -1317,35 +1337,23 @@ void VertexManagerBase::Flush()
                     MetroidHydraHudSettings{};
 
             if (elements_has_overrides)
-              handling = elements.GetOverrideHandling(*element_draw, &preserve_stereo_efb);
+            {
+              handling = element_overrides.handling;
+              preserve_stereo_efb = element_overrides.preserve_stereo_efb;
+            }
             if (handling != ShaderHunter::HandlingType::Skip)
             {
+              // ResolveOverrides filled the parameter matching this handling.
               if (handling == ShaderHunter::HandlingType::ScreenPane)
               {
-                screen_pane_depth =
-                    elements.GetOverrideScreenPaneDepth(*element_draw, &screen_pane_group);
+                screen_pane_depth = element_overrides.screen_pane_depth;
+                screen_pane_group = element_overrides.screen_pane_group;
               }
-              else if (handling == ShaderHunter::HandlingType::Screen ||
-                  handling == ShaderHunter::HandlingType::HeadLocked)
-              {
-                element_depth = elements.GetOverrideElementDepth(*element_draw);
-              }
-              else if (handling == ShaderHunter::HandlingType::UnitsPerMeter)
-              {
-                units_per_meter = elements.GetOverrideUnitsPerMeter(*element_draw);
-              }
-              else if (handling == ShaderHunter::HandlingType::Passthrough)
-              {
-                passthrough_opacity = elements.GetOverridePassthroughOpacity(*element_draw);
-              }
-              else if (handling == ShaderHunter::HandlingType::CameraAnchor)
-              {
-                elements.GetOverrideCameraAnchor(*element_draw, &anchor_params);
-              }
-              else if (handling == ShaderHunter::HandlingType::ControllerAnchor)
-              {
-                elements.GetOverrideControllerAnchor(*element_draw, &controller_anchor_params);
-              }
+              element_depth = element_overrides.element_depth;
+              units_per_meter = element_overrides.units_per_meter;
+              passthrough_opacity = element_overrides.passthrough_opacity;
+              anchor_params = element_overrides.camera_anchor;
+              controller_anchor_params = element_overrides.controller_anchor;
             }
             else if (hunter_has_overrides)
             {
@@ -1676,10 +1684,8 @@ void VertexManagerBase::Flush()
             }
           }
 
-          // ClearEFB is an independent flag, checked regardless of handling type.
-          // This lets an element be e.g. Skip+ClearEFB or Screen+ClearEFB.
-          if (elements_has_overrides)
-            elements.CheckClearEFBForDraw(*element_draw);
+          // ClearEFB is an independent flag, checked regardless of handling type (so an element
+          // can be e.g. Skip+ClearEFB or Screen+ClearEFB); ResolveOverrides armed it above.
 
           // VR Draw Debug Logging: log every draw call's projection, viewport, scissor, and
           // shader hashes so we can identify how specific visual elements (e.g. cinematic bars)
@@ -1796,6 +1802,7 @@ void VertexManagerBase::Flush()
             {
               ps_uid_data->vr_screen_exact_depth = 1;
               uber_ps_uid_data->vr_screen_exact_depth = 1;
+              m_ps_override_ids = {};
               m_pipeline_config_changed = true;
               UpdatePipelineObject();
             }
@@ -2012,6 +2019,7 @@ void VertexManagerBase::UpdatePipelineConfig()
   if (vs_uid != m_current_pipeline_config.vs_uid)
   {
     m_current_pipeline_config.vs_uid = vs_uid;
+    m_vs_override_ids = {};
     m_current_uber_pipeline_config.vs_uid = UberShader::GetVertexShaderUid();
     m_pipeline_config_changed = true;
   }
@@ -2020,6 +2028,7 @@ void VertexManagerBase::UpdatePipelineConfig()
   if (ps_uid != m_current_pipeline_config.ps_uid)
   {
     m_current_pipeline_config.ps_uid = ps_uid;
+    m_ps_override_ids = {};
     m_current_uber_pipeline_config.ps_uid = UberShader::GetPixelShaderUid();
     m_pipeline_config_changed = true;
   }
@@ -2028,6 +2037,7 @@ void VertexManagerBase::UpdatePipelineConfig()
   if (gs_uid != m_current_pipeline_config.gs_uid)
   {
     m_current_pipeline_config.gs_uid = gs_uid;
+    m_gs_override_ids = {};
     m_current_uber_pipeline_config.gs_uid = gs_uid;
     m_pipeline_config_changed = true;
   }

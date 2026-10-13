@@ -241,6 +241,27 @@ u64 ShaderHunter::RegisterShader(ShaderType type, u64 hash, const u8* uid_data, 
   const u64 family_signature = ComputeShaderFamilySignature(type, uid_data, uid_size);
 
   std::lock_guard lock(m_mutex);
+  RegisterShaderLocked(type, hash, family_signature, uid_data, uid_size);
+  return family_signature;
+}
+
+u64 ShaderHunter::ComputeFamilySignature(ShaderType type, const u8* uid_data, size_t uid_size)
+{
+  return ComputeShaderFamilySignature(type, uid_data, uid_size);
+}
+
+void ShaderHunter::RegisterDrawShaders(const DrawShaderInfo& vs, const DrawShaderInfo& ps,
+                                       const DrawShaderInfo& gs)
+{
+  std::lock_guard lock(m_mutex);
+  RegisterShaderLocked(ShaderType::Vertex, vs.hash, vs.family, vs.uid_data, vs.uid_size);
+  RegisterShaderLocked(ShaderType::Pixel, ps.hash, ps.family, ps.uid_data, ps.uid_size);
+  RegisterShaderLocked(ShaderType::Geometry, gs.hash, gs.family, gs.uid_data, gs.uid_size);
+}
+
+void ShaderHunter::RegisterShaderLocked(ShaderType type, u64 hash, u64 family_signature,
+                                        const u8* uid_data, size_t uid_size)
+{
   const int t = static_cast<int>(type);
   if (hash != 0 && family_signature != 0)
     m_shader_family_signatures[t][hash] = family_signature;
@@ -251,8 +272,6 @@ u64 ShaderHunter::RegisterShader(ShaderType type, u64 hash, const u8* uid_data, 
   // Cache UID bytes for later shader source regeneration (dump)
   if (m_enabled && m_uid_cache[t].find(hash) == m_uid_cache[t].end() && uid_data && uid_size > 0)
     m_uid_cache[t][hash] = std::vector<u8>(uid_data, uid_data + uid_size);
-
-  return family_signature;
 }
 
 std::optional<u64> ShaderHunter::GetShaderFamilySignature(ShaderType type, u64 hash) const

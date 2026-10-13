@@ -407,15 +407,6 @@ bool StableSubMatchBaseEqual(const ElementsGroupManager::StableSubMatchSignature
          lhs.texture_hashes == rhs.texture_hashes;
 }
 
-size_t ComputeStableSubMatchBaseKey(const ElementsGroupManager::StableSubMatchSignature& signature)
-{
-  size_t seed = ComputeRuntimeElementKey(signature.runtime_element, signature.texture_hashes, false);
-  HashCombineValue(seed, signature.vs_family);
-  HashCombineValue(seed, signature.ps_family);
-  HashCombineValue(seed, signature.gs_family);
-  return seed;
-}
-
 bool GroupMaskHasActiveGroups(bool projection, bool layer, bool viewport, bool scissor,
                               bool render_state)
 {
@@ -1066,8 +1057,6 @@ void ElementsGroupManager::LoadOverrides(const std::string& game_id)
   std::lock_guard lock(m_mutex);
   m_loaded_game_id = game_id;
   m_overrides.clear();
-  m_stable_submatch_occurrence_counters.clear();
-  m_current_stable_submatch = {};
   m_clear_next_efb = false;
   m_pending_clear_min = 0;
   m_pending_clear_max = 0;
@@ -1135,8 +1124,6 @@ void ElementsGroupManager::SetPopupOpen(bool open)
     m_collecting_highlighted_draw.reset();
     m_display_highlighted_draw.reset();
     m_display_highlighted_match_raw_draw_count = 0;
-    m_stable_submatch_occurrence_counters.clear();
-    m_current_stable_submatch = {};
     ClearSeedSelectionLocked();
   }
 
@@ -1728,9 +1715,6 @@ void ElementsGroupManager::OnFrameEnd()
   {
     m_display_highlighted_match_raw_draw_count = 0;
   }
-
-  m_stable_submatch_occurrence_counters.clear();
-  m_current_stable_submatch = {};
 }
 
 bool ElementsGroupManager::HasActiveHuntLocked() const
@@ -1781,21 +1765,6 @@ ElementsGroupManager::ResolveSelectedMatchDisplayDrawsLocked() const
                                              .raw_draw_count = 0});
   }
   return result;
-}
-
-ElementsGroupManager::StableSubMatchSignature
-ElementsGroupManager::GetStableSubMatchSignatureLocked(const DrawRecord& draw) const
-{
-  if (m_current_stable_submatch.valid && m_current_stable_submatch.draw_sequence == draw.draw_sequence)
-    return m_current_stable_submatch.signature;
-
-  const StableSubMatchSignature base_signature = MakeStableSubMatchSignature(draw, -1);
-  const u64 base_key = static_cast<u64>(ComputeStableSubMatchBaseKey(base_signature));
-  const int occurrence_slot = m_stable_submatch_occurrence_counters[base_key]++;
-  m_current_stable_submatch.valid = true;
-  m_current_stable_submatch.draw_sequence = draw.draw_sequence;
-  m_current_stable_submatch.signature = MakeStableSubMatchSignature(draw, occurrence_slot);
-  return m_current_stable_submatch.signature;
 }
 
 bool ElementsGroupManager::DoesTextureFilterPass(const DrawRecord& draw,
@@ -1899,7 +1868,6 @@ bool ElementsGroupManager::DoesEntryMatch(const ElementGroupOverride& entry, con
 void ElementsGroupManager::RegisterFlagsForDraw(const DrawRecord& draw)
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
   {
     if (entry.flag_group.empty())
@@ -1918,7 +1886,11 @@ void ElementsGroupManager::RegisterFlagsForDraw(const DrawRecord& draw)
 bool ElementsGroupManager::ShouldSkipByOverride(const DrawRecord& draw) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return ShouldSkipByOverrideLocked(draw);
+}
+
+bool ElementsGroupManager::ShouldSkipByOverrideLocked(const DrawRecord& draw) const
+{
   for (const auto& entry : m_overrides)
   {
     if (entry.handling != HandlingType::Skip)
@@ -1939,11 +1911,17 @@ bool ElementsGroupManager::ShouldSkipByOverride(const DrawRecord& draw) const
 ElementsGroupManager::HandlingType ElementsGroupManager::GetOverrideHandling(
     const DrawRecord& draw, bool* out_preserve_stereo_efb) const
 {
+  std::lock_guard lock(m_mutex);
+  return GetOverrideHandlingLocked(draw, out_preserve_stereo_efb);
+}
+
+ElementsGroupManager::HandlingType
+ElementsGroupManager::GetOverrideHandlingLocked(const DrawRecord& draw,
+                                                bool* out_preserve_stereo_efb) const
+{
   if (out_preserve_stereo_efb)
     *out_preserve_stereo_efb = false;
 
-  std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
   {
     if (entry.handling == HandlingType::Skip || entry.handling == HandlingType::Flag)
@@ -1969,7 +1947,13 @@ ElementsGroupManager::ScreenPaneDepthMode
 ElementsGroupManager::GetOverrideScreenPaneDepth(const DrawRecord& draw, u64* out_group_id) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverrideScreenPaneDepthLocked(draw, out_group_id);
+}
+
+ElementsGroupManager::ScreenPaneDepthMode
+ElementsGroupManager::GetOverrideScreenPaneDepthLocked(const DrawRecord& draw,
+                                                       u64* out_group_id) const
+{
   for (size_t index = 0; index < m_overrides.size(); ++index)
   {
     const auto& entry = m_overrides[index];
@@ -1990,7 +1974,11 @@ ElementsGroupManager::GetOverrideScreenPaneDepth(const DrawRecord& draw, u64* ou
 float ElementsGroupManager::GetOverrideElementDepth(const DrawRecord& draw) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverrideElementDepthLocked(draw);
+}
+
+float ElementsGroupManager::GetOverrideElementDepthLocked(const DrawRecord& draw) const
+{
   for (const auto& entry : m_overrides)
   {
     if (entry.element_depth < 0.0f)
@@ -2004,7 +1992,11 @@ float ElementsGroupManager::GetOverrideElementDepth(const DrawRecord& draw) cons
 float ElementsGroupManager::GetOverrideUnitsPerMeter(const DrawRecord& draw) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverrideUnitsPerMeterLocked(draw);
+}
+
+float ElementsGroupManager::GetOverrideUnitsPerMeterLocked(const DrawRecord& draw) const
+{
   for (const auto& entry : m_overrides)
   {
     if (entry.units_per_meter <= 0.0f)
@@ -2018,7 +2010,11 @@ float ElementsGroupManager::GetOverrideUnitsPerMeter(const DrawRecord& draw) con
 float ElementsGroupManager::GetOverridePassthroughOpacity(const DrawRecord& draw) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverridePassthroughOpacityLocked(draw);
+}
+
+float ElementsGroupManager::GetOverridePassthroughOpacityLocked(const DrawRecord& draw) const
+{
   for (const auto& entry : m_overrides)
   {
     if (entry.handling != HandlingType::Passthrough)
@@ -2033,7 +2029,12 @@ bool ElementsGroupManager::GetOverrideCameraAnchor(const DrawRecord& draw,
                                                    CameraAnchorParams* out_params) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverrideCameraAnchorLocked(draw, out_params);
+}
+
+bool ElementsGroupManager::GetOverrideCameraAnchorLocked(const DrawRecord& draw,
+                                                         CameraAnchorParams* out_params) const
+{
   for (const auto& entry : m_overrides)
   {
     if (entry.handling != HandlingType::CameraAnchor)
@@ -2055,7 +2056,12 @@ bool ElementsGroupManager::GetOverrideControllerAnchor(const DrawRecord& draw,
                                                        ControllerAnchorParams* out_params) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverrideControllerAnchorLocked(draw, out_params);
+}
+
+bool ElementsGroupManager::GetOverrideControllerAnchorLocked(
+    const DrawRecord& draw, ControllerAnchorParams* out_params) const
+{
   for (const auto& entry : m_overrides)
   {
     if (entry.handling != HandlingType::ControllerAnchor)
@@ -2077,7 +2083,11 @@ bool ElementsGroupManager::GetOverrideControllerAnchor(const DrawRecord& draw,
 void ElementsGroupManager::CheckClearEFBForDraw(const DrawRecord& draw)
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  CheckClearEFBForDrawLocked(draw);
+}
+
+void ElementsGroupManager::CheckClearEFBForDrawLocked(const DrawRecord& draw)
+{
   for (const auto& entry : m_overrides)
   {
     if (!entry.clear_efb)
@@ -2112,6 +2122,43 @@ void ElementsGroupManager::CheckClearEFBForDraw(const DrawRecord& draw)
     }
     return;
   }
+}
+
+ElementsGroupManager::DrawResolution ElementsGroupManager::ResolveOverrides(const DrawRecord& draw)
+{
+  std::lock_guard lock(m_mutex);
+  DrawResolution result;
+  result.skip = ShouldSkipByOverrideLocked(draw);
+  if (!result.skip)
+  {
+    result.handling = GetOverrideHandlingLocked(draw, &result.preserve_stereo_efb);
+    switch (result.handling)
+    {
+    case HandlingType::ScreenPane:
+      result.screen_pane_depth = GetOverrideScreenPaneDepthLocked(draw, &result.screen_pane_group);
+      break;
+    case HandlingType::Screen:
+    case HandlingType::HeadLocked:
+      result.element_depth = GetOverrideElementDepthLocked(draw);
+      break;
+    case HandlingType::UnitsPerMeter:
+      result.units_per_meter = GetOverrideUnitsPerMeterLocked(draw);
+      break;
+    case HandlingType::Passthrough:
+      result.passthrough_opacity = GetOverridePassthroughOpacityLocked(draw);
+      break;
+    case HandlingType::CameraAnchor:
+      GetOverrideCameraAnchorLocked(draw, &result.camera_anchor);
+      break;
+    case HandlingType::ControllerAnchor:
+      GetOverrideControllerAnchorLocked(draw, &result.controller_anchor);
+      break;
+    default:
+      break;
+    }
+  }
+  CheckClearEFBForDrawLocked(draw);
+  return result;
 }
 
 bool ElementsGroupManager::ShouldClearEFBCopy(int width)

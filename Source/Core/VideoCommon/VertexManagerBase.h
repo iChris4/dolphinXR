@@ -4,6 +4,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -211,6 +212,16 @@ protected:
 
   VideoCommon::GXPipelineUid m_current_pipeline_config;
   VideoCommon::GXUberPipelineUid m_current_uber_pipeline_config;
+  // Shader hunter/override identities of the current specialized UIDs (CRC32 of the UID bytes and
+  // family signature), computed on first use and dropped when the UID changes.
+  struct CachedShaderIds
+  {
+    std::optional<u64> crc;
+    std::optional<u64> family;
+  };
+  CachedShaderIds m_vs_override_ids;
+  CachedShaderIds m_ps_override_ids;
+  CachedShaderIds m_gs_override_ids;
   const AbstractPipeline* m_current_pipeline_object = nullptr;
   bool m_current_pipeline_is_uber = false;
   PrimitiveType m_current_primitive_type = PrimitiveType::Points;

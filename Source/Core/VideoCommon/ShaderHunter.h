@@ -154,6 +154,20 @@ public:
 
   // --- Video thread ---
   u64 RegisterShader(ShaderType type, u64 hash, const u8* uid_data, size_t uid_size);
+  // Family signature of a shader UID. A pure function of the UID bytes, so callers can cache
+  // it per UID instead of recomputing it for every draw.
+  static u64 ComputeFamilySignature(ShaderType type, const u8* uid_data, size_t uid_size);
+  struct DrawShaderInfo
+  {
+    u64 hash = 0;    // CRC32 of the complete UID bytes
+    u64 family = 0;  // ComputeFamilySignature of the same UID
+    const u8* uid_data = nullptr;
+    size_t uid_size = 0;
+  };
+  // Registers a draw's vertex, pixel and geometry shaders under one lock. Equivalent to three
+  // RegisterShader calls with precomputed family signatures.
+  void RegisterDrawShaders(const DrawShaderInfo& vs, const DrawShaderInfo& ps,
+                           const DrawShaderInfo& gs);
   void RegisterDrawCombination(u64 vs_hash, u64 ps_hash, u64 gs_hash);
   void OnFrameEnd();
   bool ShouldSkipDraw(u64 vs_hash, u64 ps_hash, u64 gs_hash);
@@ -337,6 +351,9 @@ private:
   ShaderHunter() = default;
 
   static constexpr int TYPE_COUNT = static_cast<int>(ShaderType::Count);
+
+  void RegisterShaderLocked(ShaderType type, u64 hash, u64 family_signature, const u8* uid_data,
+                            size_t uid_size);
 
   mutable std::mutex m_mutex;
   bool m_enabled = false;

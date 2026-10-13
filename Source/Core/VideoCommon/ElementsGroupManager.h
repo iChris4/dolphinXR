@@ -254,15 +254,26 @@ public:
   void CheckClearEFBForDraw(const DrawRecord& draw);
   bool ShouldClearEFBCopy(int width);
 
+  // Everything VertexManagerBase::Flush needs from the overrides for one draw, under one lock:
+  // ShouldSkipByOverride, then (when not skipped) GetOverrideHandling and the parameter query
+  // of that handling, then CheckClearEFBForDraw. Call after the draw's flags are registered.
+  struct DrawResolution
+  {
+    bool skip = false;
+    HandlingType handling = HandlingType::Skip;
+    bool preserve_stereo_efb = false;
+    ScreenPaneDepthMode screen_pane_depth = ScreenPaneDepthMode::Game;
+    u64 screen_pane_group = 0;
+    float element_depth = -1.0f;
+    float units_per_meter = -1.0f;
+    float passthrough_opacity = 0.0f;
+    CameraAnchorParams camera_anchor;
+    ControllerAnchorParams controller_anchor;
+  };
+  DrawResolution ResolveOverrides(const DrawRecord& draw);
+
 private:
   ElementsGroupManager() = default;
-
-  struct StableSubMatchContext
-  {
-    bool valid = false;
-    u32 draw_sequence = 0;
-    StableSubMatchSignature signature;
-  };
 
   struct GroupMask
   {
@@ -281,12 +292,24 @@ private:
   bool MatchesSelectedMatchFilterLocked(const DrawRecord& draw) const;
   bool MatchesSelectedMatchFilterSignatureLocked(const SelectedSubgroupSignature& signature) const;
   std::vector<CurrentMatchCandidate> ResolveSelectedMatchDisplayDrawsLocked() const;
-  StableSubMatchSignature GetStableSubMatchSignatureLocked(const DrawRecord& draw) const;
   bool DoesEntryBaseMatch(const ElementGroupOverride& entry, const DrawRecord& draw) const;
   bool DoesSelectedMatchFilterPass(const ElementGroupOverride& entry, const DrawRecord& draw) const;
   bool DoesEntryMatch(const ElementGroupOverride& entry, const DrawRecord& draw,
                       bool include_condition) const;
   bool DoesTextureFilterPass(const DrawRecord& draw, const ElementGroupOverride& entry) const;
+
+  bool ShouldSkipByOverrideLocked(const DrawRecord& draw) const;
+  HandlingType GetOverrideHandlingLocked(const DrawRecord& draw,
+                                         bool* out_preserve_stereo_efb) const;
+  ScreenPaneDepthMode GetOverrideScreenPaneDepthLocked(const DrawRecord& draw,
+                                                       u64* out_group_id) const;
+  float GetOverrideElementDepthLocked(const DrawRecord& draw) const;
+  float GetOverrideUnitsPerMeterLocked(const DrawRecord& draw) const;
+  float GetOverridePassthroughOpacityLocked(const DrawRecord& draw) const;
+  bool GetOverrideCameraAnchorLocked(const DrawRecord& draw, CameraAnchorParams* out_params) const;
+  bool GetOverrideControllerAnchorLocked(const DrawRecord& draw,
+                                         ControllerAnchorParams* out_params) const;
+  void CheckClearEFBForDrawLocked(const DrawRecord& draw);
 
   mutable std::mutex m_mutex;
   int m_popup_open_count = 0;
@@ -318,9 +341,6 @@ private:
 
   std::vector<ElementGroupOverride> m_overrides;
   std::string m_loaded_game_id;
-
-  mutable std::unordered_map<u64, int> m_stable_submatch_occurrence_counters;
-  mutable StableSubMatchContext m_current_stable_submatch;
 
   // Clear EFB pending state (video thread): armed by CheckClearEFBForDraw, consumed by the next
   // ShouldClearEFBCopy.
