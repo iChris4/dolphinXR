@@ -2,8 +2,11 @@
 
 package org.dolphinemu.dolphinemu.activities
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
@@ -21,6 +24,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -31,6 +35,7 @@ import androidx.fragment.app.FragmentManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
+import org.dolphinemu.dolphinemu.BuildConfig
 import org.dolphinemu.dolphinemu.NativeLibrary
 import org.dolphinemu.dolphinemu.R
 import org.dolphinemu.dolphinemu.databinding.ActivityEmulationBinding
@@ -190,10 +195,43 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
         }
     }
 
+    // Debug builds only: save/load a state over adb, for repeatable performance A/B runs at one
+    // spot without the in-game menu (which is not visible inside the headset). The slot is the
+    // file number: "--ei slot 1" is <GameID>.s01 (the Android menu's "Slot 2").
+    //   adb shell am broadcast -a org.dolphinemu.dolphinemu.SAVESTATE --es action save --ei slot 1
+    //   adb shell am broadcast -a org.dolphinemu.dolphinemu.SAVESTATE --es action load --ei slot 1
+    //   adb shell am broadcast -a org.dolphinemu.dolphinemu.SAVESTATE --es action save --es path /sdcard/x.sav
+    private val savestateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (!NativeLibrary.IsRunning())
+                return
+            val path = intent.getStringExtra("path")
+            val slot = intent.getIntExtra("slot", 1).coerceIn(0, 99)
+            when (intent.getStringExtra("action")) {
+                "save" -> if (path != null) NativeLibrary.SaveStateAs(path) else NativeLibrary.SaveState(slot)
+                "load" -> if (path != null) NativeLibrary.LoadStateAs(path) else NativeLibrary.LoadState(slot)
+            }
+        }
+    }
+    private var savestateReceiverRegistered = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         ThemeHelper.setTheme(this)
 
         super.onCreate(savedInstanceState)
+
+        if (BuildConfig.DEBUG) {
+            // Exported so adb shell can send it; the DUMP permission keeps other apps out.
+            ContextCompat.registerReceiver(
+                this,
+                savestateReceiver,
+                IntentFilter(ACTION_SAVESTATE),
+                "android.permission.DUMP",
+                null,
+                ContextCompat.RECEIVER_EXPORTED
+            )
+            savestateReceiverRegistered = true
+        }
 
         MainPresenter.skipRescanningLibrary()
 
@@ -352,6 +390,11 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
     }
 
     override fun onDestroy() {
+        if (savestateReceiverRegistered) {
+            unregisterReceiver(savestateReceiver)
+            savestateReceiverRegistered = false
+        }
+
         if (!isChangingConfigurations) {
             stopEmulationForActivityFinish()
         }
@@ -1061,6 +1104,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
         private val buttonsActionsMap = SparseIntArray()
 
         const val EXTRA_SELECTED_GAMES = "SelectedGames"
+        private const val ACTION_SAVESTATE = "org.dolphinemu.dolphinemu.SAVESTATE"
         const val EXTRA_RIIVOLUTION = "Riivolution"
         const val EXTRA_SYSTEM_MENU = "SystemMenu"
         const val EXTRA_USER_PAUSED_EMULATION = "sUserPausedEmulation"
