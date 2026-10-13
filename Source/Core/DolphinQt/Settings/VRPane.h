@@ -65,6 +65,7 @@ private:
   QLabel* m_head_locked_curvature_value = nullptr;
   ConfigBool* m_dont_clear_screen = nullptr;
   ConfigBool* m_head_cpu_cull = nullptr;
+  ConfigBool* m_nonblocking_efb_access = nullptr;
   ConfigBool* m_ortho_scissor_fix = nullptr;
   ConfigBool* m_layered_palette_conversion_path = nullptr;
   ConfigChoiceMap<OpenXRMirrorView>* m_mirror_view = nullptr;

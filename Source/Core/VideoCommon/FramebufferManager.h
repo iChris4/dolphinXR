@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <tuple>
+#include <vector>
 
 #include "Common/CommonTypes.h"
 #include "Common/EnumFormatter.h"
@@ -132,7 +133,9 @@ public:
 
   AbstractPipeline* GetClearPipeline(bool clear_color, bool clear_alpha, bool clear_z) const;
 
-  // Reads a framebuffer value back from the GPU. This may block if the cache is not current.
+  // Reads a framebuffer value back from the GPU. This may block if the cache is not current,
+  // except in a VR session with GFX_VR_NONBLOCKING_EFB_ACCESS, where a read whose readback is
+  // still in flight answers from the last completed one (see PeekEFBCacheNonBlocking).
   u32 PeekEFBColor(u32 x, u32 y);
   float PeekEFBDepth(u32 x, u32 y);
   void SetEFBCacheTileSize(u32 size);
@@ -176,6 +179,23 @@ protected:
     bool has_active_tiles;
     bool needs_refresh;
     bool needs_flush;
+
+    // Non-blocking EFB access only (see UseNonBlockingEFBAccess). snapshot is a CPU copy of the
+    // last readback that completed, laid out like readback_texture (EFB_WIDTH x EFB_HEIGHT
+    // texels, same y orientation); snapshot_tiles flags the tiles it holds data for.
+    // populated_tiles flags the tiles copied into readback_texture since its contents were last
+    // promoted into the snapshot (PromoteReadback).
+    std::vector<u8> snapshot;
+    std::vector<u8> snapshot_tiles;
+    std::vector<bool> populated_tiles;
+    // m_efb_cache_frame when the oldest copy still in flight was recorded (valid while
+    // needs_flush is set).
+    u64 pending_frame;
+    // When each tile of the snapshot last received new data. Bounds how old an answer can be.
+    std::vector<u64> snapshot_tile_time_us;
+    // A sync point's refresh was skipped while an older readback was in flight: the present tiles
+    // hold that older sync point's data (reads of them are reported as stale).
+    bool serving_skipped_refresh;
   };
 
   bool CreateEFBFramebuffer(int efb_scale);
@@ -200,6 +220,25 @@ protected:
   bool IsEFBCacheTilePresent(bool depth, u32 x, u32 y, u32* tile_index) const;
   MathUtil::Rectangle<int> GetEFBCacheTileRect(u32 tile_index) const;
   void PopulateEFBCache(bool depth, u32 tile_index, bool async = false);
+
+  // Non-blocking EFB access (GFX_VR_NONBLOCKING_EFB_ACCESS). Evaluated per call; a change of mode
+  // drops the snapshots, so data captured under the other mode is never served.
+  bool UseNonBlockingEFBAccess();
+  // Completes the readback in flight, if any, and promotes the tiles it copied into the snapshot.
+  // Without allow_blocking it only succeeds when the copy has already finished on the GPU.
+  // Returns whether readback_texture is now flushed.
+  bool FlushReadback(EFBCacheData& data, bool allow_blocking);
+  void PromoteReadback(EFBCacheData& data);
+  bool CanQueueReadback(EFBCacheData& data);
+  bool IsSnapshotUsable(const EFBCacheData& data, u32 tile_index) const;
+  static void ClearEFBCacheSnapshot(EFBCacheData& data);
+  void PeekEFBCacheNonBlocking(bool depth, u32 x, u32 y, u32 tile_index, bool present,
+                               void* out_ptr);
+  void PokeEFBCacheNonBlocking(EFBCacheData& data, u32 x, u32 y, u32 tile_index, bool present,
+                               const void* in_ptr);
+  void RefreshPeekCacheNonBlocking(bool at_sync_point);
+  void SkipEFBCacheRefresh(EFBCacheData& data);
+  static void ReadSnapshotTexel(const EFBCacheData& data, u32 x, u32 y, void* out_ptr);
 
   void CreatePokeVertices(std::vector<EFBPokeVertex>* destination_list, u32 x, u32 y, float z,
                           u32 color);
@@ -253,6 +292,14 @@ protected:
   u32 m_efb_cache_tile_row_stride = 1;
   EFBCacheData m_efb_color_cache = {};
   EFBCacheData m_efb_depth_cache = {};
+
+  // Latched UseNonBlockingEFBAccess() result: the snapshot bookkeeping only runs while it is set.
+  bool m_efb_nonblocking = false;
+  // Counts EndOfFrame() calls; ages the readback in flight (see CanQueueReadback).
+  u64 m_efb_cache_frame = 0;
+  // Set by InvalidatePeekCache(false), which only the BP sync points (draw done, PE tokens) call,
+  // right before RefreshPeekCache(). Tells those refreshes apart from the FIFO-idle one.
+  bool m_peek_cache_sync_point = false;
 
   // EFB clear pipelines
   // Indexed by [color_write_enabled][alpha_write_enabled][depth_write_enabled]

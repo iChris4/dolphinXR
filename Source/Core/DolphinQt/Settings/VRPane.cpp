@@ -437,6 +437,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   m_dont_clear_screen =
       new ConfigBool(tr("Don't Clear Screen"), Config::GFX_VR_DONT_CLEAR_SCREEN);
   m_head_cpu_cull = new ConfigBool(tr("Head-Rotated CPU Culling"), Config::GFX_VR_HEAD_CPU_CULL);
+  m_nonblocking_efb_access =
+      new ConfigBool(tr("Non-Blocking EFB Reads"), Config::GFX_VR_NONBLOCKING_EFB_ACCESS);
   m_remove_bars = new ConfigBool(tr("Remove Cinematic Bars"), Config::GFX_VR_REMOVE_BARS);
   m_frame_size_from_xfb =
       new ConfigBool(tr("Frame Size from XFB Copy"), Config::GFX_VR_FRAME_SIZE_FROM_XFB);
@@ -475,6 +477,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hacks_group_layout->addWidget(m_use_vulkan_multiview);
   hacks_group_layout->addWidget(m_dont_clear_screen);
   hacks_group_layout->addWidget(m_head_cpu_cull);
+  hacks_group_layout->addWidget(m_nonblocking_efb_access);
   hacks_group_layout->addWidget(m_remove_bars);
   hacks_group_layout->addWidget(m_frame_size_from_xfb);
   hacks_group_layout->addWidget(m_panes_on_screen);
@@ -713,6 +716,14 @@ void VRPane::AddDescriptions()
       "regular CPU culling (per-game CPUCull) is not used in VR: it tests against the game's "
       "camera and would cut holes into the view when you look around."
       "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
+  static constexpr char TR_NONBLOCKING_EFB_ACCESS_DESCRIPTION[] = QT_TR_NOOP(
+      "When a game reads the frame buffer from the CPU (EFB access, such as Super Mario Galaxy's "
+      "depth reads), answers from the last readback the GPU has completed instead of waiting for "
+      "the newest one. An answer can be up to about a frame old."
+      "<br><br>Removes the GPU stall that keeps Super Mario Galaxy below full speed in VR. "
+      "Uncheck it if an effect driven by such reads (lens flares, cursors, visibility tests) "
+      "misbehaves in a game."
+      "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
   static constexpr char TR_MIRROR_VIEW_DESCRIPTION[] = QT_TR_NOOP(
       "Selects what the desktop render window shows while OpenXR is active."
       "<br><br>Both Eyes shows the current side-by-side mirror. Left Eye and Right Eye fill the "
@@ -839,6 +850,7 @@ void VRPane::AddDescriptions()
   m_head_locked_curvature->SetDescription(tr(TR_HEAD_LOCKED_CURVATURE_DESCRIPTION));
   m_dont_clear_screen->SetDescription(tr(TR_DONT_CLEAR_SCREEN_DESCRIPTION));
   m_head_cpu_cull->SetDescription(tr(TR_HEAD_CPU_CULL_DESCRIPTION));
+  m_nonblocking_efb_access->SetDescription(tr(TR_NONBLOCKING_EFB_ACCESS_DESCRIPTION));
   m_mirror_view->SetDescription(tr(TR_MIRROR_VIEW_DESCRIPTION));
   m_forced_vbi_frequency->SetDescription(tr(TR_FORCED_VBI_FREQUENCY_DESCRIPTION));
   m_clear_efb_slider->SetDescription(tr(TR_CLEAR_EFB_COPIES_DESCRIPTION));
@@ -935,6 +947,8 @@ void VRPane::ResetGeneralSettings()
                            Config::GFX_VR_DONT_CLEAR_SCREEN.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_HEAD_CPU_CULL,
                            Config::GFX_VR_HEAD_CPU_CULL.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_NONBLOCKING_EFB_ACCESS,
+                           Config::GFX_VR_NONBLOCKING_EFB_ACCESS.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_REMOVE_BARS,
                            Config::GFX_VR_REMOVE_BARS.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_FRAME_SIZE_FROM_XFB,

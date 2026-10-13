@@ -3010,6 +3010,12 @@ class SettingsFragmentPresenter(
             R.string.quest_head_cpu_culling_description
         )
         builder.boolean(
+            "NonBlockingEFBAccess",
+            true,
+            R.string.quest_nonblocking_efb_access,
+            R.string.quest_nonblocking_efb_access_description
+        )
+        builder.boolean(
             "RemoveCinematicBars",
             true,
             R.string.quest_remove_cinematic_bars,
@@ -3451,6 +3457,14 @@ class SettingsFragmentPresenter(
                 QuestVrSettings.headCpuCullSetting(),
                 R.string.quest_head_cpu_culling,
                 R.string.quest_head_cpu_culling_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.nonBlockingEfbAccessSetting(),
+                R.string.quest_nonblocking_efb_access,
+                R.string.quest_nonblocking_efb_access_description
             )
         )
         sl.add(

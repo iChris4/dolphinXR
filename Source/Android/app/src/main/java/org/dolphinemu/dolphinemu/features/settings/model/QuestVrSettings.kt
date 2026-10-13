@@ -137,6 +137,8 @@ object QuestVrSettings {
 
     fun headCpuCullSetting() = vrBooleanSetting("HeadCPUCull", true)
 
+    fun nonBlockingEfbAccessSetting() = vrBooleanSetting("NonBlockingEFBAccess", true)
+
     fun clearEfbCopiesSetting() = vrIntSetting("ClearEFBCopies", 0)
 
     fun loadCustomShadersSetting() = vrBooleanSetting("LoadCustomShaders", false)
@@ -297,6 +299,7 @@ object QuestVrSettings {
             useVulkanMultiviewSetting(),
             dontClearScreenSetting(),
             headCpuCullSetting(),
+            nonBlockingEfbAccessSetting(),
             removeBarsSetting(),
             frameSizeFromXfbSetting(),
             panesOnScreenSetting(),

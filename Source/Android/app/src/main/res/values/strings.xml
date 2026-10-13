@@ -944,6 +944,8 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_dont_clear_screen_description">Prevents clearing the OpenXR eye framebuffers before rendering each frame.</string>
     <string name="quest_head_cpu_culling">Head-Rotated CPU Culling</string>
     <string name="quest_head_cpu_culling_description">Skips draw calls outside the view cone that follows your head before they reach the GPU. Reduces CPU load in open areas.</string>
+    <string name="quest_nonblocking_efb_access">Non-Blocking EFB Reads</string>
+    <string name="quest_nonblocking_efb_access_description">When a game reads the frame buffer from the CPU, answers from the last readback the GPU has completed instead of waiting for the newest one (up to about a frame old). Fixes Super Mario Galaxy\'s frame rate in VR. Turn off if an effect driven by such reads misbehaves in a game.</string>
     <string name="quest_load_custom_shaders">Load Custom Shaders</string>
     <string name="quest_load_custom_shaders_description">Loads custom shader replacements from the game\'s shader override directory.</string>
     <string name="quest_recenter_now">Recenter VR view now</string>

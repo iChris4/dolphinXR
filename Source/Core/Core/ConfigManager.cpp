@@ -174,6 +174,7 @@ static void ClearAppliedVRSettings()
   ClearAppliedVRSetting("DontClearScreen", Config::GFX_VR_DONT_CLEAR_SCREEN);
   ClearAppliedVRSetting("LoadCustomShaders", Config::GFX_VR_LOAD_CUSTOM_SHADERS);
   ClearAppliedVRSetting("HeadCPUCull", Config::GFX_VR_HEAD_CPU_CULL);
+  ClearAppliedVRSetting("NonBlockingEFBAccess", Config::GFX_VR_NONBLOCKING_EFB_ACCESS);
   ClearAppliedVRSetting("MirrorView", Config::GFX_VR_MIRROR_VIEW);
   ClearAppliedVRSetting("ReferenceSpaceMode", Config::GFX_VR_REFERENCE_SPACE_MODE);
   ClearAppliedVRSetting("TrackingMode", Config::GFX_VR_TRACKING_MODE);
@@ -266,6 +267,7 @@ static void ApplyGameVRConfigOverrides(std::string_view game_id, std::optional<u
       }
     }
   }
+  ApplyVRSetting(values, "NonBlockingEFBAccess", Config::GFX_VR_NONBLOCKING_EFB_ACCESS);
   ApplyVRSetting(values, "MirrorView", Config::GFX_VR_MIRROR_VIEW);
   ApplyVRSetting(values, "ReferenceSpaceMode", Config::GFX_VR_REFERENCE_SPACE_MODE);
   ApplyVRSetting(values, "TrackingMode", Config::GFX_VR_TRACKING_MODE);

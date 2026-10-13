@@ -35,6 +35,7 @@ object QuestGameVrConfigSettings {
         "DontClearScreen",
         "LoadCustomShaders",
         "HeadCPUCull",
+        "NonBlockingEFBAccess",
         "RemoveCinematicBars",
         "FrameSizeFromXFB",
         "SmallViewportsOnScreen",

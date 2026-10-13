@@ -3,12 +3,16 @@
 
 #include "VideoCommon/FramebufferManager.h"
 
+#include <algorithm>
+#include <cstring>
 #include <fmt/format.h>
 #include <memory>
+#include <utility>
 
 #include "Common/ChunkFile.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#include "Common/Timer.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/System.h"
 #include "VideoCommon/AbstractFramebuffer.h"
@@ -20,6 +24,7 @@
 #include "VideoCommon/BPFunctions.h"
 #include "VideoCommon/DriverDetails.h"
 #include "VideoCommon/FramebufferShaderGen.h"
+#include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/PixelShaderManager.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/VertexManagerBase.h"
@@ -29,10 +34,16 @@
 // Maximum number of pixels poked in one batch * 6
 constexpr size_t MAX_POKE_VERTICES = 32768;
 
+// Non-blocking EFB access: the oldest snapshot a peek may be answered from. Far above its normal
+// age (a frame or two); it only matters when no readback completes at all, e.g. a game polling
+// the EFB while nothing submits the copy, where waiting is what lets the answer change.
+constexpr u64 MAX_EFB_SNAPSHOT_AGE_US = 100'000;
+
 std::unique_ptr<FramebufferManager> g_framebuffer_manager;
 
 FramebufferManager::FramebufferManager() : m_prev_efb_format(PixelFormat::INVALID_FMT)
 {
+  VideoCommon::GPUWaitStats::Reset();
 }
 
 FramebufferManager::~FramebufferManager()
@@ -574,6 +585,9 @@ bool FramebufferManager::ReinterpretPixelData(EFBReinterpretType convtype)
   std::swap(m_efb_framebuffer_with_coverage, m_efb_convert_framebuffer_with_coverage);
   g_gfx->EndUtilityDrawing();
   InvalidatePeekCache(true);
+  // Every color texel was re-encoded: a color snapshot taken before would hold values of the old
+  // pixel format. Depth is untouched.
+  ClearEFBCacheSnapshot(m_efb_color_cache);
   return true;
 }
 
@@ -656,13 +670,28 @@ MathUtil::Rectangle<int> FramebufferManager::GetEFBCacheTileRect(u32 tile_index)
 
 u32 FramebufferManager::PeekEFBColor(u32 x, u32 y)
 {
+  using VideoCommon::GPUWaitStats::EFBRead;
+  VideoCommon::GPUWaitStats::ScopedReason wait_reason(VideoCommon::GPUWaitStats::Reason::EFBPeek);
+
   // The y coordinate here assumes upper-left origin, but the readback texture is lower-left in GL.
   if (g_backend_info.bUsesLowerLeftOrigin)
     y = EFB_HEIGHT - 1 - y;
 
+  u32 value;
   u32 tile_index;
-  if (!IsEFBCacheTilePresent(false, x, y, &tile_index))
+  const bool present = IsEFBCacheTilePresent(false, x, y, &tile_index);
+  if (UseNonBlockingEFBAccess())
+  {
+    PeekEFBCacheNonBlocking(false, x, y, tile_index, present, &value);
+    return value;
+  }
+
+  bool blocked = false;
+  if (!present)
+  {
     PopulateEFBCache(false, tile_index);
+    blocked = true;
+  }
 
   m_efb_color_cache.tiles[tile_index].frame_access_mask |= 1;
 
@@ -670,22 +699,38 @@ u32 FramebufferManager::PeekEFBColor(u32 x, u32 y)
   {
     m_efb_color_cache.readback_texture->Flush();
     m_efb_color_cache.needs_flush = false;
+    blocked = true;
   }
 
-  u32 value;
   m_efb_color_cache.readback_texture->ReadTexel(x, y, &value);
+  VideoCommon::GPUWaitStats::RecordEFBRead(blocked ? EFBRead::Blocked : EFBRead::Fresh);
   return value;
 }
 
 float FramebufferManager::PeekEFBDepth(u32 x, u32 y)
 {
+  using VideoCommon::GPUWaitStats::EFBRead;
+  VideoCommon::GPUWaitStats::ScopedReason wait_reason(VideoCommon::GPUWaitStats::Reason::EFBPeek);
+
   // The y coordinate here assumes upper-left origin, but the readback texture is lower-left in GL.
   if (g_backend_info.bUsesLowerLeftOrigin)
     y = EFB_HEIGHT - 1 - y;
 
+  float value;
   u32 tile_index;
-  if (!IsEFBCacheTilePresent(true, x, y, &tile_index))
+  const bool present = IsEFBCacheTilePresent(true, x, y, &tile_index);
+  if (UseNonBlockingEFBAccess())
+  {
+    PeekEFBCacheNonBlocking(true, x, y, tile_index, present, &value);
+    return value;
+  }
+
+  bool blocked = false;
+  if (!present)
+  {
     PopulateEFBCache(true, tile_index);
+    blocked = true;
+  }
 
   m_efb_depth_cache.tiles[tile_index].frame_access_mask |= 1;
 
@@ -693,10 +738,11 @@ float FramebufferManager::PeekEFBDepth(u32 x, u32 y)
   {
     m_efb_depth_cache.readback_texture->Flush();
     m_efb_depth_cache.needs_flush = false;
+    blocked = true;
   }
 
-  float value;
   m_efb_depth_cache.readback_texture->ReadTexel(x, y, &value);
+  VideoCommon::GPUWaitStats::RecordEFBRead(blocked ? EFBRead::Blocked : EFBRead::Fresh);
   return value;
 }
 
@@ -714,6 +760,13 @@ void FramebufferManager::SetEFBCacheTileSize(u32 size)
 
 void FramebufferManager::RefreshPeekCache()
 {
+  const bool at_sync_point = std::exchange(m_peek_cache_sync_point, false);
+  if (UseNonBlockingEFBAccess())
+  {
+    RefreshPeekCacheNonBlocking(at_sync_point);
+    return;
+  }
+
   if (!m_efb_color_cache.needs_refresh && !m_efb_depth_cache.needs_refresh)
   {
     // The cache has already been refreshed.
@@ -746,6 +799,11 @@ void FramebufferManager::RefreshPeekCache()
 
 void FramebufferManager::InvalidatePeekCache(bool forced)
 {
+  // Only the BP sync points (draw done, PE tokens) invalidate unforced, and each calls
+  // RefreshPeekCache() right after: mark that refresh as one taken at a sync point.
+  if (!forced)
+    m_peek_cache_sync_point = true;
+
   if (forced || m_efb_color_cache.out_of_date)
   {
     if (m_efb_color_cache.has_active_tiles)
@@ -760,6 +818,7 @@ void FramebufferManager::InvalidatePeekCache(bool forced)
 
     m_efb_color_cache.has_active_tiles = false;
     m_efb_color_cache.out_of_date = false;
+    m_efb_color_cache.serving_skipped_refresh = false;
   }
   if (forced || m_efb_depth_cache.out_of_date)
   {
@@ -775,6 +834,7 @@ void FramebufferManager::InvalidatePeekCache(bool forced)
 
     m_efb_depth_cache.has_active_tiles = false;
     m_efb_depth_cache.out_of_date = false;
+    m_efb_depth_cache.serving_skipped_refresh = false;
   }
 }
 
@@ -795,7 +855,15 @@ void FramebufferManager::EndOfFrame()
   {
     m_efb_color_cache.tiles[i].frame_access_mask <<= 1;
     m_efb_depth_cache.tiles[i].frame_access_mask <<= 1;
+    // Snapshot data of a tile nobody read for 8 frames is too old to ever answer a peek.
+    if (m_efb_color_cache.tiles[i].frame_access_mask == 0)
+      m_efb_color_cache.snapshot_tiles[i] = 0;
+    if (m_efb_depth_cache.tiles[i].frame_access_mask == 0)
+      m_efb_depth_cache.snapshot_tiles[i] = 0;
   }
+  m_efb_cache_frame++;
+
+  VideoCommon::GPUWaitStats::OnFrameEnd();
 }
 
 bool FramebufferManager::CompileReadbackPipelines()
@@ -971,6 +1039,15 @@ bool FramebufferManager::CreateReadbackFramebuffer()
   std::ranges::fill(m_efb_color_cache.tiles, EFBCacheTile{false, 0});
   m_efb_depth_cache.tiles.resize(total_tiles);
   std::ranges::fill(m_efb_depth_cache.tiles, EFBCacheTile{false, 0});
+  for (EFBCacheData* data : {&m_efb_color_cache, &m_efb_depth_cache})
+  {
+    // The snapshot itself is allocated on first use (non-blocking EFB access only).
+    data->snapshot.clear();
+    data->snapshot_tiles.assign(total_tiles, u8{0});
+    data->snapshot_tile_time_us.assign(total_tiles, 0);
+    data->populated_tiles.assign(total_tiles, false);
+    data->serving_skipped_refresh = false;
+  }
 
   return true;
 }
@@ -983,6 +1060,7 @@ void FramebufferManager::DestroyReadbackFramebuffer()
     data.texture.reset();
     data.needs_refresh = false;
     data.has_active_tiles = false;
+    ClearEFBCacheSnapshot(data);
   };
   DestroyCache(m_efb_color_cache);
   DestroyCache(m_efb_depth_cache);
@@ -1045,19 +1123,241 @@ void FramebufferManager::PopulateEFBCache(bool depth, u32 tile_index, bool async
     data.readback_texture->CopyFromTexture(src_texture, rect, 0, 0, rect);
   }
 
+  VideoCommon::GPUWaitStats::RecordEFBPopulate();
+  if (m_efb_nonblocking)
+    data.populated_tiles[tile_index] = true;
+
   // Wait until the copy is complete.
   if (!async)
   {
     data.readback_texture->Flush();
     data.needs_flush = false;
+    // The wait covered every copy recorded before this one as well.
+    if (m_efb_nonblocking)
+      PromoteReadback(data);
   }
   else
   {
+    // The readback in flight is aged from its oldest copy (see CanQueueReadback).
+    if (m_efb_nonblocking && !data.needs_flush)
+      data.pending_frame = m_efb_cache_frame;
     data.needs_flush = true;
   }
   data.has_active_tiles = true;
   data.out_of_date = false;
   data.tiles[tile_index].present = true;
+}
+
+bool FramebufferManager::UseNonBlockingEFBAccess()
+{
+  const bool enabled = g_ActiveConfig.VRSessionActive() && g_ActiveConfig.vr_nonblocking_efb_access;
+  if (enabled != m_efb_nonblocking)
+  {
+    m_efb_nonblocking = enabled;
+    for (EFBCacheData* data : {&m_efb_color_cache, &m_efb_depth_cache})
+    {
+      ClearEFBCacheSnapshot(*data);
+      if (!enabled)
+      {
+        // About 1.35 MB per cache; only non-blocking reads use it.
+        data->snapshot.clear();
+        data->snapshot.shrink_to_fit();
+      }
+    }
+  }
+  return enabled;
+}
+
+bool FramebufferManager::FlushReadback(EFBCacheData& data, bool allow_blocking)
+{
+  if (!data.needs_flush)
+    return true;
+
+  if (!data.readback_texture->TryFlush())
+  {
+    if (!allow_blocking)
+      return false;
+    data.readback_texture->Flush();
+  }
+  data.needs_flush = false;
+  PromoteReadback(data);
+  return true;
+}
+
+void FramebufferManager::PromoteReadback(EFBCacheData& data)
+{
+  // Called with readback_texture flushed, so ReadTexels() does not wait.
+  const size_t texel_size = data.readback_texture->GetTexelSize();
+  const size_t snapshot_size = EFB_WIDTH * EFB_HEIGHT * texel_size;
+  if (data.snapshot.size() != snapshot_size)
+    data.snapshot.assign(snapshot_size, u8{0});
+  const u32 snapshot_stride = static_cast<u32>(EFB_WIDTH * texel_size);
+  const u64 now_us = Common::Timer::NowUs();
+  for (u32 i = 0; i < data.populated_tiles.size(); i++)
+  {
+    if (!data.populated_tiles[i])
+      continue;
+
+    const MathUtil::Rectangle<int> rect = GetEFBCacheTileRect(i);
+    u8* const dst =
+        data.snapshot.data() +
+        (static_cast<size_t>(rect.top) * EFB_WIDTH + static_cast<size_t>(rect.left)) * texel_size;
+    data.readback_texture->ReadTexels(rect, dst, snapshot_stride);
+    data.snapshot_tiles[i] = 1;
+    data.snapshot_tile_time_us[i] = now_us;
+    data.populated_tiles[i] = false;
+  }
+}
+
+bool FramebufferManager::CanQueueReadback(EFBCacheData& data)
+{
+  // A staging texture only tracks its newest copy, so every copy recorded on top of one in flight
+  // pushes its completion further out. Allow that within a frame, so each sync point still gets
+  // its own copy, but not on top of a readback recorded in an earlier frame: the GPU is then that
+  // far behind, and piling on could keep TryFlush() from ever succeeding.
+  return FlushReadback(data, false) || data.pending_frame == m_efb_cache_frame;
+}
+
+bool FramebufferManager::IsSnapshotUsable(const EFBCacheData& data, u32 tile_index) const
+{
+  return data.snapshot_tiles[tile_index] != 0 &&
+         Common::Timer::NowUs() - data.snapshot_tile_time_us[tile_index] < MAX_EFB_SNAPSHOT_AGE_US;
+}
+
+void FramebufferManager::ClearEFBCacheSnapshot(EFBCacheData& data)
+{
+  std::ranges::fill(data.snapshot_tiles, u8{0});
+  std::fill(data.populated_tiles.begin(), data.populated_tiles.end(), false);
+  data.serving_skipped_refresh = false;
+}
+
+void FramebufferManager::ReadSnapshotTexel(const EFBCacheData& data, u32 x, u32 y, void* out_ptr)
+{
+  const size_t texel_size = data.readback_texture->GetTexelSize();
+  std::memcpy(out_ptr, data.snapshot.data() + (static_cast<size_t>(y) * EFB_WIDTH + x) * texel_size,
+              texel_size);
+}
+
+// A CPU EFB read that does not wait for a readback still in flight on the GPU: it answers from the
+// snapshot of the last completed one instead. It still blocks when there is no snapshot (first
+// read of a tile, or one older than MAX_EFB_SNAPSHOT_AGE_US) and for a tile the cache does not
+// hold at all: that tile was drawn to since the last sync point (or never read), and the game may
+// be reading back what it just drew, so it gets the current value as always. x/y are in readback
+// texture space.
+void FramebufferManager::PeekEFBCacheNonBlocking(bool depth, u32 x, u32 y, u32 tile_index,
+                                                 bool present, void* out_ptr)
+{
+  using VideoCommon::GPUWaitStats::EFBRead;
+  EFBCacheData& data = depth ? m_efb_depth_cache : m_efb_color_cache;
+  data.tiles[tile_index].frame_access_mask |= 1;
+
+  EFBRead outcome;
+  bool from_snapshot = false;
+  if (present)
+  {
+    if (FlushReadback(data, false))
+    {
+      outcome = data.serving_skipped_refresh ? EFBRead::Stale : EFBRead::Fresh;
+    }
+    else if (IsSnapshotUsable(data, tile_index))
+    {
+      // Reading readback_texture now would wait for the copy in flight. When that copy does not
+      // cover this tile, the snapshot holds the same data as the texture.
+      from_snapshot = true;
+      outcome = (data.populated_tiles[tile_index] || data.serving_skipped_refresh) ?
+                    EFBRead::Stale :
+                    EFBRead::Fresh;
+    }
+    else
+    {
+      FlushReadback(data, true);
+      outcome = EFBRead::Blocked;
+    }
+  }
+  else
+  {
+    PopulateEFBCache(depth, tile_index);
+    outcome = EFBRead::Blocked;
+  }
+
+  if (from_snapshot)
+    ReadSnapshotTexel(data, x, y, out_ptr);
+  else
+    data.readback_texture->ReadTexel(x, y, out_ptr);
+  VideoCommon::GPUWaitStats::RecordEFBRead(outcome);
+}
+
+void FramebufferManager::PokeEFBCacheNonBlocking(EFBCacheData& data, u32 x, u32 y, u32 tile_index,
+                                                 bool present, const void* in_ptr)
+{
+  // Writing into readback_texture while a copy is in flight would wait for it, and a snapshot of
+  // the tile would be overwritten by that older copy when it is promoted. Pokes are rare, so drop
+  // the tile from the cache and the snapshot instead: the next read copies it again (blocking)
+  // and sees the poke, which PopulateEFBCache flushes to the EFB first.
+  if (present && FlushReadback(data, false))
+  {
+    data.readback_texture->WriteTexel(x, y, in_ptr);
+    return;
+  }
+  data.tiles[tile_index].present = false;
+  data.populated_tiles[tile_index] = false;
+  data.snapshot_tiles[tile_index] = 0;
+}
+
+void FramebufferManager::RefreshPeekCacheNonBlocking(bool at_sync_point)
+{
+  bool flush_command_buffer = false;
+
+  {
+    // TryFlush() only waits on backends that cannot query a copy's completion.
+    VideoCommon::GPUWaitStats::ScopedReason wait_reason(VideoCommon::GPUWaitStats::Reason::EFBPeek);
+    for (const bool depth : {false, true})
+    {
+      EFBCacheData& data = depth ? m_efb_depth_cache : m_efb_color_cache;
+      // Promote whatever finished here, at an idle moment, rather than inside a read.
+      FlushReadback(data, false);
+
+      // The FIFO-idle call lands anywhere in a frame's draw stream: a copy taken there could put
+      // a half-drawn frame into the snapshot. Leave it to the next sync point (or read).
+      if (!data.needs_refresh || !at_sync_point)
+        continue;
+      data.needs_refresh = false;
+
+      if (!CanQueueReadback(data))
+      {
+        SkipEFBCacheRefresh(data);
+        continue;
+      }
+
+      for (u32 i = 0; i < data.tiles.size(); i++)
+      {
+        if (data.tiles[i].frame_access_mask != 0 && !data.tiles[i].present)
+        {
+          PopulateEFBCache(depth, i, true);
+          flush_command_buffer = true;
+        }
+      }
+    }
+  }
+
+  if (flush_command_buffer)
+    g_gfx->Flush();
+}
+
+void FramebufferManager::SkipEFBCacheRefresh(EFBCacheData& data)
+{
+  // This sync point's EFB is not copied: an older sync point's readback is still in flight (see
+  // CanQueueReadback), and waiting for it is the stall this mode exists to remove. Keep answering
+  // from that readback, whose tiles count as present again, and flag the cache out of date so the
+  // next sync point refreshes it even if nothing is drawn before then.
+  for (u32 i = 0; i < data.tiles.size(); i++)
+  {
+    if (data.populated_tiles[i])
+      data.tiles[i].present = true;
+  }
+  data.has_active_tiles = true;
+  data.out_of_date = true;
+  data.serving_skipped_refresh = true;
 }
 
 void FramebufferManager::ClearEFB(const MathUtil::Rectangle<int>& rc, bool color_enable,
@@ -1209,8 +1509,16 @@ void FramebufferManager::PokeEFBColor(u32 x, u32 y, u32 color)
 
   // Update the peek cache if it's valid, since we know the color of the pixel now.
   u32 tile_index;
-  if (IsEFBCacheTilePresent(false, x, y, &tile_index))
+  const bool present = IsEFBCacheTilePresent(false, x, y, &tile_index);
+  if (UseNonBlockingEFBAccess())
+  {
+    PokeEFBCacheNonBlocking(m_efb_color_cache, x, y, tile_index, present, &color);
+  }
+  else if (present)
+  {
+    VideoCommon::GPUWaitStats::ScopedReason wait_reason(VideoCommon::GPUWaitStats::Reason::EFBPeek);
     m_efb_color_cache.readback_texture->WriteTexel(x, y, &color);
+  }
 }
 
 void FramebufferManager::PokeEFBDepth(u32 x, u32 y, float depth)
@@ -1227,8 +1535,16 @@ void FramebufferManager::PokeEFBDepth(u32 x, u32 y, float depth)
 
   // Update the peek cache if it's valid, since we know the color of the pixel now.
   u32 tile_index;
-  if (IsEFBCacheTilePresent(true, x, y, &tile_index))
+  const bool present = IsEFBCacheTilePresent(true, x, y, &tile_index);
+  if (UseNonBlockingEFBAccess())
+  {
+    PokeEFBCacheNonBlocking(m_efb_depth_cache, x, y, tile_index, present, &depth);
+  }
+  else if (present)
+  {
+    VideoCommon::GPUWaitStats::ScopedReason wait_reason(VideoCommon::GPUWaitStats::Reason::EFBPeek);
     m_efb_depth_cache.readback_texture->WriteTexel(x, y, &depth);
+  }
 }
 
 void FramebufferManager::CreatePokeVertices(std::vector<EFBPokeVertex>* destination_list, u32 x,
@@ -1385,6 +1701,12 @@ void FramebufferManager::DestroyPokePipelines()
 void FramebufferManager::DoState(PointerWrap& p)
 {
   FlushEFBPokes();
+  // A loaded state is another moment of the game: never answer a read with data from before it.
+  if (p.IsReadMode())
+  {
+    ClearEFBCacheSnapshot(m_efb_color_cache);
+    ClearEFBCacheSnapshot(m_efb_depth_cache);
+  }
   p.Do(m_prev_efb_format);
 
   bool save_efb_state = Config::Get(Config::GFX_SAVE_TEXTURE_CACHE_TO_STATE);

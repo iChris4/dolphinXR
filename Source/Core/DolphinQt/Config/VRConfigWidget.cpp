@@ -443,6 +443,8 @@ void VRConfigWidget::CreateWidgets()
       make_bool(tr("Don't Clear Screen"), Config::GFX_VR_DONT_CLEAR_SCREEN));
   hacks_group_layout->addWidget(
       make_bool(tr("Head-Rotated CPU Culling"), Config::GFX_VR_HEAD_CPU_CULL));
+  hacks_group_layout->addWidget(
+      make_bool(tr("Non-Blocking EFB Reads"), Config::GFX_VR_NONBLOCKING_EFB_ACCESS));
   hacks_group_layout->addWidget(make_bool(tr("Remove Cinematic Bars"), Config::GFX_VR_REMOVE_BARS));
   hacks_group_layout->addWidget(
       make_bool(tr("Frame Size from XFB Copy"), Config::GFX_VR_FRAME_SIZE_FROM_XFB));
