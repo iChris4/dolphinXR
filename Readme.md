@@ -150,8 +150,8 @@ Build it with Gradle from `Source/Android`:
 Helper scripts are also provided for Windows:
 
 ```powershell
-.\Source\Androiduild-quest.ps1          # debug APK
-.\Source\Androiduild-quest-release.ps1  # release APK (needs signing properties)
+.\Source\Android\build-quest.ps1          # debug APK
+.\Source\Android\build-quest-release.ps1  # release APK (needs signing properties)
 ```
 
 Install the resulting APK on a headset with adb:
