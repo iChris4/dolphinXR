@@ -943,9 +943,12 @@ bool OpenXRManager::EnumerateViewConfigurations()
   // Bake the user's resolution scale into the recommended sizes so every consumer
   // (swapchain creation, per-eye blit rects, GetEyeWidth/Height) stays consistent.
   // Read through Config::Get: this can run before g_ActiveConfig is populated.
-  const float resolution_scale = std::clamp(Config::Get(Config::GFX_VR_RESOLUTION_SCALE),
-                                            Config::GFX_VR_RESOLUTION_SCALE_MIN,
-                                            Config::GFX_VR_RESOLUTION_SCALE_MAX);
+  const float configured_scale = Config::Get(Config::GFX_VR_RESOLUTION_SCALE);
+  const float resolution_scale =
+      std::isfinite(configured_scale) ?
+          std::clamp(configured_scale, Config::GFX_VR_RESOLUTION_SCALE_MIN,
+                     Config::GFX_VR_RESOLUTION_SCALE_MAX) :
+          1.0f;
 
   for (uint32_t i = 0; i < view_count; ++i)
   {
@@ -958,7 +961,8 @@ bool OpenXRManager::EnumerateViewConfigurations()
       // Round to a multiple of 4 and clamp to the runtime's limits.
       const auto scale_dim = [resolution_scale](uint32_t dim, uint32_t max_dim) {
         const auto scaled = static_cast<uint32_t>(std::lround(dim * resolution_scale / 4.0)) * 4;
-        return std::clamp<uint32_t>(scaled, 64, max_dim);
+        // std::clamp needs lo <= hi; a runtime maximum below 64 wins.
+        return std::clamp<uint32_t>(scaled, std::min<uint32_t>(64, max_dim), max_dim);
       };
       view.recommendedImageRectWidth = scale_dim(recommended_w, view.maxImageRectWidth);
       view.recommendedImageRectHeight = scale_dim(recommended_h, view.maxImageRectHeight);
@@ -1158,6 +1162,10 @@ void OpenXRManager::DestroySession()
 
   m_views = {};
   m_eye_views = {};
+  {
+    std::lock_guard lock(m_input_head_pose_mutex);
+    m_input_head_pose = {};
+  }
   m_rendered_eye_views = {};
   m_submitted_eye_views = {};
   m_present_eye_views = {};
@@ -1347,6 +1355,17 @@ void OpenXRManager::FrameThreadLoop()
       stat_handoff_waited++;
       std::this_thread::sleep_for(std::chrono::microseconds(50));
     }
+    // On Android, Vulkan releases a frame's images and publishes its poses later, on the
+    // submit worker (VulkanOpenXR::FinalizePendingXRFrame), outside the handoff bracket above.
+    // It does both under the graphics queue lock; holding that lock from the last snapshot
+    // through xrEndFrame keeps the submitted pose matched to the front image. Other backends
+    // return an empty lock. PC keeps its unlocked path: its images are released per eye on
+    // the video thread inside the handoff bracket.
+    std::unique_lock<std::mutex> queue_lock;
+#if defined(ANDROID)
+    if (m_swapchain)
+      queue_lock = m_swapchain->AcquireGraphicsQueueLock();
+#endif
     // A publish may have completed during that wait; consume it so the pose we submit
     // matches the image the video thread just made front.
     {
@@ -1383,7 +1402,9 @@ void OpenXRManager::FrameThreadLoop()
     }
 
     EndFrameDetached(m_frame_state.predictedDisplayTime, GetActiveBlendMode(), submit_content,
-                     layers);
+                     layers, !queue_lock.owns_lock());
+    if (queue_lock.owns_lock())
+      queue_lock.unlock();
     const u64 t4 = Common::Timer::NowUs();
     endframe_ema_us = endframe_ema_us * 0.8 + static_cast<double>(t4 - t3) * 0.2;
     last_cycle_us = t4 - cycle_start_us;
@@ -2192,18 +2213,20 @@ void OpenXRManager::UpdateInputActions()
 
   // Provide HMD head orientation for IR pointer reference direction.
   // Use left eye orientation as a proxy for head center (negligible difference from averaged).
+  // This runs on the pacing thread, so read LocateViews' snapshot rather than m_eye_views.
+  XrPosef eye_pose;
+  {
+    std::lock_guard lock(m_input_head_pose_mutex);
+    eye_pose = m_input_head_pose;
+  }
   Common::VR::OpenXRPoseState head_pose;
-  if (m_eye_views[0].pose.orientation.w != 0.0f || m_eye_views[0].pose.orientation.x != 0.0f ||
-      m_eye_views[0].pose.orientation.y != 0.0f || m_eye_views[0].pose.orientation.z != 0.0f)
+  if (eye_pose.orientation.w != 0.0f || eye_pose.orientation.x != 0.0f ||
+      eye_pose.orientation.y != 0.0f || eye_pose.orientation.z != 0.0f)
   {
     head_pose.valid = true;
-    head_pose.orientation = {m_eye_views[0].pose.orientation.x,
-                             m_eye_views[0].pose.orientation.y,
-                             m_eye_views[0].pose.orientation.z,
-                             m_eye_views[0].pose.orientation.w};
-    head_pose.position = {m_eye_views[0].pose.position.x,
-                          m_eye_views[0].pose.position.y,
-                          m_eye_views[0].pose.position.z};
+    head_pose.orientation = {eye_pose.orientation.x, eye_pose.orientation.y, eye_pose.orientation.z,
+                             eye_pose.orientation.w};
+    head_pose.position = {eye_pose.position.x, eye_pose.position.y, eye_pose.position.z};
   }
 
   std::array<std::string, 2> profile_strings;
@@ -2424,8 +2447,14 @@ bool OpenXRManager::WaitFrame()
 
 bool OpenXRManager::BeginFrame()
 {
-  if (m_swapchain && !m_swapchain->WaitForPendingFrameFinalization("before xrBeginFrame"))
+  // The inline flow ends the previous frame in its pending finalization, which must finish
+  // before the next xrBeginFrame. With the pacing thread the finalization only publishes, so
+  // the pacing loop never blocks on it; the video thread waits before acquiring images instead.
+  if (m_swapchain && !IsFrameThreadActive() &&
+      !m_swapchain->WaitForPendingFrameFinalization("before xrBeginFrame"))
+  {
     return false;
+  }
 
   XrFrameBeginInfo begin_info{XR_TYPE_FRAME_BEGIN_INFO};
   {
@@ -2666,6 +2695,10 @@ bool OpenXRManager::LocateViews()
   {
     m_eye_views[i].pose = m_views[i].pose;
     m_eye_views[i].fov = m_views[i].fov;
+  }
+  {
+    std::lock_guard lock(m_input_head_pose_mutex);
+    m_input_head_pose = m_eye_views[0].pose;
   }
 
   // Diagnostic: log raw xrLocateViews output every ~2 seconds.  We want to know if the

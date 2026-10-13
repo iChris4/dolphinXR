@@ -926,11 +926,11 @@ bool Presenter::StartOpenXRFrameNow(double* wait_frame_ms, double* locate_views_
         std::chrono::duration<double, std::milli>(wait_begin_end - wait_begin_start).count();
   }
 
-  if (do_locate_views && VR::g_openxr->ShouldRender())
+  // A failed locate keeps the previous poses. It must not fail the frame: xrBeginFrame has
+  // already succeeded, and the caller only ends frames this function reports as started.
+  const auto locate_start = std::chrono::high_resolution_clock::now();
+  if (do_locate_views && VR::g_openxr->ShouldRender() && VR::g_openxr->LocateViews())
   {
-    const auto locate_start = std::chrono::high_resolution_clock::now();
-    if (!VR::g_openxr->LocateViews())
-      return false;
     const auto locate_end = std::chrono::high_resolution_clock::now();
     if (locate_views_ms)
     {
@@ -1295,10 +1295,23 @@ void Presenter::Present(PresentInfo* present_info)
   // Present(N-1) so BeginFrame→EndFrame brackets the full game render time; the blits
   // and EndFrame run inline here.
 #if defined(ANDROID)
-  const bool openxr_direct_to_hmd = g_ActiveConfig.VRSessionActive() &&
-                                    VR::g_openxr && g_ActiveConfig.vr_android_direct_to_hmd;
+  // Direct-to-HMD skips the Android window, which sits under the XR compositor and is never
+  // seen. On Vulkan the window present is also what advances the backend's frame resources, so
+  // the window is only skipped while an XR session and swapchain take the frame (the OpenXR
+  // submit then advances them instead); otherwise it is still presented, without content. GL
+  // runs on a headless context here and keeps skipping it unconditionally.
+  const bool openxr_direct_configured =
+      g_ActiveConfig.VRSessionActive() && VR::g_openxr && g_ActiveConfig.vr_android_direct_to_hmd;
+  const bool openxr_direct_to_hmd =
+      openxr_direct_configured &&
+      (g_backend_info.api_type != APIType::Vulkan ||
+       (VR::g_openxr->IsSessionRunning() && VR::g_openxr->GetSwapchain() != nullptr));
+  const bool android_window_hidden = openxr_direct_configured;
+  if (VR::g_openxr)
+    VR::g_openxr->SetDirectPresentActive(openxr_direct_to_hmd);
 #else
   constexpr bool openxr_direct_to_hmd = false;
+  constexpr bool android_window_hidden = false;
 #endif
   bool vr_frame_started = false;
   if (g_ActiveConfig.VRSessionActive() && VR::g_openxr)
@@ -1329,14 +1342,17 @@ void Presenter::Present(PresentInfo* present_info)
 #endif
 #ifndef ENABLE_VR
   constexpr bool openxr_direct_to_hmd = false;
+  constexpr bool android_window_hidden = false;
 #endif
 
   g_gfx->BeginUtilityDrawing();
   const bool backbuffer_bound =
       !openxr_direct_to_hmd && g_gfx->BindBackbuffer({{0.0f, 0.0f, 0.0f, 1.0f}});
+  // A hidden window is still bound and presented (see above), but nothing is drawn into it.
+  const bool draw_window_content = backbuffer_bound && !android_window_hidden;
 
   // Render the XFB to the screen.
-  if (backbuffer_bound && m_xfb_entry)
+  if (draw_window_content && m_xfb_entry)
   {
     // Adjust the source rectangle instead of using an oversized viewport to render the XFB.
     MathUtil::Rectangle<int> render_target_rc = GetTargetRectangle();
@@ -1362,7 +1378,7 @@ void Presenter::Present(PresentInfo* present_info)
   if (m_onscreen_ui)
   {
     m_onscreen_ui->Finalize();
-    if (backbuffer_bound)
+    if (draw_window_content)
       m_onscreen_ui->DrawImGui();
   }
 

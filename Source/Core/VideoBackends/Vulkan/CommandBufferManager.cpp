@@ -522,8 +522,9 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
 
   // VR perf diagnostics: once per ~5 s of presented frames, dump where the GPU thread's
   // CPU time went (this runs on the GPU thread only — the worker thread uses the inner
-  // SubmitCommandBuffer overload directly).
-  if (has_present)
+  // SubmitCommandBuffer overload directly). A frame is either a window present or, in
+  // direct-to-HMD mode, the OpenXR submit that advances the frame resources.
+  if (has_present || advance_to_next_frame)
   {
     // Per-draw timers are only sampled while [VR] PerfCounters is on; refresh the gate here so
     // toggling it does not need a restart. Counts are always accumulated.

@@ -332,16 +332,19 @@ void VulkanOpenXR::FinalizePendingXRFrame(PendingXRFrame frame)
   bool success = true;
   XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
 
+  // Release the images and publish their poses as one step under the graphics queue lock.
+  // Releasing flips the compositor's front image at once; the pacing thread takes the same
+  // lock before its last look at the published frame and holds it through xrEndFrame, so it
+  // can never submit these new images with the previous frame's pose (ATW would warp them
+  // backwards and an older frame would flash).
+  std::unique_lock<std::mutex> queue_lock = AcquireGraphicsQueueLock();
+
   const auto release_swapchain = [&](XrSwapchain swapchain, std::string_view name) {
     if (swapchain == XR_NULL_HANDLE)
       return;
 
     const uint64_t release_start_us = Common::Timer::NowUs();
-    XrResult result = XR_SUCCESS;
-    {
-      auto queue_lock = AcquireGraphicsQueueLock();
-      result = xrReleaseSwapchainImage(swapchain, &release_info);
-    }
+    const XrResult result = xrReleaseSwapchainImage(swapchain, &release_info);
     const uint64_t release_us = ElapsedUs(release_start_us, Common::Timer::NowUs());
     release_total_us += release_us;
     if (XR_FAILED(result))
@@ -374,14 +377,27 @@ void VulkanOpenXR::FinalizePendingXRFrame(PendingXRFrame frame)
   }
   else
   {
+    // No pacing thread to race with; xrEndFrame takes the queue lock itself.
+    if (queue_lock.owns_lock())
+      queue_lock.unlock();
+
     XrCompositionLayerProjection projection_layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
     projection_layer.layerFlags = frame.layer_flags;
     projection_layer.space = frame.space;
     projection_layer.viewCount = static_cast<uint32_t>(frame.projection_views.size());
     projection_layer.views = frame.projection_views.data();
 
-    const std::vector<XrCompositionLayerBaseHeader*> layers = {
-        reinterpret_cast<XrCompositionLayerBaseHeader*>(&projection_layer)};
+    // Frames rendered before the first LocateViews carry unseeded (all-zero orientation)
+    // poses, which the runtime rejects; end such a frame without layers (PublishFrame applies
+    // the same rule on the pacing path).
+    const auto valid_orientation = [](const XrQuaternionf& q) {
+      return q.x != 0.0f || q.y != 0.0f || q.z != 0.0f || q.w != 0.0f;
+    };
+    const bool has_projection = valid_orientation(frame.projection_views[0].pose.orientation) &&
+                                valid_orientation(frame.projection_views[1].pose.orientation);
+    std::vector<XrCompositionLayerBaseHeader*> layers;
+    if (has_projection)
+      layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&projection_layer));
 
     if (!VR::g_openxr->EndFrameDetached(frame.display_time, frame.environment_blend_mode,
                                         frame.should_render, layers))
@@ -389,6 +405,8 @@ void VulkanOpenXR::FinalizePendingXRFrame(PendingXRFrame frame)
       success = false;
     }
   }
+  if (queue_lock.owns_lock())
+    queue_lock.unlock();
   end_frame_us = ElapsedUs(end_frame_start_us, Common::Timer::NowUs());
 
   if (!success)
@@ -1320,6 +1338,12 @@ AbstractFramebuffer* VulkanOpenXR::AcquireEyeFramebuffer(uint32_t eye_index)
   auto& sc = m_eye_swapchains[eye_index];
   m_frame_uses_layered_swapchain = false;
 
+  // Android releases the previous frame's images on the submit worker. Let that finish (and
+  // report a failure here, on the video thread) before acquiring the next image; the pacing
+  // thread no longer waits for it in xrBeginFrame.
+  if (!WaitForPendingFrameFinalization("before acquiring an eye image"))
+    return nullptr;
+
   XrSwapchainImageAcquireInfo acquire_info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
   XrResult acquire_result = XR_SUCCESS;
   {
@@ -1384,6 +1408,13 @@ AbstractFramebuffer* VulkanOpenXR::AcquireLayeredFramebuffer()
   auto& sc = m_layered_swapchain;
   if (!m_use_layered_swapchain || sc.swapchain == XR_NULL_HANDLE)
     return nullptr;
+
+  // See AcquireEyeFramebuffer.
+  if (!WaitForPendingFrameFinalization("before acquiring the layered image"))
+  {
+    m_frame_uses_layered_swapchain = false;
+    return nullptr;
+  }
 
   XrSwapchainImageAcquireInfo acquire_info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
   XrResult acquire_result = XR_SUCCESS;
@@ -1533,6 +1564,11 @@ bool VulkanOpenXR::SubmitFrame()
 #if defined(ANDROID)
   static unsigned int s_openxr_vk_submit_frame_log_count = 0;
   static uint64_t s_openxr_vk_async_frame_id = 0;
+  // Direct-to-HMD skipped PresentBackbuffer, so this submit is the one that advances the frame
+  // resources (descriptor pools, per-frame buffers). With the window presented (mirror mode, or
+  // no session yet) PresentBackbuffer already advanced them; advancing again would make the next
+  // frame wait on the GPU work of this one.
+  const bool advance_frame = VR::g_openxr->IsDirectPresentActive();
   bool has_acquired_images = false;
   has_acquired_images |= m_layered_image_acquired;
   for (bool acquired : m_image_acquired)
@@ -1624,18 +1660,35 @@ bool VulkanOpenXR::SubmitFrame()
 
     // Submit the eye rendering work once per frame before releasing the swapchain
     // images back to the runtime. Do not wait for GPU completion here; waiting
-    // serializes the emulator, GPU, and Quest compositor every frame. We still
-    // advance the Vulkan frame resources because the Quest direct-to-HMD path
-    // skips PresentBackbuffer(), which normally resets descriptor pools.
+    // serializes the emulator, GPU, and Quest compositor every frame.
     StateTracker::GetInstance()->EndRenderPass();
     m_async_frame_finalization_in_flight.store(true, std::memory_order_release);
-    g_command_buffer_mgr->SubmitCommandBuffer(
-        true, false, true, VK_NULL_HANDLE, 0xFFFFFFFF,
-        [this, frame = std::move(pending_frame)]() mutable {
-          FinalizePendingXRFrame(std::move(frame));
-        });
+    g_command_buffer_mgr->SubmitCommandBuffer(true, false, advance_frame, VK_NULL_HANDLE,
+                                              0xFFFFFFFF,
+                                              [this, frame = std::move(pending_frame)]() mutable {
+                                                FinalizePendingXRFrame(std::move(frame));
+                                              });
     StateTracker::GetInstance()->InvalidateCachedState();
 
+    return true;
+  }
+
+  if (advance_frame)
+  {
+    // Nothing was rendered for the headset this time (OpenXR skipped rendering, or no XFB
+    // yet), but this is still the frame's only submit: retire the recorded game work and
+    // advance the frame resources, or they pile up until rendering resumes.
+    StateTracker::GetInstance()->EndRenderPass();
+    g_command_buffer_mgr->SubmitCommandBuffer(true, false, true);
+    StateTracker::GetInstance()->InvalidateCachedState();
+  }
+
+  if (VR::g_openxr->IsFrameThreadActive())
+  {
+    // No image was released this frame. Publishing now would pair the previously released
+    // images with this frame's pose (or reference images that were never released); the
+    // pacing thread keeps repeating the last published frame with its own pose instead.
+    m_frame_uses_layered_swapchain = false;
     return true;
   }
 #endif
@@ -1701,14 +1754,14 @@ bool VulkanOpenXR::SubmitFlatFrame()
 #if defined(ANDROID)
   // On Android the per-eye ReleaseEyeTexture only ends the render pass; the command-buffer
   // submit and xrReleaseSwapchainImage are deferred to submit time. Flat mode has a single
-  // image, so do that here synchronously. advance_to_next_frame recycles descriptor pools
-  // because the Quest direct-to-HMD path skips PresentBackbuffer(). The spec only requires the
+  // image, so do that here synchronously. In direct-to-HMD mode this submit also advances the
+  // frame resources, since PresentBackbuffer() was skipped. The spec only requires the
   // writes to be submitted (not completed) before release; the shared graphics queue preserves
   // ordering, so we do not wait for the GPU.
   if (m_image_acquired[0])
   {
     StateTracker::GetInstance()->EndRenderPass();
-    g_command_buffer_mgr->SubmitCommandBuffer(false, false, true);
+    g_command_buffer_mgr->SubmitCommandBuffer(false, false, VR::g_openxr->IsDirectPresentActive());
     StateTracker::GetInstance()->InvalidateCachedState();
 
     XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
@@ -1723,6 +1776,13 @@ bool VulkanOpenXR::SubmitFlatFrame()
                    static_cast<int>(result));
     }
     m_image_acquired[0] = false;
+  }
+  else if (VR::g_openxr->IsDirectPresentActive())
+  {
+    // No panel image this time, but this is still the frame's only submit (see SubmitFrame).
+    StateTracker::GetInstance()->EndRenderPass();
+    g_command_buffer_mgr->SubmitCommandBuffer(false, false, true);
+    StateTracker::GetInstance()->InvalidateCachedState();
   }
 #endif
 

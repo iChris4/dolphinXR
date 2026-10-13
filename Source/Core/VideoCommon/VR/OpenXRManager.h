@@ -221,6 +221,13 @@ public:
   // Flat mono panel variant: a fully built world-locked quad layer.
   void PublishQuadFrame(const XrCompositionLayerQuad& quad);
 
+  // Video thread: whether this Present() skips the window present and sends the frame to the
+  // headset only (Android direct-to-HMD). Latched by the Presenter so the backend's XR submit,
+  // which then has to advance the frame resources in place of PresentBackbuffer, sees the same
+  // decision.
+  void SetDirectPresentActive(bool active) { m_direct_present_active = active; }
+  bool IsDirectPresentActive() const { return m_direct_present_active; }
+
   // Brackets the video thread's release-swapchain-images → publish-poses sequence.
   // Releasing an eye image flips the compositor's front image immediately, but the
   // matching pose only becomes visible to the pacing thread at PublishFrame — so an
@@ -585,6 +592,7 @@ private:
   std::atomic<bool> m_session_running{false};
   std::atomic<bool> m_session_focused{false};
   bool m_exit_render_loop = false;
+  bool m_direct_present_active = false;  // Video thread only; see SetDirectPresentActive.
 
   XrFrameState m_frame_state{XR_TYPE_FRAME_STATE};
   XrViewStateFlags m_view_state_flags = 0;
@@ -642,6 +650,10 @@ private:
   std::array<XrView, 2> m_views{};
   std::vector<XrEnvironmentBlendMode> m_supported_blend_modes;
   std::array<XREyeView, 2> m_eye_views{};
+  // Copy of m_eye_views[0].pose for UpdateInputActions, which runs on the pacing thread while
+  // LocateViews rewrites m_eye_views on the video thread.
+  std::mutex m_input_head_pose_mutex;
+  XrPosef m_input_head_pose{};
   std::array<XREyeView, 2> m_rendered_eye_views{};
   std::array<XREyeView, 2> m_submitted_eye_views{};
 
