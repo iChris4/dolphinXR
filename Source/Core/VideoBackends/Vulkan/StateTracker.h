@@ -47,10 +47,13 @@ public:
   void SetImageTexture(u32 index, VkImageView view);
 
   void UnbindTexture(VkImageView view);
+  // The view is about to be destroyed: unbind it and forget the cached sampler sets that use it.
+  void OnImageViewDestroyed(VkImageView view);
 
   // Set dirty flags on everything to force re-bind at next draw time.
   void InvalidateCachedState();
-  void InvalidateSamplerDescriptorCache() { m_sampler_descriptor_cache.Clear(); }
+  // Drops every cached GX sampler set; call before samplers they reference are destroyed.
+  void InvalidateSamplerDescriptorCache() { RetireSamplerSetPool(); }
 
   void UpdateSamplerBindingHash(u32 index);
   void RebuildSamplerBindingHash();
@@ -123,6 +126,13 @@ private:
 
   void UpdateDescriptorSet();
   void UpdateGXDescriptorSet();
+
+  // Cached GX sampler sets come from a pool of their own, so they survive submits and frames
+  // (the per-frame pools are reset whenever their frame resources come around again).
+  // Allocation returns VK_NULL_HANDLE once that pool is full; the next InvalidateCachedState
+  // then retires it. Retiring clears the cache and hands the pool to deferred destruction.
+  VkDescriptorSet AllocateCachedSamplerSet();
+  void RetireSamplerSetPool();
   void UpdateUtilityDescriptorSet();
   void UpdateComputeDescriptorSet();
 
@@ -157,6 +167,10 @@ private:
   std::array<VkDescriptorSet, NUM_UTILITY_DESCRIPTOR_SETS> m_utility_descriptor_sets = {};
   VkDescriptorSet m_compute_descriptor_set = VK_NULL_HANDLE;
   SamplerDescriptorSetCache<VideoCommon::MAX_PIXEL_SHADER_SAMPLERS> m_sampler_descriptor_cache;
+  static constexpr u32 SAMPLER_SET_POOL_SIZE = 2048;
+  VkDescriptorPool m_sampler_set_pool = VK_NULL_HANDLE;
+  u32 m_sampler_set_pool_used = 0;
+  bool m_sampler_set_pool_exhausted = false;
   // Hash of m_bindings.samplers, maintained per slot so a draw does not rehash all bindings.
   std::array<size_t, VideoCommon::MAX_PIXEL_SHADER_SAMPLERS> m_sampler_slot_hashes{};
   size_t m_sampler_bindings_hash = 0;

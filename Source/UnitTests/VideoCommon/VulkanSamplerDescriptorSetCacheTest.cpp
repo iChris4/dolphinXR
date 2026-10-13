@@ -76,6 +76,42 @@ TEST(VulkanSamplerDescriptorSetCache, ClearPreventsReuseAcrossResourceLifetimes)
   EXPECT_EQ(cache.Find(bindings), VK_NULL_HANDLE);
 }
 
+TEST(VulkanSamplerDescriptorSetCache, RemoveViewDropsOnlyEntriesUsingIt)
+{
+  Cache cache;
+  const auto first = MakeBindings();
+  auto second = first;
+  second[5].imageView = reinterpret_cast<VkImageView>(0x6000);
+  auto third = first;
+  third[2].imageView = reinterpret_cast<VkImageView>(0x6100);
+  const auto first_set = reinterpret_cast<VkDescriptorSet>(0x3000);
+  const auto second_set = reinterpret_cast<VkDescriptorSet>(0x3100);
+  const auto third_set = reinterpret_cast<VkDescriptorSet>(0x3200);
+  cache.Insert(first, first_set);
+  cache.Insert(second, second_set);
+  cache.Insert(third, third_set);
+
+  // 0x6000 is used by the second set only; a view shared by all three (slot 0's) clears all.
+  cache.RemoveView(reinterpret_cast<VkImageView>(0x6000));
+  EXPECT_EQ(cache.Find(first), first_set);
+  EXPECT_EQ(cache.Find(second), VK_NULL_HANDLE);
+  EXPECT_EQ(cache.Find(third), third_set);
+
+  // An unknown view changes nothing.
+  cache.RemoveView(reinterpret_cast<VkImageView>(0x9999));
+  EXPECT_EQ(cache.Find(first), first_set);
+  EXPECT_EQ(cache.Find(third), third_set);
+
+  cache.RemoveView(first[0].imageView);
+  EXPECT_EQ(cache.Find(first), VK_NULL_HANDLE);
+  EXPECT_EQ(cache.Find(third), VK_NULL_HANDLE);
+
+  // A new set for the same bindings can be cached again afterwards.
+  const auto new_set = reinterpret_cast<VkDescriptorSet>(0x3300);
+  cache.Insert(first, new_set);
+  EXPECT_EQ(cache.Find(first), new_set);
+}
+
 TEST(VulkanSamplerDescriptorSetCache, IncrementalHashMatchesFullHash)
 {
   // Mirror StateTracker: keep one contribution per slot and XOR them into a running hash.

@@ -827,6 +827,13 @@ void CommandBufferManager::DeferPipelineDestruction(VkPipeline object)
       [object] { vkDestroyPipeline(g_vulkan_context->GetDevice(), object, nullptr); });
 }
 
+void CommandBufferManager::DeferDescriptorPoolDestruction(VkDescriptorPool object)
+{
+  CmdBufferResources& cmd_buffer_resources = GetCurrentCmdBufferResources();
+  cmd_buffer_resources.cleanup_resources.push_back(
+      [object] { vkDestroyDescriptorPool(g_vulkan_context->GetDevice(), object, nullptr); });
+}
+
 void CommandBufferManager::DeferImageViewDestruction(VkImageView object)
 {
   CmdBufferResources& cmd_buffer_resources = GetCurrentCmdBufferResources();

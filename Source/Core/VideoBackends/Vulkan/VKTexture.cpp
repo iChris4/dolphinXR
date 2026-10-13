@@ -50,7 +50,7 @@ VKTexture::~VKTexture()
   DrainRecordingWorkerForDirectAccess();
   if (m_view != VK_NULL_HANDLE)
   {
-    StateTracker::GetInstance()->UnbindTexture(m_view);
+    StateTracker::GetInstance()->OnImageViewDestroyed(m_view);
     g_command_buffer_mgr->DeferImageViewDestruction(m_view);
   }
 
@@ -67,7 +67,7 @@ VkImageView VKTexture::ReleaseView()
   if (m_view == VK_NULL_HANDLE)
     return VK_NULL_HANDLE;
 
-  StateTracker::GetInstance()->UnbindTexture(m_view);
+  StateTracker::GetInstance()->OnImageViewDestroyed(m_view);
   const VkImageView view = m_view;
   m_view = VK_NULL_HANDLE;
   return view;

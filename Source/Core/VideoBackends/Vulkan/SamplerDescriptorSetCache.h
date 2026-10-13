@@ -12,7 +12,8 @@
 namespace Vulkan
 {
 // A bounded, allocation-free lookup for immutable descriptor sets. The owner must clear it
-// before the descriptor pool is reset or a referenced image view/sampler can be destroyed.
+// before the descriptor pool is reset or a referenced sampler can be destroyed, and remove an
+// image view's entries (RemoveView) before that view is destroyed.
 //
 // The lookup hash is the XOR of one contribution per binding slot (HashSlot), so an owner that
 // changes one slot at a time can maintain the hash incrementally instead of rehashing every
@@ -77,6 +78,25 @@ public:
   {
     for (auto& entry : m_entries)
       entry.set = VK_NULL_HANDLE;
+  }
+
+  // Drops every entry that references the view, so a view created later with the same handle
+  // cannot match a set written for the destroyed one. Other entries keep hitting.
+  void RemoveView(VkImageView view)
+  {
+    for (auto& entry : m_entries)
+    {
+      if (entry.set == VK_NULL_HANDLE)
+        continue;
+      for (const VkDescriptorImageInfo& binding : entry.bindings)
+      {
+        if (binding.imageView == view)
+        {
+          entry.set = VK_NULL_HANDLE;
+          break;
+        }
+      }
+    }
   }
 
 private:

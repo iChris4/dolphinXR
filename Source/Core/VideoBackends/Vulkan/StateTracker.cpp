@@ -53,6 +53,13 @@ void StateTracker::DestroyInstance()
   s_state_tracker->m_dummy_texture.reset();
   s_state_tracker->m_dummy_compute_texture.reset();
 
+  // The device is idle at shutdown, so the cached sampler sets' pool can go right away.
+  if (s_state_tracker->m_sampler_set_pool != VK_NULL_HANDLE)
+  {
+    vkDestroyDescriptorPool(g_vulkan_context->GetDevice(), s_state_tracker->m_sampler_set_pool,
+                            nullptr);
+  }
+
   s_state_tracker.reset();
 }
 
@@ -267,10 +274,17 @@ void StateTracker::SetImageTexture(u32 index, VkImageView view)
   m_dirty_flags |= DIRTY_FLAG_COMPUTE_BINDINGS;
 }
 
-void StateTracker::UnbindTexture(VkImageView view)
+void StateTracker::OnImageViewDestroyed(VkImageView view)
 {
   // Cached immutable sets may refer to this view even when it is not currently bound.
-  InvalidateSamplerDescriptorCache();
+  m_sampler_descriptor_cache.RemoveView(view);
+  UnbindTexture(view);
+}
+
+void StateTracker::UnbindTexture(VkImageView view)
+{
+  // Cached sampler sets that use the view stay valid while the view lives (only the current
+  // bindings must stop sampling it), so they are kept; see OnImageViewDestroyed.
   for (VkDescriptorImageInfo& it : m_bindings.samplers)
   {
     if (it.imageView == view)
@@ -294,10 +308,73 @@ void StateTracker::UnbindTexture(VkImageView view)
   }
 }
 
+VkDescriptorSet StateTracker::AllocateCachedSamplerSet()
+{
+  if (m_sampler_set_pool_exhausted)
+    return VK_NULL_HANDLE;
+
+  const VkDevice device = g_vulkan_context->GetDevice();
+  if (m_sampler_set_pool == VK_NULL_HANDLE)
+  {
+    const VkDescriptorPoolSize pool_size = {
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        SAMPLER_SET_POOL_SIZE * static_cast<u32>(VideoCommon::MAX_PIXEL_SHADER_SAMPLERS)};
+    const VkDescriptorPoolCreateInfo pool_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                                                  nullptr,
+                                                  0,
+                                                  SAMPLER_SET_POOL_SIZE,
+                                                  1,
+                                                  &pool_size};
+    const VkResult res = vkCreateDescriptorPool(device, &pool_info, nullptr, &m_sampler_set_pool);
+    if (res != VK_SUCCESS)
+    {
+      LOG_VULKAN_ERROR(res, "vkCreateDescriptorPool for cached sampler sets failed: ");
+      m_sampler_set_pool = VK_NULL_HANDLE;
+      m_sampler_set_pool_exhausted = true;
+      return VK_NULL_HANDLE;
+    }
+  }
+
+  if (m_sampler_set_pool_used >= SAMPLER_SET_POOL_SIZE)
+  {
+    m_sampler_set_pool_exhausted = true;
+    return VK_NULL_HANDLE;
+  }
+
+  const VkDescriptorSetLayout layout =
+      g_object_cache->GetDescriptorSetLayout(DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS);
+  const VkDescriptorSetAllocateInfo allocate_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                                     nullptr, m_sampler_set_pool, 1, &layout};
+  VkDescriptorSet set = VK_NULL_HANDLE;
+  if (vkAllocateDescriptorSets(device, &allocate_info, &set) != VK_SUCCESS)
+  {
+    m_sampler_set_pool_exhausted = true;
+    return VK_NULL_HANDLE;
+  }
+  ++m_sampler_set_pool_used;
+  return set;
+}
+
+void StateTracker::RetireSamplerSetPool()
+{
+  m_sampler_descriptor_cache.Clear();
+  if (m_sampler_set_pool != VK_NULL_HANDLE)
+  {
+    // Command buffers already recorded may still bind sets from it.
+    g_command_buffer_mgr->DeferDescriptorPoolDestruction(m_sampler_set_pool);
+    m_sampler_set_pool = VK_NULL_HANDLE;
+  }
+  m_sampler_set_pool_used = 0;
+  m_sampler_set_pool_exhausted = false;
+}
+
 void StateTracker::InvalidateCachedState()
 {
-  // Discard pooled sets when recording state is reset, including at frame/pool boundaries.
-  InvalidateSamplerDescriptorCache();
+  // Cached sampler sets survive submits and frames; replace their pool once it has filled up.
+  // This runs where the video thread owns recording (after a submit), never on the recording
+  // worker, so the pool is only handed to deferred destruction from one thread.
+  if (m_sampler_set_pool_exhausted)
+    RetireSamplerSetPool();
   m_gx_descriptor_sets.fill(VK_NULL_HANDLE);
   m_utility_descriptor_sets.fill(VK_NULL_HANDLE);
   m_compute_descriptor_set = VK_NULL_HANDLE;
@@ -560,10 +637,19 @@ void StateTracker::UpdateGXDescriptorSet()
     else
     {
       perf.sampler_cache_misses.fetch_add(1, std::memory_order_relaxed);
-      m_gx_descriptor_sets[1] = g_command_buffer_mgr->AllocateDescriptorSet(
-          g_object_cache->GetDescriptorSetLayout(DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS));
-      m_sampler_descriptor_cache.Insert(m_bindings.samplers, m_sampler_bindings_hash,
-                                        m_gx_descriptor_sets[1]);
+      // Once the cached sets' pool is full, write this one into the frame's pool, uncached,
+      // until the next submit replaces that pool.
+      m_gx_descriptor_sets[1] = AllocateCachedSamplerSet();
+      if (m_gx_descriptor_sets[1] != VK_NULL_HANDLE)
+      {
+        m_sampler_descriptor_cache.Insert(m_bindings.samplers, m_sampler_bindings_hash,
+                                          m_gx_descriptor_sets[1]);
+      }
+      else
+      {
+        m_gx_descriptor_sets[1] = g_command_buffer_mgr->AllocateDescriptorSet(
+            g_object_cache->GetDescriptorSetLayout(DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS));
+      }
       writes[num_writes++] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                               nullptr,
                               m_gx_descriptor_sets[1],
