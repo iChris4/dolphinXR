@@ -15,6 +15,7 @@
 #include "Common/Flag.h"
 
 #include "VideoBackends/Vulkan/Constants.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 
 namespace Vulkan
 {
@@ -30,12 +31,14 @@ public:
   // is submitted, after that you should call these functions again.
   VkCommandBuffer GetCurrentInitCommandBuffer()
   {
+    AssertRecordingOwner("GetCurrentInitCommandBuffer");
     CmdBufferResources& cmd_buffer_resources = GetCurrentCmdBufferResources();
     cmd_buffer_resources.init_command_buffer_used = true;
     return cmd_buffer_resources.command_buffers[0];
   }
   VkCommandBuffer GetCurrentCommandBuffer() const
   {
+    AssertRecordingOwner("GetCurrentCommandBuffer");
     const CmdBufferResources& cmd_buffer_resources = m_command_buffers[m_current_cmd_buffer];
     return cmd_buffer_resources.command_buffers[1];
   }

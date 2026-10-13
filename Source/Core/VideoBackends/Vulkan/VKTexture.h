@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -87,7 +88,9 @@ private:
   VkImage m_image;
   VkImageView m_view = VK_NULL_HANDLE;
   VkFormat m_vk_format_override = VK_FORMAT_UNDEFINED;
-  mutable VkImageLayout m_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+  // Written by whichever thread owns recording and read by the video thread to skip redundant
+  // FinishedRendering commands, hence atomic; all other accesses are ordered by drains.
+  mutable std::atomic<VkImageLayout> m_layout{VK_IMAGE_LAYOUT_UNDEFINED};
   mutable ComputeImageLayout m_compute_layout = ComputeImageLayout::Undefined;
   mutable bool m_written_since_last_layout_change = false;
   std::string m_name;

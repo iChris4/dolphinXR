@@ -248,6 +248,7 @@ VkDescriptorPool CommandBufferManager::CreateDescriptorPool(u32 max_descriptor_s
 
 VkDescriptorSet CommandBufferManager::AllocateDescriptorSet(VkDescriptorSetLayout set_layout)
 {
+  AssertRecordingOwner("AllocateDescriptorSet");
   VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
   FrameResources& resources = GetCurrentFrameResources();
 
@@ -533,6 +534,8 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
     static u64 s_perf_window_start_us = 0;
     static u32 s_perf_window_frames = 0;
     s_perf_window_frames++;
+    // One clock read per presented frame keeps the count-only stats (draws, cache hits, worker
+    // commands and drains) reportable even when the per-draw timers are off.
     const u64 now_us = Common::Timer::NowUs();
     if (s_perf_window_start_us == 0)
       s_perf_window_start_us = now_us;
@@ -544,7 +547,9 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
                    "VKPERF: frames={} wall={:.2f}ms/f submit={:.2f}ms/f (n={:.1f}/f) "
                    "fence_wait={:.2f}ms/f xr_swapchain={:.2f}ms/f uniforms={:.2f}ms/f "
                    "vtx_commit={:.2f}ms/f draw_bind={:.2f}ms/f draws={:.0f}/f "
-                   "pipelines_created={} sampler_cache_hit={:.0f}/f sampler_cache_miss={:.0f}/f",
+                   "pipelines_created={} sampler_cache_hit={:.0f}/f sampler_cache_miss={:.0f}/f "
+                   "worker: cmds={:.0f}/f drains={:.1f}/f drain_wait={:.2f}ms/f busy={:.2f}ms/f "
+                   "full_waits={} max_depth={} owner_violations={}",
                    s_perf_window_frames, elapsed_us / 1000.0 / frames,
                    perf.submit_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.submit_count.exchange(0, std::memory_order_relaxed) / frames,
@@ -556,7 +561,15 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
                    perf.draw_count.exchange(0, std::memory_order_relaxed) / frames,
                    perf.pipelines_created.exchange(0, std::memory_order_relaxed),
                    perf.sampler_cache_hits.exchange(0, std::memory_order_relaxed) / frames,
-                   perf.sampler_cache_misses.exchange(0, std::memory_order_relaxed) / frames);
+                   perf.sampler_cache_misses.exchange(0, std::memory_order_relaxed) / frames,
+                   perf.worker_commands.exchange(0, std::memory_order_relaxed) / frames,
+                   perf.worker_drains.exchange(0, std::memory_order_relaxed) / frames,
+                   perf.worker_drain_wait_us.exchange(0, std::memory_order_relaxed) / 1000.0 /
+                       frames,
+                   perf.worker_busy_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
+                   perf.worker_full_waits.exchange(0, std::memory_order_relaxed),
+                   perf.worker_max_depth.exchange(0, std::memory_order_relaxed),
+                   perf.worker_owner_violations.load(std::memory_order_relaxed));
       s_perf_window_frames = 0;
       s_perf_window_start_us = now_us;
     }

@@ -10,12 +10,15 @@
 #include "VideoBackends/Vulkan/StagingBuffer.h"
 #include "VideoBackends/Vulkan/StateTracker.h"
 #include "VideoBackends/Vulkan/VKGfx.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 
 namespace Vulkan
 {
 VKBoundingBox::~VKBoundingBox()
 {
+  // Queued draws may still use the buffer through the SSBO binding.
+  DrainRecordingWorkerForDirectAccess();
   if (m_gpu_buffer != VK_NULL_HANDLE)
   {
     vmaDestroyBuffer(g_vulkan_context->GetMemoryAllocator(), m_gpu_buffer, m_gpu_allocation);
@@ -24,6 +27,7 @@ VKBoundingBox::~VKBoundingBox()
 
 bool VKBoundingBox::Initialize()
 {
+  DrainRecordingWorkerForDirectAccess();
   if (!CreateGPUBuffer())
     return false;
 
@@ -37,6 +41,7 @@ bool VKBoundingBox::Initialize()
 
 std::vector<BBoxType> VKBoundingBox::Read(u32 index, u32 length)
 {
+  DrainRecordingWorkerForDirectAccess();
   // Can't be done within a render pass.
   StateTracker::GetInstance()->EndRenderPass();
 
@@ -77,6 +82,7 @@ std::vector<BBoxType> VKBoundingBox::Read(u32 index, u32 length)
 
 void VKBoundingBox::Write(u32 index, std::span<const BBoxType> values)
 {
+  DrainRecordingWorkerForDirectAccess();
   // We can't issue vkCmdUpdateBuffer within a render pass.
   // However, the writes must be serialized, so we can't put it in the init buffer.
   StateTracker::GetInstance()->EndRenderPass();

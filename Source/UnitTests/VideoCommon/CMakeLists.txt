@@ -10,4 +10,5 @@ if(ENABLE_VULKAN)
   add_dolphin_test(VulkanSamplerDescriptorSetCacheTest VulkanSamplerDescriptorSetCacheTest.cpp)
   target_include_directories(VulkanSamplerDescriptorSetCacheTest PRIVATE
     ${CMAKE_SOURCE_DIR}/Externals/Vulkan-Headers/include)
+  add_dolphin_test(VulkanRecordingQueueTest VulkanRecordingQueueTest.cpp)
 endif()

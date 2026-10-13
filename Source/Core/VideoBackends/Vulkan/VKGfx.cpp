@@ -16,6 +16,7 @@
 #include "VideoBackends/Vulkan/ObjectCache.h"
 #include "VideoBackends/Vulkan/StateTracker.h"
 #include "VideoBackends/Vulkan/VKPipeline.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VKShader.h"
 #include "VideoBackends/Vulkan/VKSwapChain.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
@@ -40,9 +41,28 @@ VKGfx::VKGfx(std::unique_ptr<SwapChain> swap_chain, float backbuffer_scale)
   // Various initialization routines will have executed commands on the command buffer.
   // Execute what we have done before beginning the first frame.
   ExecuteCommandBuffer(true, false);
+
+  if (g_ActiveConfig.bVulkanRecordingWorker)
+  {
+    auto worker = std::make_unique<RecordingWorker>(this);
+    if (worker->Start())
+    {
+      m_recording_worker = std::move(worker);
+      INFO_LOG_FMT(VIDEO, "Vulkan recording worker enabled.");
+    }
+    else
+    {
+      ERROR_LOG_FMT(VIDEO, "Vulkan recording worker failed to start; recording on the video "
+                           "thread.");
+    }
+  }
 }
 
-VKGfx::~VKGfx() = default;
+VKGfx::~VKGfx()
+{
+  // Drain and join before any backend state the queued commands reference goes away.
+  m_recording_worker.reset();
+}
 
 bool VKGfx::IsHeadless() const
 {
@@ -100,7 +120,20 @@ VKGfx::CreateFramebuffer(AbstractTexture* color_attachment, AbstractTexture* dep
 void VKGfx::SetPipeline(const AbstractPipeline* pipeline)
 {
   m_current_pipeline = pipeline;
-  StateTracker::GetInstance()->SetPipeline(static_cast<const VKPipeline*>(pipeline));
+  RecordSetPipeline(static_cast<const VKPipeline*>(pipeline));
+}
+
+void VKGfx::RecordSetPipeline(const VKPipeline* pipeline)
+{
+  // The state tracker ignores re-binds of the same pipeline; skip the command as well.
+  if (m_last_recorded_pipeline == pipeline)
+    return;
+  m_last_recorded_pipeline = pipeline;
+
+  RecordCommand command{};
+  command.type = RecordCommandType::SetPipeline;
+  command.set_pipeline = {pipeline};
+  Record(command);
 }
 
 void VKGfx::SetForcePixelShader(const AbstractShader* shader)
@@ -126,11 +159,17 @@ void VKGfx::SetForcePixelShader(const AbstractShader* shader)
   if (!it->second)
     return;
 
-  StateTracker::GetInstance()->SetPipeline(static_cast<const VKPipeline*>(it->second.get()));
+  RecordSetPipeline(static_cast<const VKPipeline*>(it->second.get()));
 }
 
 void VKGfx::ClearForcedPipelines()
 {
+  // Queued commands may still bind these pipelines, and a replacement can be created at the
+  // same address later, so drain and unbind them explicitly before they go.
+  DrainRecordingWorker();
+  StateTracker::GetInstance()->SetPipeline(nullptr);
+  m_last_recorded_pipeline = nullptr;
+
   // In-flight command buffers may still reference these pipelines, so their handles must
   // outlive the current fence — hand them to the deferred-destruction queue.
   for (auto& [key, pipeline] : m_forced_pipelines)
@@ -147,111 +186,60 @@ void VKGfx::ClearForcedPipelines()
 void VKGfx::ClearRegion(const MathUtil::Rectangle<int>& target_rc, bool color_enable,
                         bool alpha_enable, bool z_enable, u32 color, u32 z)
 {
-  VkRect2D target_vk_rc = {
+  RecordCommand::ClearRegionCmd clear{};
+  clear.rect = {
       {target_rc.left, target_rc.top},
       {static_cast<uint32_t>(target_rc.GetWidth()), static_cast<uint32_t>(target_rc.GetHeight())}};
 
   // Convert RGBA8 -> floating-point values.
-  VkClearValue clear_color_value = {};
-  VkClearValue clear_depth_value = {};
-  clear_color_value.color.float32[0] = static_cast<float>((color >> 16) & 0xFF) / 255.0f;
-  clear_color_value.color.float32[1] = static_cast<float>((color >> 8) & 0xFF) / 255.0f;
-  clear_color_value.color.float32[2] = static_cast<float>((color >> 0) & 0xFF) / 255.0f;
-  clear_color_value.color.float32[3] = static_cast<float>((color >> 24) & 0xFF) / 255.0f;
-  clear_depth_value.depthStencil.depth = static_cast<float>(z & 0xFFFFFF) / 16777216.0f;
+  clear.color.color.float32[0] = static_cast<float>((color >> 16) & 0xFF) / 255.0f;
+  clear.color.color.float32[1] = static_cast<float>((color >> 8) & 0xFF) / 255.0f;
+  clear.color.color.float32[2] = static_cast<float>((color >> 0) & 0xFF) / 255.0f;
+  clear.color.color.float32[3] = static_cast<float>((color >> 24) & 0xFF) / 255.0f;
+  clear.depth.depthStencil.depth = static_cast<float>(z & 0xFFFFFF) / 16777216.0f;
   if (!g_backend_info.bSupportsReversedDepthRange)
-    clear_depth_value.depthStencil.depth = 1.0f - clear_depth_value.depthStencil.depth;
+    clear.depth.depthStencil.depth = 1.0f - clear.depth.depthStencil.depth;
 
-  // If we're not in a render pass (start of the frame), we can use a clear render pass
-  // to discard the data, rather than loading and then clearing.
-  bool use_clear_attachments = (color_enable && alpha_enable) || z_enable;
-  bool use_clear_render_pass =
-      !StateTracker::GetInstance()->InRenderPass() && color_enable && alpha_enable && z_enable;
+  // EFB layer count; ClearRegionDirect drops it to 1 for multiview framebuffers.
+  clear.layers = g_framebuffer_manager->GetEFBLayers();
+
+  // The recorded fast paths clear color+alpha together and depth. Whether a clear render pass
+  // or vkCmdClearAttachments is used depends on the render pass state at recording time.
+  clear.clear_color = color_enable && alpha_enable;
+  clear.clear_depth = z_enable;
+  clear.allow_clear_render_pass = clear.clear_color && clear.clear_depth;
 
   // The NVIDIA Vulkan driver causes the GPU to lock up, or throw exceptions if MSAA is enabled,
   // a non-full clear rect is specified, and a clear loadop or vkCmdClearAttachments is used.
   if (g_ActiveConfig.iMultisamples > 1 &&
       DriverDetails::HasBug(DriverDetails::BUG_BROKEN_MSAA_CLEAR))
   {
-    use_clear_render_pass = false;
-    use_clear_attachments = false;
+    clear.clear_color = false;
+    clear.clear_depth = false;
+    clear.allow_clear_render_pass = false;
   }
 
   // This path cannot be used if the driver implementation doesn't guarantee pixels with no drawn
   // geometry in "this" renderpass won't be cleared
   if (DriverDetails::HasBug(DriverDetails::BUG_BROKEN_CLEAR_LOADOP_RENDERPASS))
-    use_clear_render_pass = false;
+    clear.allow_clear_render_pass = false;
 
-  auto* vk_frame_buffer = static_cast<VKFramebuffer*>(m_current_framebuffer);
-
-  // Fastest path: Use a render pass to clear the buffers.
-  if (use_clear_render_pass)
+  if (clear.clear_color || clear.clear_depth)
   {
-    vk_frame_buffer->SetAndClear(target_vk_rc, clear_color_value, clear_depth_value);
-    return;
-  }
-
-  // Fast path: Use vkCmdClearAttachments to clear the buffers within a render path
-  // We can't use this when preserving alpha but clearing color.
-  if (use_clear_attachments)
-  {
-    std::vector<VkClearAttachment> clear_attachments;
-    bool has_color = false;
-    if (color_enable && alpha_enable)
+    RecordCommand command{};
+    command.type = RecordCommandType::ClearRegion;
+    command.clear_region = clear;
+    Record(command);
+    if (clear.clear_color)
     {
-      VkClearAttachment clear_attachment;
-      clear_attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      clear_attachment.colorAttachment = 0;
-      clear_attachment.clearValue = clear_color_value;
-      clear_attachments.push_back(std::move(clear_attachment));
       color_enable = false;
       alpha_enable = false;
-      has_color = true;
     }
-    if (z_enable)
-    {
-      VkClearAttachment clear_attachment;
-      clear_attachment.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-      clear_attachment.colorAttachment = 0;
-      clear_attachment.clearValue = clear_depth_value;
-      clear_attachments.push_back(std::move(clear_attachment));
+    if (clear.clear_depth)
       z_enable = false;
-    }
-    if (has_color)
-    {
-      for (std::size_t i = 0; i < vk_frame_buffer->GetNumberOfAdditonalAttachments(); i++)
-      {
-        VkClearAttachment clear_attachment;
-        clear_attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        clear_attachment.colorAttachment = static_cast<u32>(i + 1);
-        clear_attachment.clearValue = clear_color_value;
-        clear_attachments.push_back(std::move(clear_attachment));
-      }
-    }
-    if (!clear_attachments.empty())
-    {
-      // In a multiview render pass the clear is broadcast to every view in the view mask,
-      // and the spec requires layerCount == 1 (VUID-vkCmdClearAttachments-baseArrayLayer-00018).
-      // Passing the EFB layer count (2) there is undefined behavior — on Adreno it corrupts
-      // the clear into misplaced rectangles in the left eye.
-      const u32 clear_layers =
-          vk_frame_buffer->IsMultiview() ? 1u : g_framebuffer_manager->GetEFBLayers();
-      VkClearRect vk_rect = {target_vk_rc, 0, clear_layers};
-      if (!StateTracker::GetInstance()->IsWithinRenderArea(
-              target_vk_rc.offset.x, target_vk_rc.offset.y, target_vk_rc.extent.width,
-              target_vk_rc.extent.height))
-      {
-        StateTracker::GetInstance()->EndClearRenderPass();
-      }
-      StateTracker::GetInstance()->BeginRenderPass();
-
-      vkCmdClearAttachments(g_command_buffer_mgr->GetCurrentCommandBuffer(),
-                            static_cast<uint32_t>(clear_attachments.size()),
-                            clear_attachments.data(), 1, &vk_rect);
-    }
   }
 
-  // Anything left over for the slow path?
+  // Anything left over for the slow path? (Clearing color while preserving alpha, or vice versa.)
   if (!color_enable && !alpha_enable && !z_enable)
     return;
 
@@ -260,6 +248,8 @@ void VKGfx::ClearRegion(const MathUtil::Rectangle<int>& target_rc, bool color_en
 
 bool VKGfx::ClearAdditionalColorAttachments(const MathUtil::Rectangle<int>& target_rc, u32 color)
 {
+  // Decided here from immutable framebuffer/config properties; the clear itself is recorded in
+  // order with the draws.
   auto* vk_frame_buffer = static_cast<VKFramebuffer*>(m_current_framebuffer);
   if (!vk_frame_buffer || vk_frame_buffer->GetNumberOfAdditonalAttachments() == 0)
     return false;
@@ -271,15 +261,26 @@ bool VKGfx::ClearAdditionalColorAttachments(const MathUtil::Rectangle<int>& targ
     return false;
   }
 
-  const VkRect2D target_vk_rc = {
+  RecordCommand command{};
+  command.type = RecordCommandType::ClearAdditionalColorAttachments;
+  auto& clear = command.clear_additional_color_attachments;
+  clear.rect = {
       {target_rc.left, target_rc.top},
       {static_cast<uint32_t>(target_rc.GetWidth()), static_cast<uint32_t>(target_rc.GetHeight())}};
+  clear.color.color.float32[0] = static_cast<float>((color >> 16) & 0xFF) / 255.0f;
+  clear.color.color.float32[1] = static_cast<float>((color >> 8) & 0xFF) / 255.0f;
+  clear.color.color.float32[2] = static_cast<float>((color >> 0) & 0xFF) / 255.0f;
+  clear.color.color.float32[3] = static_cast<float>((color >> 24) & 0xFF) / 255.0f;
+  clear.layers = g_framebuffer_manager->GetEFBLayers();
+  Record(command);
+  return true;
+}
 
-  VkClearValue clear_value = {};
-  clear_value.color.float32[0] = static_cast<float>((color >> 16) & 0xFF) / 255.0f;
-  clear_value.color.float32[1] = static_cast<float>((color >> 8) & 0xFF) / 255.0f;
-  clear_value.color.float32[2] = static_cast<float>((color >> 0) & 0xFF) / 255.0f;
-  clear_value.color.float32[3] = static_cast<float>((color >> 24) & 0xFF) / 255.0f;
+void VKGfx::ClearAdditionalColorAttachmentsDirect(
+    const RecordCommand::ClearAdditionalColorAttachmentsCmd& clear)
+{
+  StateTracker* const tracker = StateTracker::GetInstance();
+  VKFramebuffer* const vk_frame_buffer = tracker->GetFramebuffer();
 
   std::vector<VkClearAttachment> clear_attachments;
   for (std::size_t i = 0; i < vk_frame_buffer->GetNumberOfAdditonalAttachments(); i++)
@@ -287,28 +288,82 @@ bool VKGfx::ClearAdditionalColorAttachments(const MathUtil::Rectangle<int>& targ
     VkClearAttachment clear_attachment;
     clear_attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     clear_attachment.colorAttachment = static_cast<u32>(i + 1);
-    clear_attachment.clearValue = clear_value;
-    clear_attachments.push_back(std::move(clear_attachment));
+    clear_attachment.clearValue = clear.color;
+    clear_attachments.push_back(clear_attachment);
   }
 
-  // Same multiview constraint as ClearRegion: VkClearRect layerCount must be 1 inside a
+  // Same multiview constraint as ClearRegionDirect: VkClearRect layerCount must be 1 inside a
   // multiview render pass; the view mask replicates the clear to both eyes.
-  const u32 clear_layers =
-      vk_frame_buffer->IsMultiview() ? 1u : g_framebuffer_manager->GetEFBLayers();
-  const VkClearRect vk_rect = {target_vk_rc, 0, clear_layers};
-  if (!StateTracker::GetInstance()->IsWithinRenderArea(target_vk_rc.offset.x,
-                                                       target_vk_rc.offset.y,
-                                                       target_vk_rc.extent.width,
-                                                       target_vk_rc.extent.height))
+  const u32 clear_layers = vk_frame_buffer->IsMultiview() ? 1u : clear.layers;
+  const VkClearRect vk_rect = {clear.rect, 0, clear_layers};
+  if (!tracker->IsWithinRenderArea(clear.rect.offset.x, clear.rect.offset.y,
+                                   clear.rect.extent.width, clear.rect.extent.height))
   {
-    StateTracker::GetInstance()->EndClearRenderPass();
+    tracker->EndClearRenderPass();
   }
-  StateTracker::GetInstance()->BeginRenderPass();
+  tracker->BeginRenderPass();
 
   vkCmdClearAttachments(g_command_buffer_mgr->GetCurrentCommandBuffer(),
                         static_cast<uint32_t>(clear_attachments.size()), clear_attachments.data(),
                         1, &vk_rect);
-  return true;
+}
+
+void VKGfx::ClearRegionDirect(const RecordCommand::ClearRegionCmd& clear)
+{
+  StateTracker* const tracker = StateTracker::GetInstance();
+  VKFramebuffer* const vk_frame_buffer = tracker->GetFramebuffer();
+
+  // Fastest path: if we're not in a render pass (start of the frame), use a clear render pass
+  // to discard the data, rather than loading and then clearing.
+  if (clear.allow_clear_render_pass && !tracker->InRenderPass())
+  {
+    vk_frame_buffer->SetAndClear(clear.rect, clear.color, clear.depth);
+    return;
+  }
+
+  // Fast path: Use vkCmdClearAttachments to clear the buffers within a render pass.
+  std::vector<VkClearAttachment> clear_attachments;
+  if (clear.clear_color)
+  {
+    VkClearAttachment clear_attachment;
+    clear_attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    clear_attachment.colorAttachment = 0;
+    clear_attachment.clearValue = clear.color;
+    clear_attachments.push_back(clear_attachment);
+    for (std::size_t i = 0; i < vk_frame_buffer->GetNumberOfAdditonalAttachments(); i++)
+    {
+      clear_attachment.colorAttachment = static_cast<u32>(i + 1);
+      clear_attachments.push_back(clear_attachment);
+    }
+  }
+  if (clear.clear_depth)
+  {
+    VkClearAttachment clear_attachment;
+    clear_attachment.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    clear_attachment.colorAttachment = 0;
+    clear_attachment.clearValue = clear.depth;
+    clear_attachments.push_back(clear_attachment);
+  }
+  if (clear_attachments.empty())
+    return;
+
+  // In a multiview render pass the clear is broadcast to every view in the view mask,
+  // and the spec requires layerCount == 1 (VUID-vkCmdClearAttachments-baseArrayLayer-00018).
+  // Passing the EFB layer count (2) there is undefined behavior — on Adreno it corrupts
+  // the clear into misplaced rectangles in the left eye. Decided from the framebuffer that is
+  // bound when the clear is recorded.
+  const u32 clear_layers = vk_frame_buffer->IsMultiview() ? 1u : clear.layers;
+  VkClearRect vk_rect = {clear.rect, 0, clear_layers};
+  if (!tracker->IsWithinRenderArea(clear.rect.offset.x, clear.rect.offset.y,
+                                   clear.rect.extent.width, clear.rect.extent.height))
+  {
+    tracker->EndClearRenderPass();
+  }
+  tracker->BeginRenderPass();
+
+  vkCmdClearAttachments(g_command_buffer_mgr->GetCurrentCommandBuffer(),
+                        static_cast<uint32_t>(clear_attachments.size()), clear_attachments.data(),
+                        1, &vk_rect);
 }
 
 void VKGfx::Flush()
@@ -323,6 +378,7 @@ void VKGfx::WaitForGPUIdle()
 
 bool VKGfx::BindBackbuffer(const ClearColor& clear_color)
 {
+  DrainRecordingWorker();
   StateTracker::GetInstance()->EndRenderPass();
 
   g_command_buffer_mgr->WaitForWorkerThreadIdle();
@@ -412,6 +468,8 @@ bool VKGfx::BindBackbuffer(const ClearColor& clear_color)
 
 void VKGfx::PresentBackbuffer()
 {
+  DrainRecordingWorker();
+
   // End drawing to backbuffer
   StateTracker::GetInstance()->EndRenderPass();
 
@@ -453,6 +511,7 @@ bool VKGfx::IsFullscreen() const
 
 void VKGfx::ExecuteCommandBuffer(bool submit_off_thread, bool wait_for_completion)
 {
+  DrainRecordingWorker();
   StateTracker::GetInstance()->EndRenderPass();
 
   g_command_buffer_mgr->SubmitCommandBuffer(submit_off_thread, wait_for_completion);
@@ -505,6 +564,7 @@ void VKGfx::CheckForSurfaceResize()
 
 void VKGfx::OnConfigChanged(u32 bits)
 {
+  DrainRecordingWorker();
   AbstractGfx::OnConfigChanged(bits);
 
   if (bits & CONFIG_CHANGE_BIT_HOST_CONFIG)
@@ -542,7 +602,8 @@ void VKGfx::OnSwapChainResized()
   g_presenter->SetBackbuffer(m_swap_chain->GetWidth(), m_swap_chain->GetHeight());
 }
 
-void VKGfx::BindFramebuffer(VKFramebuffer* fb)
+void VKGfx::BindFramebufferDirect(VKFramebuffer* fb, FramebufferBindMode mode,
+                                  const VkClearValue& color_value, const VkClearValue& depth_value)
 {
   StateTracker::GetInstance()->EndRenderPass();
 
@@ -551,7 +612,20 @@ void VKGfx::BindFramebuffer(VKFramebuffer* fb)
 
   fb->TransitionForRender();
   StateTracker::GetInstance()->SetFramebuffer(fb);
-  m_current_framebuffer = fb;
+
+  switch (mode)
+  {
+  case FramebufferBindMode::Bind:
+    break;
+  case FramebufferBindMode::Discard:
+    // If we're discarding, begin the discard pass, then switch to a load pass.
+    // This way if the command buffer is flushed, we don't start another discard pass.
+    StateTracker::GetInstance()->BeginDiscardRenderPass();
+    break;
+  case FramebufferBindMode::Clear:
+    fb->SetAndClear(fb->GetRect(), color_value, depth_value);
+    break;
+  }
 }
 
 void VKGfx::SetFramebuffer(AbstractFramebuffer* framebuffer)
@@ -559,8 +633,12 @@ void VKGfx::SetFramebuffer(AbstractFramebuffer* framebuffer)
   if (m_current_framebuffer == framebuffer)
     return;
 
-  VKFramebuffer* vkfb = static_cast<VKFramebuffer*>(framebuffer);
-  BindFramebuffer(vkfb);
+  m_current_framebuffer = framebuffer;
+  RecordCommand command{};
+  command.type = RecordCommandType::BindFramebuffer;
+  command.bind_framebuffer.framebuffer = static_cast<VKFramebuffer*>(framebuffer);
+  command.bind_framebuffer.mode = FramebufferBindMode::Bind;
+  Record(command);
 }
 
 void VKGfx::SetAndDiscardFramebuffer(AbstractFramebuffer* framebuffer)
@@ -568,34 +646,43 @@ void VKGfx::SetAndDiscardFramebuffer(AbstractFramebuffer* framebuffer)
   if (m_current_framebuffer == framebuffer)
     return;
 
-  VKFramebuffer* vkfb = static_cast<VKFramebuffer*>(framebuffer);
-  BindFramebuffer(vkfb);
-
-  // If we're discarding, begin the discard pass, then switch to a load pass.
-  // This way if the command buffer is flushed, we don't start another discard pass.
-  StateTracker::GetInstance()->BeginDiscardRenderPass();
+  m_current_framebuffer = framebuffer;
+  RecordCommand command{};
+  command.type = RecordCommandType::BindFramebuffer;
+  command.bind_framebuffer.framebuffer = static_cast<VKFramebuffer*>(framebuffer);
+  command.bind_framebuffer.mode = FramebufferBindMode::Discard;
+  Record(command);
 }
 
 void VKGfx::SetAndClearFramebuffer(AbstractFramebuffer* framebuffer, const ClearColor& color_value,
                                    float depth_value)
 {
-  VKFramebuffer* vkfb = static_cast<VKFramebuffer*>(framebuffer);
-  BindFramebuffer(vkfb);
-
-  VkClearValue clear_color_value;
-  std::memcpy(clear_color_value.color.float32, color_value.data(),
-              sizeof(clear_color_value.color.float32));
-  VkClearValue clear_depth_value;
-  clear_depth_value.depthStencil.depth = depth_value;
-  clear_depth_value.depthStencil.stencil = 0;
-  vkfb->SetAndClear(vkfb->GetRect(), clear_color_value, clear_depth_value);
+  m_current_framebuffer = framebuffer;
+  RecordCommand command{};
+  command.type = RecordCommandType::BindFramebuffer;
+  command.bind_framebuffer.framebuffer = static_cast<VKFramebuffer*>(framebuffer);
+  command.bind_framebuffer.mode = FramebufferBindMode::Clear;
+  std::memcpy(command.bind_framebuffer.color.color.float32, color_value.data(),
+              sizeof(command.bind_framebuffer.color.color.float32));
+  command.bind_framebuffer.depth.depthStencil.depth = depth_value;
+  command.bind_framebuffer.depth.depthStencil.stencil = 0;
+  Record(command);
 }
 
 void VKGfx::SetTexture(u32 index, const AbstractTexture* texture)
 {
+  // Not deduplicated here: the layout transition inside depends on the texture's state when
+  // the command is recorded, which earlier queued commands may change.
+  RecordCommand command{};
+  command.type = RecordCommandType::SetTexture;
+  command.set_texture = {index, static_cast<const VKTexture*>(texture)};
+  Record(command);
+}
+
+void VKGfx::SetTextureDirect(u32 index, const VKTexture* tex)
+{
   // Texture should always be in SHADER_READ_ONLY layout prior to use.
   // This is so we don't need to transition during render passes.
-  const VKTexture* tex = static_cast<const VKTexture*>(texture);
   if (tex)
   {
     if (tex->GetLayout() != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
@@ -624,7 +711,7 @@ void VKGfx::SetSamplerState(u32 index, const SamplerState& state)
   if (m_sampler_states[index] == state)
     return;
 
-  // Look up new state and replace in state tracker.
+  // Look up new state (video thread owns the sampler cache) and replace in state tracker.
   VkSampler sampler = g_object_cache->GetSampler(state);
   if (sampler == VK_NULL_HANDLE)
   {
@@ -632,13 +719,23 @@ void VKGfx::SetSamplerState(u32 index, const SamplerState& state)
     sampler = g_object_cache->GetPointSampler();
   }
 
-  StateTracker::GetInstance()->SetSampler(index, sampler);
   m_sampler_states[index] = state;
+  RecordCommand command{};
+  command.type = RecordCommandType::SetSampler;
+  command.set_sampler = {index, sampler};
+  Record(command);
 }
 
 void VKGfx::SetComputeImageTexture(u32 index, AbstractTexture* texture, bool read, bool write)
 {
-  VKTexture* vk_texture = static_cast<VKTexture*>(texture);
+  RecordCommand command{};
+  command.type = RecordCommandType::SetComputeImageTexture;
+  command.set_compute_image_texture = {index, static_cast<VKTexture*>(texture), read, write};
+  Record(command);
+}
+
+void VKGfx::SetComputeImageTextureDirect(u32 index, VKTexture* vk_texture, bool read, bool write)
+{
   if (vk_texture)
   {
     StateTracker::GetInstance()->EndRenderPass();
@@ -656,11 +753,16 @@ void VKGfx::SetComputeImageTexture(u32 index, AbstractTexture* texture, bool rea
 
 void VKGfx::UnbindTexture(const AbstractTexture* texture)
 {
-  StateTracker::GetInstance()->UnbindTexture(static_cast<const VKTexture*>(texture)->GetView());
+  RecordCommand command{};
+  command.type = RecordCommandType::UnbindTexture;
+  command.unbind_texture = {static_cast<const VKTexture*>(texture)->GetView()};
+  Record(command);
 }
 
 void VKGfx::ResetSamplerStates()
 {
+  DrainRecordingWorker();
+
   // Invalidate all sampler states, next draw will re-initialize them.
   for (u32 i = 0; i < m_sampler_states.size(); i++)
   {
@@ -690,29 +792,64 @@ void VKGfx::SetScissorRect(const MathUtil::Rectangle<int>& rc)
     scissor.extent.height -= -scissor.offset.y;
     scissor.offset.y = 0;
   }
-  StateTracker::GetInstance()->SetScissor(scissor);
+  if (m_scissor_recorded && std::memcmp(&m_last_recorded_scissor, &scissor, sizeof(scissor)) == 0)
+    return;
+  m_last_recorded_scissor = scissor;
+  m_scissor_recorded = true;
+
+  RecordCommand command{};
+  command.type = RecordCommandType::SetScissor;
+  command.set_scissor = {scissor};
+  Record(command);
 }
 
 void VKGfx::SetViewport(float x, float y, float width, float height, float near_depth,
                         float far_depth)
 {
   VkViewport viewport = {x, y, width, height, near_depth, far_depth};
-  StateTracker::GetInstance()->SetViewport(viewport);
+  if (m_viewport_recorded &&
+      std::memcmp(&m_last_recorded_viewport, &viewport, sizeof(viewport)) == 0)
+  {
+    return;
+  }
+  m_last_recorded_viewport = viewport;
+  m_viewport_recorded = true;
+
+  RecordCommand command{};
+  command.type = RecordCommandType::SetViewport;
+  command.set_viewport = {viewport};
+  Record(command);
 }
 
 void VKGfx::Draw(u32 base_vertex, u32 num_vertices)
+{
+  g_vulkan_context->GetPerfCounters().draw_count.fetch_add(1, std::memory_order_relaxed);
+  RecordCommand command{};
+  command.type = RecordCommandType::Draw;
+  command.draw = {base_vertex, num_vertices};
+  Record(command);
+}
+
+void VKGfx::DrawDirect(u32 base_vertex, u32 num_vertices)
 {
   const u64 perf_start_us = g_vulkan_context->PerfTimingStart();
   if (!StateTracker::GetInstance()->Bind())
     return;
 
   vkCmdDraw(g_command_buffer_mgr->GetCurrentCommandBuffer(), num_vertices, 1, base_vertex, 0);
-  auto& perf = g_vulkan_context->GetPerfCounters();
-  VulkanContext::AddPerfTiming(perf.draw_us, perf_start_us);
-  perf.draw_count.fetch_add(1, std::memory_order_relaxed);
+  VulkanContext::AddPerfTiming(g_vulkan_context->GetPerfCounters().draw_us, perf_start_us);
 }
 
 void VKGfx::DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex)
+{
+  g_vulkan_context->GetPerfCounters().draw_count.fetch_add(1, std::memory_order_relaxed);
+  RecordCommand command{};
+  command.type = RecordCommandType::DrawIndexed;
+  command.draw_indexed = {base_index, num_indices, base_vertex};
+  Record(command);
+}
+
+void VKGfx::DrawIndexedDirect(u32 base_index, u32 num_indices, u32 base_vertex)
 {
   const u64 perf_start_us = g_vulkan_context->PerfTimingStart();
   if (!StateTracker::GetInstance()->Bind())
@@ -720,17 +857,214 @@ void VKGfx::DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex)
 
   vkCmdDrawIndexed(g_command_buffer_mgr->GetCurrentCommandBuffer(), num_indices, 1, base_index,
                    base_vertex, 0);
-  auto& perf = g_vulkan_context->GetPerfCounters();
-  VulkanContext::AddPerfTiming(perf.draw_us, perf_start_us);
-  perf.draw_count.fetch_add(1, std::memory_order_relaxed);
+  VulkanContext::AddPerfTiming(g_vulkan_context->GetPerfCounters().draw_us, perf_start_us);
 }
 
 void VKGfx::DispatchComputeShader(const AbstractShader* shader, u32 groupsize_x, u32 groupsize_y,
                                   u32 groupsize_z, u32 groups_x, u32 groups_y, u32 groups_z)
 {
-  StateTracker::GetInstance()->SetComputeShader(static_cast<const VKShader*>(shader));
+  RecordCommand command{};
+  command.type = RecordCommandType::DispatchCompute;
+  command.dispatch_compute = {static_cast<const VKShader*>(shader), groups_x, groups_y, groups_z};
+  Record(command);
+}
+
+void VKGfx::DispatchComputeShaderDirect(const VKShader* shader, u32 groups_x, u32 groups_y,
+                                        u32 groups_z)
+{
+  StateTracker::GetInstance()->SetComputeShader(shader);
   if (StateTracker::GetInstance()->BindCompute())
     vkCmdDispatch(g_command_buffer_mgr->GetCurrentCommandBuffer(), groups_x, groups_y, groups_z);
+}
+
+void VKGfx::DrainRecordingWorker()
+{
+  if (m_pending_gx_uniforms.mask != 0)
+    FlushPendingGXUniformBuffers();
+  if (m_recording_worker)
+    m_recording_worker->Drain();
+}
+
+void VKGfx::Record(const RecordCommand& command)
+{
+  if (m_pending_gx_uniforms.mask != 0)
+    FlushPendingGXUniformBuffers();
+  Dispatch(command);
+}
+
+void VKGfx::Dispatch(const RecordCommand& command)
+{
+  if (m_recording_worker)
+    m_recording_worker->Push(command);
+  else
+    ExecuteRecordCommand(command);
+}
+
+void VKGfx::FlushPendingGXUniformBuffers()
+{
+  RecordCommand command{};
+  command.type = RecordCommandType::SetGXUniformBuffers;
+  command.set_gx_uniform_buffers = m_pending_gx_uniforms;
+  m_pending_gx_uniforms.mask = 0;
+  Dispatch(command);
+}
+
+void VKGfx::RecordSetVertexBuffer(VkBuffer buffer, VkDeviceSize offset, u32 size)
+{
+  if (m_last_recorded_vertex_buffer == buffer && m_last_recorded_vertex_offset == offset &&
+      m_last_recorded_vertex_size == size)
+  {
+    return;
+  }
+  m_last_recorded_vertex_buffer = buffer;
+  m_last_recorded_vertex_offset = offset;
+  m_last_recorded_vertex_size = size;
+
+  RecordCommand command{};
+  command.type = RecordCommandType::SetVertexBuffer;
+  command.set_vertex_buffer = {buffer, offset, size};
+  Record(command);
+}
+
+void VKGfx::RecordSetIndexBuffer(VkBuffer buffer, VkDeviceSize offset, VkIndexType type)
+{
+  if (m_index_buffer_recorded && m_last_recorded_index_buffer == buffer &&
+      m_last_recorded_index_offset == offset && m_last_recorded_index_type == type)
+  {
+    return;
+  }
+  m_last_recorded_index_buffer = buffer;
+  m_last_recorded_index_offset = offset;
+  m_last_recorded_index_type = type;
+  m_index_buffer_recorded = true;
+
+  RecordCommand command{};
+  command.type = RecordCommandType::SetIndexBuffer;
+  command.set_index_buffer = {buffer, offset, type};
+  Record(command);
+}
+
+void VKGfx::RecordSetGXUniformBuffer(u32 binding, VkBuffer buffer, u32 offset, u32 size)
+{
+  m_pending_gx_uniforms.buffer = buffer;
+  m_pending_gx_uniforms.offsets[binding] = offset;
+  m_pending_gx_uniforms.sizes[binding] = size;
+  m_pending_gx_uniforms.mask |= static_cast<u8>(1u << binding);
+}
+
+void VKGfx::RecordSetUtilityUniformBuffer(VkBuffer buffer, u32 offset, u32 size)
+{
+  RecordCommand command{};
+  command.type = RecordCommandType::SetUtilityUniformBuffer;
+  command.set_utility_uniform_buffer = {buffer, offset, size};
+  Record(command);
+}
+
+void VKGfx::RecordSetTexelBuffer(u32 index, VkBufferView view)
+{
+  RecordCommand command{};
+  command.type = RecordCommandType::SetTexelBuffer;
+  command.set_texel_buffer = {index, view};
+  Record(command);
+}
+
+void VKGfx::RecordFinishedRendering(const VKTexture* texture)
+{
+  RecordCommand command{};
+  command.type = RecordCommandType::FinishedRendering;
+  command.finished_rendering = {texture};
+  Record(command);
+}
+
+void VKGfx::ExecuteRecordCommand(const RecordCommand& command)
+{
+  StateTracker* const tracker = StateTracker::GetInstance();
+  switch (command.type)
+  {
+  case RecordCommandType::Nop:
+    break;
+  case RecordCommandType::SetPipeline:
+    tracker->SetPipeline(command.set_pipeline.pipeline);
+    break;
+  case RecordCommandType::SetTexture:
+    SetTextureDirect(command.set_texture.index, command.set_texture.texture);
+    break;
+  case RecordCommandType::SetSampler:
+    tracker->SetSampler(command.set_sampler.index, command.set_sampler.sampler);
+    break;
+  case RecordCommandType::SetViewport:
+    tracker->SetViewport(command.set_viewport.viewport);
+    break;
+  case RecordCommandType::SetScissor:
+    tracker->SetScissor(command.set_scissor.scissor);
+    break;
+  case RecordCommandType::SetVertexBuffer:
+    tracker->SetVertexBuffer(command.set_vertex_buffer.buffer, command.set_vertex_buffer.offset,
+                             command.set_vertex_buffer.size);
+    break;
+  case RecordCommandType::SetIndexBuffer:
+    tracker->SetIndexBuffer(command.set_index_buffer.buffer, command.set_index_buffer.offset,
+                            command.set_index_buffer.type);
+    break;
+  case RecordCommandType::SetGXUniformBuffers:
+    for (u32 i = 0; i < NUM_UBO_DESCRIPTOR_SET_BINDINGS; i++)
+    {
+      if (command.set_gx_uniform_buffers.mask & (1u << i))
+      {
+        tracker->SetGXUniformBuffer(i, command.set_gx_uniform_buffers.buffer,
+                                    command.set_gx_uniform_buffers.offsets[i],
+                                    command.set_gx_uniform_buffers.sizes[i]);
+      }
+    }
+    break;
+  case RecordCommandType::SetUtilityUniformBuffer:
+    tracker->SetUtilityUniformBuffer(command.set_utility_uniform_buffer.buffer,
+                                     command.set_utility_uniform_buffer.offset,
+                                     command.set_utility_uniform_buffer.size);
+    break;
+  case RecordCommandType::SetTexelBuffer:
+    tracker->SetTexelBuffer(command.set_texel_buffer.index, command.set_texel_buffer.view);
+    break;
+  case RecordCommandType::BindFramebuffer:
+    BindFramebufferDirect(command.bind_framebuffer.framebuffer, command.bind_framebuffer.mode,
+                          command.bind_framebuffer.color, command.bind_framebuffer.depth);
+    break;
+  case RecordCommandType::ClearRegion:
+    ClearRegionDirect(command.clear_region);
+    break;
+  case RecordCommandType::ClearAdditionalColorAttachments:
+    ClearAdditionalColorAttachmentsDirect(command.clear_additional_color_attachments);
+    break;
+  case RecordCommandType::Draw:
+    DrawDirect(command.draw.base_vertex, command.draw.num_vertices);
+    break;
+  case RecordCommandType::DrawIndexed:
+    DrawIndexedDirect(command.draw_indexed.base_index, command.draw_indexed.num_indices,
+                      command.draw_indexed.base_vertex);
+    break;
+  case RecordCommandType::SetComputeImageTexture:
+    SetComputeImageTextureDirect(
+        command.set_compute_image_texture.index, command.set_compute_image_texture.texture,
+        command.set_compute_image_texture.read, command.set_compute_image_texture.write);
+    break;
+  case RecordCommandType::DispatchCompute:
+    DispatchComputeShaderDirect(command.dispatch_compute.shader, command.dispatch_compute.groups_x,
+                                command.dispatch_compute.groups_y,
+                                command.dispatch_compute.groups_z);
+    break;
+  case RecordCommandType::UnbindTexture:
+    tracker->UnbindTexture(command.unbind_texture.view);
+    break;
+  case RecordCommandType::FinishedRendering:
+    if (command.finished_rendering.texture->GetLayout() != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+    {
+      tracker->EndRenderPass();
+      command.finished_rendering.texture->TransitionToLayout(
+          g_command_buffer_mgr->GetCurrentCommandBuffer(),
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+    break;
+  }
 }
 
 SurfaceInfo VKGfx::GetSurfaceInfo() const

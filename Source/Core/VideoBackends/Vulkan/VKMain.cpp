@@ -16,6 +16,7 @@
 #include "VideoBackends/Vulkan/VKBoundingBox.h"
 #include "VideoBackends/Vulkan/VKGfx.h"
 #include "VideoBackends/Vulkan/VKPerfQuery.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VKSwapChain.h"
 #include "VideoBackends/Vulkan/VKVertexManager.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
@@ -418,6 +419,9 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
 
 void VideoBackend::Shutdown()
 {
+  // Nothing may still be recording into the command buffers torn down below.
+  Vulkan::DrainRecordingWorkerForDirectAccess();
+
 #ifdef ENABLE_VR
   // Whether VR actually ran this session. Captured before the OpenXR objects are torn down so the
   // persist decision below can tell a VR game stop from a plain non-VR shutdown.

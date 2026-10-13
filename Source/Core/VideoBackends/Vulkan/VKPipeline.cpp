@@ -15,6 +15,7 @@
 #include "Common/MsgHandler.h"
 
 #include "VideoBackends/Vulkan/ObjectCache.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VKShader.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VKVertexFormat.h"
@@ -31,6 +32,8 @@ VKPipeline::VKPipeline(const AbstractPipelineConfig& config, VkPipeline pipeline
 
 VKPipeline::~VKPipeline()
 {
+  // A queued SetPipeline may still reference this object.
+  DrainRecordingWorkerForDirectAccess();
   vkDestroyPipeline(g_vulkan_context->GetDevice(), m_pipeline, nullptr);
 }
 

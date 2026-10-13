@@ -11,6 +11,7 @@
 #include "VideoBackends/Vulkan/CommandBufferManager.h"
 #include "VideoBackends/Vulkan/StateTracker.h"
 #include "VideoBackends/Vulkan/VKGfx.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/VideoCommon.h"
@@ -42,6 +43,7 @@ bool PerfQuery::Initialize()
 
 void PerfQuery::EnableQuery(PerfQueryGroup group)
 {
+  DrainRecordingWorkerForDirectAccess();
   // Block if there are no free slots.
   // Otherwise, try to keep half of them available.
   const u32 query_count = m_query_count.load(std::memory_order_relaxed);
@@ -72,6 +74,7 @@ void PerfQuery::EnableQuery(PerfQueryGroup group)
 
 void PerfQuery::DisableQuery(PerfQueryGroup group)
 {
+  DrainRecordingWorkerForDirectAccess();
   if (group == PQG_ZCOMP_ZCOMPLOC || group == PQG_ZCOMP)
   {
     vkCmdEndQuery(g_command_buffer_mgr->GetCurrentCommandBuffer(), m_query_pool, m_query_next_pos);
@@ -85,6 +88,7 @@ void PerfQuery::DisableQuery(PerfQueryGroup group)
 
 void PerfQuery::ResetQuery()
 {
+  DrainRecordingWorkerForDirectAccess();
   m_query_count.store(0, std::memory_order_relaxed);
   m_query_readback_pos = 0;
   m_query_next_pos = 0;
@@ -188,6 +192,7 @@ void PerfQuery::ReadbackQueries()
 
 void PerfQuery::ReadbackQueries(u32 query_count)
 {
+  DrainRecordingWorkerForDirectAccess();
   // Should be at maximum query_count queries pending.
   ASSERT(query_count <= m_query_count.load(std::memory_order_relaxed) &&
          (m_query_readback_pos + query_count) <= PERF_QUERY_BUFFER_SIZE);

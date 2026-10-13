@@ -29,10 +29,11 @@ void SetCurrentThreadAffinity(u32 mask);
 // The hottest emulator threads, for big.LITTLE performance-core pinning.
 enum class ThreadCoreRole
 {
-  EmuCPU,    // PowerPC JIT ("CPU thread") — serial, latency-critical: dedicated fast core
-  EmuVideo,  // FIFO/GPU-submit ("Video thread"): its own fast core, no contention with EmuCPU
-  VRPacing,  // OpenXR frame-pacing thread
-  VRSubmit,  // Vulkan async command-submit worker
+  EmuCPU,          // PowerPC JIT ("CPU thread") — serial, latency-critical: dedicated fast core
+  EmuVideo,        // FIFO/GPU-submit ("Video thread"): its own fast core, no contention with EmuCPU
+  VRPacing,        // OpenXR frame-pacing thread
+  VRSubmit,        // Vulkan async command-submit worker
+  VideoRecording,  // Vulkan command recording worker fed by the video thread
 };
 
 // Android only: pin the calling thread to one of the device's performance (highest

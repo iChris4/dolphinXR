@@ -20,6 +20,9 @@ add_library(videovulkan
   VKPipeline.h
   VKGfx.cpp
   VKGfx.h
+  VKRecordingQueue.h
+  VKRecordingWorker.cpp
+  VKRecordingWorker.h
   VKShader.cpp
   VKShader.h
   VKStreamBuffer.cpp

@@ -26,13 +26,14 @@
 #include "Core/Config/GraphicsSettings.h"
 #include "VideoBackends/Vulkan/CommandBufferManager.h"
 #include "VideoBackends/Vulkan/StateTracker.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/AbstractGfx.h"
-#include "VideoCommon/TextureConfig.h"
-#include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/OnScreenDisplay.h"
+#include "VideoCommon/TextureConfig.h"
 #include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VideoConfig.h"
 
 #ifdef _WIN32
 #include <windows.h>  // for SEH __try/__except
@@ -817,6 +818,7 @@ bool VulkanOpenXR::PrepareFoveationImages(
     const std::vector<XrSwapchainImageFoveationVulkanFB>& fdm_images,
     std::vector<VkImageView>* out_views)
 {
+  DrainRecordingWorkerForDirectAccess();
   out_views->clear();
   out_views->reserve(fdm_images.size());
 
@@ -1234,6 +1236,8 @@ bool VulkanOpenXR::CreateEyeSwapchains(int64_t swapchain_format)
 
 void VulkanOpenXR::DestroySwapchains()
 {
+  // WaitForGPUIdle drains too, but not on the device-lost path below.
+  DrainRecordingWorkerForDirectAccess();
   // Finish and submit the current command buffer as well as waiting for queued GPU work. A plain
   // vkDeviceWaitIdle does not make it safe to destroy objects referenced by an unsubmitted buffer.
   // Do not submit again after VK_ERROR_DEVICE_LOST; the command buffer manager has already queued
@@ -1475,6 +1479,7 @@ AbstractFramebuffer* VulkanOpenXR::AcquireLayeredFramebuffer()
 
 void VulkanOpenXR::ReleaseEyeTexture(uint32_t eye_index)
 {
+  DrainRecordingWorkerForDirectAccess();
   ASSERT(eye_index < 2);
   if (!m_image_acquired[eye_index])
     return;
@@ -1526,6 +1531,7 @@ void VulkanOpenXR::ReleaseEyeTexture(uint32_t eye_index)
 
 void VulkanOpenXR::ReleaseLayeredTexture()
 {
+  DrainRecordingWorkerForDirectAccess();
   if (!m_layered_image_acquired)
     return;
 
@@ -1559,6 +1565,7 @@ void VulkanOpenXR::ReleaseLayeredTexture()
 
 bool VulkanOpenXR::SubmitFrame()
 {
+  DrainRecordingWorkerForDirectAccess();
   ASSERT(VR::g_openxr != nullptr);
 
 #if defined(ANDROID)
@@ -1749,6 +1756,7 @@ bool VulkanOpenXR::SubmitFrame()
 
 bool VulkanOpenXR::SubmitFlatFrame()
 {
+  DrainRecordingWorkerForDirectAccess();
   ASSERT(VR::g_openxr != nullptr);
 
 #if defined(ANDROID)

@@ -142,6 +142,7 @@ void VideoConfig::Refresh()
   bBorderlessFullscreen = Config::Get(Config::GFX_BORDERLESS_FULLSCREEN);
   bEnableValidationLayer = Config::Get(Config::GFX_ENABLE_VALIDATION_LAYER);
   bBackendMultithreading = Config::Get(Config::GFX_BACKEND_MULTITHREADING);
+  bVulkanRecordingWorker = Config::Get(Config::GFX_VULKAN_RECORDING_WORKER);
   iCommandBufferExecuteInterval = Config::Get(Config::GFX_COMMAND_BUFFER_EXECUTE_INTERVAL);
   bShaderCache = Config::Get(Config::GFX_SHADER_CACHE);
   bWaitForShadersBeforeStarting = Config::Get(Config::GFX_WAIT_FOR_SHADERS_BEFORE_STARTING);

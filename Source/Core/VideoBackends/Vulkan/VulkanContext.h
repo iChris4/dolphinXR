@@ -167,6 +167,14 @@ public:
     // Set once per presented frame from [VR] PerfCounters. Counts are always accumulated;
     // the per-draw timer reads only happen while this is true.
     std::atomic<bool> timing_enabled{false};
+    // Recording worker: queued commands, drains and waits (see VKRecordingWorker.h).
+    std::atomic<u32> worker_commands{0};
+    std::atomic<u32> worker_drains{0};
+    std::atomic<u64> worker_drain_wait_us{0};
+    std::atomic<u32> worker_full_waits{0};
+    std::atomic<u64> worker_busy_us{0};
+    std::atomic<u32> worker_max_depth{0};
+    std::atomic<u32> worker_owner_violations{0};
   };
   PerfCounters& GetPerfCounters() { return m_perf_counters; }
 

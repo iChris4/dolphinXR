@@ -7,6 +7,7 @@
 
 #include "VideoBackends/Vulkan/ObjectCache.h"
 #include "VideoBackends/Vulkan/ShaderCompiler.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 
 #include "VideoCommon/VideoConfig.h"
@@ -62,6 +63,8 @@ VKShader::VKShader(std::vector<u32> spv, VkPipeline compute_pipeline, std::strin
 
 VKShader::~VKShader()
 {
+  // A queued compute dispatch may still reference this object.
+  DrainRecordingWorkerForDirectAccess();
   if (m_stage != ShaderStage::Compute)
     vkDestroyShaderModule(g_vulkan_context->GetDevice(), m_module, nullptr);
   else

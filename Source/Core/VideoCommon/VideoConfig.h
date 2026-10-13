@@ -441,6 +441,7 @@ struct VideoConfig final
 
   // Multithreaded submission, currently only supported with Vulkan.
   bool bBackendMultithreading = true;
+  bool bVulkanRecordingWorker = false;
 
   // Early command buffer execution interval in number of draws.
   // Currently only supported with Vulkan.

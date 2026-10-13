@@ -18,6 +18,7 @@
 #include "VideoBackends/Vulkan/StagingBuffer.h"
 #include "VideoBackends/Vulkan/StateTracker.h"
 #include "VideoBackends/Vulkan/VKGfx.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VKStreamBuffer.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 
@@ -46,6 +47,7 @@ VKTexture::VKTexture(const TextureConfig& tex_config, VmaAllocation alloc, VkIma
 
 VKTexture::~VKTexture()
 {
+  DrainRecordingWorkerForDirectAccess();
   if (m_view != VK_NULL_HANDLE)
   {
     StateTracker::GetInstance()->UnbindTexture(m_view);
@@ -61,6 +63,7 @@ VKTexture::~VKTexture()
 
 VkImageView VKTexture::ReleaseView()
 {
+  DrainRecordingWorkerForDirectAccess();
   if (m_view == VK_NULL_HANDLE)
     return VK_NULL_HANDLE;
 
@@ -300,6 +303,7 @@ void VKTexture::CopyRectangleFromTexture(const AbstractTexture* src,
                                          u32 src_level, const MathUtil::Rectangle<int>& dst_rect,
                                          u32 dst_layer, u32 dst_level)
 {
+  DrainRecordingWorkerForDirectAccess();
   const VKTexture* src_texture = static_cast<const VKTexture*>(src);
 
   ASSERT_MSG(VIDEO,
@@ -341,6 +345,7 @@ void VKTexture::CopyRectangleFromTexture(const AbstractTexture* src,
 void VKTexture::ResolveFromTexture(const AbstractTexture* src, const MathUtil::Rectangle<int>& rect,
                                    u32 layer, u32 level)
 {
+  DrainRecordingWorkerForDirectAccess();
   const VKTexture* srcentry = static_cast<const VKTexture*>(src);
   DEBUG_ASSERT(m_config.samples == 1 && m_config.width == srcentry->m_config.width &&
                m_config.height == srcentry->m_config.height && srcentry->m_config.samples > 1);
@@ -371,6 +376,7 @@ void VKTexture::ResolveFromTexture(const AbstractTexture* src, const MathUtil::R
 void VKTexture::Load(u32 level, u32 width, u32 height, u32 row_length, const u8* buffer,
                      size_t buffer_size, u32 layer)
 {
+  DrainRecordingWorkerForDirectAccess();
   // Can't copy data larger than the texture extents.
   width = std::max(1u, std::min(width, GetWidth() >> level));
   height = std::max(1u, std::min(height, GetHeight() >> level));
@@ -468,12 +474,16 @@ void VKTexture::Load(u32 level, u32 width, u32 height, u32 row_length, const u8*
 
 void VKTexture::FinishedRendering()
 {
-  if (m_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+  // Uploads end in the shader-read layout, and only render targets and compute images leave it
+  // through queued commands. For any other texture a layout that already reads as shader-read
+  // stays that way until this thread changes it, so the command can be skipped. Otherwise it is
+  // recorded in order with the draws and re-checks the layout at recording time.
+  if (!m_config.IsRenderTarget() && !m_config.IsComputeImage() &&
+      m_layout.load(std::memory_order_relaxed) == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+  {
     return;
-
-  StateTracker::GetInstance()->EndRenderPass();
-  TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(),
-                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  }
+  VKGfx::GetInstance()->RecordFinishedRendering(this);
 }
 
 void VKTexture::OverrideImageLayout(VkImageLayout new_layout)
@@ -902,6 +912,7 @@ void VKStagingTexture::CopyFromTexture(const AbstractTexture* src,
                                        const MathUtil::Rectangle<int>& src_rect, u32 src_layer,
                                        u32 src_level, const MathUtil::Rectangle<int>& dst_rect)
 {
+  DrainRecordingWorkerForDirectAccess();
   const VKTexture* src_tex = static_cast<const VKTexture*>(src);
   ASSERT(m_type == StagingTextureType::Readback || m_type == StagingTextureType::Mutable);
   ASSERT(src_rect.GetWidth() == dst_rect.GetWidth() &&
@@ -1002,6 +1013,7 @@ void VKStagingTexture::CopyToTexture(const MathUtil::Rectangle<int>& src_rect, A
                                      const MathUtil::Rectangle<int>& dst_rect, u32 dst_layer,
                                      u32 dst_level)
 {
+  DrainRecordingWorkerForDirectAccess();
   const VKTexture* dst_tex = static_cast<const VKTexture*>(dst);
   ASSERT(m_type == StagingTextureType::Upload || m_type == StagingTextureType::Mutable);
   ASSERT(src_rect.GetWidth() == dst_rect.GetWidth() &&
@@ -1095,6 +1107,7 @@ VKFramebuffer::VKFramebuffer(VKTexture* color_attachment, VKTexture* depth_attac
 
 VKFramebuffer::~VKFramebuffer()
 {
+  DrainRecordingWorkerForDirectAccess();
   if (m_fb != VK_NULL_HANDLE)
     g_command_buffer_mgr->DeferFramebufferDestruction(m_fb);
 }

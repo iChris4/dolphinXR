@@ -102,6 +102,13 @@ const Info<bool> GFX_BORDERLESS_FULLSCREEN{{System::GFX, "Settings", "Borderless
 const Info<bool> GFX_ENABLE_VALIDATION_LAYER{{System::GFX, "Settings", "EnableValidationLayer"},
                                              false};
 
+#if defined(__ANDROID__)
+constexpr bool DEFAULT_VULKAN_RECORDING_WORKER = true;
+#else
+constexpr bool DEFAULT_VULKAN_RECORDING_WORKER = false;
+#endif
+const Info<bool> GFX_VULKAN_RECORDING_WORKER{{System::GFX, "Settings", "VulkanRecordingWorker"},
+                                             DEFAULT_VULKAN_RECORDING_WORKER};
 const Info<bool> GFX_BACKEND_MULTITHREADING{{System::GFX, "Settings", "BackendMultithreading"},
                                             true};
 const Info<int> GFX_COMMAND_BUFFER_EXECUTE_INTERVAL{
