@@ -7,8 +7,8 @@ _Generated 2026-10-02 for the DolphinXR fork. Audience: the DolphinXR maintainer
 - **DolphinXR starting/base revision:** `openxr-work` @ `5e9a304a65` — merge-base with upstream is `b55aaa8ca7` (2026-02-21, "Merge pull request #14376 from Windsurf7/lozss-gameini")
 - **Upstream target revision:** `771fb15405` = `upstream/master` on 2026-09-30 ("Merge pull request #14870 from LillyJadeKatrin/retroachievements-allowlist-update")
 - **Number of upstream commits analyzed:** 556 non-merge commits, in 354 landing groups (344 PR merges, 7 direct commits, 3 release-branch merges)
-- **Number integrated:** 272 in stage 1, **453 after stage 2** (see "Stage 2" below)
-- **Number skipped:** 284
+- **Number integrated:** 537 (272 in stage 1, 181 in stage 2, 84 in stage 3; see the stage sections below)
+- **Number skipped:** 19 (all obsolete; nothing deferred)
 
 | Outcome | Commits |
 |---|---:|
@@ -117,6 +117,67 @@ At the maintainer's request the remaining commits were then integrated in upstre
 | Intermediate checkpoint at G076 (`2e6a91e222`) | Windows 435 s, 0 errors; Quest BUILD SUCCESSFUL |
 
 Not runtime-tested yet. Please smoke-test in a headset on PC and Quest before merging.
+
+## Stage 3 (2026-10-13/14): high-risk pass and final merge
+
+The remaining 84 commits (the HIGH groups and their dependents) were integrated in landing order on the same branch, then upstream `771fb15405` was recorded as merged. **The branch now contains the whole analyzed range.**
+
+| Stage-3 outcome | Commits |
+|---|---:|
+| Integrated, clean cherry-pick | 74 |
+| Integrated, manual conflict resolution | 10 |
+| DolphinXR adaptation commits added on top | 6 |
+| Final merge commit (`-s ours`, tree unchanged) | 1 |
+
+**Final totals:** 537 of 556 upstream commits integrated, 19 skipped as obsolete, 0 deferred. Merge commit `9db79cee94` makes `771fb15405` an ancestor of the branch, so the next upstream sync starts from there (72 newer upstream commits existed on `upstream/master` at the time of writing, not yet analyzed).
+
+### Manual conflict resolutions in the HIGH pass
+
+| Upstream | Group | Title | Resolution |
+|---|---|---|---|
+| `fc47091592` | G144 | Remove GLX support | deleted GLX.h (XR getters gone with it); OGLMain Create() keeps XR gl_wsi minus prefer_egl; OGLOpenXR Linux block now errors (no EGL binding in XR_KHR_opengl_enable); dropped NativeContextType::GLX; CMake Linux-VR message now requires Vulkan |
+| `c73dde2193` | G160 | Android: Remove HostThreadLock | removed XR's HostThreadLock guards too (MainAndroid OpenXR JNI entry points, HotkeyDispatcher), lock was a no-op per upstream |
+| `7ef2906351` | G180 | Android: Convert DirectoryInitialization to Kotlin | took upstream DirectoryInitialization.kt; re-ported XR's GameSettingsVR-aware Sys re-extraction (getSysDirectoryVersion + missing-dir check) |
+| `3d9f46cd64` | G273 | CMake: Remove LINUX_LOCAL_DEV and symlink required files | dropped XR's dolphin-emu-sys-copy target + old post-build copies in favour of upstream's DolphinSymlinkOrCopy (runtime dir now has no per-config subdir) |
+| `c1261e7406` | G273 | CMake: Introduce Presets, replacing Settings | Readme: upstream's new Building section + XR intro/VR requirements/VR build+Docker+Quest subsections re-inserted (GLX/OPENXR.sln text dropped) |
+| `893be0996e` | G317 | Android: Add global settings search | settings search: XR Quest/VR/hotkey menus moved into upstream's tryBuildSettingsList (also indexed for search); revision extras kept via fragmentExtrasWithRevision incl. search navigation; OpenXR Wii Remote (3) kept in getMenuTagAction; XR questDefaultProfile/mapper rows kept with upstream's new mapping signature |
+| `93706022d5` | G317 | Android: Reformat settings search files | kept XR's revision-bundle call (reformat-only upstream hunk) |
+| `9263f6b7c6` | G327 | VideoCommon: separate out reinterpret and palette texture creation fro | XR Metroid layered palette selection moved into static ShouldUseLayeredPaletteConversion(source) + use_layered_pipeline param on upstream's RenderPaletteEntry; all 3 call sites pass it |
+| `e5eabd08f5` | G335 | Optimize vertex_shader_uid_data down to 28 bytes | VS UID: XR code_version kept in the 8 spare bits of the repacked 28-byte struct; GX_PIPELINE_UID_VERSION 14; ShaderHunter vertex family signature reconstructs the old fields so persisted family_version-2 signatures stay valid |
+| `e9c5b57d88` | G340 | DolphinQt: Properly define QtPaths | took upstream's WIN32 QtPaths block (XR side was only a blank line + if(MSVC)) |
+
+### DolphinXR adaptation commits (deliberate deviations from upstream, each its own commit)
+
+| Commit | What | Why |
+|---|---|---|
+| `d8452d410c` | CMake: vendored-Qt prefix path → `Externals/Qt/Qt6.8.3` | XR prepends the bundled Qt to `CMAKE_PREFIX_PATH`; upstream moved the bundle to 6.8.3 (G207). |
+| `7944eed7e9` | Readme: fix backslashes in Quest script paths | Repair of my own Readme rebuild (G273). |
+| `772f68d129` | `Source/PCH/pch.h`: keep the VS 2022 (17.6+) floor | Upstream G314 requires VS 2026 (`_MSC_FULL_VER ≥ 195136252`); this machine builds with VS 2022 19.44. The rest of G314 (build_info/WinUpdater redist) is kept. |
+| `c17bee462e` | `build.gradle.kts`: keep NDK r29 | Upstream G246 moved to NDK r30, which is not installed; XR's Quest scripts and `local.properties` pin r29, and AGP refuses mismatched `ndk.dir`/`ndkVersion`. |
+| `74908f54d9` | ShaderHunter: include `ConstantManager.h` | My family-signature rewrite reads `uid.vs_expand`; the enum is only forward-declared in `VertexShaderGen.h`. |
+| `802e11ce0b` | Android: restore XR imports + `getSysDirectory()` | Upstream G317 replaced wildcard imports with explicit ones (dropping XR's Quest settings classes) and the G180 Kotlin port removed `getSysDirectory()`, which XR's per-game profile code uses. |
+
+### Semantic adaptations worth knowing about
+
+- **G144 (GLX removed):** `OGLOpenXR.cpp`'s Linux binding block now logs an error and fails session creation, since upstream creates EGL contexts on Linux and `XR_KHR_opengl_enable` has only Xlib/GLX, Xcb and Wayland bindings. `NativeContextType::GLX` and the GLX getters are gone; the root CMake message says desktop-Linux VR needs `ENABLE_VULKAN`. Windows (WGL) and Quest (EGL/GLES) are unchanged. Implementing `XR_MNDX_egl_enable` would restore Linux GL VR.
+- **G160 (HostThreadLock removed):** XR's 9 guards (OpenXR JNI entry points in `MainAndroid.cpp`, 8 sites in `HotkeyDispatcher.cpp`) were removed like upstream's own; upstream states the lock no longer serves a purpose.
+- **G180 (DirectoryInitialization → Kotlin):** XR's Sys re-extraction rule is re-ported: the stored `sysDirectoryVersion` is `<git revision>-GameSettingsVR-<hash of the asset list>` (same value as the Java version, via `contentHashCode()`), and a missing `Sys/GameSettingsVR` forces re-extraction.
+- **G273 (CMake replaces the VS project):** XR's `dolphin-emu-sys-copy` post-build target was dropped in favour of upstream's `DolphinSymlinkOrCopy.cmake`. With upstream's generator-expression output directory, Windows binaries now land in **`Build-vs2022/Binaries/Dolphin.exe`** (no `Binary/x64/Release/` any more) with `Sys/` beside them (copied, or symlinked when Windows Developer Mode is on). `Binaries/Tests/tests.exe` and `Binaries/Tests/Sys` are now consistent too, so the old ctest/Sys quirk is gone. The Readme's Building section was rebuilt from upstream's new text plus XR's VR/Docker/Quest subsections.
+- **G317 (Android settings search):** XR's OpenXR, Quest override/VR-config and hotkey menus were moved into upstream's `tryBuildSettingsList`, so they are also indexed by the new search; `fragmentExtrasWithRevision` is applied to search-result navigation too; the OpenXR Wii Remote source (3) keeps opening the emulated bindings UI; XR's `questDefaultProfile` and controller-mapper rows follow upstream's new `addControllerMappingSettings(…, controllerNumber, …)` signature.
+- **G327 (palette/reinterpret split):** XR's Metroid layered palette selection now lives in `TextureCacheBase::ShouldUseLayeredPaletteConversion(source, tlutfmt)`, evaluated on the *source* entry at the three call sites and passed into upstream's `RenderPaletteEntry(…, use_layered_pipeline)`; the `VR_PALETTE:` log is unchanged.
+- **G335 (vertex UID repacked to 28 bytes):** XR's `code_version` occupies 6 of the 8 spare bits of the first word; `GX_PIPELINE_UID_VERSION` is 14. `ShaderHunter::ComputeVertexFamilySignature` reconstructs the pre-repack field values from the new layout and hashes them in the original order, so the `family_version=2` signatures stored in the shipped VR profiles keep matching. The one known exception is a draw using dual texture transform with no regular texgen (upstream no longer records `dualTexTrans_enabled` there).
+- **G223 (Android netplay, 46 commits) and G063/G246 (AGP 9.2.1, Gradle 9.6.1, Kotlin 2.4, compileSdk 37):** applied as-is; Gradle downloaded the new wrapper and AGP fetched the `android-37` platform during the build. The Quest APK grew from 22.6 MB to 38.9 MB (Compose, netplay UI, mGBA).
+
+### Stage-3 build/test results (HEAD `802e11ce0b` + merge commit, clean checkpoint worktree `C:\Users\Christophe\Documents\DXR-build`, fresh CMake configure)
+
+| Check | Result |
+|---|---|
+| Windows VS2022 Release, `ENABLE_VR=ON`, Qt 6.8.3 (fresh configure + full build) | **success**, 314 s, 0 errors |
+| Unit tests (`Build-vs2022/Binaries/Tests/tests.exe`) | **1384/1384 passed** |
+| Quest `assembleQuestDebug` (AGP 9.2.1, Gradle 9.6.1, NDK r29) | **BUILD SUCCESSFUL**, 8 m 5 s; new warnings only in third-party `libadrenotools` |
+| Final merge sanity | tree identical before/after the merge commit; apart from XR's own files only `pch.h`, the two Kotlin ports and this report differ from upstream |
+
+Not runtime-tested. Before merging into `openxr-work`, smoke-test in a headset on PC (D3D11/D3D12/Vulkan/OpenGL) and on Quest, and check the Android settings screens (search, OpenXR menu, per-game Quest overrides) and savestates (STATE_VERSION 196).
 
 ## Key findings for the next integrator
 
