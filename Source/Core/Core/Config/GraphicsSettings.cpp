@@ -226,6 +226,7 @@ const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE{{System::GFX, "VR", "Trackin
 const Info<bool> GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER{
     {System::GFX, "VR", "UseOpenXRPlaySpaceCenter"}, false};
 const Info<bool> GFX_VR_USE_XR_PACING_THREAD{{System::GFX, "VR", "UseXRPacingThread"}, true};
+const Info<bool> GFX_VR_PERF_COUNTERS{{System::GFX, "VR", "PerfCounters"}, false};
 #if defined(__ANDROID__)
 constexpr bool DEFAULT_VR_PIN_EMULATION_CORES = true;
 #else

@@ -669,6 +669,7 @@ void VKGfx::ResetSamplerStates()
   }
 
   // Invalidate all sampler objects (some will be unused now).
+  StateTracker::GetInstance()->InvalidateSamplerDescriptorCache();
   g_object_cache->ClearSamplerCache();
 }
 
@@ -701,26 +702,26 @@ void VKGfx::SetViewport(float x, float y, float width, float height, float near_
 
 void VKGfx::Draw(u32 base_vertex, u32 num_vertices)
 {
-  const u64 perf_start_us = Common::Timer::NowUs();
+  const u64 perf_start_us = g_vulkan_context->PerfTimingStart();
   if (!StateTracker::GetInstance()->Bind())
     return;
 
   vkCmdDraw(g_command_buffer_mgr->GetCurrentCommandBuffer(), num_vertices, 1, base_vertex, 0);
   auto& perf = g_vulkan_context->GetPerfCounters();
-  perf.draw_us.fetch_add(Common::Timer::NowUs() - perf_start_us, std::memory_order_relaxed);
+  VulkanContext::AddPerfTiming(perf.draw_us, perf_start_us);
   perf.draw_count.fetch_add(1, std::memory_order_relaxed);
 }
 
 void VKGfx::DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex)
 {
-  const u64 perf_start_us = Common::Timer::NowUs();
+  const u64 perf_start_us = g_vulkan_context->PerfTimingStart();
   if (!StateTracker::GetInstance()->Bind())
     return;
 
   vkCmdDrawIndexed(g_command_buffer_mgr->GetCurrentCommandBuffer(), num_indices, 1, base_index,
                    base_vertex, 0);
   auto& perf = g_vulkan_context->GetPerfCounters();
-  perf.draw_us.fetch_add(Common::Timer::NowUs() - perf_start_us, std::memory_order_relaxed);
+  VulkanContext::AddPerfTiming(perf.draw_us, perf_start_us);
   perf.draw_count.fetch_add(1, std::memory_order_relaxed);
 }
 

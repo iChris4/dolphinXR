@@ -9,6 +9,7 @@
 
 #include "Common/CommonTypes.h"
 #include "VideoBackends/Vulkan/Constants.h"
+#include "VideoBackends/Vulkan/SamplerDescriptorSetCache.h"
 #include "VideoCommon/Constants.h"
 
 namespace Vulkan
@@ -49,6 +50,10 @@ public:
 
   // Set dirty flags on everything to force re-bind at next draw time.
   void InvalidateCachedState();
+  void InvalidateSamplerDescriptorCache() { m_sampler_descriptor_cache.Clear(); }
+
+  void UpdateSamplerBindingHash(u32 index);
+  void RebuildSamplerBindingHash();
 
   // Ends a render pass if we're currently in one.
   // When Bind() is next called, the pass will be restarted.
@@ -151,6 +156,10 @@ private:
   std::array<VkDescriptorSet, NUM_GX_DESCRIPTOR_SETS> m_gx_descriptor_sets = {};
   std::array<VkDescriptorSet, NUM_UTILITY_DESCRIPTOR_SETS> m_utility_descriptor_sets = {};
   VkDescriptorSet m_compute_descriptor_set = VK_NULL_HANDLE;
+  SamplerDescriptorSetCache<VideoCommon::MAX_PIXEL_SHADER_SAMPLERS> m_sampler_descriptor_cache;
+  // Hash of m_bindings.samplers, maintained per slot so a draw does not rehash all bindings.
+  std::array<size_t, VideoCommon::MAX_PIXEL_SHADER_SAMPLERS> m_sampler_slot_hashes{};
+  size_t m_sampler_bindings_hash = 0;
 
   // rasterization
   VkViewport m_viewport = {0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};

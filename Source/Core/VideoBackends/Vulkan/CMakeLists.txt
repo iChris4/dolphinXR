@@ -4,6 +4,7 @@ add_library(videovulkan
   Constants.h
   ObjectCache.cpp
   ObjectCache.h
+  SamplerDescriptorSetCache.h
   ShaderCompiler.cpp
   ShaderCompiler.h
   StagingBuffer.cpp

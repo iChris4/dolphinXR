@@ -525,6 +525,10 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
   // SubmitCommandBuffer overload directly).
   if (has_present)
   {
+    // Per-draw timers are only sampled while [VR] PerfCounters is on; refresh the gate here so
+    // toggling it does not need a restart. Counts are always accumulated.
+    auto& perf = g_vulkan_context->GetPerfCounters();
+    perf.timing_enabled.store(g_ActiveConfig.vr_perf_counters, std::memory_order_relaxed);
     static u64 s_perf_window_start_us = 0;
     static u32 s_perf_window_frames = 0;
     s_perf_window_frames++;
@@ -534,13 +538,12 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
     const u64 elapsed_us = now_us - s_perf_window_start_us;
     if (elapsed_us >= 5'000'000)
     {
-      auto& perf = g_vulkan_context->GetPerfCounters();
       const double frames = static_cast<double>(std::max<u32>(s_perf_window_frames, 1));
       WARN_LOG_FMT(VIDEO,
                    "VKPERF: frames={} wall={:.2f}ms/f submit={:.2f}ms/f (n={:.1f}/f) "
                    "fence_wait={:.2f}ms/f xr_swapchain={:.2f}ms/f uniforms={:.2f}ms/f "
                    "vtx_commit={:.2f}ms/f draw_bind={:.2f}ms/f draws={:.0f}/f "
-                   "pipelines_created={}",
+                   "pipelines_created={} sampler_cache_hit={:.0f}/f sampler_cache_miss={:.0f}/f",
                    s_perf_window_frames, elapsed_us / 1000.0 / frames,
                    perf.submit_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.submit_count.exchange(0, std::memory_order_relaxed) / frames,
@@ -550,7 +553,9 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
                    perf.vertex_commit_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.draw_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.draw_count.exchange(0, std::memory_order_relaxed) / frames,
-                   perf.pipelines_created.exchange(0, std::memory_order_relaxed));
+                   perf.pipelines_created.exchange(0, std::memory_order_relaxed),
+                   perf.sampler_cache_hits.exchange(0, std::memory_order_relaxed) / frames,
+                   perf.sampler_cache_misses.exchange(0, std::memory_order_relaxed) / frames);
       s_perf_window_frames = 0;
       s_perf_window_start_us = now_us;
     }

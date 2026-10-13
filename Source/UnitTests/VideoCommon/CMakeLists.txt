@@ -6,3 +6,8 @@ add_dolphin_test(VRFrameRegionTest VRFrameRegionTest.cpp)
 if(ENABLE_VR)
   add_dolphin_test(OpenXRBindingWizardModelTest OpenXRBindingWizardModelTest.cpp)
 endif()
+if(ENABLE_VULKAN)
+  add_dolphin_test(VulkanSamplerDescriptorSetCacheTest VulkanSamplerDescriptorSetCacheTest.cpp)
+  target_include_directories(VulkanSamplerDescriptorSetCacheTest PRIVATE
+    ${CMAKE_SOURCE_DIR}/Externals/Vulkan-Headers/include)
+endif()

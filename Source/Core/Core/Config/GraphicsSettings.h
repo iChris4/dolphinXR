@@ -222,6 +222,9 @@ extern const Info<int> GFX_VR_FORCED_VBI_FREQUENCY;
 // legacy Opcode Replay). INI-only escape hatch; disable to fall back to the inline
 // synchronous frame flow.
 extern const Info<bool> GFX_VR_USE_XR_PACING_THREAD;
+// Samples per-draw CPU timing into the Vulkan VKPERF counters. Off by default: the timer
+// reads alone cost about 3% of the video thread on Quest. Counts are always accumulated.
+extern const Info<bool> GFX_VR_PERF_COUNTERS;
 // Android big.LITTLE: pin the CPU (JIT) and Video threads to dedicated performance cores
 // so they never migrate onto a slow core or contend with each other. INI-only escape
 // hatch; default on for Android/Quest.

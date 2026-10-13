@@ -83,6 +83,7 @@ bool StateTracker::Initialize()
     m_bindings.samplers[i].imageView = m_dummy_texture->GetView();
     m_bindings.samplers[i].sampler = g_object_cache->GetPointSampler();
   }
+  RebuildSamplerBindingHash();
 
   for (size_t i = 0; i < VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS; i++)
   {
@@ -198,6 +199,7 @@ void StateTracker::SetTexture(u32 index, VkImageView view)
 
   m_bindings.samplers[index].imageView = view;
   m_bindings.samplers[index].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  UpdateSamplerBindingHash(index);
   m_dirty_flags |=
       DIRTY_FLAG_GX_SAMPLERS | DIRTY_FLAG_UTILITY_BINDINGS | DIRTY_FLAG_COMPUTE_BINDINGS;
 }
@@ -208,8 +210,28 @@ void StateTracker::SetSampler(u32 index, VkSampler sampler)
     return;
 
   m_bindings.samplers[index].sampler = sampler;
+  UpdateSamplerBindingHash(index);
   m_dirty_flags |=
       DIRTY_FLAG_GX_SAMPLERS | DIRTY_FLAG_UTILITY_BINDINGS | DIRTY_FLAG_COMPUTE_BINDINGS;
+}
+
+void StateTracker::UpdateSamplerBindingHash(u32 index)
+{
+  m_sampler_bindings_hash ^= m_sampler_slot_hashes[index];
+  m_sampler_slot_hashes[index] =
+      decltype(m_sampler_descriptor_cache)::HashSlot(index, m_bindings.samplers[index]);
+  m_sampler_bindings_hash ^= m_sampler_slot_hashes[index];
+}
+
+void StateTracker::RebuildSamplerBindingHash()
+{
+  m_sampler_bindings_hash = 0;
+  for (u32 i = 0; i < static_cast<u32>(m_bindings.samplers.size()); ++i)
+  {
+    m_sampler_slot_hashes[i] =
+        decltype(m_sampler_descriptor_cache)::HashSlot(i, m_bindings.samplers[i]);
+    m_sampler_bindings_hash ^= m_sampler_slot_hashes[i];
+  }
 }
 
 void StateTracker::SetSSBO(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range)
@@ -247,27 +269,35 @@ void StateTracker::SetImageTexture(u32 index, VkImageView view)
 
 void StateTracker::UnbindTexture(VkImageView view)
 {
+  // Cached immutable sets may refer to this view even when it is not currently bound.
+  InvalidateSamplerDescriptorCache();
   for (VkDescriptorImageInfo& it : m_bindings.samplers)
   {
     if (it.imageView == view)
     {
       it.imageView = m_dummy_texture->GetView();
       it.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      m_dirty_flags |=
+          DIRTY_FLAG_GX_SAMPLERS | DIRTY_FLAG_UTILITY_BINDINGS | DIRTY_FLAG_COMPUTE_BINDINGS;
     }
   }
+  RebuildSamplerBindingHash();
 
   for (VkDescriptorImageInfo& it : m_bindings.image_textures)
   {
     if (it.imageView == view)
     {
       it.imageView = m_dummy_compute_texture->GetView();
-      it.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      it.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+      m_dirty_flags |= DIRTY_FLAG_COMPUTE_BINDINGS;
     }
   }
 }
 
 void StateTracker::InvalidateCachedState()
 {
+  // Discard pooled sets when recording state is reset, including at frame/pool boundaries.
+  InvalidateSamplerDescriptorCache();
   m_gx_descriptor_sets.fill(VK_NULL_HANDLE);
   m_utility_descriptor_sets.fill(VK_NULL_HANDLE);
   m_compute_descriptor_set = VK_NULL_HANDLE;
@@ -520,19 +550,31 @@ void StateTracker::UpdateGXDescriptorSet()
 
   if (m_dirty_flags & DIRTY_FLAG_GX_SAMPLERS || m_gx_descriptor_sets[1] == VK_NULL_HANDLE)
   {
-    m_gx_descriptor_sets[1] = g_command_buffer_mgr->AllocateDescriptorSet(
-        g_object_cache->GetDescriptorSetLayout(DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS));
-
-    writes[num_writes++] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                            nullptr,
-                            m_gx_descriptor_sets[1],
-                            0,
-                            0,
-                            static_cast<u32>(VideoCommon::MAX_PIXEL_SHADER_SAMPLERS),
-                            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                            m_bindings.samplers.data(),
-                            nullptr,
-                            nullptr};
+    auto& perf = g_vulkan_context->GetPerfCounters();
+    m_gx_descriptor_sets[1] =
+        m_sampler_descriptor_cache.Find(m_bindings.samplers, m_sampler_bindings_hash);
+    if (m_gx_descriptor_sets[1] != VK_NULL_HANDLE)
+    {
+      perf.sampler_cache_hits.fetch_add(1, std::memory_order_relaxed);
+    }
+    else
+    {
+      perf.sampler_cache_misses.fetch_add(1, std::memory_order_relaxed);
+      m_gx_descriptor_sets[1] = g_command_buffer_mgr->AllocateDescriptorSet(
+          g_object_cache->GetDescriptorSetLayout(DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS));
+      m_sampler_descriptor_cache.Insert(m_bindings.samplers, m_sampler_bindings_hash,
+                                        m_gx_descriptor_sets[1]);
+      writes[num_writes++] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                              nullptr,
+                              m_gx_descriptor_sets[1],
+                              0,
+                              0,
+                              static_cast<u32>(VideoCommon::MAX_PIXEL_SHADER_SAMPLERS),
+                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                              m_bindings.samplers.data(),
+                              nullptr,
+                              nullptr};
+    }
     m_dirty_flags = (m_dirty_flags & ~DIRTY_FLAG_GX_SAMPLERS) | DIRTY_FLAG_DESCRIPTOR_SETS;
   }
 
