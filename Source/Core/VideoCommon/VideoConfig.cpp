@@ -41,17 +41,19 @@ static std::optional<CPUThreadConfigCallback::ConfigChangedCallbackID>
     s_config_changed_callback_id = std::nullopt;
 static Common::EventHook s_check_config_event;
 
-static bool IsVSyncActive(bool enabled)
+static bool IsVSyncActive(const VideoConfig& config)
 {
-  // Vsync is disabled when the throttler is disabled by the tab key.
-  return enabled && !Core::GetIsThrottlerTempDisabled() &&
+  // Vsync is disabled when the throttler is disabled by the tab key. A VR session paces frames
+  // itself (xrWaitFrame); waiting on the desktop mirror's vertical blank as well would tie the
+  // emulation to the monitor's refresh rate (a 60 Hz monitor throttling a 90 Hz headset).
+  return config.bVSync && !config.VRSessionActive() && !Core::GetIsThrottlerTempDisabled() &&
          Config::Get(Config::MAIN_EMULATION_SPEED) == 1.0;
 }
 
 void UpdateActiveConfig()
 {
   g_ActiveConfig = g_Config;
-  g_ActiveConfig.bVSyncActive = IsVSyncActive(g_ActiveConfig.bVSync);
+  g_ActiveConfig.bVSyncActive = IsVSyncActive(g_ActiveConfig);
 }
 
 void VideoConfig::Refresh()
