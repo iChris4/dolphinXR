@@ -220,8 +220,9 @@ bool ObjectCache::CreateDescriptorSetLayouts()
     create_infos[DESCRIPTOR_SET_LAYOUT_STANDARD_UNIFORM_BUFFERS].bindingCount--;
   }
 
-  // Remove the dynamic vertex loader's buffer if it'll never be needed
-  if (!g_backend_info.bSupportsDynamicVertexLoader)
+  // Remove the vertex buffer binding if it'll never be needed: the dynamic vertex loader and VS
+  // point/line expansion both read vertices through it.
+  if (!g_backend_info.bSupportsDynamicVertexLoader && !g_backend_info.bSupportsVSLinePointExpand)
     create_infos[DESCRIPTOR_SET_LAYOUT_STANDARD_SHADER_STORAGE_BUFFERS].bindingCount--;
 
   for (size_t i = 0; i < create_infos.size(); i++)

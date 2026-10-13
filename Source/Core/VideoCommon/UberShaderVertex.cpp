@@ -14,7 +14,7 @@
 
 namespace UberShader
 {
-static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 4;
+static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 5;
 
 VertexShaderUid GetVertexShaderUid()
 {
@@ -28,8 +28,8 @@ VertexShaderUid GetVertexShaderUid()
 }
 
 static void GenVertexShaderTexGens(APIType api_type, const ShaderHostConfig& host_config,
-                                   u32 num_texgen, ShaderCode& out);
-static void LoadVertexAttribute(ShaderCode& code, const ShaderHostConfig& host_config, u32 indent,
+                                   bool vertex_loader, u32 num_texgen, ShaderCode& out);
+static void LoadVertexAttribute(ShaderCode& code, bool vertex_loader, u32 indent,
                                 std::string_view name, std::string_view shader_type,
                                 std::string_view stored_type, std::string_view offset_name = {});
 
@@ -40,8 +40,13 @@ ShaderCode GenVertexShader(APIType api_type, const ShaderHostConfig& host_config
   const bool ssaa = host_config.ssaa;
   const bool per_pixel_lighting = host_config.per_pixel_lighting;
   const bool vertex_rounding = host_config.vertex_rounding;
-  const bool vertex_loader =
-      host_config.backend_dynamic_vertex_loader || host_config.backend_vs_point_line_expand;
+  // Point/line expansion happens in every ubershader when the backend loads vertices
+  // dynamically; otherwise only in the variant made for expanded points and lines, so triangles
+  // keep reading vertex attributes.
+  const bool vs_expand = host_config.backend_vs_point_line_expand &&
+                         (host_config.backend_dynamic_vertex_loader || uid_data->vs_expand != 0);
+  // Vertices come from the vertex SSBO (and are decoded here) rather than vertex attributes.
+  const bool vertex_loader = host_config.backend_dynamic_vertex_loader || vs_expand;
   const u32 num_texgen = uid_data->num_texgens;
   // Multiview VR path: no GS stage for triangles, so this VS applies the per-eye HMD
   // projection itself via gl_ViewIndex (shared with the specialized VS generator).
@@ -215,7 +220,7 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
 
   out.Write("VS_OUTPUT o;\n"
             "\n");
-  if (host_config.backend_vs_point_line_expand)
+  if (vs_expand)
   {
     out.Write("uint vertex_id = gl_VertexID;\n"
               "if (vs_expand != 0u) {{\n"
@@ -223,12 +228,12 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
               "}}\n"
               "uint vertex_base_offset = GetVertexBaseOffset(vertex_id);\n");
   }
-  else if (host_config.backend_dynamic_vertex_loader)
+  else if (vertex_loader)
   {
     out.Write("uint vertex_base_offset = GetVertexBaseOffset(gl_VertexID);\n");
   }
   // rawpos is always needed
-  LoadVertexAttribute(out, host_config, 0, "rawpos", "float4", "rawpos");
+  LoadVertexAttribute(out, vertex_loader, 0, "rawpos", "float4", "rawpos");
   // Transforms
   out.Write("// Position matrix\n"
             "float4 P0;\n"
@@ -242,7 +247,7 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
             "\n"
             "if ((components & {}u) != 0u) {{ // VB_HAS_POSMTXIDX\n",
             std::to_underlying(VB_HAS_POSMTXIDX));
-  LoadVertexAttribute(out, host_config, 2, "posmtx", "uint4", "ubyte4");
+  LoadVertexAttribute(out, vertex_loader, 2, "posmtx", "uint4", "ubyte4");
   out.Write("  // Vertex format has a per-vertex matrix\n"
             "  int posidx = int(posmtx.r);\n"
             "  P0 = " I_TRANSFORMMATRICES "[posidx];\n"
@@ -274,7 +279,7 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
             "if ((components & {}u) != 0u) // VB_HAS_NORMAL\n"
             "{{\n",
             std::to_underlying(VB_HAS_NORMAL));
-  LoadVertexAttribute(out, host_config, 2, "rawnormal", "float3", "float3");
+  LoadVertexAttribute(out, vertex_loader, 2, "rawnormal", "float3", "float3");
   out.Write("  _rawnormal = rawnormal;\n"
             "}}\n"
             "else\n"
@@ -285,7 +290,7 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
             "if ((components & {}u) != 0u) // VB_HAS_TANGENT\n"
             "{{\n",
             std::to_underlying(VB_HAS_TANGENT));
-  LoadVertexAttribute(out, host_config, 2, "rawtangent", "float3", "float3");
+  LoadVertexAttribute(out, vertex_loader, 2, "rawtangent", "float3", "float3");
   out.Write("  _rawtangent = rawtangent;\n"
             "}}\n"
             "else\n"
@@ -296,7 +301,7 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
             "if ((components & {}u) != 0u) // VB_HAS_BINORMAL\n"
             "{{\n",
             std::to_underlying(VB_HAS_BINORMAL));
-  LoadVertexAttribute(out, host_config, 2, "rawbinormal", "float3", "float3");
+  LoadVertexAttribute(out, vertex_loader, 2, "rawbinormal", "float3", "float3");
   out.Write("  _rawbinormal = rawbinormal;\n"
             "}}\n"
             "else\n"
@@ -330,22 +335,22 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
   out.Write("if ((components & {0}u) == {0}u) // VB_HAS_COL0 | VB_HAS_COL1\n"
             "{{\n",
             static_cast<u32>(VB_HAS_COL0 | VB_HAS_COL1));
-  LoadVertexAttribute(out, host_config, 2, "rawcolor0", "float4", "ubyte4");
-  LoadVertexAttribute(out, host_config, 2, "rawcolor1", "float4", "ubyte4");
+  LoadVertexAttribute(out, vertex_loader, 2, "rawcolor0", "float4", "ubyte4");
+  LoadVertexAttribute(out, vertex_loader, 2, "rawcolor1", "float4", "ubyte4");
   out.Write("  vertex_color_0 = rawcolor0;\n"
             "  vertex_color_1 = rawcolor1;\n"
             "}}\n"
             "else if ((components & {}u) != 0u) // VB_HAS_COL0\n"
             "{{\n",
             std::to_underlying(VB_HAS_COL0));
-  LoadVertexAttribute(out, host_config, 2, "rawcolor0", "float4", "ubyte4");
+  LoadVertexAttribute(out, vertex_loader, 2, "rawcolor0", "float4", "ubyte4");
   out.Write("  vertex_color_0 = rawcolor0;\n"
             "  vertex_color_1 = rawcolor0;\n"
             "}}\n"
             "else if ((components & {}u) != 0u) // VB_HAS_COL1\n"
             "{{\n",
             std::to_underlying(VB_HAS_COL1));
-  LoadVertexAttribute(out, host_config, 2, "rawcolor1", "float4", "ubyte4");
+  LoadVertexAttribute(out, vertex_loader, 2, "rawcolor1", "float4", "ubyte4");
   out.Write("  vertex_color_0 = rawcolor1;\n"
             "  vertex_color_1 = rawcolor1;\n"
             "}}\n"
@@ -360,9 +365,9 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
 
   // Texture Coordinates
   if (num_texgen > 0)
-    GenVertexShaderTexGens(api_type, host_config, num_texgen, out);
+    GenVertexShaderTexGens(api_type, host_config, vertex_loader, num_texgen, out);
 
-  if (host_config.backend_vs_point_line_expand)
+  if (vs_expand)
   {
     out.Write("if (vs_expand == {}u) {{ // Line\n", std::to_underlying(VSExpand::Line));
     out.Write("  bool is_bottom = (gl_VertexID & 2) != 0;\n"
@@ -590,7 +595,7 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
 }
 
 static void GenVertexShaderTexGens(APIType api_type, const ShaderHostConfig& host_config,
-                                   u32 num_texgen, ShaderCode& out)
+                                   bool vertex_loader, u32 num_texgen, ShaderCode& out)
 {
   // The HLSL compiler complains that the output texture coordinates are uninitialized when trying
   // to dynamically index them.
@@ -618,7 +623,7 @@ static void GenVertexShaderTexGens(APIType api_type, const ShaderHostConfig& hos
   out.Write("    if ((components & {}u) != 0u) // VB_HAS_NORMAL\n"
             "    {{\n",
             std::to_underlying(VB_HAS_NORMAL));
-  LoadVertexAttribute(out, host_config, 6, "rawnormal", "float3", "float3");
+  LoadVertexAttribute(out, vertex_loader, 6, "rawnormal", "float3", "float3");
   out.Write("      coord.xyz = rawnormal.xyz;\n"
             "    }}\n"
             "    break;\n\n");
@@ -626,7 +631,7 @@ static void GenVertexShaderTexGens(APIType api_type, const ShaderHostConfig& hos
   out.Write("    if ((components & {}u) != 0u) // VB_HAS_TANGENT\n"
             "    {{\n",
             std::to_underlying(VB_HAS_TANGENT));
-  LoadVertexAttribute(out, host_config, 6, "rawtangent", "float3", "float3");
+  LoadVertexAttribute(out, vertex_loader, 6, "rawtangent", "float3", "float3");
   out.Write("      coord.xyz = rawtangent.xyz;\n"
             "    }}\n"
             "    break;\n\n");
@@ -634,7 +639,7 @@ static void GenVertexShaderTexGens(APIType api_type, const ShaderHostConfig& hos
   out.Write("    if ((components & {}u) != 0u) // VB_HAS_BINORMAL\n"
             "    {{\n",
             std::to_underlying(VB_HAS_BINORMAL));
-  LoadVertexAttribute(out, host_config, 6, "rawbinormal", "float3", "float3");
+  LoadVertexAttribute(out, vertex_loader, 6, "rawbinormal", "float3", "float3");
   out.Write("      coord.xyz = rawbinormal.xyz;\n"
             "    }}\n"
             "    break;\n\n");
@@ -644,7 +649,7 @@ static void GenVertexShaderTexGens(APIType api_type, const ShaderHostConfig& hos
     out.Write("    if ((components & {}u) != 0u) // VB_HAS_UV{}\n"
               "    {{\n",
               VB_HAS_UV0 << i, i);
-    LoadVertexAttribute(out, host_config, 6, fmt::format("rawtex{}", i), "float3", "rawtex",
+    LoadVertexAttribute(out, vertex_loader, 6, fmt::format("rawtex{}", i), "float3", "rawtex",
                         fmt::format("rawtex[{}][{}]", i / 4, i % 4));
     out.Write("      coord = float4(rawtex{}.x, rawtex{}.y, 1.0f, 1.0f);\n"
               "    }}\n",
@@ -698,7 +703,7 @@ static void GenVertexShaderTexGens(APIType api_type, const ShaderHostConfig& hos
             "    {{\n");
   out.Write("      if ((components & ({}u /* VB_HAS_TEXMTXIDX0 */ << texgen)) != 0u) {{\n",
             std::to_underlying(VB_HAS_TEXMTXIDX0));
-  if (host_config.backend_dynamic_vertex_loader || host_config.backend_vs_point_line_expand)
+  if (vertex_loader)
   {
     out.Write("        int tmp = int(load_input_float3_rawtex(vertex_base_offset, "
               "vertex_offset_rawtex[texgen / 4][texgen % 4]).z);\n"
@@ -775,11 +780,11 @@ static void GenVertexShaderTexGens(APIType api_type, const ShaderHostConfig& hos
             "}}\n");
 }
 
-static void LoadVertexAttribute(ShaderCode& code, const ShaderHostConfig& host_config, u32 indent,
+static void LoadVertexAttribute(ShaderCode& code, bool vertex_loader, u32 indent,
                                 std::string_view name, std::string_view shader_type,
                                 std::string_view stored_type, std::string_view offset_name)
 {
-  if (host_config.backend_dynamic_vertex_loader || host_config.backend_vs_point_line_expand)
+  if (vertex_loader)
   {
     code.Write("{:{}}{} {} = load_input_{}_{}(vertex_base_offset, vertex_offset_{});\n", "", indent,
                shader_type, name, shader_type, stored_type,
@@ -792,6 +797,8 @@ void EnumerateVertexShaderUids(const std::function<void(const VertexShaderUid&)>
 {
   VertexShaderUid uid;
 
+  // No vs_expand variants: runtime UIDs never set it, ApplyDriverBugs does when it compiles the
+  // point and line pipelines queued from these.
   for (u32 texgens = 0; texgens <= 8; texgens++)
   {
     vertex_ubershader_uid_data* const vuid = uid.GetUidData();

@@ -363,6 +363,8 @@
     <string name="vsync_description">This setting is unnecessary on most Android devices, because Android always enables V-Sync. If unsure, leave this unchecked.</string>
     <string name="backend_multithreading">Backend Multithreading</string>
     <string name="backend_multithreading_description">Enables graphics backend multithreading (Vulkan only). May affect performance. If unsure, leave this checked.</string>
+    <string name="uber_shader_native_vertices">Ubershader Vertex Input</string>
+    <string name="uber_shader_native_vertices_description">Ubershaders read vertices through the GPU\'s vertex input instead of decoding them in the shader (Vulkan only). Faster on the Quest\'s GPU; one ubershader pipeline per vertex format. Only matters when ubershaders run. Applies at the next game start. If unsure, leave this checked.</string>
     <string name="command_buffers_in_flight">Command Buffers in Flight</string>
     <string name="command_buffers_in_flight_description">How many command buffers the Vulkan backend keeps in flight. Each time one is submitted, Dolphin reuses the oldest and must wait for the GPU to finish it, so a shallow ring stalls whenever the GPU completes work more slowly than Dolphin queues it. Raising this can recover a lot of performance in games that submit many times per frame, and in VR. Higher values cost a little memory and let the CPU run further ahead of the GPU, which adds latency if you are GPU-bound. Vulkan only. Takes effect on next launch.</string>
     <string name="prefer_vs_for_point_line_expansion">Prefer VS for Point/Line Expansion</string>

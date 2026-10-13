@@ -104,6 +104,10 @@ extern const Info<bool> GFX_BACKEND_MULTITHREADING;
 // Vulkan only: record state binds and draws on a helper thread (see VKRecordingWorker.h).
 // Read when the backend starts; changing it needs a backend restart.
 extern const Info<bool> GFX_VULKAN_RECORDING_WORKER;
+// Vulkan only: ubershaders read triangle vertices through vertex attributes instead of
+// loading and decoding them from a storage buffer in the vertex shader (the dynamic vertex
+// loader). Costs one ubershader pipeline per vertex format. Read when the backend starts.
+extern const Info<bool> GFX_UBER_SHADER_NATIVE_VERTICES;
 extern const Info<int> GFX_COMMAND_BUFFER_EXECUTE_INTERVAL;
 // Depth of the backend's command list/buffer ring (D3D12 command lists, Vulkan command
 // buffers). Read once at device init, so a change applies on the next emulation start.

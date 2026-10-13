@@ -826,6 +826,16 @@ static GXUberPipelineUid ApplyDriverBugs(const GXUberPipelineUid& in)
 
   if (g_ActiveConfig.UseVSForLinePointExpand())
   {
+    // Without the dynamic vertex loader, only points and lines take the expanding variant, which
+    // reads its vertices from the vertex SSBO (no vertex input); triangles keep the attributes.
+    if (!g_backend_info.bSupportsDynamicVertexLoader &&
+        (in.rasterization_state.primitive == PrimitiveType::Points ||
+         in.rasterization_state.primitive == PrimitiveType::Lines))
+    {
+      out.vs_uid.GetUidData()->vs_expand = 1;
+      out.vertex_format = nullptr;
+    }
+
     // All primitives are expanded to triangles in the vertex shader
     PrimitiveType prim = g_backend_info.bSupportsPrimitiveRestart ? PrimitiveType::TriangleStrip :
                                                                     PrimitiveType::Triangles;

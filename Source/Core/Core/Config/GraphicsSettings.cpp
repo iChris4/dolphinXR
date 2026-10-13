@@ -109,6 +109,13 @@ constexpr bool DEFAULT_VULKAN_RECORDING_WORKER = false;
 #endif
 const Info<bool> GFX_VULKAN_RECORDING_WORKER{{System::GFX, "Settings", "VulkanRecordingWorker"},
                                              DEFAULT_VULKAN_RECORDING_WORKER};
+#if defined(__ANDROID__)
+constexpr bool DEFAULT_UBER_SHADER_NATIVE_VERTICES = true;
+#else
+constexpr bool DEFAULT_UBER_SHADER_NATIVE_VERTICES = false;
+#endif
+const Info<bool> GFX_UBER_SHADER_NATIVE_VERTICES{
+    {System::GFX, "Settings", "UberShaderNativeVertices"}, DEFAULT_UBER_SHADER_NATIVE_VERTICES};
 const Info<bool> GFX_BACKEND_MULTITHREADING{{System::GFX, "Settings", "BackendMultithreading"},
                                             true};
 const Info<int> GFX_COMMAND_BUFFER_EXECUTE_INTERVAL{

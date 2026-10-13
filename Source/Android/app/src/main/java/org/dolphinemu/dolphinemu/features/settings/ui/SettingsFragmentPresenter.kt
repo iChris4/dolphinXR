@@ -2246,6 +2246,14 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(
+            SwitchSetting(
+                context,
+                BooleanSetting.GFX_UBER_SHADER_NATIVE_VERTICES,
+                R.string.uber_shader_native_vertices,
+                R.string.uber_shader_native_vertices_description
+            )
+        )
+        sl.add(
             IntSliderSetting(
                 context,
                 IntSetting.GFX_COMMAND_BUFFERS_IN_FLIGHT,

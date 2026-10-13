@@ -8,9 +8,12 @@
 #include <cstring>
 
 #include "Common/Assert.h"
+#include "Common/Config/Config.h"
 #include "Common/Contains.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+
+#include "Core/Config/GraphicsSettings.h"
 
 #include "VideoCommon/DriverDetails.h"
 #include "VideoCommon/VideoCommon.h"
@@ -542,7 +545,12 @@ void VulkanContext::PopulateBackendInfo(BackendInfo* backend_info)
   backend_info->bSupportsLodBiasInSampler = false;          // Dependent on OS.
   backend_info->bSupportsSettingObjectNames = false;        // Dependent on features.
   backend_info->bSupportsPartialMultisampleResolve = true;  // Assumed support.
-  backend_info->bSupportsDynamicVertexLoader = true;        // Assumed support.
+  // Ubershaders can load vertices in the shader from a storage buffer (one pipeline for every
+  // vertex format), or through vertex attributes like specialized shaders. Fetching and decoding
+  // in the shader is much slower on tile-based mobile GPUs (vertex fetch stalls), so Android
+  // takes vertex attributes by default (UberShaderNativeVertices).
+  backend_info->bSupportsDynamicVertexLoader =
+      !Config::Get(Config::GFX_UBER_SHADER_NATIVE_VERTICES);
   backend_info->bSupportsVSLinePointExpand = true;          // Assumed support.
   backend_info->bSupportsHDROutput = true;                  // Assumed support.
   backend_info->bSupportsUnrestrictedDepthRange = false;    // Dependent on features.

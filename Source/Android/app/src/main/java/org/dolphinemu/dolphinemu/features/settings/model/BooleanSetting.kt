@@ -774,6 +774,12 @@ enum class BooleanSetting(
         "BackendMultithreading",
         true
     ),
+    GFX_UBER_SHADER_NATIVE_VERTICES(
+        Settings.FILE_GFX,
+        Settings.SECTION_GFX_SETTINGS,
+        "UberShaderNativeVertices",
+        true
+    ),
     GFX_WAIT_FOR_SHADERS_BEFORE_STARTING(
         Settings.FILE_GFX,
         Settings.SECTION_GFX_SETTINGS,

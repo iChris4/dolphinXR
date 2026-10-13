@@ -13,6 +13,9 @@ struct vertex_ubershader_uid_data
 {
   u32 code_version;
   u32 num_texgens : 4;
+  // Points/lines expanded to triangles in this shader. Only set when the backend loads vertices
+  // through vertex attributes: the expansion still reads its vertices from the vertex SSBO.
+  u32 vs_expand : 1;
 
   u32 NumValues() const { return sizeof(vertex_ubershader_uid_data); }
 };
@@ -34,7 +37,7 @@ struct fmt::formatter<UberShader::vertex_ubershader_uid_data>
   template <typename FormatContext>
   auto format(const UberShader::vertex_ubershader_uid_data& uid, FormatContext& ctx) const
   {
-    return fmt::format_to(ctx.out(), "Vertex UberShader v{} for {} texgens", uid.code_version,
-                          uid.num_texgens);
+    return fmt::format_to(ctx.out(), "Vertex UberShader v{} for {} texgens{}", uid.code_version,
+                          uid.num_texgens, uid.vs_expand ? ", VS expand" : "");
   }
 };
