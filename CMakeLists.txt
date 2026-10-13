@@ -495,11 +495,11 @@ endif()
 # override autodetection of system libraries and force the usage of the
 # externals.
 if (ENABLE_QT AND MSVC)
-  # Windows has no system Qt6 package, so use the vendored one from Externals/Qt (locked to 6.5.1).
-  # On Linux we use the system Qt6 package instead: mixing the vendored Qt6.5.1 (which lacks a DBus
-  # module) with a system Qt6 for DBus fails, since CMake's Qt6 package requires all found
-  # components to share the exact same version.
-  list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/Externals/Qt/Qt6.5.1/x64")
+  # Windows has no system Qt6 package, so use the vendored one from Externals/Qt (6.8.3, the
+  # version upstream Dolphin bundles). On Linux we use the system Qt6 package instead: mixing the
+  # vendored Qt (which lacks a DBus module) with a system Qt6 for DBus fails, since CMake's Qt6
+  # package requires all found components to share the exact same version.
+  list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/Externals/Qt/Qt6.8.3/x64")
 endif()
 include(CheckLib)
 include(CheckCXXSourceRuns)
