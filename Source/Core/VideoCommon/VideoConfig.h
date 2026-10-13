@@ -393,7 +393,7 @@ struct VideoConfig final
   float vr_head_locked_curvature = 0.0f;
   bool vr_dont_clear_screen = false;
   bool vr_load_custom_shaders = false;
-  bool vr_disable_cpu_cull = false;
+  bool vr_head_cpu_cull = true;
   OpenXRMirrorView vr_mirror_view = OpenXRMirrorView::BothEyes;
   OpenXRReferenceSpaceMode vr_reference_space_mode = OpenXRReferenceSpaceMode::Local;
   OpenXRTrackingMode vr_tracking_mode = OpenXRTrackingMode::Full6DoF;

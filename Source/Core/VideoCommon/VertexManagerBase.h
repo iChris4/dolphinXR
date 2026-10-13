@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -112,8 +113,24 @@ public:
 
   PrimitiveType GetCurrentPrimitiveType() const { return m_current_primitive_type; }
   void AddIndices(OpcodeDecoder::Primitive primitive, u32 num_vertices);
+  // How RunVertices may CPU-cull draws with the current state. Stock is Dolphin's cull against
+  // the game's projection (per-game CPUCull, outside VR). In VR the headset does not show the
+  // game's projection, so only the head-following cone is used: ConeOnly for draws known to be
+  // rendered from the head's point of view, ConeAndGame (cull only what is outside the cone and
+  // also culled by the game's projection) for draws that may end up on the virtual screen or
+  // head-locked.
+  enum class CpuCullPlan : u8
+  {
+    None,
+    Stock,
+    ConeOnly,
+    ConeAndGame,
+  };
+  CpuCullPlan GetCpuCullPlan();
+  // Per-frame part of GetCpuCullPlan's decision, plus the once-a-second statistics line.
+  void UpdateVRCullPolicy();
   bool AreAllVerticesCulled(VertexLoaderBase* loader, OpcodeDecoder::Primitive primitive,
-                            const u8* src, u32 count);
+                            const u8* src, u32 count, CpuCullPlan plan);
   virtual DataReader PrepareForAdditionalData(OpcodeDecoder::Primitive primitive, u32 count,
                                               u32 stride, bool cullall);
   /// Switch cullall off after a call to PrepareForAdditionalData with cullall true
@@ -259,6 +276,28 @@ private:
 
   bool m_is_flushed = true;
   FlushStatistics m_flush_statistics = {};
+
+  // VR head-cone CPU culling (see GetCpuCullPlan). The policy is refreshed once per frame in
+  // OnEndFrame; the projection is copied when a plan is chosen.
+  bool m_vr_cull_allowed = false;
+  bool m_vr_cull_cone_only = false;
+  std::array<std::array<float, 4>, 4> m_vr_cull_projection{};
+  // The pending batch was removed by the head cone / tested with the cone only.
+  bool m_vr_culled_pending = false;
+  bool m_vr_cone_only_pending = false;
+  // Draw calls removed by the head cone this frame. Added to m_draw_counter wherever a draw's
+  // index in the frame identifies it (element matching, Metroid layers), so those match a frame
+  // without culling. EFB-copy and readback bookkeeping keep the raw counter.
+  u32 m_vr_culled_flushes = 0;
+  struct VRCullStats
+  {
+    std::array<u32, 2> tested{};  // [0] = cone and game, [1] = cone only
+    std::array<u32, 2> culled{};
+    u32 culled_draws = 0;
+    u32 misrouted = 0;  // cone-only batches a later route did not render from the head
+    u32 frames = 0;
+  };
+  VRCullStats m_vr_cull_stats;
 
   // CPU access tracking
   u32 m_draw_counter = 0;

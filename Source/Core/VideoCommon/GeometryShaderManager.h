@@ -42,6 +42,11 @@ public:
   // XFB-copy boundary so a single game frame's draws all see one consistent pose.
   void InvalidateVRHeadPose();
 
+  // VR head-cone CPU culling projection for the current pose at the base world scale (see
+  // OpenXRManager::GetHeadCullProjection), built together with the eye rows that draws at that
+  // scale render with. nullptr while there is no usable pose.
+  const std::array<std::array<float, 4>, 4>* GetVRCullProjection();
+
   GeometryShaderConstants constants{};
   bool dirty = false;
 
@@ -87,22 +92,37 @@ public:
   int vr_metroid_hud_reference_context = 0;
 
 private:
+  // OpenXR projection rows for one world scale, all built from the same pose.
+  struct VREyeRows
+  {
+    bool valid = false;
+    float units_per_meter = 0.0f;
+    std::array<std::array<float, 4>, 4> eye_projection{};
+    std::array<std::array<float, 4>, 2> eye_z_row{};
+    // Same pose, but without game-camera adjustments. Screen/HUD routes use these so their
+    // placement is independent of Free Look and camera offsets.
+    std::array<std::array<float, 4>, 4> tracked_eye_projection{};
+    std::array<std::array<float, 4>, 2> tracked_eye_z_row{};
+    std::array<std::array<float, 4>, 4> head_projection{};
+    bool cull_valid = false;
+    std::array<std::array<float, 4>, 4> cull_projection{};
+  };
+
   void SetVSExpand(VSExpand expand);
+  void RefreshVREyeRowCache();
+  const VREyeRows& GetVREyeRows(float units_per_meter);
 
   bool m_projection_changed = false;
   bool m_viewport_changed = false;
 
-  // Cached OpenXR head pose data — refreshed only at frame boundaries (XFB copy)
-  // while the head-pose lock is in effect (VideoConfig::VRLockHeadPosePerFrame),
-  // otherwise refreshed every SetConstants call.
-  std::array<std::array<float, 4>, 4> m_cached_eye_projection{};
-  std::array<std::array<float, 4>, 2> m_cached_eye_z_row{};
-  // Same pose snapshot as the eye rows above, but without game-camera adjustments.  Screen/HUD
-  // routes use these so their placement is independent of Free Look and camera offsets.
-  std::array<std::array<float, 4>, 4> m_cached_tracked_eye_projection{};
-  std::array<std::array<float, 4>, 2> m_cached_tracked_eye_z_row{};
-  std::array<std::array<float, 4>, 4> m_cached_head_projection{};
-  float m_cached_units_per_meter = 0.0f;
+  // Cached OpenXR projection rows, one entry per world scale in use (the game's, the HUD's,
+  // per-draw overrides). Rebuilt at frame boundaries (XFB copy) while the head-pose lock is in
+  // effect (VideoConfig::VRLockHeadPosePerFrame), otherwise whenever OpenXRManager publishes a
+  // new pose generation (once per LocateViews) instead of for every draw.
+  std::array<VREyeRows, 4> m_vr_eye_rows{};
+  u32 m_vr_eye_rows_next = 0;
+  u64 m_vr_eye_rows_generation = 0;
+  bool m_vr_eye_rows_freelook = false;
   bool m_vr_pose_needs_refresh = true;
 
   // Shared reference depth for the headlocked perspective HUD (-3) path.  Stable body layers choose

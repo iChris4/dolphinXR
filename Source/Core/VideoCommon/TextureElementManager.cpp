@@ -543,6 +543,14 @@ bool TextureElementManager::HasOverrides() const
   return m_has_overrides.load(std::memory_order_relaxed);
 }
 
+bool TextureElementManager::HasControllerAnchorOverrides() const
+{
+  std::lock_guard lock(m_mutex);
+  return std::ranges::any_of(m_overrides, [](const TextureElementOverride& ovr) {
+    return ovr.handling == HandlingType::ControllerAnchor;
+  });
+}
+
 bool TextureElementManager::NeedsTextureHashes() const
 {
   return m_has_overrides.load(std::memory_order_relaxed) ||

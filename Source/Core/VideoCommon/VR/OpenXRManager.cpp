@@ -1162,6 +1162,7 @@ void OpenXRManager::DestroySession()
 
   m_views = {};
   m_eye_views = {};
+  ++m_pose_generation;
   {
     std::lock_guard lock(m_input_head_pose_mutex);
     m_input_head_pose = {};
@@ -2696,6 +2697,7 @@ bool OpenXRManager::LocateViews()
     m_eye_views[i].pose = m_views[i].pose;
     m_eye_views[i].fov = m_views[i].fov;
   }
+  ++m_pose_generation;
   {
     std::lock_guard lock(m_input_head_pose_mutex);
     m_input_head_pose = m_eye_views[0].pose;
@@ -3122,6 +3124,13 @@ void OpenXRManager::CommitCameraAnchorFrame()
     if (!rotation_active)
       m_camera_anchor_rotation = CAMERA_ANCHOR_IDENTITY;
   }
+
+  // An engaged or gliding anchor moves the game-camera rig every frame.
+  if (m_camera_anchor_has_target || m_camera_anchor_rotation_active || m_camera_anchor_upm > 0.0f ||
+      m_camera_anchor_position != std::array<float, 3>{})
+  {
+    ++m_pose_generation;
+  }
 }
 
 bool OpenXRManager::GetControllerAnchorViewPose(int hand, float units_per_meter,
@@ -3339,10 +3348,8 @@ void OpenXRManager::GetTrackedEyeProjectionRows(
   GetEyeProjectionRowsImpl(units_per_meter, false, out_proj_rows, out_z_rows);
 }
 
-void OpenXRManager::GetEyeProjectionRowsImpl(
-    float units_per_meter, bool apply_game_camera,
-    std::array<std::array<float, 4>, 4>& out_proj_rows,
-    std::array<std::array<float, 4>, 2>& out_z_rows) const
+std::array<OpenXRManager::EyeRig, 2> OpenXRManager::ComputeEyeRigs(float units_per_meter,
+                                                                   bool apply_game_camera) const
 {
   const float s = std::max(units_per_meter, 0.0001f);
   constexpr float DEG_TO_RAD = 0.01745329252f;
@@ -3364,9 +3371,9 @@ void OpenXRManager::GetEyeProjectionRowsImpl(
 
   const std::array<XREyeView, 2> eye_views = GetTrackingAdjustedEyeViews();
 
+  std::array<EyeRig, 2> rigs{};
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
-    const XrFovf& fov = eye_views[eye].fov;
     const XrQuaternionf& q_xr = eye_views[eye].pose.orientation;
     const XrVector3f& eye_pos_xr = eye_views[eye].pose.position;
     XrQuaternionf q = {-q_xr.x, -q_xr.y, -q_xr.z, q_xr.w};
@@ -3426,34 +3433,6 @@ void OpenXRManager::GetEyeProjectionRowsImpl(
       m22 = A[6] * r02 + A[7] * r12 + A[8] * r22;
     }
 
-    // --- Asymmetric projection from FOV tangent angles ---
-    const float tanL = tanf(fov.angleLeft);   // negative
-    const float tanR_val = tanf(fov.angleRight);  // positive
-    const float tanU = tanf(fov.angleUp);     // positive
-    const float tanD = tanf(fov.angleDown);   // negative
-
-    const float inv_w = 1.0f / (tanR_val - tanL);
-    const float inv_h = 1.0f / (tanU - tanD);
-
-    // Raw projection rows (before head rotation):
-    //   proj_row0 = { 2*inv_w,  0,        (tanR+tanL)*inv_w }
-    //   proj_row1 = { 0,        2*inv_h,  (tanU+tanD)*inv_h }
-    const float p0x = 2.0f * inv_w;
-    const float p0z = (tanR_val + tanL) * inv_w;
-    const float p1y = 2.0f * inv_h;
-    const float p1z = (tanU + tanD) * inv_h;
-
-    // --- Bake rotation: combined = (A*R) * proj_row ---
-    // combined_row0 = (A*R) * {p0x, 0, p0z}
-    const float c0x = m00 * p0x + m02 * p0z;
-    const float c0y = m10 * p0x + m12 * p0z;
-    const float c0z = m20 * p0x + m22 * p0z;
-
-    // combined_row1 = (A*R) * {0, p1y, p1z}
-    const float c1x = m01 * p1y + m02 * p1z;
-    const float c1y = m11 * p1y + m12 * p1z;
-    const float c1z = m21 * p1y + m22 * p1z;
-
     // Eye position relative to home, in game units.
     // Includes both IPD offset (per-eye) and head positional tracking (shared).
     float ex = (eye_pos_xr.x - m_home_position.x) * s;
@@ -3487,6 +3466,56 @@ void OpenXRManager::GetEyeProjectionRowsImpl(
       ez += m_camera_anchor_position[2];
     }
 
+    rigs[eye].m = {{{m00, m01, m02}, {m10, m11, m12}, {m20, m21, m22}}};
+    rigs[eye].e = {ex, ey, ez};
+    rigs[eye].fov = eye_views[eye].fov;
+  }
+  return rigs;
+}
+
+void OpenXRManager::GetEyeProjectionRowsImpl(float units_per_meter, bool apply_game_camera,
+                                             std::array<std::array<float, 4>, 4>& out_proj_rows,
+                                             std::array<std::array<float, 4>, 2>& out_z_rows) const
+{
+  const std::array<EyeRig, 2> rigs = ComputeEyeRigs(units_per_meter, apply_game_camera);
+
+  for (uint32_t eye = 0; eye < 2; ++eye)
+  {
+    const EyeRig& rig = rigs[eye];
+    const XrFovf& fov = rig.fov;
+    const float m00 = rig.m[0][0], m01 = rig.m[0][1], m02 = rig.m[0][2];
+    const float m10 = rig.m[1][0], m11 = rig.m[1][1], m12 = rig.m[1][2];
+    const float m20 = rig.m[2][0], m21 = rig.m[2][1], m22 = rig.m[2][2];
+    const float ex = rig.e[0], ey = rig.e[1], ez = rig.e[2];
+
+    // --- Asymmetric projection from FOV tangent angles ---
+    const float tanL = tanf(fov.angleLeft);       // negative
+    const float tanR_val = tanf(fov.angleRight);  // positive
+    const float tanU = tanf(fov.angleUp);         // positive
+    const float tanD = tanf(fov.angleDown);       // negative
+
+    const float inv_w = 1.0f / (tanR_val - tanL);
+    const float inv_h = 1.0f / (tanU - tanD);
+
+    // Raw projection rows (before head rotation):
+    //   proj_row0 = { 2*inv_w,  0,        (tanR+tanL)*inv_w }
+    //   proj_row1 = { 0,        2*inv_h,  (tanU+tanD)*inv_h }
+    const float p0x = 2.0f * inv_w;
+    const float p0z = (tanR_val + tanL) * inv_w;
+    const float p1y = 2.0f * inv_h;
+    const float p1z = (tanU + tanD) * inv_h;
+
+    // --- Bake rotation: combined = (A*R) * proj_row ---
+    // combined_row0 = (A*R) * {p0x, 0, p0z}
+    const float c0x = m00 * p0x + m02 * p0z;
+    const float c0y = m10 * p0x + m12 * p0z;
+    const float c0z = m20 * p0x + m22 * p0z;
+
+    // combined_row1 = (A*R) * {0, p1y, p1z}
+    const float c1x = m01 * p1y + m02 * p1z;
+    const float c1y = m11 * p1y + m12 * p1z;
+    const float c1z = m21 * p1y + m22 * p1z;
+
     // W component: -dot(combined_xyz, eye_pos) using the ROTATED projection rows.
     // This gives the correct full view transform: P · R^T · (viewPos - eye_pos).
     const float c0w = -(c0x * ex + c0y * ey + c0z * ez);
@@ -3500,8 +3529,90 @@ void OpenXRManager::GetEyeProjectionRowsImpl(
     // (A*R)_col2 = {m02, m12, m22}
     const float zw = -(m02 * ex + m12 * ey + m22 * ez);
     out_z_rows[eye] = {m02, m12, m22, zw};
-
   }
+}
+
+bool OpenXRManager::GetHeadCullProjection(float units_per_meter,
+                                          std::array<std::array<float, 4>, 4>& out_rows) const
+{
+  const XrQuaternionf& q0 = m_eye_views[0].pose.orientation;
+  if (q0.x == 0.0f && q0.y == 0.0f && q0.z == 0.0f && q0.w == 0.0f)
+    return false;  // No located pose yet.
+
+  const std::array<EyeRig, 2> rigs = ComputeEyeRigs(units_per_meter, true);
+
+  // Reference frame: the left eye's axes in view space (the eye looks down -Z).
+  const auto column = [](const EyeRig& rig, int c) {
+    return std::array<float, 3>{rig.m[0][c], rig.m[1][c], rig.m[2][c]};
+  };
+  const auto dot = [](const std::array<float, 3>& a, const std::array<float, 3>& b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  };
+  const std::array<float, 3> right = column(rigs[0], 0);
+  const std::array<float, 3> up = column(rigs[0], 1);
+  const std::array<float, 3> back = column(rigs[0], 2);
+
+  // Widest corner direction of either eye's frustum, as tangents in the reference frame.
+  // Canted displays and both eyes' FOVs are covered this way.
+  float tan_x = 0.0f;
+  float tan_y = 0.0f;
+  for (const EyeRig& rig : rigs)
+  {
+    const float tan_l = std::tan(rig.fov.angleLeft);
+    const float tan_r = std::tan(rig.fov.angleRight);
+    const float tan_d = std::tan(rig.fov.angleDown);
+    const float tan_u = std::tan(rig.fov.angleUp);
+    for (const float lx : {tan_l, tan_r})
+    {
+      for (const float ly : {tan_d, tan_u})
+      {
+        // Corner direction (lx, ly, -1) in eye-local space, rotated into view space.
+        const std::array<float, 3> dir = {rig.m[0][0] * lx + rig.m[0][1] * ly - rig.m[0][2],
+                                          rig.m[1][0] * lx + rig.m[1][1] * ly - rig.m[1][2],
+                                          rig.m[2][0] * lx + rig.m[2][1] * ly - rig.m[2][2]};
+        const float forward = -dot(back, dir);
+        if (forward < 0.01f)
+          return false;
+        tan_x = std::max(tan_x, std::abs(dot(right, dir)) / forward);
+        tan_y = std::max(tan_y, std::abs(dot(up, dir)) / forward);
+      }
+    }
+  }
+
+  // About two degrees of margin on every side. Views wider than that allows (very wide FOV
+  // headsets) get no culling rather than a cone narrower than what is displayed.
+  constexpr float MARGIN_RAD = 2.0f * 0.01745329252f;
+  constexpr float MAX_HALF_ANGLE_RAD = 85.0f * 0.01745329252f;
+  const float half_angle_x = std::atan(tan_x) + MARGIN_RAD;
+  const float half_angle_y = std::atan(tan_y) + MARGIN_RAD;
+  if (half_angle_x > MAX_HALF_ANGLE_RAD || half_angle_y > MAX_HALF_ANGLE_RAD)
+    return false;
+  tan_x = std::tan(half_angle_x);
+  tan_y = std::tan(half_angle_y);
+
+  // Apex: the midpoint between the eyes, pulled back along the view direction until both
+  // eye positions are inside the pyramid. Each eye's frustum is then contained in it too.
+  const std::array<float, 3> mid = {0.5f * (rigs[0].e[0] + rigs[1].e[0]),
+                                    0.5f * (rigs[0].e[1] + rigs[1].e[1]),
+                                    0.5f * (rigs[0].e[2] + rigs[1].e[2])};
+  float pull_back = 0.0f;
+  for (const EyeRig& rig : rigs)
+  {
+    const std::array<float, 3> offset = {rig.e[0] - mid[0], rig.e[1] - mid[1], rig.e[2] - mid[2]};
+    const float forward = -dot(back, offset);
+    pull_back = std::max(pull_back, std::abs(dot(right, offset)) / tan_x - forward);
+    pull_back = std::max(pull_back, std::abs(dot(up, offset)) / tan_y - forward);
+  }
+  const std::array<float, 3> apex = {mid[0] + pull_back * back[0], mid[1] + pull_back * back[1],
+                                     mid[2] + pull_back * back[2]};
+
+  // x = right.(v - apex) / tan_x, y = up.(v - apex) / tan_y, w = -back.(v - apex). CPUCull only
+  // tests x and y against w; z just mirrors w.
+  out_rows[0] = {right[0] / tan_x, right[1] / tan_x, right[2] / tan_x, -dot(right, apex) / tan_x};
+  out_rows[1] = {up[0] / tan_y, up[1] / tan_y, up[2] / tan_y, -dot(up, apex) / tan_y};
+  out_rows[3] = {-back[0], -back[1], -back[2], dot(back, apex)};
+  out_rows[2] = out_rows[3];
+  return true;
 }
 
 void OpenXRManager::GetRawEyeProjectionRows(

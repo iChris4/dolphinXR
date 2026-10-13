@@ -214,7 +214,10 @@ extern const Info<float> GFX_VR_SCREEN_SIZE;
 extern const Info<float> GFX_VR_HEAD_LOCKED_CURVATURE;
 extern const Info<bool> GFX_VR_DONT_CLEAR_SCREEN;
 extern const Info<bool> GFX_VR_LOAD_CUSTOM_SHADERS;
-extern const Info<bool> GFX_VR_DISABLE_CPU_CULL;
+// CPU-cull draws that are outside the head-following view cone (VertexManagerBase::GetCpuCullPlan).
+// In VR the game's own projection is not what the headset shows, so Dolphin's stock CPU cull
+// is never used there.
+extern const Info<bool> GFX_VR_HEAD_CPU_CULL;
 extern const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW;
 extern const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE;
 extern const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE;

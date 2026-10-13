@@ -34,7 +34,7 @@ object QuestGameVrConfigSettings {
         "AutoNativeEfbEffects",
         "DontClearScreen",
         "LoadCustomShaders",
-        "DisableCPUCull",
+        "HeadCPUCull",
         "RemoveCinematicBars",
         "FrameSizeFromXFB",
         "SmallViewportsOnScreen",

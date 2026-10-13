@@ -1097,6 +1097,14 @@ bool ElementsGroupManager::HasOverrides() const
   return m_has_overrides.load();
 }
 
+bool ElementsGroupManager::HasControllerAnchorOverrides() const
+{
+  std::lock_guard lock(m_mutex);
+  return std::ranges::any_of(m_overrides, [](const ElementGroupOverride& entry) {
+    return entry.handling == HandlingType::ControllerAnchor;
+  });
+}
+
 void ElementsGroupManager::SetPopupOpen(bool open)
 {
   std::lock_guard lock(m_mutex);

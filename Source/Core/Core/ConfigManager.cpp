@@ -173,7 +173,7 @@ static void ClearAppliedVRSettings()
   ClearAppliedVRSetting("HeadLockedCurvature", Config::GFX_VR_HEAD_LOCKED_CURVATURE);
   ClearAppliedVRSetting("DontClearScreen", Config::GFX_VR_DONT_CLEAR_SCREEN);
   ClearAppliedVRSetting("LoadCustomShaders", Config::GFX_VR_LOAD_CUSTOM_SHADERS);
-  ClearAppliedVRSetting("DisableCPUCull", Config::GFX_VR_DISABLE_CPU_CULL);
+  ClearAppliedVRSetting("HeadCPUCull", Config::GFX_VR_HEAD_CPU_CULL);
   ClearAppliedVRSetting("MirrorView", Config::GFX_VR_MIRROR_VIEW);
   ClearAppliedVRSetting("ReferenceSpaceMode", Config::GFX_VR_REFERENCE_SPACE_MODE);
   ClearAppliedVRSetting("TrackingMode", Config::GFX_VR_TRACKING_MODE);
@@ -252,7 +252,20 @@ static void ApplyGameVRConfigOverrides(std::string_view game_id, std::optional<u
   ApplyVRSetting(values, "HeadLockedCurvature", Config::GFX_VR_HEAD_LOCKED_CURVATURE);
   ApplyVRSetting(values, "DontClearScreen", Config::GFX_VR_DONT_CLEAR_SCREEN);
   ApplyVRSetting(values, "LoadCustomShaders", Config::GFX_VR_LOAD_CUSTOM_SHADERS);
-  ApplyVRSetting(values, "DisableCPUCull", Config::GFX_VR_DISABLE_CPU_CULL);
+  ApplyVRSetting(values, "HeadCPUCull", Config::GFX_VR_HEAD_CPU_CULL);
+  // Older per-game files: "DisableCPUCull = True" switched VR CPU culling off.
+  if (!values.contains("HeadCPUCull"))
+  {
+    if (const auto it = values.find("DisableCPUCull"); it != values.end())
+    {
+      bool disable = false;
+      if (TryParse(it->second, &disable))
+      {
+        Config::SetCurrent(Config::GFX_VR_HEAD_CPU_CULL, !disable);
+        s_applied_vr_settings.insert("HeadCPUCull");
+      }
+    }
+  }
   ApplyVRSetting(values, "MirrorView", Config::GFX_VR_MIRROR_VIEW);
   ApplyVRSetting(values, "ReferenceSpaceMode", Config::GFX_VR_REFERENCE_SPACE_MODE);
   ApplyVRSetting(values, "TrackingMode", Config::GFX_VR_TRACKING_MODE);

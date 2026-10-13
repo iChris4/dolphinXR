@@ -87,6 +87,8 @@ public:
   void LoadOverrides(const std::string& game_id);
   void LoadOverridesIfNeeded(const std::string& game_id);
   bool HasOverrides() const;
+  // True when a loaded override moves elements to a VR controller (ControllerAnchor).
+  bool HasControllerAnchorOverrides() const;
   // True when the per-draw bound texture hashes are needed (overrides exist or hunter is open).
   bool NeedsTextureHashes() const;
 

@@ -506,16 +506,16 @@ LoadTransformVertex(const u8* data, Vector pos0, Vector pos1, Vector pos2, Vecto
 }
 
 template <bool PositionHas3Elems, bool PerVertexPosMtx>
-ATTR_TARGET static void TransformVertices(void* output, const void* vertices, u32 stride, int count)
+ATTR_TARGET static void TransformVertices(void* output, const void* vertices, u32 stride, int count,
+                                          const void* projection)
 {
-  const VertexShaderManager& vsmanager = Core::System::GetInstance().GetVertexShaderManager();
   const u8* cvertices = static_cast<const u8*>(vertices);
   Vector* voutput = static_cast<Vector*>(output);
   u32 idx = g_main_cp_state.matrix_index_a.PosNormalMtxIdx & 0x3f;
 #ifdef USE_AVX
   __m256 proj0, proj1, proj2, proj3;
   __m256 pos0, pos1, pos2, pos3;
-  LoadTransposedYMM(vsmanager.constants.projection.data(), proj0, proj1, proj2, proj3);
+  LoadTransposedYMM(projection, proj0, proj1, proj2, proj3);
   LoadTransposedPosYMM(&xfmem.posMatrices[idx * 4], pos0, pos1, pos2, pos3);
   for (int i = 1; i < count; i += 2)
   {
@@ -539,7 +539,7 @@ ATTR_TARGET static void TransformVertices(void* output, const void* vertices, u3
 #else
   Vector proj0, proj1, proj2, proj3;
   Vector pos0, pos1, pos2, pos3;
-  LoadTransposed(vsmanager.constants.projection.data(), proj0, proj1, proj2, proj3);
+  LoadTransposed(projection, proj0, proj1, proj2, proj3);
   LoadTransposedPos(&xfmem.posMatrices[idx * 4], pos0, pos1, pos2, pos3);
   for (int i = 0; i < count; i++)
   {

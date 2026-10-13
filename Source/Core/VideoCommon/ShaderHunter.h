@@ -255,6 +255,8 @@ public:
   void AddAndSaveOverride(const std::string& game_id, const std::string& name, ShaderType type,
                           u64 hash, HandlingType handling);
   bool HasOverrides() const;
+  // True when a loaded override moves elements to a VR controller (ControllerAnchor).
+  bool HasControllerAnchorOverrides() const;
   bool NeedsShaderFamilySignatures() const;
   bool NeedsTextureHashes() const;
 

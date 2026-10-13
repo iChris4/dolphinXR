@@ -1565,6 +1565,12 @@ bool ShaderHunter::HasOverrides() const
   return m_has_overrides.load(std::memory_order_relaxed);
 }
 
+bool ShaderHunter::HasControllerAnchorOverrides() const
+{
+  std::lock_guard lock(m_mutex);
+  return !m_controller_anchors.empty();
+}
+
 bool ShaderHunter::NeedsShaderFamilySignatures() const
 {
   return m_needs_shader_family_signatures.load(std::memory_order_relaxed);

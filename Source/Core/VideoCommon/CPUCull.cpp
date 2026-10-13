@@ -138,6 +138,18 @@ void CPUCull::Init()
 bool CPUCull::AreAllVerticesCulled(VertexLoaderBase* loader, OpcodeDecoder::Primitive primitive,
                                    const u8* src, u32 count)
 {
+  // transform functions need the projection matrix to transform to clip space
+  auto& system = Core::System::GetInstance();
+  auto& vertex_shader_manager = system.GetVertexShaderManager();
+  vertex_shader_manager.SetProjectionMatrix(system.GetXFStateManager());
+  return AreAllVerticesCulled(loader, primitive, src, count,
+                              vertex_shader_manager.constants.projection.data());
+}
+
+bool CPUCull::AreAllVerticesCulled(VertexLoaderBase* loader, OpcodeDecoder::Primitive primitive,
+                                   const u8* src, u32 count, const void* projection,
+                                   bool frustum_only)
+{
   ASSERT_MSG(VIDEO, primitive < OpcodeDecoder::Primitive::GX_DRAW_LINES,
              "CPUCull should not be called on lines or points");
   const u32 stride = loader->m_native_vtx_decl.stride;
@@ -151,18 +163,16 @@ bool CPUCull::AreAllVerticesCulled(VertexLoaderBase* loader, OpcodeDecoder::Prim
         Common::AllocateAlignedMemory(new_size * sizeof(TransformedVertex), 32)));
   }
 
-  // transform functions need the projection matrix to transform to clip space
-  auto& system = Core::System::GetInstance();
-  system.GetVertexShaderManager().SetProjectionMatrix(system.GetXFStateManager());
-
   static constexpr Common::EnumMap<CullMode, CullMode::All> cullmode_invert = {
       CullMode::None, CullMode::Front, CullMode::Back, CullMode::All};
 
   CullMode cull_mode = bpmem.genMode.cull_mode;
-  if (xfmem.viewport.ht > 0)  // See videosoftware Clipper.cpp:IsBackface
+  if (frustum_only)
+    cull_mode = CullMode::None;
+  else if (xfmem.viewport.ht > 0)  // See videosoftware Clipper.cpp:IsBackface
     cull_mode = cullmode_invert[cull_mode];
   const TransformFunction transform = m_transform_table[posHas3Elems][perVertexPosMtx];
-  transform(m_transform_buffer.get(), src, stride, count);
+  transform(m_transform_buffer.get(), src, stride, count, projection);
   const CullFunction cull = m_cull_table[primitive][cull_mode];
   return cull(m_transform_buffer.get(), count);
 }

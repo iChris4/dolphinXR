@@ -442,12 +442,12 @@ int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int coun
 
     // CPUCull's performance increase comes from encoding fewer GPU commands, not sending less data
     // Therefore it's only useful to check if culling could remove a flush.
-    // Optional VR override can disable CPU-side culling in OpenXR mode.
-    const bool cpu_cull_allowed_in_vr =
-        !(g_ActiveConfig.stereo_mode == StereoMode::OpenXR && g_ActiveConfig.vr_disable_cpu_cull);
-    bool can_cpu_cull = g_ActiveConfig.bCPUCull && cpu_cull_allowed_in_vr &&
-                        primitive < OpcodeDecoder::Primitive::GX_DRAW_LINES &&
-                        !g_vertex_manager->HasSendableVertices();
+    // In VR this tests the head-following cone instead of the game's projection.
+    const bool cull_eligible = primitive < OpcodeDecoder::Primitive::GX_DRAW_LINES &&
+                               !g_vertex_manager->HasSendableVertices();
+    const VertexManagerBase::CpuCullPlan cull_plan =
+        cull_eligible ? g_vertex_manager->GetCpuCullPlan() : VertexManagerBase::CpuCullPlan::None;
+    bool can_cpu_cull = cull_plan != VertexManagerBase::CpuCullPlan::None;
 
     // if cull mode is CULL_ALL, tell VertexManager to skip triangles and quads.
     // They still need to go through vertex loading, because we need to calculate a zfreeze
@@ -471,8 +471,8 @@ int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int coun
 
       if (can_cpu_cull && !cullall)
       {
-        const bool all_culled =
-            g_vertex_manager->AreAllVerticesCulled(loader, primitive, dst.GetPointer(), num_loaded);
+        const bool all_culled = g_vertex_manager->AreAllVerticesCulled(
+            loader, primitive, dst.GetPointer(), num_loaded, cull_plan);
         if (!all_culled)
         {
           DataReader new_dst = g_vertex_manager->DisableCullAll(stride);

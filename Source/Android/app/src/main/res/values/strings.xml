@@ -940,8 +940,8 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_clear_efb_copies_description">Clears large EFB copy textures to transparent at or above the selected native width. Set 0 to disable.</string>
     <string name="quest_dont_clear_screen">Don\'t Clear Screen</string>
     <string name="quest_dont_clear_screen_description">Prevents clearing the OpenXR eye framebuffers before rendering each frame.</string>
-    <string name="quest_disable_cpu_culling">Disable CPU Culling in VR</string>
-    <string name="quest_disable_cpu_culling_description">Disables Dolphin\'s CPU-side primitive culling while OpenXR is active.</string>
+    <string name="quest_head_cpu_culling">Head-Rotated CPU Culling</string>
+    <string name="quest_head_cpu_culling_description">Skips draw calls outside the view cone that follows your head before they reach the GPU. Reduces CPU load in open areas.</string>
     <string name="quest_load_custom_shaders">Load Custom Shaders</string>
     <string name="quest_load_custom_shaders_description">Loads custom shader replacements from the game\'s shader override directory.</string>
     <string name="quest_recenter_now">Recenter VR view now</string>

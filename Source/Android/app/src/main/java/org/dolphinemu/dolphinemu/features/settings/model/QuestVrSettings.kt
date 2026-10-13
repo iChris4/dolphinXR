@@ -135,7 +135,7 @@ object QuestVrSettings {
 
     fun dontClearScreenSetting() = vrBooleanSetting("DontClearScreen", false)
 
-    fun disableCpuCullSetting() = vrBooleanSetting("DisableCPUCull", false)
+    fun headCpuCullSetting() = vrBooleanSetting("HeadCPUCull", true)
 
     fun clearEfbCopiesSetting() = vrIntSetting("ClearEFBCopies", 0)
 
@@ -296,7 +296,7 @@ object QuestVrSettings {
             // VR hacks
             useVulkanMultiviewSetting(),
             dontClearScreenSetting(),
-            disableCpuCullSetting(),
+            headCpuCullSetting(),
             removeBarsSetting(),
             frameSizeFromXfbSetting(),
             panesOnScreenSetting(),

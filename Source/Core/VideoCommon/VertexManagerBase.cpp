@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
@@ -549,11 +550,107 @@ void VertexManagerBase::AddIndices(OpcodeDecoder::Primitive primitive, u32 num_v
   m_index_generator.AddIndices(primitive, num_vertices);
 }
 
+void VertexManagerBase::UpdateVRCullPolicy()
+{
+  auto& hunter = ShaderHunter::GetInstance();
+  auto& elements = ElementsGroupManager::GetInstance();
+  auto& texmgr = TextureElementManager::GetInstance();
+
+  // Hunting lists and previews show draws as the game issues them; ControllerAnchor elements
+  // are drawn at the controller, so neither the cone nor the game's view describes them.
+  const bool hunting = hunter.IsEnabled() || elements.IsPopupOpen() || texmgr.IsHunterActive();
+  const bool controller_anchors = hunter.HasControllerAnchorOverrides() ||
+                                  elements.HasControllerAnchorOverrides() ||
+                                  texmgr.HasControllerAnchorOverrides();
+  m_vr_cull_allowed = g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+                      g_ActiveConfig.vr_head_cpu_cull && !hunting && !controller_anchors;
+  m_vr_cull_cone_only = !hunter.HasOverrides() && !elements.HasOverrides() &&
+                        !texmgr.HasOverrides() &&
+                        GetCachedMetroidProfile() == MetroidElementProfile::None;
+
+  if (!m_vr_cull_allowed)
+  {
+    m_vr_cull_stats = {};
+    return;
+  }
+  if (++m_vr_cull_stats.frames < 60)
+    return;
+
+  const auto& s = m_vr_cull_stats;
+  const double frames = s.frames;
+  INFO_LOG_FMT(VIDEO,
+               "VR CPU cull: removed {:.0f} draw calls per frame (cone only: {:.0f} of {:.0f} "
+               "batches culled, cone and game: {:.0f} of {:.0f}), misrouted cone-only {}",
+               s.culled_draws / frames, s.culled[1] / frames, s.tested[1] / frames,
+               s.culled[0] / frames, s.tested[0] / frames, s.misrouted);
+  m_vr_cull_stats = {};
+}
+
+VertexManagerBase::CpuCullPlan VertexManagerBase::GetCpuCullPlan()
+{
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR)
+    return g_ActiveConfig.bCPUCull ? CpuCullPlan::Stock : CpuCullPlan::None;
+
+  // The stock cull tests the game's projection, which covers far less than the headset shows: it
+  // would cut head-independent holes into the view. VR only tests against the head cone.
+  if (!m_vr_cull_allowed)
+    return CpuCullPlan::None;
+  const auto* const cone =
+      Core::System::GetInstance().GetGeometryShaderManager().GetVRCullProjection();
+  if (!cone)
+    return CpuCullPlan::None;
+  m_vr_cull_projection = *cone;
+
+  // Without overrides or a game profile, the only routes for a perspective draw of the main view
+  // render it from the head. Anything else may be placed on the virtual screen or head-locked,
+  // where the game's own projection decides what is visible.
+  if (m_vr_cull_cone_only && xfmem.projection.type == ProjectionType::Perspective)
+  {
+    const VR::VRViewportClass viewport_class = VR::ClassifyVRViewport(
+        xfmem.viewport, bpmem.scissorOffset.x << 1, bpmem.scissorOffset.y << 1);
+    if (viewport_class == VR::VRViewportClass::MainScene ||
+        viewport_class == VR::VRViewportClass::Letterboxed)
+    {
+      return CpuCullPlan::ConeOnly;
+    }
+  }
+  return CpuCullPlan::ConeAndGame;
+}
+
 bool VertexManagerBase::AreAllVerticesCulled(VertexLoaderBase* loader,
                                              OpcodeDecoder::Primitive primitive, const u8* src,
-                                             u32 count)
+                                             u32 count, CpuCullPlan plan)
 {
-  return m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count);
+  switch (plan)
+  {
+  case CpuCullPlan::None:
+    return false;
+  case CpuCullPlan::Stock:
+    return m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count);
+  case CpuCullPlan::ConeOnly:
+  case CpuCullPlan::ConeAndGame:
+    break;
+  }
+
+  const bool cone_only = plan == CpuCullPlan::ConeOnly;
+  ++m_vr_cull_stats.tested[cone_only];
+  if (cone_only)
+    m_vr_cone_only_pending = true;
+
+  // Outside the head cone. Frustum planes only: the cone's apex is not an eye, so it cannot
+  // decide which faces point away from the viewer.
+  bool culled = m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count,
+                                                m_vr_cull_projection.data(), true);
+  // ...and, unless the draw is known to be rendered from the head, outside the game's own view.
+  if (culled && !cone_only)
+    culled = m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count);
+
+  if (culled)
+  {
+    ++m_vr_cull_stats.culled[cone_only];
+    m_vr_culled_pending = true;
+  }
+  return culled;
 }
 
 DataReader VertexManagerBase::PrepareForAdditionalData(OpcodeDecoder::Primitive primitive,
@@ -848,6 +945,8 @@ void VertexManagerBase::Flush()
     return;
 
   m_is_flushed = true;
+  const bool vr_culled = std::exchange(m_vr_culled_pending, false);
+  const bool vr_cone_only = std::exchange(m_vr_cone_only_pending, false);
 
   if (m_draw_counter == 0)
   {
@@ -1211,7 +1310,7 @@ void VertexManagerBase::Flush()
           {
             element_draw.emplace(ElementsGroupManager::DrawRecord{
                 .draw_index = -1,
-                .draw_sequence = m_draw_counter + 1,
+                .draw_sequence = m_draw_counter + m_vr_culled_flushes + 1,
                 .vs_hash = vs_hash,
                 .ps_hash = ps_hash,
                 .gs_hash = gs_hash,
@@ -1225,7 +1324,8 @@ void VertexManagerBase::Flush()
             if (metroid_profile_active)
             {
               metroid_profile = GetCachedMetroidProfile();
-              metroid_metrics = BuildMetroidProjectionMetrics(xfmem, m_draw_counter);
+              metroid_metrics =
+                  BuildMetroidProjectionMetrics(xfmem, m_draw_counter + m_vr_culled_flushes);
               metroid_layer =
                   GetMetroidElementClassifier().Classify(metroid_profile, metroid_metrics);
               if (IsMetroidPrime1Profile(metroid_profile) &&
@@ -1854,6 +1954,14 @@ void VertexManagerBase::Flush()
           RenderDrawCall(pixel_shader_manager, geometry_shader_manager,
                          custom_pixel_shader_contents, custom_pixel_shader_uniforms,
                          m_current_primitive_type, pipeline_object);
+          // A cone-only batch must have been rendered from the head (immersive route); anything
+          // else means the cone may have removed visible geometry.
+          if (vr_cone_only)
+          {
+            const float route = geometry_shader_manager.constants.stereoparams[3];
+            if (route < 0.5f || route > 1.5f)
+              ++m_vr_cull_stats.misrouted;
+          }
           if (pane_raster_overridden)
           {
             BPFunctions::SetScissorAndViewport(g_framebuffer_manager.get(), bpmem.scissorTL,
@@ -1877,6 +1985,11 @@ void VertexManagerBase::Flush()
   else
   {
     HideObjectEngine::Engine::GetInstance().DiscardPendingCapturedPrefixes();
+    if (vr_culled)
+    {
+      ++m_vr_culled_flushes;
+      ++m_vr_cull_stats.culled_draws;
+    }
   }
 
   if (xfmem.numTexGen.numTexGens != bpmem.genMode.numtexgens)
@@ -2232,7 +2345,9 @@ void VertexManagerBase::OnEndFrame()
   GetMetroidElementClassifier().ResetFrame();
   m_metroid_prime1_combat_context_seen = false;
   m_metroid_prime1_menu_context_seen = false;
+  UpdateVRCullPolicy();
   m_draw_counter = 0;
+  m_vr_culled_flushes = 0;
   m_last_efb_copy_draw_counter = 0;
   m_scheduled_command_buffer_kicks.clear();
 

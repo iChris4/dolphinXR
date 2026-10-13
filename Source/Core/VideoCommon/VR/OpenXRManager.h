@@ -356,6 +356,18 @@ public:
       std::array<std::array<float, 4>, 4>& out_proj_rows,
       std::array<std::array<float, 4>, 2>& out_z_rows) const;
 
+  // Changes whenever the inputs of the projection rows above may have changed: a new
+  // LocateViews (including recenters), a session reset or a Camera Anchor commit. Projection
+  // rows built from one generation stay valid until the next. Video thread only.
+  u64 GetPoseGeneration() const { return m_pose_generation; }
+
+  // CPU culling volume of the game-camera rig (same pose as GetEyeProjectionRows): a symmetric
+  // frustum, as four row-major float4 rows (clip = rows * viewPos, x/y against w), that
+  // contains both eyes' frusta plus a small margin. Returns false while no pose is available
+  // or the eyes diverge too far for a single frustum.
+  bool GetHeadCullProjection(float units_per_meter,
+                             std::array<std::array<float, 4>, 4>& out_rows) const;
+
   // ---- Camera Anchor (Elements Group Override "CameraAnchor" handling) ----
   // Anchors the VR camera to a game element's view-space origin (e.g. a character's
   // head for first-person view). Video-thread only, like m_submitted_eye_views.
@@ -444,6 +456,16 @@ public:
   XrCompositionLayerFlags GetProjectionLayerExtraFlags() const;
 
 private:
+  // One eye of the camera rig in game view space: eye-local -> view rotation (row-major; its
+  // columns are the eye's axes, the eye looking down -Z), eye position in game units and the
+  // eye's FOV. Shared by the GS projection rows and the CPU culling frustum.
+  struct EyeRig
+  {
+    std::array<std::array<float, 3>, 3> m;
+    std::array<float, 3> e;
+    XrFovf fov;
+  };
+  std::array<EyeRig, 2> ComputeEyeRigs(float units_per_meter, bool apply_game_camera) const;
   void GetEyeProjectionRowsImpl(
       float units_per_meter, bool apply_game_camera,
       std::array<std::array<float, 4>, 4>& out_proj_rows,
@@ -593,6 +615,7 @@ private:
   std::atomic<bool> m_session_focused{false};
   bool m_exit_render_loop = false;
   bool m_direct_present_active = false;  // Video thread only; see SetDirectPresentActive.
+  u64 m_pose_generation = 0;             // Video thread only; see GetPoseGeneration.
 
   XrFrameState m_frame_state{XR_TYPE_FRAME_STATE};
   XrViewStateFlags m_view_state_flags = 0;

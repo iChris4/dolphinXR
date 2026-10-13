@@ -2996,10 +2996,10 @@ class SettingsFragmentPresenter(
             R.string.quest_dont_clear_screen_description
         )
         builder.boolean(
-            "DisableCPUCull",
-            false,
-            R.string.quest_disable_cpu_culling,
-            R.string.quest_disable_cpu_culling_description
+            "HeadCPUCull",
+            true,
+            R.string.quest_head_cpu_culling,
+            R.string.quest_head_cpu_culling_description
         )
         builder.boolean(
             "RemoveCinematicBars",
@@ -3440,9 +3440,9 @@ class SettingsFragmentPresenter(
         sl.add(
             SwitchSetting(
                 context,
-                QuestVrSettings.disableCpuCullSetting(),
-                R.string.quest_disable_cpu_culling,
-                R.string.quest_disable_cpu_culling_description
+                QuestVrSettings.headCpuCullSetting(),
+                R.string.quest_head_cpu_culling,
+                R.string.quest_head_cpu_culling_description
             )
         )
         sl.add(

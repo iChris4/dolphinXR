@@ -276,68 +276,18 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
                                               g_ActiveConfig.vr_units_per_meter;
         const float upm = std::max(upm_override > 0.0f ? upm_override : base_upm, 0.0001f);
 
+        const VREyeRows* vr_rows = nullptr;
         if (VR::g_openxr && VR::g_openxr->IsSessionRunning())
         {
+          // Projection rows for this scale, cached until the pose they were built from changes
+          // (see RefreshVREyeRowCache).
+          vr_rows = &GetVREyeRows(upm);
 
-          // Under the head-pose lock, only re-fetch the head pose from OpenXR when we've
-          // been explicitly invalidated (at the XFB-copy frame boundary).  This prevents
-          // mid-frame LocateViews() updates from desynchronising different draw calls
-          // within the same game frame.  The lock applies whenever ImmediateXFB is off
-          // (VRLockHeadPosePerFrame): presents then interleave with the next frame's draw
-          // stream, so per-draw refresh WILL land mid-frame.  With ImmediateXFB on,
-          // presentation is frame-aligned, so refetch every call for fresher tracking.
-          const bool upm_changed = std::abs(upm - m_cached_units_per_meter) > 0.0001f;
-          const bool need_refresh =
-              upm_changed || !g_ActiveConfig.VRLockHeadPosePerFrame() || m_vr_pose_needs_refresh;
-          if (need_refresh)
-          {
-            std::array<std::array<float, 4>, 4> eye_projection_rows{};
-            std::array<std::array<float, 4>, 2> eye_z_rows{};
-            VR::g_openxr->GetEyeProjectionRows(upm, eye_projection_rows, eye_z_rows);
-
-            // OpenXR stereo bypasses the classic cproj path, so bake Free Look into the cached
-            // game-camera rows.  Do this regardless of the current draw type: with the per-frame
-            // pose lock, an ortho draw may be the one that refreshes the cache for all later
-            // perspective draws in the frame.
-            if (g_freelook_camera.IsActive())
-            {
-              const Common::Matrix44 freelook_view = g_freelook_camera.GetView();
-              ApplyRowTransform(&eye_projection_rows, freelook_view);
-              ApplyRowTransform(&eye_z_rows, freelook_view);
-            }
-
-            m_cached_eye_projection = eye_projection_rows;
-            m_cached_eye_z_row = eye_z_rows;
-
-            // Cache a second projection from the exact same tracked pose without any game-camera
-            // adjustment.  Orthographic HUD and other virtual-screen routes select this below, so
-            // Free Look, Camera Forward/Height, and Camera Anchor only move immersive 3D geometry.
-            std::array<std::array<float, 4>, 4> tracked_eye_projection_rows{};
-            std::array<std::array<float, 4>, 2> tracked_eye_z_rows{};
-            VR::g_openxr->GetTrackedEyeProjectionRows(upm, tracked_eye_projection_rows,
-                                                       tracked_eye_z_rows);
-            m_cached_tracked_eye_projection = tracked_eye_projection_rows;
-            m_cached_tracked_eye_z_row = tracked_eye_z_rows;
-            m_cached_units_per_meter = upm;
-
-            // Unrotated per-eye projection rows for head-locked content.
-            std::array<std::array<float, 4>, 4> head_proj_rows{};
-            VR::g_openxr->GetRawEyeProjectionRows(upm, head_proj_rows);
-            m_cached_head_projection = head_proj_rows;
-
-            // Snapshot the pose the cache was built from.  SubmitFrame will use
-            // this snapshot so render_pose == submit_pose regardless of any
-            // later LocateViews that may clobber m_eye_views before xrEndFrame.
-            VR::g_openxr->RecordRenderedEyeViews();
-
-            m_vr_pose_needs_refresh = false;
-          }
-
-          // Unrotated per-eye projection rows for head-locked content (cached above).
-          constants.head_projection[0] = m_cached_head_projection[0];
-          constants.head_projection[1] = m_cached_head_projection[1];
-          constants.head_projection[2] = m_cached_head_projection[2];
-          constants.head_projection[3] = m_cached_head_projection[3];
+          // Unrotated per-eye projection rows for head-locked content.
+          constants.head_projection[0] = vr_rows->head_projection[0];
+          constants.head_projection[1] = vr_rows->head_projection[1];
+          constants.head_projection[2] = vr_rows->head_projection[2];
+          constants.head_projection[3] = vr_rows->head_projection[3];
           for (u32 eye = 0; eye < 2; ++eye)
           {
             auto& row0 = constants.head_projection[eye * 2 + 0];
@@ -515,17 +465,16 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           vr_stereo_override = std::numeric_limits<float>::quiet_NaN();
         }
 
-        if (VR::g_openxr && VR::g_openxr->IsSessionRunning())
+        if (vr_rows)
         {
           // Only the normal immersive-perspective route represents the game camera.  Virtual
           // screens (including orthographic HUD and perspective Screen Pane draws) stay tied to
           // the tracked room pose and therefore do not inherit Free Look or camera offsets.
           const bool use_game_camera =
               constants.stereoparams[3] > 0.5f && constants.stereoparams[3] < 1.5f;
-          const auto& eye_projection = use_game_camera ? m_cached_eye_projection :
-                                                         m_cached_tracked_eye_projection;
-          const auto& eye_z_row =
-              use_game_camera ? m_cached_eye_z_row : m_cached_tracked_eye_z_row;
+          const auto& eye_projection =
+              use_game_camera ? vr_rows->eye_projection : vr_rows->tracked_eye_projection;
+          const auto& eye_z_row = use_game_camera ? vr_rows->eye_z_row : vr_rows->tracked_eye_z_row;
           constants.eye_projection[0] = eye_projection[0];
           constants.eye_projection[1] = eye_projection[1];
           constants.eye_projection[2] = eye_projection[2];
@@ -710,6 +659,97 @@ void GeometryShaderManager::SetViewportChanged()
 void GeometryShaderManager::SetProjectionChanged()
 {
   m_projection_changed = true;
+}
+
+#ifdef ENABLE_VR
+void GeometryShaderManager::RefreshVREyeRowCache()
+{
+  // Rows stay valid while the pose they were built from does. Under the head-pose lock
+  // (ImmediateXFB off) that is until the XFB-copy frame boundary invalidates them, so every
+  // draw of a game frame sees one pose even when presents interleave with the next frame's
+  // draws. Otherwise it is until OpenXRManager publishes a new pose generation (LocateViews,
+  // a Camera Anchor commit), so draws keep using the freshest pose without rebuilding the rows
+  // for every draw. Free Look moves the camera between draws: without the lock it still
+  // rebuilds per draw, as before.
+  const bool lock = g_ActiveConfig.VRLockHeadPosePerFrame();
+  const bool freelook = g_freelook_camera.IsActive();
+  const u64 generation = VR::g_openxr->GetPoseGeneration();
+  if (!m_vr_pose_needs_refresh && freelook == m_vr_eye_rows_freelook &&
+      (lock || (!freelook && generation == m_vr_eye_rows_generation)))
+  {
+    return;
+  }
+
+  for (VREyeRows& rows : m_vr_eye_rows)
+    rows.valid = false;
+  m_vr_eye_rows_generation = generation;
+  m_vr_eye_rows_freelook = freelook;
+  m_vr_pose_needs_refresh = false;
+}
+
+const GeometryShaderManager::VREyeRows& GeometryShaderManager::GetVREyeRows(float units_per_meter)
+{
+  RefreshVREyeRowCache();
+  for (const VREyeRows& rows : m_vr_eye_rows)
+  {
+    if (rows.valid && std::abs(rows.units_per_meter - units_per_meter) <= 0.0001f)
+      return rows;
+  }
+
+  VREyeRows& rows = m_vr_eye_rows[m_vr_eye_rows_next];
+  m_vr_eye_rows_next = (m_vr_eye_rows_next + 1) % static_cast<u32>(m_vr_eye_rows.size());
+  rows.valid = true;
+  rows.units_per_meter = units_per_meter;
+  VR::g_openxr->GetEyeProjectionRows(units_per_meter, rows.eye_projection, rows.eye_z_row);
+
+  // OpenXR stereo bypasses the classic cproj path, so bake Free Look into the cached
+  // game-camera rows.  Do this regardless of the current draw type: with the per-frame
+  // pose lock, an ortho draw may be the one that refreshes the cache for all later
+  // perspective draws in the frame.
+  if (g_freelook_camera.IsActive())
+  {
+    const Common::Matrix44 freelook_view = g_freelook_camera.GetView();
+    ApplyRowTransform(&rows.eye_projection, freelook_view);
+    ApplyRowTransform(&rows.eye_z_row, freelook_view);
+  }
+
+  // A second projection from the exact same tracked pose without any game-camera adjustment.
+  // Orthographic HUD and other virtual-screen routes select this, so Free Look, Camera
+  // Forward/Height, and Camera Anchor only move immersive 3D geometry.
+  VR::g_openxr->GetTrackedEyeProjectionRows(units_per_meter, rows.tracked_eye_projection,
+                                            rows.tracked_eye_z_row);
+
+  // Unrotated per-eye projection rows for head-locked content.
+  VR::g_openxr->GetRawEyeProjectionRows(units_per_meter, rows.head_projection);
+
+  // CPU culling cone of the game-camera rig, from the same pose as the rows above.
+  rows.cull_valid = VR::g_openxr->GetHeadCullProjection(units_per_meter, rows.cull_projection);
+
+  // Snapshot the pose the cache was built from.  SubmitFrame will use
+  // this snapshot so render_pose == submit_pose regardless of any
+  // later LocateViews that may clobber m_eye_views before xrEndFrame.
+  VR::g_openxr->RecordRenderedEyeViews();
+  return rows;
+}
+
+#endif
+
+const std::array<std::array<float, 4>, 4>* GeometryShaderManager::GetVRCullProjection()
+{
+#ifdef ENABLE_VR
+  if (!VR::g_openxr || !VR::g_openxr->IsSessionRunning())
+    return nullptr;
+
+  // Free Look moves the rendered camera away from the rig the cone describes.
+  if (g_freelook_camera.IsActive())
+    return nullptr;
+
+  const float upm = std::max(VR::g_openxr->GetEffectiveUnitsPerMeter(), 0.0001f);
+  const VREyeRows& rows = GetVREyeRows(upm);
+  return rows.cull_valid ? &rows.cull_projection : nullptr;
+#else
+  return nullptr;
+#endif
 }
 
 void GeometryShaderManager::InvalidateVRHeadPose()
