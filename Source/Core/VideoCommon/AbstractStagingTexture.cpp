@@ -120,6 +120,12 @@ void AbstractStagingTexture::WriteTexel(u32 x, u32 y, const void* in_ptr)
   std::memcpy(dest_ptr, in_ptr, m_texel_size);
 }
 
+bool AbstractStagingTexture::TryFlush()
+{
+  Flush();
+  return true;
+}
+
 bool AbstractStagingTexture::PrepareForAccess()
 {
   if (m_needs_flush)

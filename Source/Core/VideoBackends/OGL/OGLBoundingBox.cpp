@@ -5,9 +5,12 @@
 
 #include <cstring>
 
+#include "Common/Timer.h"
+
 #include "VideoBackends/OGL/OGLConfig.h"
 #include "VideoBackends/OGL/OGLGfx.h"
 #include "VideoCommon/DriverDetails.h"
+#include "VideoCommon/GPUWaitStats.h"
 
 namespace OGL
 {
@@ -33,6 +36,10 @@ std::vector<BBoxType> OGLBoundingBox::Read(u32 index, u32 length)
 {
   std::vector<BBoxType> values(length);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_buffer_id);
+
+  // Both readback paths wait for the GPU; GL gives no cheaper completion signal here, so only a
+  // readback that took a while counts as a GPU wait.
+  const u64 read_start_us = Common::Timer::NowUs();
 
   // Using glMapBufferRange to read back the contents of the SSBO is extremely slow
   // on nVidia drivers. This is more noticeable at higher internal resolutions.
@@ -64,6 +71,10 @@ std::vector<BBoxType> OGLBoundingBox::Read(u32 index, u32 length)
       glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
     }
   }
+
+  const u64 read_us = Common::Timer::NowUs() - read_start_us;
+  if (read_us > 50)
+    VideoCommon::GPUWaitStats::RecordWait(read_us);
 
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
   return values;

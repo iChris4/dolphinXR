@@ -40,12 +40,13 @@
 #include "VideoCommon/Assets/CustomTextureData.h"
 #include "VideoCommon/Assets/TextureAssetUtils.h"
 #include "VideoCommon/BPMemory.h"
+#include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/FramebufferManager.h"
+#include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/FBInfo.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
 #include "VideoCommon/OpcodeDecoding.h"
-#include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/PixelShaderManager.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/Resources/CustomResourceManager.h"
@@ -2870,7 +2871,12 @@ void TextureCacheBase::WriteEFBCopyToRAM(u8* dst_ptr, u32 width, u32 height, u32
                                          std::unique_ptr<AbstractStagingTexture> staging_texture)
 {
   MathUtil::Rectangle<int> copy_rect(0, 0, static_cast<int>(width), static_cast<int>(height));
-  staging_texture->ReadTexels(copy_rect, dst_ptr, stride);
+  {
+    // ReadTexels() flushes the staging texture, waiting for the GPU copy if it is still running.
+    VideoCommon::GPUWaitStats::ScopedReason wait_reason(
+        VideoCommon::GPUWaitStats::Reason::EFBCopyToRAM);
+    staging_texture->ReadTexels(copy_rect, dst_ptr, stride);
+  }
   ReleaseEFBCopyStagingTexture(std::move(staging_texture));
 }
 

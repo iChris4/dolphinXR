@@ -13,6 +13,7 @@
 #include "Common/DynamicLibrary.h"
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
+#include "Common/Timer.h"
 
 #include "Core/Config/GraphicsSettings.h"
 
@@ -20,6 +21,7 @@
 #include "VideoBackends/D3D12/D3D12StreamBuffer.h"
 #include "VideoBackends/D3D12/DescriptorHeapManager.h"
 #include "VideoCommon/FramebufferManager.h"
+#include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace DX12
@@ -502,9 +504,14 @@ void DXContext::MoveToNextCommandList()
   m_current_command_list = (m_current_command_list + 1) % m_num_command_lists;
   m_current_fence_value++;
 
-  // We may have to wait if this command list hasn't finished on the GPU.
+  // We may have to wait if this command list hasn't finished on the GPU. That wait is the ring
+  // wrapping into unfinished work, whatever submitted it, so it is reported as frame recycling
+  // rather than charged to the caller's reason (e.g. the EFB peek whose submit rotated the ring).
   CommandListResources& res = m_command_lists[m_current_command_list];
-  WaitForFence(res.ready_fence_value);
+  {
+    VideoCommon::GPUWaitStats::ScopedReason reason(VideoCommon::GPUWaitStats::Reason::FrameRecycle);
+    WaitForFence(res.ready_fence_value);
+  }
 
   // Begin command list.
   res.command_allocator->Reset();
@@ -587,14 +594,40 @@ void DXContext::WaitForFence(u64 fence)
   m_completed_fence_value = m_fence->GetCompletedValue();
   if (m_completed_fence_value < fence)
   {
-    // Fall back to event.
+    // Fall back to event. Only this path blocks, so only it is reported as a GPU wait.
+    const u64 wait_start_us = Common::Timer::NowUs();
     HRESULT hr = m_fence->SetEventOnCompletion(fence, m_fence_event);
     ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Failed to set fence event on completion: {}", DX12HRWrap(hr));
     WaitForSingleObject(m_fence_event, INFINITE);
     m_completed_fence_value = m_fence->GetCompletedValue();
+    VideoCommon::GPUWaitStats::RecordWait(Common::Timer::NowUs() - wait_start_us);
   }
 
-  // Release resources for as many command lists which have completed.
+  ReleaseCompletedCommandLists();
+}
+
+bool DXContext::PollFence(u64 fence)
+{
+  if (m_completed_fence_value >= fence)
+    return true;
+
+  // Whatever the answer, lists that completed since the last check are released now: a later
+  // WaitForFence() for them returns early on m_completed_fence_value and would not do it.
+  const u64 completed = m_fence->GetCompletedValue();
+  if (completed != m_completed_fence_value)
+  {
+    m_completed_fence_value = completed;
+    ReleaseCompletedCommandLists();
+  }
+  return m_completed_fence_value >= fence;
+}
+
+void DXContext::ReleaseCompletedCommandLists()
+{
+  // Release resources for as many command lists which have completed, oldest first. A list being
+  // recorded carries the not-yet-signalled current fence value, so a poll mid-list stops before
+  // it; only MoveToNextCommandList(), whose recycled list still holds its old completed value,
+  // reaches and releases the current list (last).
   u32 index = (m_current_command_list + 1) % m_num_command_lists;
   for (u32 i = 0; i < m_num_command_lists; i++)
   {

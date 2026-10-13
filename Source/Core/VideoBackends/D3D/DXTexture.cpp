@@ -9,9 +9,11 @@
 #include "Common/Assert.h"
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
+#include "Common/Timer.h"
 
 #include "VideoBackends/D3D/D3DState.h"
 #include "VideoBackends/D3DCommon/D3DCommon.h"
+#include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace DX11
@@ -323,11 +325,28 @@ bool DXStagingTexture::Map()
   else
     map_type = D3D11_MAP_READ_WRITE;
 
+  // Mapping a staging texture for reading is where D3D11 waits for the copy into it: the API has
+  // no fence to ask beforehand, so the duration of the map is the only sign of a GPU wait.
+  // Write-discard maps of upload textures rename instead of waiting, so they are not timed.
+  const bool reads_gpu_data = m_type != StagingTextureType::Upload;
+  const u64 map_start_us = reads_gpu_data ? Common::Timer::NowUs() : 0;
+
   D3D11_MAPPED_SUBRESOURCE sr;
   HRESULT hr = D3D::context->Map(m_tex.Get(), 0, map_type, 0, &sr);
   ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Failed to map readback texture: {}", DX11HRWrap(hr));
   if (FAILED(hr))
     return false;
+
+  if (reads_gpu_data)
+  {
+    // A blocking map also submits whatever the context had batched, the copy included.
+
+    // Below this the map was just the driver call; above it, the CPU sat waiting for the GPU.
+    constexpr u64 MAP_WAIT_THRESHOLD_US = 50;
+    const u64 map_us = Common::Timer::NowUs() - map_start_us;
+    if (map_us > MAP_WAIT_THRESHOLD_US)
+      VideoCommon::GPUWaitStats::RecordWait(map_us);
+  }
 
   m_map_pointer = static_cast<char*>(sr.pData);
   m_map_stride = sr.RowPitch;
@@ -347,6 +366,45 @@ void DXStagingTexture::Flush()
 {
   // Flushing is handled by the API.
   m_needs_flush = false;
+}
+
+bool DXStagingTexture::TryFlush()
+{
+  // Upload textures are written through write-discard maps, which never wait for the GPU.
+  if (m_type == StagingTextureType::Upload)
+    return AbstractStagingTexture::TryFlush();
+
+  // Mapped textures hold finished data: CopyFromTexture() unmaps before every copy, and a map only
+  // succeeds once the GPU is done with the texture.
+  if (IsMapped())
+  {
+    m_needs_flush = false;
+    return true;
+  }
+
+  // Flush() is a no-op on D3D11 and the wait happens in Map(), so the only way to ask whether the
+  // copy completed is a map that refuses to wait. On success the mapping is kept for the read that
+  // follows. This also covers m_needs_flush == false while unmapped, since Flush() clears it
+  // without the GPU being done.
+  const D3D11_MAP map_type =
+      m_type == StagingTextureType::Readback ? D3D11_MAP_READ : D3D11_MAP_READ_WRITE;
+  D3D11_MAPPED_SUBRESOURCE sr;
+  const HRESULT hr = D3D::context->Map(m_tex.Get(), 0, map_type, D3D11_MAP_FLAG_DO_NOT_WAIT, &sr);
+  if (SUCCEEDED(hr))
+  {
+    m_map_pointer = static_cast<char*>(sr.pData);
+    m_map_stride = sr.RowPitch;
+    m_needs_flush = false;
+    return true;
+  }
+
+  // Still in flight. The copy reaches the GPU through the caller's g_gfx->Flush() (or the next
+  // present); polling never submits.
+  if (hr == DXGI_ERROR_WAS_STILL_DRAWING)
+    return false;
+
+  // Any other failure (e.g. device removed): take the blocking path, which reports the error.
+  return AbstractStagingTexture::TryFlush();
 }
 
 DXFramebuffer::DXFramebuffer(AbstractTexture* color_attachment, AbstractTexture* depth_attachment,

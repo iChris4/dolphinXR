@@ -976,6 +976,14 @@ void VKGfx::RecordFinishedRendering(const VKTexture* texture)
   Record(command);
 }
 
+void VKGfx::RecordStagingCopyFromTexture(const RecordCommand::StagingCopyFromTextureCmd& copy)
+{
+  RecordCommand command{};
+  command.type = RecordCommandType::StagingCopyFromTexture;
+  command.staging_copy_from_texture = copy;
+  Record(command);
+}
+
 void VKGfx::ExecuteRecordCommand(const RecordCommand& command)
 {
   StateTracker* const tracker = StateTracker::GetInstance();
@@ -1063,6 +1071,10 @@ void VKGfx::ExecuteRecordCommand(const RecordCommand& command)
           g_command_buffer_mgr->GetCurrentCommandBuffer(),
           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
+    break;
+  case RecordCommandType::StagingCopyFromTexture:
+    command.staging_copy_from_texture.staging->CopyFromTextureDirect(
+        command.staging_copy_from_texture);
     break;
   }
 }

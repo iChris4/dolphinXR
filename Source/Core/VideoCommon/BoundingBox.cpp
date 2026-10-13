@@ -8,6 +8,7 @@
 #include "Common/Assert.h"
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
+#include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/PixelShaderManager.h"
 #include "VideoCommon/VideoConfig.h"
 
@@ -60,6 +61,9 @@ void BoundingBox::Readback()
   if (!g_backend_info.bSupportsBBox)
     return;
 
+  // The backend waits for the draws that wrote the bounding box.
+  VideoCommon::GPUWaitStats::ScopedReason wait_reason(
+      VideoCommon::GPUWaitStats::Reason::BoundingBox);
   auto read_values = Read(0, NUM_BBOX_VALUES);
 
   // Preserve dirty values, that way we don't need to sync.

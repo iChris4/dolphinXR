@@ -7,6 +7,7 @@
 #include "Common/GL/GLExtensions/GLExtensions.h"
 #include "Common/GL/GLUtil.h"
 #include "Common/Logging/LogManager.h"
+#include "Common/Timer.h"
 
 #include "VideoBackends/OGL/OGLConfig.h"
 #include "VideoBackends/OGL/OGLPipeline.h"
@@ -17,6 +18,7 @@
 
 #include "VideoCommon/AsyncShaderCompiler.h"
 #include "VideoCommon/DriverDetails.h"
+#include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/VideoConfig.h"
 
@@ -473,7 +475,10 @@ void OGLGfx::Flush()
 
 void OGLGfx::WaitForGPUIdle()
 {
+  // glFinish() blocks until the GPU has drained by definition, so all of it counts as a wait.
+  const u64 wait_start_us = Common::Timer::NowUs();
   glFinish();
+  VideoCommon::GPUWaitStats::RecordWait(Common::Timer::NowUs() - wait_start_us);
 }
 
 void OGLGfx::CheckForSurfaceChange()

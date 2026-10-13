@@ -129,6 +129,7 @@ public:
   bool Map() override;
   void Unmap() override;
   void Flush() override;
+  bool TryFlush() override;
 
   static std::unique_ptr<DXStagingTexture> Create(StagingTextureType type,
                                                   const TextureConfig& config);

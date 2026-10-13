@@ -394,6 +394,7 @@ struct VideoConfig final
   bool vr_dont_clear_screen = false;
   bool vr_load_custom_shaders = false;
   bool vr_head_cpu_cull = true;
+  bool vr_nonblocking_efb_access = true;  // EFB peeks answer from the last completed readback
   OpenXRMirrorView vr_mirror_view = OpenXRMirrorView::BothEyes;
   OpenXRReferenceSpaceMode vr_reference_space_mode = OpenXRReferenceSpaceMode::Local;
   OpenXRTrackingMode vr_tracking_mode = OpenXRTrackingMode::Full6DoF;

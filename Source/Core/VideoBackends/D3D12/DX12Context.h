@@ -119,6 +119,11 @@ public:
   // Waits for a specific fence.
   void WaitForFence(u64 fence);
 
+  // Non-blocking form of WaitForFence(): returns whether the GPU has passed `fence`, releasing the
+  // resources of every command list that completed, exactly as a wait would. Never submits or
+  // waits, so the fence must belong to an already executed command list to ever become true.
+  bool PollFence(u64 fence);
+
   // Defers destruction of a D3D resource (associates it with the current list).
   void DeferResourceDestruction(ID3D12Resource* resource);
 
@@ -185,6 +190,9 @@ private:
   bool CreateCommandLists();
   void MoveToNextCommandList();
   void DestroyPendingResources(CommandListResources& cmdlist);
+  // Destroys the pending resources of the command lists m_completed_fence_value covers, oldest
+  // first. Shared by WaitForFence() and PollFence().
+  void ReleaseCompletedCommandLists();
 
   ComPtr<IDXGIFactory> m_dxgi_factory;
   ComPtr<ID3D12Debug> m_debug_interface;

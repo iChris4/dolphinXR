@@ -229,6 +229,7 @@ void VideoConfig::Refresh()
   vr_dont_clear_screen = Config::Get(Config::GFX_VR_DONT_CLEAR_SCREEN);
   vr_load_custom_shaders = Config::Get(Config::GFX_VR_LOAD_CUSTOM_SHADERS);
   vr_head_cpu_cull = Config::Get(Config::GFX_VR_HEAD_CPU_CULL);
+  vr_nonblocking_efb_access = Config::Get(Config::GFX_VR_NONBLOCKING_EFB_ACCESS);
   vr_mirror_view = Config::Get(Config::GFX_VR_MIRROR_VIEW);
   vr_reference_space_mode = Config::Get(Config::GFX_VR_REFERENCE_SPACE_MODE);
   vr_tracking_mode = Config::Get(Config::GFX_VR_TRACKING_MODE);

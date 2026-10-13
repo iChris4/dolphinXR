@@ -53,6 +53,7 @@
 #include "VideoCommon/Fifo.h"
 #include "VideoCommon/FrameDumper.h"
 #include "VideoCommon/FramebufferManager.h"
+#include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/GeometryShaderManager.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
 #include "VideoCommon/HideObjectEngine.h"
@@ -142,7 +143,12 @@ u32 VideoBackendBase::Video_GetQueryResult(PerfQueryType type)
 
   if (!g_perf_query->IsFlushed())
   {
-    AsyncRequests::GetInstance()->PushBlockingEvent([] { g_perf_query->FlushResults(); });
+    AsyncRequests::GetInstance()->PushBlockingEvent([] {
+      // Runs on the video thread, where the backend records its wait for the query results.
+      VideoCommon::GPUWaitStats::ScopedReason wait_reason(
+          VideoCommon::GPUWaitStats::Reason::PerfQuery);
+      g_perf_query->FlushResults();
+    });
   }
 
   return g_perf_query->GetQueryResult(type);

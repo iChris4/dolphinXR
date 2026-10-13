@@ -117,3 +117,62 @@ TEST(VulkanRecordingQueue, WaitForEmptyReturnsImmediatelyWhenNothingIsQueued)
   EXPECT_EQ(queue.Front(), nullptr);
   EXPECT_EQ(queue.GetDepth(), 0u);
 }
+
+TEST(VulkanRecordingQueue, WaitForEmptyForWakesAsSoonAsTheConsumerDrains)
+{
+  Vulkan::RecordingQueue<Item, 8> queue;
+  std::atomic<bool> release{false};
+  std::thread consumer([&] {
+    while (!release.load())
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    // Long enough for the producer to finish its spin and fall asleep before the ring drains,
+    // so the wake-up has to come from the Pop that empties it.
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    while (queue.WaitForCommand())
+    {
+      while (queue.Front())
+        queue.Pop();
+    }
+  });
+
+  for (int i = 0; i < 4; ++i)
+    queue.Push(Item{i, {}});
+  const auto start = std::chrono::steady_clock::now();
+  release.store(true);
+  const bool empty = queue.WaitForEmptyFor(std::chrono::seconds(10));
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_TRUE(empty);
+  EXPECT_EQ(queue.GetDepth(), 0u);
+  // The consumer drains about 20 ms in; a lost wake-up would only return at the 10 s timeout.
+  EXPECT_LT(elapsed, std::chrono::seconds(2));
+
+  queue.Shutdown(WAKE_ITEM);
+  consumer.join();
+}
+
+TEST(VulkanRecordingQueue, WaitForEmptyForTimesOutWhileTheConsumerIsStalled)
+{
+  Vulkan::RecordingQueue<Item, 8> queue;
+  std::atomic<bool> release{false};
+  std::thread consumer([&] {
+    while (!release.load())
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    while (queue.WaitForCommand())
+    {
+      while (queue.Front())
+        queue.Pop();
+    }
+  });
+
+  queue.Push(Item{1, {}});
+  EXPECT_FALSE(queue.WaitForEmptyFor(std::chrono::milliseconds(20)));
+  EXPECT_EQ(queue.GetDepth(), 1u);
+
+  // A timed-out wait must leave the queue usable for the next one.
+  release.store(true);
+  EXPECT_TRUE(queue.WaitForEmptyFor(std::chrono::seconds(10)));
+  EXPECT_EQ(queue.GetDepth(), 0u);
+
+  queue.Shutdown(WAKE_ITEM);
+  consumer.join();
+}

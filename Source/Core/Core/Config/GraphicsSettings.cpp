@@ -231,6 +231,7 @@ const Info<float> GFX_VR_HEAD_LOCKED_CURVATURE{{System::GFX, "VR", "HeadLockedCu
 const Info<bool> GFX_VR_DONT_CLEAR_SCREEN{{System::GFX, "VR", "DontClearScreen"}, false};
 const Info<bool> GFX_VR_LOAD_CUSTOM_SHADERS{{System::GFX, "VR", "LoadCustomShaders"}, false};
 const Info<bool> GFX_VR_HEAD_CPU_CULL{{System::GFX, "VR", "HeadCPUCull"}, true};
+const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS{{System::GFX, "VR", "NonBlockingEFBAccess"}, true};
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},
                                                 OpenXRMirrorView::BothEyes};
 const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{

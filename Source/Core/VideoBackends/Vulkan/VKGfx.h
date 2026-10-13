@@ -110,6 +110,10 @@ public:
   // Transitions a render target back to shader-read layout once its pass is done. Called for
   // every bound texture on every draw, so it must stay queued rather than drain.
   void RecordFinishedRendering(const VKTexture* texture);
+  // Texture-to-staging readback copy (VKStagingTexture::CopyFromTexture). Queued in order with
+  // the draws that produced the source, so EFB peeks and EFB copies to RAM do not drain the
+  // worker; the copy lands in the current command buffer since the worker never submits.
+  void RecordStagingCopyFromTexture(const RecordCommand::StagingCopyFromTextureCmd& copy);
 
 private:
   void CheckForSurfaceChange();

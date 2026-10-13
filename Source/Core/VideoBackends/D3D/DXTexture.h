@@ -68,6 +68,7 @@ public:
   bool Map() override;
   void Unmap() override;
   void Flush() override;
+  bool TryFlush() override;
 
   static std::unique_ptr<DXStagingTexture> Create(StagingTextureType type,
                                                   const TextureConfig& config);
@@ -77,6 +78,9 @@ private:
                    ComPtr<ID3D11Texture2D> tex);
 
   ComPtr<ID3D11Texture2D> m_tex = nullptr;
+
+  // A CopyFromTexture() whose commands may still sit in the immediate context's batch, i.e. no
+  // context Flush() or blocking Map() has pushed them to the GPU since. TryFlush() kicks it once.
 };
 
 class DXFramebuffer final : public AbstractFramebuffer

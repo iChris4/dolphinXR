@@ -82,6 +82,12 @@ public:
   // Also invokes callbacks for completion.
   void WaitForFenceCounter(u64 fence_counter);
 
+  // Non-blocking form of WaitForFenceCounter: returns true if the work up to fence_counter has
+  // completed (running the same completion bookkeeping), false while it is still in flight,
+  // still queued for the submit thread, or not submitted at all. Never waits and never submits.
+  // Also returns true once the device is lost or the fence query fails, so callers do not spin.
+  bool PollFenceCounter(u64 fence_counter);
+
   // Returns false after the Vulkan device has been lost. Once that happens no more work is
   // submitted: repeatedly touching a lost NVIDIA device can turn a recoverable game stop into a
   // crash inside the driver.
@@ -122,6 +128,12 @@ private:
   bool CreateSubmitThread();
 
   void WaitForCommandBufferCompletion(u32 command_buffer_index);
+  // Bookkeeping once the fence of this buffer is known to be signaled: runs the deferred cleanup
+  // of every buffer up to it and advances the completed fence counter.
+  void OnCommandBufferCompleted(u32 command_buffer_index);
+  // Index of the oldest submitted buffer whose fence counter covers fence_counter, or the current
+  // (unsubmitted) buffer's index when none does.
+  u32 FindCommandBufferForFenceCounter(u64 fence_counter) const;
   VkResult SubmitCommandBuffer(u32 command_buffer_index, VkSwapchainKHR present_swap_chain,
                                u32 present_image_index);
   void BeginCommandBuffer();
@@ -142,6 +154,10 @@ private:
     bool init_command_buffer_used = false;
     bool semaphore_used = false;
     std::atomic<bool> waiting_for_submit{false};
+    // Set once vkQueueSubmit returned for this buffer (before the post-submit callback), from
+    // which point the fence may be queried; waiting_for_submit stays set until the callback is
+    // done as well.
+    std::atomic<bool> fence_submitted{false};
     u32 frame_index = 0;
 
     std::vector<std::function<void()>> cleanup_resources;

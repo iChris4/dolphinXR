@@ -21,6 +21,7 @@
 
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/Constants.h"
+#include "VideoCommon/GPUWaitStats.h"
 #if defined(ANDROID) && defined(ENABLE_VR)
 #include "VideoCommon/VR/OpenXRManager.h"
 #endif
@@ -334,9 +335,10 @@ bool CommandBufferManager::CreateSubmitThread()
 
     SubmitCommandBuffer(submit.command_buffer_index, submit.present_swap_chain,
                         submit.present_image_index);
+    CmdBufferResources& resources = m_command_buffers[submit.command_buffer_index];
+    resources.fence_submitted.store(true, std::memory_order_release);
     if (submit.post_submit_callback)
       submit.post_submit_callback();
-    CmdBufferResources& resources = m_command_buffers[submit.command_buffer_index];
     resources.waiting_for_submit.store(false, std::memory_order_release);
   });
 
@@ -363,12 +365,10 @@ void CommandBufferManager::WaitForWorkerThreadIdle()
   m_submit_thread.WaitForCompletion();
 }
 
-void CommandBufferManager::WaitForFenceCounter(u64 fence_counter)
+u32 CommandBufferManager::FindCommandBufferForFenceCounter(u64 fence_counter) const
 {
-  if (m_completed_fence_counter >= fence_counter)
-    return;
-
-  // Find the first command buffer which covers this counter value.
+  // Walk from the oldest buffer to the newest; the first one whose counter is at least the
+  // requested one holds that work.
   u32 index = (m_current_cmd_buffer + 1) % m_num_command_buffers;
   while (index != m_current_cmd_buffer)
   {
@@ -377,9 +377,52 @@ void CommandBufferManager::WaitForFenceCounter(u64 fence_counter)
 
     index = (index + 1) % m_num_command_buffers;
   }
+  return index;
+}
 
+void CommandBufferManager::WaitForFenceCounter(u64 fence_counter)
+{
+  if (m_completed_fence_counter >= fence_counter)
+    return;
+
+  const u32 index = FindCommandBufferForFenceCounter(fence_counter);
   ASSERT(index != m_current_cmd_buffer);
   WaitForCommandBufferCompletion(index);
+}
+
+bool CommandBufferManager::PollFenceCounter(u64 fence_counter)
+{
+  if (m_completed_fence_counter >= fence_counter)
+    return true;
+  // Nothing will ever complete after a device loss; report done so callers stop polling.
+  if (IsDeviceLost())
+    return true;
+
+  // Work still being recorded into the current buffer cannot be complete. Unlike
+  // WaitForFenceCounter's callers, a poller must not force a submit to make progress.
+  const u32 index = FindCommandBufferForFenceCounter(fence_counter);
+  if (index == m_current_cmd_buffer)
+    return false;
+
+  // The submit thread owns the fence until vkQueueSubmit has returned (the fence is externally
+  // synchronized there), and an unsubmitted fence cannot be signaled yet anyway.
+  CmdBufferResources& resources = m_command_buffers[index];
+  if (!resources.fence_submitted.load(std::memory_order_acquire))
+    return false;
+
+  const VkResult res = vkGetFenceStatus(g_vulkan_context->GetDevice(), resources.fence);
+  if (res == VK_NOT_READY)
+    return false;
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "vkGetFenceStatus failed: ");
+    if (res == VK_ERROR_DEVICE_LOST)
+      HandleDeviceLost("vkGetFenceStatus");
+    return true;
+  }
+
+  OnCommandBufferCompleted(index);
+  return true;
 }
 
 void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
@@ -390,28 +433,62 @@ void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
   const u64 perf_start_us = Common::Timer::NowUs();
   CmdBufferResources& resources = m_command_buffers[index];
 
-  // Ensure this command buffer has been submitted.
-  if (resources.waiting_for_submit.load(std::memory_order_acquire))
+  // Most completion waits find the buffer already finished (the ring is several buffers deep), so
+  // check first: only a wait that actually blocks the video thread is reported to GPUWaitStats,
+  // which is meant to count real stalls. A buffer still queued for the submit thread has to be
+  // waited for, and its fence must not be queried before vkQueueSubmit returns.
+  bool signaled = false;
+  if (resources.fence_submitted.load(std::memory_order_acquire))
   {
-    WaitForWorkerThreadIdle();
-    ASSERT_MSG(VIDEO, !resources.waiting_for_submit.load(std::memory_order_relaxed),
-               "Submit thread is idle but command buffer is still waiting for submission!");
+    const VkResult status = vkGetFenceStatus(g_vulkan_context->GetDevice(), resources.fence);
+    if (status == VK_SUCCESS)
+    {
+      signaled = true;
+    }
+    else if (status != VK_NOT_READY)
+    {
+      LOG_VULKAN_ERROR(status, "vkGetFenceStatus failed: ");
+      if (status == VK_ERROR_DEVICE_LOST)
+      {
+        HandleDeviceLost("vkGetFenceStatus");
+        return;
+      }
+    }
   }
 
-  // Wait for this command buffer to be completed.
-  VkResult res =
-      vkWaitForFences(g_vulkan_context->GetDevice(), 1, &resources.fence, VK_TRUE, UINT64_MAX);
-  if (res != VK_SUCCESS)
+  if (!signaled)
   {
-    LOG_VULKAN_ERROR(res, "vkWaitForFences failed: ");
-    if (res == VK_ERROR_DEVICE_LOST)
-      HandleDeviceLost("vkWaitForFences");
-    return;
+    // Ensure this command buffer has been submitted.
+    if (resources.waiting_for_submit.load(std::memory_order_acquire))
+    {
+      WaitForWorkerThreadIdle();
+      ASSERT_MSG(VIDEO, !resources.waiting_for_submit.load(std::memory_order_relaxed),
+                 "Submit thread is idle but command buffer is still waiting for submission!");
+    }
+
+    // Wait for this command buffer to be completed.
+    VkResult res =
+        vkWaitForFences(g_vulkan_context->GetDevice(), 1, &resources.fence, VK_TRUE, UINT64_MAX);
+    if (res != VK_SUCCESS)
+    {
+      LOG_VULKAN_ERROR(res, "vkWaitForFences failed: ");
+      if (res == VK_ERROR_DEVICE_LOST)
+        HandleDeviceLost("vkWaitForFences");
+      return;
+    }
+    VideoCommon::GPUWaitStats::RecordWait(Common::Timer::NowUs() - perf_start_us);
   }
 
+  OnCommandBufferCompleted(index);
+  g_vulkan_context->GetPerfCounters().fence_wait_us.fetch_add(
+      Common::Timer::NowUs() - perf_start_us, std::memory_order_relaxed);
+}
+
+void CommandBufferManager::OnCommandBufferCompleted(u32 index)
+{
   // Clean up any resources for command buffers between the last known completed buffer and this
   // now-completed command buffer. If we use >2 buffers, this may be more than one buffer.
-  const u64 now_completed_counter = resources.fence_counter;
+  const u64 now_completed_counter = m_command_buffers[index].fence_counter;
   u32 cleanup_index = (m_current_cmd_buffer + 1) % m_num_command_buffers;
   while (cleanup_index != m_current_cmd_buffer)
   {
@@ -430,8 +507,6 @@ void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
   }
 
   m_completed_fence_counter = now_completed_counter;
-  g_vulkan_context->GetPerfCounters().fence_wait_us.fetch_add(
-      Common::Timer::NowUs() - perf_start_us, std::memory_order_relaxed);
 }
 
 bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
@@ -498,6 +573,7 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
   // Submitting off-thread?
   if (submit_to_worker)
   {
+    resources.fence_submitted.store(false, std::memory_order_relaxed);
     resources.waiting_for_submit.store(true, std::memory_order_relaxed);
     // Push to the pending submit queue.
     m_submit_thread.Push(
@@ -506,11 +582,17 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
   }
   else
   {
+    // An earlier off-thread submit (and its post-submit callback, which on Quest can wait for the
+    // pacing thread) must finish first; that is part of what a blocking caller waits for.
+    const u64 idle_start_us = Common::Timer::NowUs();
     WaitForWorkerThreadIdle();
+    VideoCommon::GPUWaitStats::RecordWait(Common::Timer::NowUs() - idle_start_us);
 
     // Pass through to normal submission path.
+    resources.fence_submitted.store(false, std::memory_order_relaxed);
     const VkResult submit_result =
         SubmitCommandBuffer(m_current_cmd_buffer, present_swap_chain, present_image_index);
+    resources.fence_submitted.store(true, std::memory_order_release);
     if (post_submit_callback)
       post_submit_callback();
     if (submit_result != VK_SUCCESS)
@@ -580,16 +662,21 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
     m_current_frame = (m_current_frame + 1) % NUM_FRAMES_IN_FLIGHT;
 
     // Wait for all command buffers that used the descriptor pool to finish
-    u32 cmd_buffer_index = (m_current_cmd_buffer + 1) % m_num_command_buffers;
-    while (cmd_buffer_index != m_current_cmd_buffer)
     {
-      CmdBufferResources& cmd_buffer = m_command_buffers[cmd_buffer_index];
-      if (cmd_buffer.frame_index == m_current_frame && cmd_buffer.fence_counter != 0 &&
-          cmd_buffer.fence_counter > m_completed_fence_counter)
+      // These waits are for an older frame's resources, whatever triggered this submit.
+      VideoCommon::GPUWaitStats::ScopedReason wait_reason(
+          VideoCommon::GPUWaitStats::Reason::FrameRecycle);
+      u32 cmd_buffer_index = (m_current_cmd_buffer + 1) % m_num_command_buffers;
+      while (cmd_buffer_index != m_current_cmd_buffer)
       {
-        WaitForCommandBufferCompletion(cmd_buffer_index);
+        CmdBufferResources& cmd_buffer = m_command_buffers[cmd_buffer_index];
+        if (cmd_buffer.frame_index == m_current_frame && cmd_buffer.fence_counter != 0 &&
+            cmd_buffer.fence_counter > m_completed_fence_counter)
+        {
+          WaitForCommandBufferCompletion(cmd_buffer_index);
+        }
+        cmd_buffer_index = (cmd_buffer_index + 1) % m_num_command_buffers;
       }
-      cmd_buffer_index = (cmd_buffer_index + 1) % m_num_command_buffers;
     }
 
     if (IsDeviceLost())
@@ -739,9 +826,14 @@ void CommandBufferManager::BeginCommandBuffer()
   const u32 next_buffer_index = (m_current_cmd_buffer + 1) % m_num_command_buffers;
   CmdBufferResources& resources = m_command_buffers[next_buffer_index];
 
-  // Wait for the GPU to finish with all resources for this command buffer.
+  // Wait for the GPU to finish with all resources for this command buffer. This is the ring
+  // rotation stall (too few buffers for the GPU's latency), not the wait of whoever submitted.
   if (resources.fence_counter > m_completed_fence_counter)
+  {
+    VideoCommon::GPUWaitStats::ScopedReason wait_reason(
+        VideoCommon::GPUWaitStats::Reason::FrameRecycle);
     WaitForCommandBufferCompletion(next_buffer_index);
+  }
   if (IsDeviceLost())
     return;
 

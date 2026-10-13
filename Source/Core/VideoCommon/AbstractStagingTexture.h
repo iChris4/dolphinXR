@@ -67,6 +67,13 @@ public:
   // call to CopyFromTexture()/CopyToTexture() and the Flush() call.
   virtual void Flush() = 0;
 
+  // Non-blocking form of Flush() for readback textures. Returns true when the data of the last
+  // CopyFromTexture() is ready to be read: the texture is then flushed, and Map()/ReadTexels()
+  // will not wait for the GPU. Returns false, without waiting, while the copy is still in
+  // flight or has not been submitted yet (it never submits anything itself). Backends without
+  // a cheap completion query fall back to Flush() and return true.
+  virtual bool TryFlush();
+
   // Reads the specified rectangle from the staging texture to out_ptr, with the specified stride
   // (length in bytes of each row). CopyFromTexture must be called first. The contents of any
   // texels outside of the rectangle used for CopyFromTexture is undefined.

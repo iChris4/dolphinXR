@@ -17,13 +17,15 @@ class VKFramebuffer;
 class VKGfx;
 class VKPipeline;
 class VKShader;
+class VKStagingTexture;
 class VKTexture;
 
 // The recording worker owns command recording into the current draw command buffer: state
-// binding, descriptor updates, render pass management, draws, clears and compute dispatches.
-// The video thread keeps everything else: command buffer submission and advancement, fence
-// waits, stream buffer reservation, texture uploads/copies/readbacks, object creation and
-// destruction, presentation and every OpenXR call. Those paths call
+// binding, descriptor updates, render pass management, draws, clears, compute dispatches and
+// texture-to-staging readback copies (EFB peeks and EFB copies to RAM issue several per frame,
+// in between draws). The video thread keeps everything else: command buffer submission and
+// advancement, fence waits, stream buffer reservation, texture uploads and other copies, object
+// creation and destruction, presentation and every OpenXR call. Those paths call
 // DrainRecordingWorkerForDirectAccess() first, which waits for the queue to empty and hands
 // recording ownership back to the video thread until the next command is queued.
 
@@ -49,6 +51,7 @@ enum class RecordCommandType : u8
   UnbindTexture,
   FinishedRendering,
   ClearAdditionalColorAttachments,
+  StagingCopyFromTexture,
 };
 
 enum class FramebufferBindMode : u8
@@ -171,6 +174,22 @@ struct RecordCommand
     VkClearValue color;
     u32 layers;  // EFB layer count; 1 is used for multiview framebuffers
   };
+  // VKStagingTexture::CopyFromTexture. The destination rectangle has the size of the source
+  // one, so only its origin is stored. ~VKStagingTexture and ~VKTexture drain the worker, so
+  // both objects outlive the queued command.
+  struct StagingCopyFromTextureCmd
+  {
+    VKStagingTexture* staging;
+    const VKTexture* src;
+    s32 src_left;
+    s32 src_top;
+    s32 src_right;
+    s32 src_bottom;
+    s32 dst_left;
+    s32 dst_top;
+    u32 src_layer;
+    u32 src_level;
+  };
 
   RecordCommandType type = RecordCommandType::Nop;
   union
@@ -194,6 +213,7 @@ struct RecordCommand
     UnbindTextureCmd unbind_texture;
     FinishedRenderingCmd finished_rendering;
     ClearAdditionalColorAttachmentsCmd clear_additional_color_attachments;
+    StagingCopyFromTextureCmd staging_copy_from_texture;
   };
 };
 static_assert(sizeof(RecordCommand) <= 64);

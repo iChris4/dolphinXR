@@ -5,8 +5,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 #if defined(_M_X86_64) || defined(__x86_64__) || defined(_M_IX86) || defined(__i386__)
@@ -41,9 +43,15 @@ inline void SpinPause()
 // consumer peeks, pops and waits for work. Capacity must be a power of two. Indices are free
 // running u32 values, so the ring wraps correctly after 2^32 commands.
 //
-// Both waits use std::atomic::wait on the index the other side advances, so every wake-up
-// coincides with a value change. Shutdown therefore pushes a caller-supplied no-op command:
-// the consumer drains it like any other and then sees the shutdown flag on an empty ring.
+// The consumer waits with std::atomic::wait on the write index, so every wake-up coincides with
+// a value change. Shutdown therefore pushes a caller-supplied no-op command: the consumer drains
+// it like any other and then sees the shutdown flag on an empty ring.
+//
+// The producer's waits (ring empty, free slot) need a timeout, which std::atomic::wait lacks, so
+// they sleep on a condition variable for a target read index instead. Only the Pop that reaches
+// that target notifies, so a drain wakes exactly once, as soon as the ring empties, and the
+// consumer never takes the mutex for the other Pops. See SleepUntilRead for why no wake-up is
+// lost.
 //
 // Before sleeping, each side spins with a cheap pause for a while. The consumer's spin is long
 // enough to bridge the gaps between one draw's commands and the next, so during a frame it stays
@@ -77,7 +85,8 @@ public:
       while (write - m_cached_read >= Capacity)
       {
         waited = true;
-        WaitForPop();
+        // Sleep until the consumer frees the oldest slot of this lap.
+        SleepUntilRead(write - static_cast<u32>(Capacity) + 1, nullptr);
         m_cached_read = m_read.load(std::memory_order_acquire);
       }
     }
@@ -96,53 +105,23 @@ public:
   void WaitForEmpty()
   {
     const u32 write = m_write.load(std::memory_order_relaxed);
-    for (int spin = 0; spin < PRODUCER_SPIN_ITERATIONS; ++spin)
-    {
-      if (m_read.load(std::memory_order_acquire) == write)
-        return;
-      detail::SpinPause();
-    }
-    while (true)
-    {
-      m_producer_waiting.store(true, std::memory_order_seq_cst);
-      const u32 read = m_read.load(std::memory_order_seq_cst);
-      if (read == write)
-        break;
-      m_read.wait(read, std::memory_order_acquire);
-    }
-    m_producer_waiting.store(false, std::memory_order_seq_cst);
+    if (!SpinUntilRead(write))
+      SleepUntilRead(write, nullptr);
   }
 
-  // Producer: like WaitForEmpty but gives up after the timeout. Returns true when empty.
+  // Producer: like WaitForEmpty but gives up after the timeout. Returns true when empty. Wakes
+  // on the Pop that empties the ring, not on a polling interval: a drain used to oversleep by up
+  // to a 50 us poll slice each time, and the video thread drains many times per frame.
   template <typename Rep, typename Period>
   bool WaitForEmptyFor(const std::chrono::duration<Rep, Period>& timeout)
   {
     const u32 write = m_write.load(std::memory_order_relaxed);
-    for (int spin = 0; spin < PRODUCER_SPIN_ITERATIONS; ++spin)
-    {
-      if (m_read.load(std::memory_order_acquire) == write)
-        return true;
-      detail::SpinPause();
-    }
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    bool empty = false;
-    while (true)
-    {
-      m_producer_waiting.store(true, std::memory_order_seq_cst);
-      const u32 read = m_read.load(std::memory_order_seq_cst);
-      if (read == write)
-      {
-        empty = true;
-        break;
-      }
-      // std::atomic::wait has no timeout; poll the index at a coarse interval instead. This
-      // path only runs when the worker is behind, so the extra latency is not on the hot path.
-      std::this_thread::sleep_for(std::chrono::microseconds(50));
-      if (std::chrono::steady_clock::now() >= deadline)
-        break;
-    }
-    m_producer_waiting.store(false, std::memory_order_seq_cst);
-    return empty;
+    if (SpinUntilRead(write))
+      return true;
+    const std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::now() +
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(timeout);
+    return SleepUntilRead(write, &deadline);
   }
 
   // Producer: after this, WaitForCommand returns false once the ring (including the wake-up
@@ -196,8 +175,18 @@ public:
   {
     const u32 read = m_read.load(std::memory_order_relaxed) + 1;
     m_read.store(read, std::memory_order_seq_cst);
-    if (m_producer_waiting.load(std::memory_order_seq_cst))
-      m_read.notify_all();
+    // The hot path is this one flag load. Only the Pop that reaches the sleeping producer's
+    // target takes the mutex; the target is published before the flag, so the acquire half of
+    // the flag load makes it visible here. The index moves by exactly one per Pop, so an exact
+    // match fires once per wait.
+    if (m_producer_waiting.load(std::memory_order_seq_cst)) [[unlikely]]
+    {
+      if (read == m_wait_target.load(std::memory_order_relaxed))
+      {
+        std::lock_guard lock(m_wait_mutex);
+        m_wait_cv.notify_one();
+      }
+    }
   }
 
 private:
@@ -207,13 +196,51 @@ private:
   static constexpr int CONSUMER_SPIN_ITERATIONS = 16384;
   static constexpr int PRODUCER_SPIN_ITERATIONS = 4096;
 
-  void WaitForPop()
+  // True once the read index has reached target. The index only moves forward and a wait never
+  // targets more than Capacity ahead of it, so the signed distance is exact across wraparound.
+  static bool HasReached(u32 read, u32 target) { return static_cast<s32>(read - target) >= 0; }
+
+  // Producer: short pre-sleep spin. Returns true once the read index reaches target.
+  bool SpinUntilRead(u32 target) const
   {
-    const u32 read = m_read.load(std::memory_order_relaxed);
+    for (int spin = 0; spin < PRODUCER_SPIN_ITERATIONS; ++spin)
+    {
+      if (HasReached(m_read.load(std::memory_order_acquire), target))
+        return true;
+      detail::SpinPause();
+    }
+    return false;
+  }
+
+  // Producer: sleeps until the read index reaches target, or until *deadline when one is given.
+  // Returns true when the target was reached.
+  //
+  // Why no wake-up is lost: with the mutex held, the producer publishes the target, sets
+  // m_producer_waiting (seq_cst) and only then loads m_read (seq_cst) in the predicate. Pop
+  // stores m_read (seq_cst) and then loads m_producer_waiting (seq_cst). All four are seq_cst,
+  // so they fall in one total order consistent with each thread's program order: either the
+  // consumer's flag load comes after the producer's flag store, and the consumer sees the flag
+  // and the target and notifies; or it comes before it, and then the consumer's m_read store
+  // also precedes the producer's predicate load, which sees the new index and does not sleep.
+  // The notify itself is issued with the mutex held, so it cannot land between the producer's
+  // predicate check and its wait: it runs either before the producer takes the mutex (the
+  // predicate then sees the index stored before the notify) or after wait() has atomically
+  // released the mutex and is asleep. Spurious or extra wake-ups only re-run the predicate.
+  bool SleepUntilRead(u32 target, const std::chrono::steady_clock::time_point* deadline)
+  {
+    const auto reached = [this, target] {
+      return HasReached(m_read.load(std::memory_order_seq_cst), target);
+    };
+    std::unique_lock lock(m_wait_mutex);
+    m_wait_target.store(target, std::memory_order_relaxed);
     m_producer_waiting.store(true, std::memory_order_seq_cst);
-    if (m_read.load(std::memory_order_seq_cst) == read)
-      m_read.wait(read, std::memory_order_acquire);
+    bool result = true;
+    if (deadline)
+      result = m_wait_cv.wait_until(lock, *deadline, reached);
+    else
+      m_wait_cv.wait(lock, reached);
     m_producer_waiting.store(false, std::memory_order_seq_cst);
+    return result;
   }
 
   std::unique_ptr<T[]> m_slots;
@@ -223,5 +250,11 @@ private:
   alignas(64) std::atomic<bool> m_consumer_sleeping{false};
   std::atomic<bool> m_producer_waiting{false};
   std::atomic<bool> m_shutdown{false};
+  // Read index the sleeping producer waits for; written by the producer before it sets
+  // m_producer_waiting.
+  std::atomic<u32> m_wait_target{0};
+  // Only touched while the producer sleeps, and by the one Pop that wakes it.
+  alignas(64) std::mutex m_wait_mutex;
+  std::condition_variable m_wait_cv;
 };
 }  // namespace Vulkan

@@ -9,9 +9,11 @@
 #include "Common/Assert.h"
 #include "Common/CommonTypes.h"
 #include "Common/MsgHandler.h"
+#include "Common/Timer.h"
 
 #include "VideoBackends/D3D/D3DState.h"
 #include "VideoBackends/D3DCommon/D3DCommon.h"
+#include "VideoCommon/GPUWaitStats.h"
 
 namespace DX11
 {
@@ -75,8 +77,14 @@ std::vector<BBoxType> D3DBoundingBox::Read(u32 index, u32 length)
   std::vector<BBoxType> values(length);
   D3D::context->CopyResource(m_staging_buffer.Get(), m_buffer.Get());
 
+  // The map waits for the copy; D3D11 offers no cheaper completion signal to tell a stall from
+  // driver overhead, so only maps that took a while count as GPU waits.
+  const u64 map_start_us = Common::Timer::NowUs();
   D3D11_MAPPED_SUBRESOURCE map;
   HRESULT hr = D3D::context->Map(m_staging_buffer.Get(), 0, D3D11_MAP_READ, 0, &map);
+  const u64 map_us = Common::Timer::NowUs() - map_start_us;
+  if (map_us > 50)
+    VideoCommon::GPUWaitStats::RecordWait(map_us);
   if (SUCCEEDED(hr))
   {
     std::memcpy(values.data(), static_cast<const u8*>(map.pData) + sizeof(BBoxType) * index,

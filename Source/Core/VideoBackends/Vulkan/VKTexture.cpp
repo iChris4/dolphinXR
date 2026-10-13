@@ -796,6 +796,9 @@ VKStagingTexture::VKStagingTexture(PrivateTag, StagingTextureType type, const Te
 
 VKStagingTexture::~VKStagingTexture()
 {
+  // A copy queued on the recording worker still points at this object, its staging buffer and
+  // its linear image; let it record before any of them goes away.
+  DrainRecordingWorkerForDirectAccess();
   if (m_linear_image != VK_NULL_HANDLE)
   {
     g_command_buffer_mgr->DeferImageDestruction(m_linear_image, m_linear_image_alloc);
@@ -912,7 +915,6 @@ void VKStagingTexture::CopyFromTexture(const AbstractTexture* src,
                                        const MathUtil::Rectangle<int>& src_rect, u32 src_layer,
                                        u32 src_level, const MathUtil::Rectangle<int>& dst_rect)
 {
-  DrainRecordingWorkerForDirectAccess();
   const VKTexture* src_tex = static_cast<const VKTexture*>(src);
   ASSERT(m_type == StagingTextureType::Readback || m_type == StagingTextureType::Mutable);
   ASSERT(src_rect.GetWidth() == dst_rect.GetWidth() &&
@@ -922,8 +924,43 @@ void VKStagingTexture::CopyFromTexture(const AbstractTexture* src,
   ASSERT(dst_rect.left >= 0 && static_cast<u32>(dst_rect.right) <= m_config.width &&
          dst_rect.top >= 0 && static_cast<u32>(dst_rect.bottom) <= m_config.height);
 
+  // Queued behind the draws instead of draining the recording worker: games that read the EFB
+  // from the CPU issue tens of these per frame, and each drain stalled the video thread until
+  // the worker caught up. Nothing here needs the copy to be recorded yet; Flush() drains (through
+  // ExecuteCommandBuffer) before it submits and waits.
+  RecordCommand::StagingCopyFromTextureCmd copy{};
+  copy.staging = this;
+  copy.src = src_tex;
+  copy.src_left = src_rect.left;
+  copy.src_top = src_rect.top;
+  copy.src_right = src_rect.right;
+  copy.src_bottom = src_rect.bottom;
+  copy.dst_left = dst_rect.left;
+  copy.dst_top = dst_rect.top;
+  copy.src_layer = src_layer;
+  copy.src_level = src_level;
+  VKGfx::GetInstance()->RecordStagingCopyFromTexture(copy);
+
+  m_needs_flush = true;
+  // Stamped here rather than by the worker: the worker never submits, and every submit drains it
+  // first, so the queued copy is recorded into the command buffer that is current right now.
+  m_flush_fence_counter = g_command_buffer_mgr->GetCurrentFenceCounter();
+}
+
+void VKStagingTexture::CopyFromTextureDirect(const RecordCommand::StagingCopyFromTextureCmd& copy)
+{
+  const VKTexture* src_tex = copy.src;
+  const u32 src_layer = copy.src_layer;
+  const u32 src_level = copy.src_level;
+  const MathUtil::Rectangle<int> src_rect(copy.src_left, copy.src_top, copy.src_right,
+                                          copy.src_bottom);
+  const MathUtil::Rectangle<int> dst_rect(copy.dst_left, copy.dst_top,
+                                          copy.dst_left + src_rect.GetWidth(),
+                                          copy.dst_top + src_rect.GetHeight());
+
   StateTracker::GetInstance()->EndRenderPass();
 
+  // Read at recording time: commands queued ahead of this one may have changed the layout.
   VkImageLayout old_layout = src_tex->GetLayout();
   src_tex->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(),
                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -955,9 +992,6 @@ void VKStagingTexture::CopyFromTexture(const AbstractTexture* src,
 
   // Restore old source texture layout.
   src_tex->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(), old_layout);
-
-  m_needs_flush = true;
-  m_flush_fence_counter = g_command_buffer_mgr->GetCurrentFenceCounter();
 }
 
 void VKStagingTexture::CopyFromTextureToLinearImage(const VKTexture* src_tex,
@@ -1072,12 +1106,15 @@ void VKStagingTexture::Flush()
   // Is this copy in the current command buffer?
   if (g_command_buffer_mgr->GetCurrentFenceCounter() == m_flush_fence_counter)
   {
-    // Execute the command buffer and wait for it to finish.
+    // Execute the command buffer and wait for it to finish. ExecuteCommandBuffer drains the
+    // recording worker before it submits, so a CopyFromTexture still queued there is recorded
+    // into this buffer first.
     VKGfx::GetInstance()->ExecuteCommandBuffer(false, true);
   }
   else
   {
-    // Wait for the GPU to finish with it.
+    // Wait for the GPU to finish with it. The buffer holding the copy has been submitted, and
+    // every submit path drains the worker first, so the copy was recorded into it.
     g_command_buffer_mgr->WaitForFenceCounter(m_flush_fence_counter);
   }
 
@@ -1086,6 +1123,27 @@ void VKStagingTexture::Flush()
     m_staging_buffer->InvalidateCPUCache();
 
   m_needs_flush = false;
+}
+
+bool VKStagingTexture::TryFlush()
+{
+  if (!m_needs_flush)
+    return true;
+
+  // Still in the command buffer being recorded: not submitted, so not ready. Do not submit here;
+  // the caller decides whether a stale result is acceptable or it has to Flush().
+  if (g_command_buffer_mgr->GetCurrentFenceCounter() == m_flush_fence_counter)
+    return false;
+
+  if (!g_command_buffer_mgr->PollFenceCounter(m_flush_fence_counter))
+    return false;
+
+  // Same completion work as Flush(): there is new data in the readback memory.
+  if (m_type == StagingTextureType::Readback || m_type == StagingTextureType::Mutable)
+    m_staging_buffer->InvalidateCPUCache();
+
+  m_needs_flush = false;
+  return true;
 }
 
 VKFramebuffer::VKFramebuffer(VKTexture* color_attachment, VKTexture* depth_attachment,

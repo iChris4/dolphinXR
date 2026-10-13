@@ -222,6 +222,10 @@ extern const Info<bool> GFX_VR_LOAD_CUSTOM_SHADERS;
 // In VR the game's own projection is not what the headset shows, so Dolphin's stock CPU cull
 // is never used there.
 extern const Info<bool> GFX_VR_HEAD_CPU_CULL;
+// CPU reads of the EFB (EFBAccessEnable games such as Super Mario Galaxy) in a VR session answer
+// from the last completed readback instead of waiting for the GPU when the newest one is still
+// in flight (at most about a frame old). See FramebufferManager::PeekEFBColor/Depth.
+extern const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS;
 extern const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW;
 extern const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE;
 extern const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE;

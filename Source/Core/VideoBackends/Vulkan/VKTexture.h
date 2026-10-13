@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VulkanLoader.h"
 #include "VideoCommon/AbstractFramebuffer.h"
 #include "VideoCommon/AbstractStagingTexture.h"
@@ -120,6 +121,11 @@ public:
   bool Map() override;
   void Unmap() override;
   void Flush() override;
+  bool TryFlush() override;
+
+  // Recording side of CopyFromTexture(): records the copy into the current command buffer.
+  // Runs on whichever thread owns recording (VKGfx::ExecuteRecordCommand).
+  void CopyFromTextureDirect(const RecordCommand::StagingCopyFromTextureCmd& copy);
 
   static std::unique_ptr<VKStagingTexture> Create(StagingTextureType type,
                                                   const TextureConfig& config);

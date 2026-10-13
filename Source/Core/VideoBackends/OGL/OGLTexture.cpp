@@ -7,10 +7,12 @@
 #include "Common/CommonTypes.h"
 #include "Common/GL/GLUtil.h"
 #include "Common/MsgHandler.h"
+#include "Common/Timer.h"
 
 #include "VideoBackends/OGL/OGLConfig.h"
 #include "VideoBackends/OGL/OGLGfx.h"
 
+#include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace OGL
@@ -568,13 +570,21 @@ void OGLStagingTexture::CopyFromTexture(const AbstractTexture* src,
   glPixelStorei(GL_PACK_ROW_LENGTH, 0);
   glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
-  // If we support buffer storage, create a fence for synchronization.
-  if (UsePersistentStagingBuffers())
+  // With persistent buffers the fence is what Flush() waits on before the CPU reads. Without
+  // them glMapBufferRange() synchronizes by itself, but only by blocking, so the EFB peek cache
+  // (the only Mutable staging texture) also gets a fence when VR non-blocking reads may poll it.
+  // Other readbacks keep the old no-fence path: the glFlush() that submits the fence is a submit
+  // per copy they never paid before.
+  const bool fence_for_polling = m_type == StagingTextureType::Mutable &&
+                                 g_ActiveConfig.VRSessionActive() &&
+                                 g_ActiveConfig.vr_nonblocking_efb_access;
+  if (g_ogl_config.bSupportsGLSync && (UsePersistentStagingBuffers() || fence_for_polling))
   {
     if (m_fence != nullptr)
       glDeleteSync(m_fence);
 
-    glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
+    if (UsePersistentStagingBuffers())
+      glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
     m_fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     glFlush();
   }
@@ -644,18 +654,53 @@ void OGLStagingTexture::CopyToTexture(const MathUtil::Rectangle<int>& src_rect,
 
 void OGLStagingTexture::Flush()
 {
-  // No-op when not using buffer storage, as the transfers happen on Map().
-  // m_fence will always be zero in this case.
+  // No-op without a fence: nothing was copied since the last flush, or the transfer has no fence
+  // (uploads without buffer storage, drivers without sync objects) and synchronizes in Map().
   if (m_fence == nullptr)
   {
     m_needs_flush = false;
     return;
   }
 
-  glClientWaitSync(m_fence, 0, GL_TIMEOUT_IGNORED);
+  // Poll first so that only an actual stall is reported as a GPU wait.
+  if (glClientWaitSync(m_fence, 0, 0) == GL_TIMEOUT_EXPIRED)
+  {
+    const u64 wait_start_us = Common::Timer::NowUs();
+    glClientWaitSync(m_fence, 0, GL_TIMEOUT_IGNORED);
+    VideoCommon::GPUWaitStats::RecordWait(Common::Timer::NowUs() - wait_start_us);
+  }
   glDeleteSync(m_fence);
   m_fence = nullptr;
   m_needs_flush = false;
+}
+
+bool OGLStagingTexture::TryFlush()
+{
+  if (m_fence == nullptr)
+  {
+    // Nothing to poll: either no copy is pending, or it can only be synchronized by blocking.
+    if (m_needs_flush)
+      Flush();
+    return true;
+  }
+
+  switch (glClientWaitSync(m_fence, 0, 0))
+  {
+  case GL_ALREADY_SIGNALED:
+  case GL_CONDITION_SATISFIED:
+    glDeleteSync(m_fence);
+    m_fence = nullptr;
+    m_needs_flush = false;
+    return true;
+
+  case GL_TIMEOUT_EXPIRED:
+    return false;
+
+  default:
+    // GL_WAIT_FAILED: the fence can't be polled, take the blocking path.
+    Flush();
+    return true;
+  }
 }
 
 bool OGLStagingTexture::Map()

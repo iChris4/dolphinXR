@@ -785,6 +785,26 @@ void DXStagingTexture::Flush()
     g_dx_context->WaitForFence(m_completed_fence);
 }
 
+bool DXStagingTexture::TryFlush()
+{
+  if (!m_needs_flush)
+    return true;
+
+  // The copy is still in the command list being recorded, so it cannot have completed. Submitting
+  // it is the caller's call: doing it here would turn every poll into a submit, and the submit
+  // rotates the ring, which is exactly the per-read cost this path avoids.
+  if (m_completed_fence == g_dx_context->GetCurrentFenceValue())
+    return false;
+
+  // Submitted: ask the fence without blocking. On PSVR2 a readback fence takes ~6.9ms to retire,
+  // so a wait here would cost most of a frame.
+  if (!g_dx_context->PollFence(m_completed_fence))
+    return false;
+
+  m_needs_flush = false;
+  return true;
+}
+
 std::unique_ptr<DXStagingTexture> DXStagingTexture::Create(StagingTextureType type,
                                                            const TextureConfig& config)
 {

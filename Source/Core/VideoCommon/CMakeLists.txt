@@ -76,6 +76,8 @@ add_library(videocommon
   GeometryShaderGen.h
   GeometryShaderManager.cpp
   GeometryShaderManager.h
+  GPUWaitStats.cpp
+  GPUWaitStats.h
   GraphicsModSystem/Config/GraphicsMod.cpp
   GraphicsModSystem/Config/GraphicsMod.h
   GraphicsModSystem/Config/GraphicsModAsset.cpp
