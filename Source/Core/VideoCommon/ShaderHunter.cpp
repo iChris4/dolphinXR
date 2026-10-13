@@ -17,6 +17,7 @@
 #include "Core/ConfigLoaders/GameConfigLoader.h"
 #include "VideoCommon/GeometryShaderGen.h"
 #include "VideoCommon/PixelShaderGen.h"
+#include "VideoCommon/ConstantManager.h"
 #include "VideoCommon/ShaderGenCommon.h"
 #include "VideoCommon/VertexShaderGen.h"
 #include "VideoCommon/XFMemory.h"
