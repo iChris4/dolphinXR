@@ -7,7 +7,7 @@ _Generated 2026-10-02 for the DolphinXR fork. Audience: the DolphinXR maintainer
 - **DolphinXR starting/base revision:** `openxr-work` @ `5e9a304a65` — merge-base with upstream is `b55aaa8ca7` (2026-02-21, "Merge pull request #14376 from Windsurf7/lozss-gameini")
 - **Upstream target revision:** `771fb15405` = `upstream/master` on 2026-09-30 ("Merge pull request #14870 from LillyJadeKatrin/retroachievements-allowlist-update")
 - **Number of upstream commits analyzed:** 556 non-merge commits, in 354 landing groups (344 PR merges, 7 direct commits, 3 release-branch merges)
-- **Number integrated:** 272
+- **Number integrated:** 272 in stage 1, **453 after stage 2** (see "Stage 2" below)
 - **Number skipped:** 284
 
 | Outcome | Commits |
@@ -26,6 +26,97 @@ _Generated 2026-10-02 for the DolphinXR fork. Audience: the DolphinXR maintainer
 - **Adopting it:** if `openxr-work` has not moved since `5e9a304a65`, run `git merge --ff-only upstream-integration` from the main checkout. Otherwise run `git merge upstream-integration`; conflicts are only possible in files you have changed since.
 - **Cleanup when done:** `git worktree remove C:\Users\Christophe\Documents\DXR-upstream` (it holds ~10 GB of build output). Its submodules are local `--shared` clones of the main repo's module stores, so nothing was downloaded. `Externals/OpenXR` in the worktree is checked out at the same nested commit as the main checkout (`d6fe963`). The superproject gitlink for it (`a170408`) is unchanged; that commit does not exist locally.
 - **Machine-readable data** (per-commit decisions, classifier and skeptic reasoning, simulations, logs): `C:\Users\Christophe\Documents\DXR-upstream-data\` (outside both working trees).
+
+## Stage 2 (2026-10-13): medium-risk pass
+
+At the maintainer's request the remaining commits were then integrated in upstream landing order on the same branch, taking every MEDIUM commit and every commit blocked only by MEDIUM work. The remaining HIGH groups and their dependents are deferred to a later pass. Commits were applied with the same `cherry-pick -x` driver, and every conflict was resolved by hand, keeping XR code and applying upstream's intent.
+
+| Stage-2 outcome | Commits |
+|---|---:|
+| Integrated, clean cherry-pick | 159 |
+| Integrated, manual conflict resolution | 16 |
+| Integrated, STATE_VERSION renumbering only | 6 |
+| Skipped as obsolete (release-branch duplicates, commit+revert pair, superseded R8 pin, XR-equivalent abiFilters) | 19 |
+| Deferred to the HIGH pass | 84 |
+
+**Totals after stage 2:** 453 of 556 upstream commits integrated, 19 obsolete, 84 deferred. `STATE_VERSION` is now **196**. The version string now follows upstream (**2609.0**), because all four ScmRevGen bumps were taken in order.
+
+### Manual conflict resolutions
+
+| Upstream | Group | Title | Resolution |
+|---|---|---|---|
+| `4af06fd487` | G040 | minizip-ng: Properly use libraries from Externals | kept XR MZ_FETCH_LIBS/MZ_FORCE_FETCH_LIBS CACHE FORCE guards + upstream MZ_* OFF list |
+| `57a8a78d06` | G041 | Android: Raise minSdk to 24 (Android 7.0) | Readme: kept XR formatting, applied Android 7.0 (API 24) wording |
+| `b5b5b6fb7d` | G060 | Android: Convert StartupHandler to Kotlin | took upstream Kotlin StartupHandler; re-applied XR's FirstLaunchDialogs.checkInit hook |
+| `51e488e84a` | G079 | VideoCommon: ignore zero-stride EFB/XFB copies | re-applied upstream's destStride!=0 wrap+reindent over XR's VR XFB-copy blocks; verified diff vs upstream == XR additions only |
+| `fdbc2883ef` | G122 | VideoCommon: Invert interaction between Arbitrary Mipmap Detection and | EnhancementsWidget: kept XR ConfigChanged->UpdateStereoscopyAvailability connect + upstream mipmap connect; took upstream removal of OnConfigChanged |
+| `cc01a60347` | G145 | GCAdapter: Automatically start and stop thread | MainAndroid.cpp: kept XR InputCommon includes, dropped GCAdapter.h per upstream |
+| `4e55d2518a` | G159 | Config: Add Edit button to DSU server menu | .gitignore: kept XR block + appended upstream clangd entry |
+| `a5059cbca8` | G176 | Add screen crop feature | HotkeyManager groups: upstream renamed crop line + XR VR groups; AdvancedWidget: XR cmd-buffer desc + upstream crop descs |
+| `fb4ff3e51b` | G179 | VideoCommon: Added an option to showcase internal resolution, EFB widt | OSD pane: XR shader flags/hunting at row 1, upstream internal-resolution checkbox at (2,0) |
+| `b35223e0f3` | G219 | HacksWidget: Merge GPU Texture Decoding disabled tooltip with BalloonT | HacksWidget: kept XR ImmediateXFB comment above upstream's OnBackendChanged(get_backend_name()) |
+| `1800f5cf51` | G231 | Android: Convert EGLHelper to Kotlin | kept XR BuildConfig.IS_QUEST short-circuit with upstream's renamed EGLHelper methods |
+| `aff4d18d59` | G235 | Move the code for the show internal resolution setting | kept XR shader-flags/hunting overlay settings alongside upstream's relocated ShowInternalResolution (6 files) |
+| `83dc4685aa` | G269 | waterfall loading of textures via id to prefer elfid-gameid when launc | ConfigManager: includes merged (XR quoted Core.h kept), XR ReloadGameVRConfigOverrides + upstream SetElfDolID |
+| `dbbe5c403e` | G291 | Make sure CMAKE_OSX_SYSROOT is set | kept XR relative FlagsOverride path + upstream CMAKE_OSX_SYSROOT |
+| `a5552e612c` | G295 | Replace functional cast with `static_cast` | State::Save keeps XR SaveOptions param with upstream u32 slot |
+| `94eceb35e8` | G302 | Enable fallthrough warnings for msvc++ | kept current compiler-version block (whitespace hunk belongs to deferred G276); /w15262 applied |
+
+### STATE_VERSION renumbering in stage 2
+
+| Upstream | Group | DolphinXR before → after | Upstream value |
+|---|---|---|---:|
+| `657a6f0cff` | G086 | 190 → 191 | 186 |
+| `ef997d0d82` | G105 | 191 → 192 | 187 |
+| `571d166c7c` | G123 | 192 → 193 | 189 |
+| `adcfbda2a3` | G172 | 193 → 194 | 190 |
+| `d35fe1b78b` | G193 | 194 → 195 | 191 |
+| `82a317124a` | G213 | 195 → 196 | 192 |
+
+### Deferred to the HIGH pass
+
+- G144 (1 commit) — Remove GLX support (HIGH)
+- G160 (1 commit) — Android: Remove HostThreadLock (HIGH)
+- G180 (1 commit) — Android: Convert DirectoryInitialization to Kotlin (HIGH)
+- G207 (1 commit) — Update bundled Windows Qt to 6.8.3 (HIGH)
+- G223 (46 commits) — Android netplay (HIGH)
+- G225 (1 commit) — Android: Fix release build (BLOCKED)
+- G238 (1 commit) — Android: Enable USE_UPNP in android builds (BLOCKED)
+- G242 (1 commit) — Android: Coloured netplay chat messages (BLOCKED)
+- G246 (1 commit) — Android: Update dependencies and build tools (HIGH)
+- G250 (1 commit) — Android: Netplay layout update for landscape navigation (BLOCKED)
+- G273 (11 commits) — CMake: Replace the Visual Studio project (HIGH)
+- G276 (3 commits) — CMake: Improve our version checking (MEDIUM)
+- G280 (1 commit) — Replace string concatination with `fmt::format` (BLOCKED)
+- G293 (1 commit) — windeployqt: Disable uneeded DLLs (BLOCKED)
+- G309 (1 commit) — Android: Dual core warning when hosting netplay (BLOCKED)
+- G314 (1 commit) — Require VS2026; Update Redist WinUpdater Pulls (HIGH)
+- G317 (2 commits) — Android: Add global settings search (HIGH)
+- G321 (1 commit) — Fix netplay crash on pre API 31 devices (BLOCKED)
+- G323 (3 commits) — Android: Netplay controller mapping (BLOCKED)
+- G327 (1 commit) — VideoCommon: separate out reinterpret and palette texture creation from rendering (HIGH)
+- G335 (1 commit) — Optimize vertex_shader_uid_data down to 28 bytes (HIGH)
+- G340 (1 commit) — DolphinQt: Properly define QtPaths (MEDIUM)
+- G342 (1 commit) — NetPlayIndex: Fix regression introduced in #14738 (BLOCKED)
+- G352 (1 commit) — Fix android settings crash on API level 28 and lower (BLOCKED)
+
+### Notes and corrections
+
+- **Correction to key finding 4 (G152, Metroid Prime 2):** the commit only cleans up comments and boilerplate in `G2M.ini`, `G2ME01.ini` and `G2MP01.ini`. `EFBToTextureEnable = False` was **already** present in `G2M.ini` at XR's baseline, so it changes nothing for VR. It is integrated.
+- **Custom crop (G176/G178)** applies to the desktop present paths only: `RenderXFBToScreen`, `ShowImage` and window sizing. XR's `#ifdef ENABLE_VR` presentation blocks keep their own frame-region and cinematic-bar logic, so the headset view is unaffected. The option is off by default.
+- **G079 (zero-stride EFB/XFB copies, HIGH)** and **G063 (Android version catalog + AGP 9, HIGH)** were integrated in this pass, because they came early in landing order. For G079, the diff of the resolved `BPStructs.cpp` against upstream's post-commit file consists only of XR's additions. G063 builds for Quest.
+- **XR preservation audit (whitespace-normalised)** over all 377 XR-touched files: every XR-added line is still present except intended rewrites. Those are the `STATE_VERSION` line; `State::Save(..., int slot, SaveOptions)`, now `u32 slot` with `SaveOptions` kept; the `EGLHelper` method renames inside XR's `IS_QUEST` condition; the Android 5.0→7.0 Readme line; `StartupHandler.java`, which became `StartupHandler.kt` with XR's `FirstLaunchDialogs.checkInit` hook; and the `UpdateStereoscopyAvailability()` call inside the removed `EnhancementsWidget::OnConfigChanged()`, which is still covered by XR's `Settings::ConfigChanged` connection and the `OnBackendChanged()` call.
+
+### Stage-2 build/test results (HEAD `0d3a1d8f72`, built in the clean checkpoint worktree `C:\Users\Christophe\Documents\DXR-build`)
+
+| Check | Result |
+|---|---|
+| Windows VS2022 Release, `ENABLE_VR=ON` | **success**, 362 s incremental, 0 errors |
+| Unit tests (`tests.exe`, with `Sys/` beside the exe) | **1384/1384 passed** (8 new upstream tests) |
+| Quest `assembleQuestDebug` (upstream AGP 9 / version catalog, NDK r29) | **BUILD SUCCESSFUL**, 4 m 58 s |
+| Intermediate checkpoint at G076 (`2e6a91e222`) | Windows 435 s, 0 errors; Quest BUILD SUCCESSFUL |
+
+Not runtime-tested yet. Please smoke-test in a headset on PC and Quest before merging.
 
 ## Key findings for the next integrator
 
