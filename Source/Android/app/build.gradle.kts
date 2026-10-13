@@ -8,7 +8,8 @@ plugins {
 @Suppress("UnstableApiUsage")
 android {
     compileSdk = 37
-    ndkVersion = "30.0.15729638"
+    // DolphinXR: upstream moved to NDK r30; the Quest build scripts and local.properties pin r29.
+    ndkVersion = "29.0.14206865"
 
     buildFeatures {
         compose = true
