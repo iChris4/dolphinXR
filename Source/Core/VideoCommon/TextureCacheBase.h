@@ -33,6 +33,7 @@
 
 class AbstractFramebuffer;
 class AbstractStagingTexture;
+class FramebufferManager;
 class PointerWrap;
 struct SamplerState;
 struct VideoConfig;
@@ -96,6 +97,53 @@ struct EFBCopyParams
   bool all_copy_filter_coefs_needed;
   bool copy_filter_can_overflow;
   bool apply_gamma;
+};
+
+struct FramebufferCopyRawData
+{
+  u32 dest_address;
+  u32 copy_width;
+  u32 copy_height;
+
+  u32 dest_stride;
+  EFBCopyFormat efbcopy_format;
+
+  bool is_depth_format;
+  bool is_intensity_format;
+  bool half_scale;
+  float y_scale;
+  float gamma;
+
+  MathUtil::Rectangle<int> src_rect;
+
+  bool clamp_top;
+  bool clamp_bottom;
+  CopyFilterCoefficients::Values filter_coefficients;
+
+  // DolphinXR: source region for the VRAM copy when it differs from src_rect (the VR presentation
+  // region of an XFB copy, for the cinematic-bar fix). The RAM copy always uses src_rect.
+  std::optional<MathUtil::Rectangle<int>> vr_vram_src_rect;
+};
+
+struct FramebufferCopyResolvedData
+{
+  // Source details
+  FramebufferCopyRawData source_data;
+  PixelFormat pixel_format;
+
+  // Derived details
+  bool is_xfb;
+  bool copy_to_vram;
+  bool copy_to_ram;
+  u32 memory_width;
+  u32 memory_height;
+  u32 scaled_memory_width;
+  u32 scaled_memory_height;
+  TextureFormat memory_format;
+  u32 bytes_per_row;
+  u32 num_blocks_y;
+  u32 covered_range;
+  bool linear_filter;
 };
 
 template <>
@@ -253,6 +301,31 @@ private:
 
 using RcTcacheEntry = std::shared_ptr<TCacheEntry>;
 
+struct PartialTextureUpdateContext
+{
+  RcTcacheEntry target_entry;
+  RcTcacheEntry source_entry;
+
+  bool needs_reinterpret = false;
+  RcTcacheEntry reinterpret_entry;
+
+  bool needs_palette = false;
+  TLUTFormat tlutfmt = TLUTFormat::IA8;
+  u32 texel_offset;
+  RcTcacheEntry palette_entry;
+
+  bool needs_scale = false;
+  RcTcacheEntry source_scale_entry;
+
+  // Store off the original target for reference during scale operation
+  RcTcacheEntry target_prescaled_entry;
+
+  // Rectangles, post scaling
+  MathUtil::Rectangle<int> src_rect;
+  MathUtil::Rectangle<int> dst_rect;
+  u32 layers_to_copy = 0;
+};
+
 class TextureCacheBase
 {
 public:
@@ -289,7 +362,7 @@ public:
   void Invalidate();
   void ReleaseToPool(TCacheEntry* entry);
 
-  TCacheEntry* Load(u32 stage);
+  RcTcacheEntry Load(u32 stage);
   RcTcacheEntry GetTexture(const int textureCacheSafetyColorSampleSize,
                            const TextureInfo& texture_info);
   RcTcacheEntry GetXFBTexture(u32 address, u32 width, u32 height, u32 stride,
@@ -310,13 +383,7 @@ public:
   // Fullscreen override opt-in: repair a one-layer texture which was partially updated from a
   // same-address stereo EFB copy, then rebind the promoted texture for the current draw.
   bool ApplyVRPreserveStereoEFBFix(u32 stage);
-  void CopyRenderTargetToTexture(u32 dstAddr, EFBCopyFormat dstFormat, u32 width, u32 height,
-                                 u32 dstStride, bool is_depth_copy,
-                                 const MathUtil::Rectangle<int>& srcRect, bool isIntensity,
-                                 bool scaleByHalf, float y_scale, float gamma, bool clamp_top,
-                                 bool clamp_bottom,
-                                 const CopyFilterCoefficients::Values& filter_coefficients,
-                                 const MathUtil::Rectangle<int>* vram_source_rect = nullptr);
+  void CopyRenderTargetToTexture(FramebufferCopyResolvedData& resolved_data);
 
   void ScaleTextureCacheEntryTo(RcTcacheEntry& entry, u32 new_width, u32 new_height);
 
@@ -344,11 +411,16 @@ public:
 
   // VR: true when a stereo EFB-copy source must be palette-converted per layer (Metroid visors).
   static bool ShouldUseLayeredPaletteConversion(const TCacheEntry& source, TLUTFormat tlutfmt);
+  static FramebufferCopyResolvedData
+  ResolveFramebufferCopyData(const FramebufferCopyRawData& copy_data);
+
   static void RenderPaletteEntry(u32 texel_buffer_offset, const RcTcacheEntry& entry,
                                  AbstractTexture* texture, TLUTFormat tlutfmt,
                                  bool use_layered_pipeline = false);
   static void RenderReinterpretEntry(const RcTcacheEntry& entry, AbstractTexture* texture,
                                      TextureFormat old_format, TextureFormat new_format);
+
+  void ExecutePartialTextureUpdate(const PartialTextureUpdateContext& context);
 
 protected:
   // Decodes the specified data to the GPU texture specified by entry.
@@ -361,8 +433,9 @@ protected:
                           u32 aligned_height, u32 row_stride, const u8* palette,
                           TLUTFormat palette_format);
 
-  virtual void CopyEFB(AbstractStagingTexture* dst, const EFBCopyParams& params, u32 native_width,
-                       u32 bytes_per_row, u32 num_blocks_y, u32 memory_stride,
+  virtual void CopyEFB(AbstractStagingTexture* dst, FramebufferManager* frame_buffer_manager,
+                       const EFBCopyParams& params, u32 native_width, u32 bytes_per_row,
+                       u32 num_blocks_y, u32 memory_stride,
                        const MathUtil::Rectangle<int>& src_rect, bool scale_by_half,
                        bool linear_filter, float y_scale, float gamma, bool clamp_top,
                        bool clamp_bottom, const std::array<u32, 3>& filter_coefficients);
@@ -383,7 +456,7 @@ private:
 
   static bool DidLinkedAssetsChange(const TCacheEntry& entry);
 
-  TCacheEntry* LoadImpl(u32 stage, bool force_reload);
+  RcTcacheEntry LoadImpl(u32 stage, bool force_reload);
 
   bool CreateUtilityTextures();
 
@@ -402,6 +475,10 @@ private:
   RcTcacheEntry CreateReinterpretEntry(const RcTcacheEntry& existing_entry,
                                        TextureFormat new_format);
 
+  PartialTextureUpdateContext
+  BuildPartialUpdateContext(const RcTcacheEntry& target, const RcTcacheEntry& source,
+                            const u8* palette, TLUTFormat tlutfmt, bool is_palette_texture,
+                            u32 block_width, u32 block_height, u32 block_size, u32 numBlocksX);
   RcTcacheEntry DoPartialTextureUpdates(RcTcacheEntry& entry_to_update, const u8* palette,
                                         TLUTFormat tlutfmt);
   void StitchXFBCopy(RcTcacheEntry& entry_to_update);
@@ -448,6 +525,16 @@ private:
 
   void ApplyMaterialToCacheEntry(const VideoCommon::MaterialResource& material, TCacheEntry* entry);
 
+  RcTcacheEntry SetupCopyEntry(FramebufferManager* frame_buffer_manager,
+                               const FramebufferCopyResolvedData& resolved_data);
+  void CopyRenderTargetToVRam(RcTcacheEntry& entry, FramebufferManager* frame_buffer_manager,
+                              const FramebufferCopyResolvedData& resolved_data);
+  void CopyRenderTargetToRam(RcTcacheEntry& entry, FramebufferManager* frame_buffer_manager,
+                             u8* dst, const FramebufferCopyResolvedData& resolved_data,
+                             bool defer_write);
+  void FinalizeFramebufferCopy(RcTcacheEntry& entry,
+                               const FramebufferCopyResolvedData& resolved_data);
+
   // m_textures_by_address is the authoritive version of what's actually "in" the texture cache
   // but it's possible for invalidated TCache entries to live on elsewhere
   TexAddrCache m_textures_by_address;
@@ -459,6 +546,10 @@ private:
   // m_bound_textures are actually active in the current draw
   // It's valid for textures to be in here after they've been invalidated
   std::array<RcTcacheEntry, 8> m_bound_textures{};
+
+  // Overlapping entries collected during partial texture updates.
+  // Kept as a member so the buffer capacity is preserved across calls.
+  std::vector<RcTcacheEntry> m_partial_texture_update_entries;
 
   TexPool m_texture_pool;
   u64 m_last_entry_id = 0;

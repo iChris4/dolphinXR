@@ -593,6 +593,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
             MENU_ACTION_INFINITY_BASE -> showInfinityBaseSettings()
             MENU_ACTION_RECENTER_OPENXR -> NativeLibrary.RequestOpenXRRecenter()
             MENU_ACTION_EXIT -> emulationFragment!!.stopEmulation()
+            MENU_ACTION_RESET -> emulationFragment!!.resetEmulation()
         }
     }
 
@@ -1154,6 +1155,8 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
         const val MENU_ACTION_INFINITY_BASE = 37
         const val MENU_ACTION_LATCHING_CONTROLS = 38
         const val MENU_ACTION_RECENTER_OPENXR = 39
+        // DolphinXR: upstream uses 39 for RESET, which XR already uses for RECENTER_OPENXR.
+        const val MENU_ACTION_RESET = 40
 
         init {
             buttonsActionsMap.apply {

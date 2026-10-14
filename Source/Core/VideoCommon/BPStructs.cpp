@@ -306,17 +306,31 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
 
     if (destStride != 0)
     {
+      // bpmem.zcontrol.pixel_format to PixelFormat::Z24 is when the game wants to copy from
+      // ZBuffer (Zbuffer uses 24-bit Format)
+      bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
+
+      FramebufferCopyRawData framebuffer_copy_data{
+          .dest_address = destAddr,
+          .copy_width = copy_width,
+          .dest_stride = destStride,
+          .is_depth_format = is_depth_copy,
+          .gamma = s_gammaLUT[PE_copy.gamma],
+          .src_rect = srcRect,
+          .clamp_top = bpmem.triggerEFBCopy.clamp_top,
+          .clamp_bottom = bpmem.triggerEFBCopy.clamp_bottom,
+          .filter_coefficients = bpmem.copyfilter.GetCoefficients()};
+
       // Check if we are to copy from the EFB or draw to the XFB
       if (PE_copy.copy_to_xfb == 0)
       {
-        // bpmem.zcontrol.pixel_format to PixelFormat::Z24 is when the game wants to copy from
-        // ZBuffer (Zbuffer uses 24-bit Format)
-        bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
-        g_texture_cache->CopyRenderTargetToTexture(
-            destAddr, PE_copy.tp_realFormat(), copy_width, copy_height, destStride, is_depth_copy,
-            srcRect, PE_copy.intensity_fmt && PE_copy.auto_conv, PE_copy.half_scale, 1.0f,
-            s_gammaLUT[PE_copy.gamma], bpmem.triggerEFBCopy.clamp_top,
-            bpmem.triggerEFBCopy.clamp_bottom, bpmem.copyfilter.GetCoefficients());
+        framebuffer_copy_data.efbcopy_format = PE_copy.tp_realFormat();
+        framebuffer_copy_data.is_intensity_format = PE_copy.intensity_fmt && PE_copy.auto_conv;
+        framebuffer_copy_data.half_scale = PE_copy.half_scale;
+        framebuffer_copy_data.y_scale = 1.0;
+        framebuffer_copy_data.copy_height = copy_height;
+        auto resolved_data = g_texture_cache->ResolveFramebufferCopyData(framebuffer_copy_data);
+        g_texture_cache->CopyRenderTargetToTexture(std::ref(resolved_data));
       }
       else
       {
@@ -341,12 +355,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
                       destAddr, srcRect.left, srcRect.top, srcRect.right, srcRect.bottom,
                       bpmem.copyTexSrcWH.x + 1, destStride, height, yScale);
 
-        bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
-
         // VR: the XFB copy source rect IS the displayed frame region (what the TV scans out).
         // Latch it for the cinematic-bar fix and the viewport classifier.
-        MathUtil::Rectangle<int> vr_presentation_src_rect{};
-        const MathUtil::Rectangle<int>* vram_source_rect = nullptr;
         if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
         {
           if (g_ActiveConfig.vr_remove_bars && g_ActiveConfig.vr_frame_size_from_xfb)
@@ -357,20 +367,23 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
             VR::VRFrameRegion presentation_source{};
             if (VR::ConsumeVRPresentationSourceRegion(xfb_source, &presentation_source))
             {
-              vr_presentation_src_rect = {
+              framebuffer_copy_data.vr_vram_src_rect = MathUtil::Rectangle<int>{
                   presentation_source.left, presentation_source.top,
                   presentation_source.left + presentation_source.width,
                   presentation_source.top + presentation_source.height};
-              vram_source_rect = &vr_presentation_src_rect;
             }
           }
           VR::NotifyVRXFBCopyRegion(srcRect.left, srcRect.top, srcRect.right, srcRect.bottom);
         }
 
-        g_texture_cache->CopyRenderTargetToTexture(
-            destAddr, EFBCopyFormat::XFB, copy_width, height, destStride, is_depth_copy, srcRect,
-            false, false, yScale, s_gammaLUT[PE_copy.gamma], bpmem.triggerEFBCopy.clamp_top,
-            bpmem.triggerEFBCopy.clamp_bottom, bpmem.copyfilter.GetCoefficients(), vram_source_rect);
+        framebuffer_copy_data.efbcopy_format = EFBCopyFormat::XFB;
+        framebuffer_copy_data.is_intensity_format = false;
+        framebuffer_copy_data.half_scale = false;
+        framebuffer_copy_data.y_scale = yScale;
+        framebuffer_copy_data.copy_height = height;
+        auto resolved_data = g_texture_cache->ResolveFramebufferCopyData(framebuffer_copy_data);
+
+        g_texture_cache->CopyRenderTargetToTexture(std::ref(resolved_data));
 
         auto& system = Core::System::GetInstance();
 

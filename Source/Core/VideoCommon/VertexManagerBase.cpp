@@ -30,7 +30,6 @@
 #include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/GeometryShaderManager.h"
-#include "VideoCommon/GraphicsModSystem/Runtime/CustomShaderCache.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
 #include "VideoCommon/IndexGenerator.h"
@@ -535,7 +534,6 @@ bool VertexManagerBase::Initialize()
   m_after_present_event = video_events.after_present_event.Register(
       [this](const PresentInfo& pi) { m_ticks_elapsed = pi.emulated_timestamp; });
   m_index_generator.Init();
-  m_custom_shader_cache = std::make_unique<CustomShaderCache>();
   m_cpu_cull.Init();
   return true;
 }
@@ -1125,25 +1123,12 @@ void VertexManagerBase::Flush()
 
   if (!m_cull_all)
   {
-    CustomPixelShaderContents custom_pixel_shader_contents;
-    std::optional<CustomPixelShader> custom_pixel_shader;
-    std::vector<std::string> custom_pixel_texture_names;
-    std::span<u8> custom_pixel_shader_uniforms;
     bool skip = false;
-    for (size_t i = 0; i < texture_names.size(); i++)
+    for (const std::string& texture_name : texture_names)
     {
-      GraphicsModActionData::DrawStarted draw_started{texture_units, &skip, &custom_pixel_shader,
-                                                      &custom_pixel_shader_uniforms};
-      for (const auto& action : g_graphics_mod_manager->GetDrawStartedActions(texture_names[i]))
-      {
+      GraphicsModActionData::DrawStarted draw_started{texture_units, &skip};
+      for (const auto& action : g_graphics_mod_manager->GetDrawStartedActions(texture_name))
         action->OnDrawStarted(&draw_started);
-        if (custom_pixel_shader)
-        {
-          custom_pixel_shader_contents.shaders.push_back(*custom_pixel_shader);
-          custom_pixel_texture_names.push_back(texture_names[i]);
-        }
-        custom_pixel_shader = std::nullopt;
-      }
     }
 
     // Now the vertices can be flushed to the GPU. Everything following the CommitBuffer() call
@@ -1932,28 +1917,11 @@ void VertexManagerBase::Flush()
           }
           m_force_pink_ps = shader_hunter_force_pink;
 
-          const AbstractPipeline* pipeline_object = m_current_pipeline_object;
-          if (!custom_pixel_shader_contents.shaders.empty())
-          {
-            const AbstractPipeline* custom_pipeline = nullptr;
-            if (const auto async_pipeline =
-                    GetCustomPipeline(custom_pixel_shader_contents, m_current_pipeline_config,
-                                      m_current_uber_pipeline_config, m_current_pipeline_object))
-            {
-              custom_pipeline = async_pipeline;
-            }
-
-            if (custom_pipeline)
-            {
-              pipeline_object = custom_pipeline;
-            }
-          }
           const bool pane_raster_overridden =
               manual_screen_pane &&
               BPFunctions::SetVRPaneScreenViewport(g_framebuffer_manager.get());
-          RenderDrawCall(pixel_shader_manager, geometry_shader_manager,
-                         custom_pixel_shader_contents, custom_pixel_shader_uniforms,
-                         m_current_primitive_type, pipeline_object);
+          RenderDrawCall(pixel_shader_manager, geometry_shader_manager, m_current_primitive_type,
+                         m_current_pipeline_object);
           // A cone-only batch must have been rendered from the head (immersive route); anything
           // else means the cone may have removed visible geometry.
           if (vr_cone_only)
@@ -2399,27 +2367,14 @@ void VertexManagerBase::OnEndFrame()
   InvalidatePipelineObject();
 }
 
-void VertexManagerBase::NotifyCustomShaderCacheOfHostChange(const ShaderHostConfig& host_config)
-{
-  m_custom_shader_cache->SetHostConfig(host_config);
-  m_custom_shader_cache->Reload();
-}
-
-void VertexManagerBase::RenderDrawCall(
-    PixelShaderManager& pixel_shader_manager, GeometryShaderManager& geometry_shader_manager,
-    const CustomPixelShaderContents& custom_pixel_shader_contents,
-    std::span<u8> custom_pixel_shader_uniforms, PrimitiveType primitive_type,
-    const AbstractPipeline* current_pipeline)
+void VertexManagerBase::RenderDrawCall(PixelShaderManager& pixel_shader_manager,
+                                       GeometryShaderManager& geometry_shader_manager,
+                                       PrimitiveType primitive_type,
+                                       const AbstractPipeline* current_pipeline)
 {
   // Now we can upload uniforms, as nothing else will override them.
   geometry_shader_manager.SetConstants(primitive_type);
   pixel_shader_manager.SetConstants();
-  if (!custom_pixel_shader_uniforms.empty() &&
-      pixel_shader_manager.custom_constants.data() != custom_pixel_shader_uniforms.data())
-  {
-    pixel_shader_manager.custom_constants_dirty = true;
-  }
-  pixel_shader_manager.custom_constants = custom_pixel_shader_uniforms;
   UploadUniforms();
 
   u32 base_vertex, base_index;
@@ -2436,15 +2391,10 @@ void VertexManagerBase::RenderDrawCall(
     base_vertex <<= 2;
   }
 
-  VRPassthroughCoverageShaderMode coverage_mode =
+  const VRPassthroughCoverageShaderMode coverage_mode =
       m_current_pipeline_is_uber ?
           m_current_uber_pipeline_config.ps_uid.GetUidData()->vr_coverage_mode :
           m_current_pipeline_config.ps_uid.GetUidData()->vr_coverage_mode;
-  if (!custom_pixel_shader_contents.shaders.empty() &&
-      g_framebuffer_manager->HasEFBCoverage())
-  {
-    coverage_mode = VRPassthroughCoverageShaderMode::Prepass;
-  }
 
   if (coverage_mode == VRPassthroughCoverageShaderMode::Prepass)
   {
@@ -2484,105 +2434,4 @@ void VertexManagerBase::RenderDrawCall(
 
   if (PerfQueryBase::ShouldEmulate())
     g_perf_query->DisableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
-}
-
-const AbstractPipeline* VertexManagerBase::GetCustomPipeline(
-    const CustomPixelShaderContents& custom_pixel_shader_contents,
-    const VideoCommon::GXPipelineUid& current_pipeline_config,
-    const VideoCommon::GXUberPipelineUid& current_uber_pipeline_config,
-    const AbstractPipeline* current_pipeline) const
-{
-  if (current_pipeline)
-  {
-    if (!custom_pixel_shader_contents.shaders.empty())
-    {
-      VideoCommon::GXPipelineUid custom_pipeline_config = current_pipeline_config;
-      VideoCommon::GXUberPipelineUid custom_uber_pipeline_config =
-          current_uber_pipeline_config;
-      AbstractPipelineConfig custom_base_config = current_pipeline->m_config;
-      if (g_framebuffer_manager->HasEFBCoverage())
-      {
-        custom_pipeline_config.ps_uid.GetUidData()->vr_coverage_mode =
-            VRPassthroughCoverageShaderMode::Prepass;
-        custom_uber_pipeline_config.ps_uid.GetUidData()->vr_coverage_mode =
-            VRPassthroughCoverageShaderMode::Prepass;
-        // Match the shared with-coverage render pass (attachment 1 write-masked; the
-        // coverage itself comes from the separate prepass) so custom-shader draws don't
-        // force a render pass restart either.
-        custom_base_config.framebuffer_state = g_framebuffer_manager->GetEFBFramebufferState(true);
-        custom_base_config.additional_blending_state = RenderState::GetNoColorWriteBlendState();
-        custom_base_config.use_independent_blending = true;
-      }
-
-      CustomShaderInstance custom_shaders;
-      custom_shaders.pixel_contents = custom_pixel_shader_contents;
-      switch (g_ActiveConfig.iShaderCompilationMode)
-      {
-      case ShaderCompilationMode::Synchronous:
-      case ShaderCompilationMode::AsynchronousSkipRendering:
-      {
-        if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                custom_pipeline_config, custom_shaders, custom_base_config))
-        {
-          return *pipeline;
-        }
-      }
-      break;
-      case ShaderCompilationMode::SynchronousUberShaders:
-      {
-        // Custom pixel shader injection is only supported by specialized pixel shader generation.
-        // Avoid custom ubershader fallback in this mode so behavior is consistent across backends.
-        if (!custom_pixel_shader_contents.shaders.empty())
-        {
-          if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                  custom_pipeline_config, custom_shaders, custom_base_config))
-          {
-            return *pipeline;
-          }
-        }
-        else
-        {
-          // D3D has issues compiling large custom ubershaders, use specialized shaders instead.
-          if (g_backend_info.api_type == APIType::D3D)
-          {
-            if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                    custom_pipeline_config, custom_shaders, custom_base_config))
-            {
-              return *pipeline;
-            }
-          }
-          else
-          {
-            if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                    custom_uber_pipeline_config, custom_shaders, custom_base_config))
-            {
-              return *pipeline;
-            }
-          }
-        }
-      }
-      break;
-      case ShaderCompilationMode::AsynchronousUberShaders:
-      {
-        if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                custom_pipeline_config, custom_shaders, custom_base_config))
-        {
-          return *pipeline;
-        }
-        // Custom pixel shader injection is only supported by specialized shaders.
-        else if (custom_pixel_shader_contents.shaders.empty())
-        {
-          if (auto uber_pipeline = m_custom_shader_cache->GetPipelineAsync(
-                  custom_uber_pipeline_config, custom_shaders, custom_base_config))
-          {
-            return *uber_pipeline;
-          }
-        }
-      }
-      break;
-      };
-    }
-  }
-
-  return nullptr;
 }

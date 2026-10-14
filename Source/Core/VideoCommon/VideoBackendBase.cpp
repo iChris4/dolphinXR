@@ -218,18 +218,18 @@ const std::vector<std::unique_ptr<VideoBackendBase>>& VideoBackendBase::GetAvail
     backends.push_back(std::make_unique<DX11::VideoBackend>());
     backends.push_back(std::make_unique<DX12::VideoBackend>());
 #endif
-#ifdef HAS_OPENGL
-    backends.push_back(std::make_unique<OGL::VideoBackend>());
-#endif
 #ifdef HAS_VULKAN
-#if defined(__APPLE__) || (defined(__ANDROID__) && defined(ENABLE_VR))
-    // Emplace the Vulkan backend at the beginning so it takes precedence over OpenGL.
-    // On macOS, we prefer Vulkan over OpenGL due to OpenGL support being deprecated by Apple.
-    // On Android VR builds, Vulkan is the preferred default for the direct OpenXR swapchain
-    // path (GLES also supports it now, and remains selectable explicitly).
-    backends.emplace(backends.begin(), std::make_unique<Vulkan::VideoBackend>());
-#else
     backends.push_back(std::make_unique<Vulkan::VideoBackend>());
+#endif
+#ifdef HAS_OPENGL
+#if defined(ANDROID) && !defined(ENABLE_VR)
+    // Emplace the OpenGL backend at the beginning so it takes precedence over Vulkan.
+    // On Android, we prefer OpenGL over Vulkan due to OpenGL supporting more features.
+    backends.emplace(backends.begin(), std::make_unique<OGL::VideoBackend>());
+#else
+    // DolphinXR: Android VR builds keep Vulkan as the default for the direct OpenXR swapchain
+    // path (GLES also supports it, and remains selectable explicitly).
+    backends.push_back(std::make_unique<OGL::VideoBackend>());
 #endif
 #endif
 #ifdef __APPLE__

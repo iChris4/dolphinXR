@@ -44,6 +44,7 @@
 #include "Core/DolphinAnalytics.h"
 #include "Core/HW/DVD/DVDInterface.h"
 #include "Core/HW/GCPad.h"
+#include "Core/HW/ProcessorInterface.h"
 #include "Core/HW/Wiimote.h"
 #include "Core/HW/WiimoteReal/WiimoteReal.h"
 #include "Core/HotkeyManager.h"
@@ -276,6 +277,11 @@ JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_PauseEmulati
 {
   Core::SetState(Core::System::GetInstance(), Core::State::Paused, true,
                  override_achievement_restrictions);
+}
+
+JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_ResetEmulation(JNIEnv*, jclass)
+{
+  Core::System::GetInstance().GetProcessorInterface().ResetButton_Tap();
 }
 
 JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_StopEmulation(JNIEnv*, jclass)

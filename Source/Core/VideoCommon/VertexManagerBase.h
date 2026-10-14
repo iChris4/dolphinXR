@@ -19,8 +19,6 @@
 #include "VideoCommon/VideoEvents.h"
 
 class AbstractShader;
-struct CustomPixelShaderContents;
-class CustomShaderCache;
 class DataReader;
 class GeometryShaderManager;
 enum class MetroidElementProfile;
@@ -155,7 +153,6 @@ public:
     m_current_pipeline_object = nullptr;
     m_pipeline_config_changed = true;
   }
-  void NotifyCustomShaderCacheOfHostChange(const ShaderHostConfig& host_config);
 
   // Utility pipeline drawing (e.g. EFB copies, post-processing, UI).
   virtual void UploadUtilityUniforms(const void* uniforms, u32 uniforms_size);
@@ -256,9 +253,7 @@ private:
   static constexpr u32 MINIMUM_DRAW_CALLS_PER_COMMAND_BUFFER_FOR_READBACK = 10;
 
   void RenderDrawCall(PixelShaderManager& pixel_shader_manager,
-                      GeometryShaderManager& geometry_shader_manager,
-                      const CustomPixelShaderContents& custom_pixel_shader_contents,
-                      std::span<u8> custom_pixel_shader_uniforms, PrimitiveType primitive_type,
+                      GeometryShaderManager& geometry_shader_manager, PrimitiveType primitive_type,
                       const AbstractPipeline* current_pipeline);
   void UpdatePipelineConfig();
   void UpdatePipelineObject();
@@ -267,12 +262,6 @@ private:
   // VertexManager's lifetime (a new game re-initializes the video backend), so this avoids a
   // per-draw GetGameID() string allocation on the render hot path.
   MetroidElementProfile GetCachedMetroidProfile();
-
-  const AbstractPipeline*
-  GetCustomPipeline(const CustomPixelShaderContents& custom_pixel_shader_contents,
-                    const VideoCommon::GXPipelineUid& current_pipeline_config,
-                    const VideoCommon::GXUberPipelineUid& current_uber_pipeline_confi,
-                    const AbstractPipeline* current_pipeline) const;
 
   bool m_is_flushed = true;
   FlushStatistics m_flush_statistics = {};
@@ -312,7 +301,6 @@ private:
   std::vector<u32> m_scheduled_command_buffer_kicks;
   bool m_allow_background_execution = true;
 
-  std::unique_ptr<CustomShaderCache> m_custom_shader_cache;
   std::unique_ptr<AbstractShader> m_pink_pixel_shader;
   bool m_force_pink_ps = false;
   u64 m_ticks_elapsed = 0;
