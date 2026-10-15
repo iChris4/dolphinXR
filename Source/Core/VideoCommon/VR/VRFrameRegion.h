@@ -37,6 +37,8 @@ enum class VRViewportClass
   HudElement,       // small / off-center sub-viewport (e.g. MKDD character select panes)
   RenderToTexture,  // square edge-anchored render target (shadow/env maps)
   Offscreen,        // outside the displayed frame region
+  DisplacedScene,   // frame-sized viewport moved by the scissor offset (PSO pans the scene
+                    // aside under its menus): still the head-tracked main scene
 };
 
 // Called from BPStructs for every EFB->XFB copy (srcRect in native EFB coordinates,
