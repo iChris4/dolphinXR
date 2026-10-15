@@ -60,6 +60,12 @@ bool SliderInt(const char* label, const char* tooltip, const Config::Info<int>& 
                int max, const char* format, TouchedKeys* touched);
 bool Checkbox(const char* label, const char* tooltip, const Config::Info<bool>& info,
               TouchedKeys* touched);
+// Checked when the setting is off (options phrased as "Skip ...", "Disable ...").
+bool CheckboxInverted(const char* label, const char* tooltip, const Config::Info<bool>& info,
+                      TouchedKeys* touched);
+
+// GFX_EFB_SCALE as a list of multipliers of the native resolution.
+bool InternalResolutionCombo(TouchedKeys* touched);
 
 // Text-only row.
 void ValueRow(const char* label, const std::string& value, const char* tooltip = nullptr);

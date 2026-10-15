@@ -31,23 +31,6 @@ namespace
 using MenuWidgets::Apply;
 using MenuWidgets::FloatRange;
 
-constexpr std::array<std::pair<int, const char*>, 9> INTERNAL_RESOLUTIONS{{
-    {0, "Auto (Window Size)"},
-    {1, "1x Native (640x528)"},
-    {2, "2x (1280x1056)"},
-    {3, "3x (1920x1584)"},
-    {4, "4x (2560x2112)"},
-    {5, "5x (3200x2640)"},
-    {6, "6x (3840x3168)"},
-    {7, "7x (4480x3696)"},
-    {8, "8x (5120x4224)"},
-}};
-#ifdef ANDROID
-constexpr int MAX_MENU_INTERNAL_RESOLUTION = 6;
-#else
-constexpr int MAX_MENU_INTERNAL_RESOLUTION = 8;
-#endif
-
 constexpr std::array<std::pair<OpenXRTrackingMode, const char*>, 3> TRACKING_MODES{{
     {OpenXRTrackingMode::Full6DoF, "6DoF (rotation + position)"},
     {OpenXRTrackingMode::Rotation3DoF, "3DoF (rotation only)"},
@@ -83,78 +66,15 @@ public:
         "reopened from the desktop or 2D settings.",
         Config::GFX_VR_MENU_TOGGLE_BUTTON, MENU_BUTTONS, touched);
 
-    DrawSaveForGame(context);
+    DrawSaveForGameSection(context);
   }
 
 private:
-  static void DrawSaveForGame(VRMenuContext& context)
-  {
-    if (context.game_id.empty())
-      return;
-
-    MenuWidgets::SectionHeader("This Game");
-    ImGui::TextWrapped("Changes here apply to every game. \"Save for This Game\" keeps the VR "
-                       "settings and internal resolution you changed as this game's own "
-                       "settings (GameSettingsVR/%s.ini).",
-                       context.game_id.c_str());
-    ImGui::BeginDisabled(context.touched.Empty());
-    if (ImGui::Button("Save for This Game"))
-    {
-      std::vector<Config::Location> locations(context.touched.Get().begin(),
-                                              context.touched.Get().end());
-      context.actions.Run("Saving settings for this game...",
-                          [locations = std::move(locations)](Core::System&) {
-                            const SConfig& sconfig = SConfig::GetInstance();
-                            const std::string game_id = sconfig.GetGameID();
-                            const u16 revision = sconfig.GetRevision();
-                            if (!ConfigLoaders::SaveCurrentVRSettingsForGame(
-                                    game_id,
-                                    revision == 0 ? std::nullopt : std::make_optional(revision),
-                                    locations))
-                            {
-                              return std::string("No game is running");
-                            }
-                            SaveInternalResolutionForGame(locations);
-                            return fmt::format("Saved settings for {}", game_id);
-                          });
-    }
-    ImGui::EndDisabled();
-  }
-
-  // Internal resolution is a regular game setting (GameSettings/<GameID>.ini). Host thread.
-  static void SaveInternalResolutionForGame(const std::vector<Config::Location>& locations)
-  {
-    if (std::ranges::find(locations, Config::GFX_EFB_SCALE.GetLocation()) == locations.end())
-      return;
-    const auto layer = Config::GetLayer(Config::LayerType::LocalGame);
-    if (!layer)
-      return;
-    layer->Set(Config::GFX_EFB_SCALE, Config::Get(Config::GFX_EFB_SCALE));
-    layer->Save();
-    Config::OnConfigChanged();
-  }
-
   static void DrawRendering(MenuWidgets::TouchedKeys* touched)
   {
     MenuWidgets::SectionHeader("Rendering");
 
-    // Auto follows the desktop window size, which means nothing in the headset: only offer it
-    // while it is the current value.
-    std::vector<std::pair<int, const char*>> resolutions;
-    const int efb_scale = Config::Get(Config::GFX_EFB_SCALE);
-    for (const auto& item : INTERNAL_RESOLUTIONS)
-    {
-      if ((item.first == 0 && efb_scale != 0) ||
-          (item.first > MAX_MENU_INTERNAL_RESOLUTION && item.first != efb_scale))
-      {
-        continue;
-      }
-      resolutions.push_back(item);
-    }
-    MenuWidgets::Combo<int>("Internal Resolution",
-                            "Resolution the game is rendered at. Higher is sharper and costs "
-                            "more GPU time.",
-                            Config::GFX_EFB_SCALE, resolutions, touched);
+    MenuWidgets::InternalResolutionCombo(touched);
 
     MenuWidgets::SliderFloat(
         "Eye Resolution",
@@ -314,7 +234,61 @@ private:
     }
   }
 };
+
+// Graphics settings are regular game settings (GameSettings/<GameID>.ini). Host thread.
+void SaveGraphicsSettingsForGame(const std::vector<Config::Location>& locations)
+{
+  const auto layer = Config::GetLayer(Config::LayerType::LocalGame);
+  if (!layer)
+    return;
+  bool changed = false;
+  for (const Config::Location& location : locations)
+  {
+    if (location.system != Config::System::GFX || location.section == "VR")
+      continue;
+    if (std::optional<std::string> value = Config::GetAsString(location))
+      changed |= layer->Set(location, std::move(*value));
+  }
+  if (!changed)
+    return;
+  layer->Save();
+  Config::OnConfigChanged();
+}
 }  // namespace
+
+void DrawSaveForGameSection(VRMenuContext& context)
+{
+  if (context.game_id.empty())
+    return;
+
+  MenuWidgets::SectionHeader("This Game");
+  ImGui::TextWrapped("Changes here apply to every game. \"Save for This Game\" keeps the VR and "
+                     "graphics settings you changed in this menu as this game's own settings "
+                     "(GameSettingsVR/%s.ini and GameSettings/%s.ini).",
+                     context.game_id.c_str(), context.game_id.c_str());
+  ImGui::BeginDisabled(context.touched.Empty());
+  if (ImGui::Button("Save for This Game"))
+  {
+    std::vector<Config::Location> locations(context.touched.Get().begin(),
+                                            context.touched.Get().end());
+    context.actions.Run("Saving settings for this game...",
+                        [locations = std::move(locations)](Core::System&) {
+                          const SConfig& sconfig = SConfig::GetInstance();
+                          const std::string game_id = sconfig.GetGameID();
+                          const u16 revision = sconfig.GetRevision();
+                          if (!ConfigLoaders::SaveCurrentVRSettingsForGame(
+                                  game_id,
+                                  revision == 0 ? std::nullopt : std::make_optional(revision),
+                                  locations))
+                          {
+                            return std::string("No game is running");
+                          }
+                          SaveGraphicsSettingsForGame(locations);
+                          return fmt::format("Saved settings for {}", game_id);
+                        });
+  }
+  ImGui::EndDisabled();
+}
 
 std::unique_ptr<VRMenuTab> CreateVRSettingsTab()
 {

@@ -43,10 +43,15 @@ public:
 
 std::unique_ptr<VRMenuTab> CreateMainTab();
 std::unique_ptr<VRMenuTab> CreateVRSettingsTab();
+std::unique_ptr<VRMenuTab> CreateGraphicsTab();
 std::unique_ptr<VRMenuTab> CreateControlsTab();
 std::unique_ptr<VRMenuTab> CreateAudioTab();
 std::unique_ptr<VRMenuTab> CreateSavestatesTab();
 std::unique_ptr<VRMenuTab> CreateStatsTab();
+
+// "Save for This Game": stores the VR and graphics settings changed in the menu as the running
+// game's own settings. Shared by the VR and Graphics tabs.
+void DrawSaveForGameSection(VRMenuContext& context);
 }  // namespace VR
 
 #endif  // ENABLE_VR
