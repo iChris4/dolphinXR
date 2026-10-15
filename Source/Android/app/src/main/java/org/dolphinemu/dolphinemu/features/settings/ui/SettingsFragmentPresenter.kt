@@ -3016,6 +3016,12 @@ class SettingsFragmentPresenter(
             R.string.quest_nonblocking_efb_access_description
         )
         builder.boolean(
+            "ScreenRecordingCompatibility",
+            true,
+            R.string.quest_screen_recording_compatibility,
+            R.string.quest_screen_recording_compatibility_description
+        )
+        builder.boolean(
             "RemoveCinematicBars",
             true,
             R.string.quest_remove_cinematic_bars,
@@ -3465,6 +3471,14 @@ class SettingsFragmentPresenter(
                 QuestVrSettings.nonBlockingEfbAccessSetting(),
                 R.string.quest_nonblocking_efb_access,
                 R.string.quest_nonblocking_efb_access_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.screenRecordingCompatibilitySetting(),
+                R.string.quest_screen_recording_compatibility,
+                R.string.quest_screen_recording_compatibility_description
             )
         )
         sl.add(

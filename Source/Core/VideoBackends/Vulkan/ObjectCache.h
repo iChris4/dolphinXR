@@ -63,7 +63,8 @@ public:
                              VkAttachmentLoadOp load_op, u8 additional_attachment_count = 0,
                              bool multiview = false,
                              VkFormat additional_color_format = VK_FORMAT_UNDEFINED,
-                             bool fragment_density_map = false);
+                             bool fragment_density_map = false,
+                             bool discard_additional_attachments = false);
 
   // VR foveation: view of Dolphin's own fragment density map for the EFB render pass
   // (as opposed to the runtime-owned maps attached to the OpenXR swapchains). Lazily
@@ -112,8 +113,8 @@ private:
   std::unique_ptr<VKTexture> m_dummy_texture;
 
   // Render pass cache
-  using RenderPassCacheKey =
-      std::tuple<VkFormat, VkFormat, u32, VkAttachmentLoadOp, std::size_t, bool, VkFormat, bool>;
+  using RenderPassCacheKey = std::tuple<VkFormat, VkFormat, u32, VkAttachmentLoadOp, std::size_t,
+                                        bool, VkFormat, bool, bool>;
   std::map<RenderPassCacheKey, VkRenderPass> m_render_pass_cache;
 
   // pipeline cache

@@ -64,7 +64,14 @@ public:
   AbstractTexture* GetEFBDepthTexture() const { return m_efb_depth_texture.get(); }
   AbstractTexture* GetEFBCoverageTexture() const { return m_efb_coverage_texture.get(); }
   AbstractFramebuffer* GetEFBFramebuffer() const { return m_efb_framebuffer.get(); }
+  // The coverage attachment exists: EFB draws target the with-coverage framebuffers.
   bool HasEFBCoverage() const { return m_efb_coverage_texture != nullptr; }
+  // ...and holds real coverage, which clears, pokes and savestates must maintain. A discarded
+  // attachment only shapes the render pass (see VRDiscardsCoverageAttachment).
+  bool HasEFBCoverageContents() const
+  {
+    return HasEFBCoverage() && !m_efb_coverage_texture->GetConfig().IsDiscardedAttachment();
+  }
   u32 GetEFBWidth() const { return m_efb_color_texture->GetWidth(); }
   u32 GetEFBHeight() const { return m_efb_color_texture->GetHeight(); }
   u32 GetEFBLayers() const { return m_efb_color_texture->GetLayers(); }

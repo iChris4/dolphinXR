@@ -1559,6 +1559,14 @@ void VulkanContext::InitDriverDetails()
   DriverDetails::Init(DriverDetails::API_VULKAN, vendor, driver,
                       static_cast<double>(m_device_info.driverVersion),
                       DriverDetails::Family::UNKNOWN, std::move(device_name));
+
+  // The D24S8 EFB depth that BUG_BROKEN_D32F_CLEAR selects dates from Adreno 5xx/6xx drivers;
+  // recent ones clear D32F fine (native Quest 3 titles rely on it). Opt-in until verified.
+  if (vendor == DriverDetails::VENDOR_QUALCOMM &&
+      Config::Get(Config::GFX_VULKAN_ADRENO_D32F_DEPTH))
+  {
+    DriverDetails::OverrideBug(DriverDetails::BUG_BROKEN_D32F_CLEAR, false);
+  }
 }
 
 bool VulkanContext::SupportsExclusiveFullscreen(const WindowSystemInfo& wsi, VkSurfaceKHR surface)

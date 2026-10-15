@@ -72,6 +72,18 @@ enum class VRMenuToggleButton : int
   LeftMenu = 3,
 };
 
+// Independent parts of passthrough for investigating Quest screen-recorder GPU faults.
+// Opt-in diagnostics, not automatic recorder detection. Restart emulation between tests.
+enum class VRScreenRecordingDiagnostic : int
+{
+  Disabled = 0,
+  AlphaBlend = 1,        // Normal scene rendering, alpha-blended projection; no camera feed.
+  PassthroughLayer = 2,  // Normal opaque projection over a running camera layer.
+  Coverage = 3,         // Passthrough rendering/coverage, opaque projection; no camera feed.
+  AttachmentOnly = 4,   // Extra EFB attachment, without coverage shader output or XFB sampling.
+  DiscardedAttachment = 5,  // Extra EFB attachment never loaded, stored or cleared.
+};
+
 enum class VRPassthroughCoverageMode : int
 {
   Exact = 0,
@@ -404,6 +416,7 @@ struct VideoConfig final
   bool vr_load_custom_shaders = false;
   bool vr_head_cpu_cull = true;
   bool vr_nonblocking_efb_access = true;  // EFB peeks answer from the last completed readback
+  bool vr_screen_recording_compatibility = false;  // Discarded extra EFB attachment (Quest)
   OpenXRMirrorView vr_mirror_view = OpenXRMirrorView::BothEyes;
   OpenXRReferenceSpaceMode vr_reference_space_mode = OpenXRReferenceSpaceMode::Local;
   OpenXRTrackingMode vr_tracking_mode = OpenXRTrackingMode::Full6DoF;
@@ -420,6 +433,8 @@ struct VideoConfig final
   bool vr_metroid_thermal_visor_fix = false;  // Preserve thermal EFB copy layers for MP1 Vulkan
   bool vr_metroid_d3d_thermal_palette_fix = false;  // Layered MP1 thermal palette conversion on D3D11
   bool vr_passthrough = false;  // Show the headset camera feed behind unrendered (transparent) areas
+  VRScreenRecordingDiagnostic vr_screen_recording_diagnostic =
+      VRScreenRecordingDiagnostic::Disabled;
   // Reveal EFB regions untouched by game color draws or clears. Off initializes coverage
   // opaque so only elements marked with Passthrough overrides make holes.
   bool vr_passthrough_remove_black_bg = true;
@@ -511,9 +526,39 @@ struct VideoConfig final
   // while rendering through OpenXR.
   bool VRPassthroughEnabled() const
   {
-    return vr_passthrough && stereo_mode == StereoMode::OpenXR &&
+    return VRNeedsCoverageAttachment() &&
+           (vr_passthrough ||
+            GetVRScreenRecordingDiagnostic() == VRScreenRecordingDiagnostic::Coverage);
+  }
+  bool VRNeedsCoverageAttachment() const
+  {
+    const auto diagnostic = GetVRScreenRecordingDiagnostic();
+    return (vr_passthrough || VRRecordingCompatibilityRequested() ||
+            diagnostic == VRScreenRecordingDiagnostic::Coverage ||
+            diagnostic == VRScreenRecordingDiagnostic::AttachmentOnly ||
+            diagnostic == VRScreenRecordingDiagnostic::DiscardedAttachment) &&
+           stereo_mode == StereoMode::OpenXR &&
            g_backend_info.bSupportsVRPassthroughCoverage &&
            (g_backend_info.vr_passthrough_coverage_sample_counts & iMultisamples) != 0;
+  }
+  // The attachment only shapes the EFB render pass: nothing writes, clears or reads it.
+  bool VRDiscardsCoverageAttachment() const
+  {
+    return VRNeedsCoverageAttachment() && !VRPassthroughEnabled() &&
+           (VRRecordingCompatibilityRequested() ||
+            GetVRScreenRecordingDiagnostic() == VRScreenRecordingDiagnostic::DiscardedAttachment);
+  }
+  // Screen Recording Compatibility; a recording diagnostic mode overrides it.
+  bool VRRecordingCompatibilityRequested() const
+  {
+    return vr_screen_recording_compatibility &&
+           GetVRScreenRecordingDiagnostic() == VRScreenRecordingDiagnostic::Disabled;
+  }
+  VRScreenRecordingDiagnostic GetVRScreenRecordingDiagnostic() const
+  {
+    return stereo_mode == StereoMode::OpenXR && g_backend_info.api_type == APIType::Vulkan ?
+               vr_screen_recording_diagnostic :
+               VRScreenRecordingDiagnostic::Disabled;
   }
   bool ExclusiveFullscreenEnabled() const
   {

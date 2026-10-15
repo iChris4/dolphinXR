@@ -332,11 +332,18 @@ bool FramebufferManager::CreateEFBFramebuffer(int efb_scale)
                g_ActiveConfig.stereo_mode == StereoMode::OpenXR,
                g_backend_info.bSupportsVRPassthroughCoverage,
                g_backend_info.vr_passthrough_coverage_sample_counts, g_ActiveConfig.iMultisamples);
-  if (g_ActiveConfig.VRPassthroughEnabled())
+  INFO_LOG_FMT(VIDEO, "EFB depth format: {}",
+               GetEFBDepthFormat() == AbstractTextureFormat::D32F ? "D32F" : "D24S8");
+  if (g_ActiveConfig.VRNeedsCoverageAttachment())
   {
+    const bool discarded = g_ActiveConfig.VRDiscardsCoverageAttachment();
+    INFO_LOG_FMT(VIDEO, "VR EFB coverage attachment: shader coverage={} discarded={}",
+                 g_ActiveConfig.VRPassthroughEnabled(), discarded);
     const TextureConfig coverage_config(
         width, height, 1, efb_color_texture_config.layers, efb_color_texture_config.samples,
-        AbstractTextureFormat::R8, AbstractTextureFlag_RenderTarget,
+        AbstractTextureFormat::R8,
+        AbstractTextureFlag_RenderTarget |
+            (discarded ? AbstractTextureFlag_DiscardedAttachment : 0u),
         AbstractTextureType::Texture_2DArray);
     m_efb_coverage_texture =
         g_gfx->CreateTexture(coverage_config, "EFB passthrough coverage texture");
@@ -371,7 +378,7 @@ bool FramebufferManager::CreateEFBFramebuffer(int efb_scale)
     if (!m_efb_resolve_color_texture)
       return false;
 
-    if (HasEFBCoverage())
+    if (HasEFBCoverageContents())
     {
       m_efb_resolve_coverage_texture = g_gfx->CreateTexture(
           TextureConfig(efb_color_texture_config.width, efb_color_texture_config.height, 1,
@@ -411,7 +418,7 @@ bool FramebufferManager::CreateEFBFramebuffer(int efb_scale)
   // Clear the renderable textures out.
   g_gfx->SetAndClearFramebuffer(m_efb_framebuffer.get(), {{0.0f, 0.0f, 0.0f, 0.0f}},
                                 g_backend_info.bSupportsReversedDepthRange ? 1.0f : 0.0f);
-  if (HasEFBCoverage())
+  if (HasEFBCoverageContents())
   {
     const u32 coverage_color =
         g_ActiveConfig.vr_passthrough_remove_black_bg ? 0x00000000u : 0x00FF0000u;
@@ -467,16 +474,26 @@ void FramebufferManager::ClearEFBForOpenXR()
   // (D3D11/D3D12, and GL in VR) store it as 0.0. Hardcoding 0.0 filled the Vulkan depth
   // buffer with *near*, so every depth-tested draw of the frame failed the test and only
   // depth-test-disabled 2D/HUD content survived.
-  g_gfx->SetAndClearFramebuffer(m_efb_framebuffer.get(), {0.f, 0.f, 0.f, 0.f},
-                                g_backend_info.bSupportsReversedDepthRange ? 1.0f : 0.0f);
-  if (HasEFBCoverage())
+  const float far_depth = g_backend_info.bSupportsReversedDepthRange ? 1.0f : 0.0f;
+  if (!HasEFBCoverage())
   {
-    const u32 coverage_color =
-        g_ActiveConfig.vr_passthrough_remove_black_bg ? 0x00000000u : 0x00FF0000u;
-    BindEFBCoverageFramebuffer();
-    g_gfx->ClearRegion(m_efb_coverage_framebuffer->GetRect(), true, true, false, coverage_color, 0);
+    g_gfx->SetAndClearFramebuffer(m_efb_framebuffer.get(), {0.f, 0.f, 0.f, 0.f}, far_depth);
+    return;
   }
-  BindEFBFramebuffer();
+
+  // Clear through the with-coverage framebuffer the frame's GX draws use, so they continue
+  // this render pass. A separate coverage pass and a switch back would make a tiler store and
+  // reload the whole EFB every frame. The clear color also sets coverage to 0 (unrendered).
+  g_gfx->SetAndClearFramebuffer(m_efb_framebuffer_with_coverage.get(), {0.f, 0.f, 0.f, 0.f},
+                                far_depth);
+  if (HasEFBCoverageContents() && !g_ActiveConfig.vr_passthrough_remove_black_bg &&
+      !g_gfx->ClearAdditionalColorAttachments(m_efb_framebuffer_with_coverage->GetRect(),
+                                              0x00FF0000u))
+  {
+    BindEFBCoverageFramebuffer();
+    g_gfx->ClearRegion(m_efb_coverage_framebuffer->GetRect(), true, true, false, 0x00FF0000u, 0);
+    BindEFBFramebufferWithCoverage();
+  }
 }
 
 AbstractTexture* FramebufferManager::ResolveEFBColorTexture(const MathUtil::Rectangle<int>& region)
@@ -518,7 +535,7 @@ AbstractTexture* FramebufferManager::ResolveEFBColorTexture(const MathUtil::Rect
 AbstractTexture*
 FramebufferManager::ResolveEFBCoverageTexture(const MathUtil::Rectangle<int>& region)
 {
-  if (!HasEFBCoverage())
+  if (!HasEFBCoverageContents())
     return nullptr;
   if (!IsEFBMultisampled())
     return m_efb_coverage_texture.get();
@@ -936,7 +953,7 @@ bool FramebufferManager::CompileReadbackPipelines()
   if (!m_efb_restore_pipeline)
     return false;
 
-  if (HasEFBCoverage())
+  if (HasEFBCoverageContents())
   {
     config.depth_state = RenderState::GetNoDepthTestingDepthState();
     config.framebuffer_state = GetEFBCoverageFramebufferState();
@@ -1392,6 +1409,7 @@ void FramebufferManager::ClearEFB(const MathUtil::Rectangle<int>& rc, bool color
   // the passthrough. The low 3 bits per channel are ignored — they are lost to
   // RGBA6/RGB565 quantization anyway.
   const bool has_coverage = HasEFBCoverage();
+  const bool update_coverage = HasEFBCoverageContents() && writes_visual_color;
   const bool black_clear = g_ActiveConfig.vr_passthrough_remove_black_clears &&
                            (color & 0x00F8F8F8u) == 0;
   const u32 coverage_color = black_clear ? 0x00000000u : 0x00FF0000u;
@@ -1406,7 +1424,7 @@ void FramebufferManager::ClearEFB(const MathUtil::Rectangle<int>& rc, bool color
   {
     BindEFBFramebufferWithCoverage();
     g_gfx->ClearRegion(target_rc, color_enable, alpha_enable, z_enable, color, z);
-    if (writes_visual_color && !g_gfx->ClearAdditionalColorAttachments(target_rc, coverage_color))
+    if (update_coverage && !g_gfx->ClearAdditionalColorAttachments(target_rc, coverage_color))
     {
       // Unexpected on coverage-capable backends — restore correctness the slow way.
       BindEFBCoverageFramebuffer();
@@ -1419,7 +1437,7 @@ void FramebufferManager::ClearEFB(const MathUtil::Rectangle<int>& rc, bool color
   BindEFBFramebuffer();
   g_gfx->ClearRegion(target_rc, color_enable, alpha_enable, z_enable, color, z);
 
-  if (has_coverage && writes_visual_color)
+  if (update_coverage)
   {
     BindEFBCoverageFramebuffer();
     g_gfx->ClearRegion(target_rc, true, true, false, coverage_color, 0);
@@ -1662,7 +1680,7 @@ bool FramebufferManager::CompilePokePipelines()
   if (!m_color_poke_pipeline)
     return false;
 
-  if (HasEFBCoverage())
+  if (HasEFBCoverageContents())
   {
     auto coverage_shader = g_gfx->CreateShaderFromSource(
         ShaderStage::Pixel,
@@ -1740,7 +1758,8 @@ void FramebufferManager::DoSaveState(PointerWrap& p)
                                            AbstractTextureType::Texture_2DArray);
   g_texture_cache->SerializeTexture(depth_texture, depth_texture_config, p);
 
-  bool has_coverage = HasEFBCoverage();
+  // A discarded coverage attachment holds nothing worth saving.
+  bool has_coverage = HasEFBCoverageContents();
   p.Do(has_coverage);
   if (has_coverage)
   {
@@ -1775,7 +1794,7 @@ void FramebufferManager::DoLoadState(PointerWrap& p)
     WARN_LOG_FMT(VIDEO, "Failed to deserialize EFB contents. Clearing instead.");
     g_gfx->SetAndClearFramebuffer(m_efb_framebuffer.get(), {{0.0f, 0.0f, 0.0f, 0.0f}},
                                   g_backend_info.bSupportsReversedDepthRange ? 1.0f : 0.0f);
-    if (HasEFBCoverage())
+    if (HasEFBCoverageContents())
     {
       BindEFBCoverageFramebuffer();
       g_gfx->ClearRegion(m_efb_coverage_framebuffer->GetRect(), true, true, false, 0x00FF0000u, 0);
@@ -1801,7 +1820,7 @@ void FramebufferManager::DoLoadState(PointerWrap& p)
   g_gfx->SetSamplerState(1, RenderState::GetPointSamplerState());
   g_gfx->Draw(0, 3);
 
-  if (HasEFBCoverage())
+  if (HasEFBCoverageContents())
   {
     const bool valid_coverage =
         coverage_tex &&

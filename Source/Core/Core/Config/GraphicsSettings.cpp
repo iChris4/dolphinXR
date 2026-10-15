@@ -109,6 +109,7 @@ constexpr bool DEFAULT_VULKAN_RECORDING_WORKER = false;
 #endif
 const Info<bool> GFX_VULKAN_RECORDING_WORKER{{System::GFX, "Settings", "VulkanRecordingWorker"},
                                              DEFAULT_VULKAN_RECORDING_WORKER};
+const Info<bool> GFX_VULKAN_ADRENO_D32F_DEPTH{{System::GFX, "Settings", "AdrenoD32FDepth"}, false};
 #if defined(__ANDROID__)
 constexpr bool DEFAULT_UBER_SHADER_NATIVE_VERTICES = true;
 #else
@@ -232,6 +233,13 @@ const Info<bool> GFX_VR_DONT_CLEAR_SCREEN{{System::GFX, "VR", "DontClearScreen"}
 const Info<bool> GFX_VR_LOAD_CUSTOM_SHADERS{{System::GFX, "VR", "LoadCustomShaders"}, false};
 const Info<bool> GFX_VR_HEAD_CPU_CULL{{System::GFX, "VR", "HeadCPUCull"}, true};
 const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS{{System::GFX, "VR", "NonBlockingEFBAccess"}, true};
+#if defined(__ANDROID__)
+constexpr bool DEFAULT_VR_SCREEN_RECORDING_COMPATIBILITY = true;
+#else
+constexpr bool DEFAULT_VR_SCREEN_RECORDING_COMPATIBILITY = false;
+#endif
+const Info<bool> GFX_VR_SCREEN_RECORDING_COMPATIBILITY{
+    {System::GFX, "VR", "ScreenRecordingCompatibility"}, DEFAULT_VR_SCREEN_RECORDING_COMPATIBILITY};
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},
                                                 OpenXRMirrorView::BothEyes};
 const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{
@@ -288,6 +296,10 @@ const Info<VRPassthroughCoverageMode> GFX_VR_PASSTHROUGH_COVERAGE_MODE{
 const Info<float> GFX_VR_GAMMA{{System::GFX, "VR", "Gamma"}, 1.0f};
 const Info<int> GFX_VR_CLEAR_EFB_COPIES{{System::GFX, "VR", "ClearEFBCopies"}, 0};
 const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW{{System::GFX, "VR", "UseVulkanMultiview"}, true};
+const Info<bool> GFX_VR_OPENXR_FORCE_UNORM_FORMAT{
+    {System::GFX, "VR", "OpenXRForceUnormFormat"}, false};
+const Info<VRScreenRecordingDiagnostic> GFX_VR_OPENXR_RECORDING_DIAGNOSTIC{
+    {System::GFX, "VR", "OpenXRRecordingDiagnostic"}, VRScreenRecordingDiagnostic::Disabled};
 const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD{{System::GFX, "VR", "AndroidDirectToHMD"},
                                               DEFAULT_VR_ANDROID_DIRECT_TO_HMD};
 const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT{{System::GFX, "VR", "QuestCpuLevel5Hint"},
