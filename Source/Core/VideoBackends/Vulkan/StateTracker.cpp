@@ -800,57 +800,54 @@ void StateTracker::UpdateUtilityDescriptorSet()
 
 void StateTracker::UpdateComputeDescriptorSet()
 {
-  // Max number of updates - UBO, Samplers, TexelBuffer, Image
-  std::array<VkWriteDescriptorSet, 4> dswrites;
+  // One write per binding: UBO, samplers, texel buffers, images. Every sampler, texel buffer and
+  // image has its own binding in the compute layout, and the Quest 3's Adreno driver dereferences
+  // null in vkUpdateDescriptorSets when one write rolls over from such a binding into the next.
+  constexpr u32 MAX_WRITES = 1 + VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS +
+                             NUM_COMPUTE_TEXEL_BUFFERS + VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS;
+  std::array<VkWriteDescriptorSet, MAX_WRITES> dswrites;
 
   // Allocate descriptor sets.
   if (m_dirty_flags & DIRTY_FLAG_COMPUTE_BINDINGS)
   {
     m_compute_descriptor_set = g_command_buffer_mgr->AllocateDescriptorSet(
         g_object_cache->GetDescriptorSetLayout(DESCRIPTOR_SET_LAYOUT_COMPUTE));
-    dswrites[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                   nullptr,
-                   m_compute_descriptor_set,
-                   0,
-                   0,
-                   1,
-                   VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-                   nullptr,
-                   &m_bindings.utility_ubo_binding,
-                   nullptr};
-    dswrites[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                   nullptr,
-                   m_compute_descriptor_set,
-                   1,
-                   0,
-                   VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS,
-                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                   m_bindings.samplers.data(),
-                   nullptr,
-                   nullptr};
-    dswrites[2] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                   nullptr,
-                   m_compute_descriptor_set,
-                   1 + VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS,
-                   0,
-                   NUM_COMPUTE_TEXEL_BUFFERS,
-                   VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
-                   nullptr,
-                   nullptr,
-                   m_bindings.texel_buffers.data()};
-    dswrites[3] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                   nullptr,
-                   m_compute_descriptor_set,
-                   1 + VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS + NUM_COMPUTE_TEXEL_BUFFERS,
-                   0,
-                   VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS,
-                   VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                   m_bindings.image_textures.data(),
-                   nullptr,
-                   nullptr};
 
-    vkUpdateDescriptorSets(g_vulkan_context->GetDevice(), static_cast<uint32_t>(dswrites.size()),
-                           dswrites.data(), 0, nullptr);
+    u32 writes = 0;
+    const auto add_write = [&](VkDescriptorType type, const VkDescriptorImageInfo* image_info,
+                               const VkDescriptorBufferInfo* buffer_info,
+                               const VkBufferView* texel_buffer_view) {
+      dswrites[writes] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                          nullptr,
+                          m_compute_descriptor_set,
+                          writes,
+                          0,
+                          1,
+                          type,
+                          image_info,
+                          buffer_info,
+                          texel_buffer_view};
+      writes++;
+    };
+    add_write(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, nullptr, &m_bindings.utility_ubo_binding,
+              nullptr);
+    for (u32 i = 0; i < VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS; i++)
+    {
+      add_write(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &m_bindings.samplers[i], nullptr,
+                nullptr);
+    }
+    for (u32 i = 0; i < NUM_COMPUTE_TEXEL_BUFFERS; i++)
+    {
+      add_write(VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr,
+                &m_bindings.texel_buffers[i]);
+    }
+    for (u32 i = 0; i < VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS; i++)
+    {
+      add_write(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &m_bindings.image_textures[i], nullptr,
+                nullptr);
+    }
+
+    vkUpdateDescriptorSets(g_vulkan_context->GetDevice(), writes, dswrites.data(), 0, nullptr);
     m_dirty_flags =
         (m_dirty_flags & ~DIRTY_FLAG_COMPUTE_BINDINGS) | DIRTY_FLAG_COMPUTE_DESCRIPTOR_SET;
   }
