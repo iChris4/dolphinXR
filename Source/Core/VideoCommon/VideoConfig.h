@@ -548,7 +548,7 @@ struct VideoConfig final
            (VRRecordingCompatibilityRequested() ||
             GetVRScreenRecordingDiagnostic() == VRScreenRecordingDiagnostic::DiscardedAttachment);
   }
-  // Screen Recording Compatibility; a recording diagnostic mode overrides it.
+  // Quest Screen Recording Compatibility; a recording diagnostic mode overrides it.
   bool VRRecordingCompatibilityRequested() const
   {
     return vr_screen_recording_compatibility &&

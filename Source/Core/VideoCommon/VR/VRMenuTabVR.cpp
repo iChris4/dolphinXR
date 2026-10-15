@@ -113,7 +113,7 @@ private:
     if (g_backend_info.api_type == APIType::Vulkan)
     {
       MenuWidgets::Checkbox(
-          "Screen Recording Compatibility",
+          "Quest Screen Recording Compatibility",
           "Gives the frame buffer's render pass an extra attachment that is never loaded, stored "
           "or read. On Quest, this avoids the GPU driver fault that freezes the image while "
           "Meta's screen recorder or casting is running. Costs almost nothing; no effect while "

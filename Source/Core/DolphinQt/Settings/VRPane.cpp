@@ -439,8 +439,9 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   m_head_cpu_cull = new ConfigBool(tr("Head-Rotated CPU Culling"), Config::GFX_VR_HEAD_CPU_CULL);
   m_nonblocking_efb_access =
       new ConfigBool(tr("Non-Blocking EFB Reads"), Config::GFX_VR_NONBLOCKING_EFB_ACCESS);
-  m_screen_recording_compatibility = new ConfigBool(
-      tr("Screen Recording Compatibility"), Config::GFX_VR_SCREEN_RECORDING_COMPATIBILITY);
+  m_screen_recording_compatibility =
+      new ConfigBool(tr("Quest Screen Recording Compatibility"),
+                     Config::GFX_VR_SCREEN_RECORDING_COMPATIBILITY);
   m_remove_bars = new ConfigBool(tr("Remove Cinematic Bars"), Config::GFX_VR_REMOVE_BARS);
   m_frame_size_from_xfb =
       new ConfigBool(tr("Frame Size from XFB Copy"), Config::GFX_VR_FRAME_SIZE_FROM_XFB);
