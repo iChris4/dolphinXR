@@ -2131,6 +2131,8 @@ void OpenXRManager::UpdateMenuGate(
   gate.previous_close = close;
 
   const MenuRequest request = m_menu_request.exchange(MenuRequest::None);
+  const bool capture = menu.open && m_menu_binding_capture.load(std::memory_order_acquire);
+  menu.binding_capture = capture;
   bool open = menu.open;
   if (!open)
   {
@@ -2143,7 +2145,7 @@ void OpenXRManager::UpdateMenuGate(
     if ((toggle_pressed || request == MenuRequest::Open) && presents_alive)
       open = true;
   }
-  else if (toggle_pressed || close_pressed || request == MenuRequest::Close)
+  else if ((!capture && (toggle_pressed || close_pressed)) || request == MenuRequest::Close)
   {
     open = false;
   }
@@ -2195,6 +2197,15 @@ void OpenXRManager::UpdateMenuGate(
     for (size_t hand = 0; hand < controllers.size(); ++hand)
     {
       const bool pressed = select_pressed(hand);
+      if (capture)
+      {
+        // The buttons being bound are not menu input. Re-arm only once released.
+        if (gate.select_held[hand])
+          ++menu.select_releases[hand];
+        gate.select_held[hand] = false;
+        gate.select_armed[hand] = false;
+        continue;
+      }
       if (!gate.select_armed[hand])
       {
         gate.select_armed[hand] = !pressed;

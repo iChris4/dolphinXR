@@ -41,6 +41,7 @@ public:
   virtual void OnClose(VRMenuContext& context) {}
 };
 
+std::unique_ptr<VRMenuTab> CreateMainTab();
 std::unique_ptr<VRMenuTab> CreateVRSettingsTab();
 std::unique_ptr<VRMenuTab> CreateControlsTab();
 std::unique_ptr<VRMenuTab> CreateAudioTab();

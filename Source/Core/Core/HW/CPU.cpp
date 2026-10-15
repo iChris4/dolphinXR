@@ -3,6 +3,7 @@
 
 #include "Core/HW/CPU.h"
 
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <queue>
@@ -154,8 +155,9 @@ void CPUManager::Run()
       break;
 
     case State::Stepping:
+    {
       // Wait for step command.
-      m_state_cpu_cvar.wait(state_lock, [this, &state_lock, &gdb_step_sync_event] {
+      const auto stop_waiting = [this, &state_lock, &gdb_step_sync_event] {
         ExecutePendingJobs(state_lock);
         CPUThreadConfigCallback::CheckForConfigChanges();
         state_lock.unlock();
@@ -180,7 +182,28 @@ void CPUManager::Run()
         }
         state_lock.lock();
         return m_state_cpu_step_instruction || !IsStepping();
-      });
+      };
+      auto& fifo = m_system.GetFifo();
+      if (!m_system.IsDualCoreMode() && fifo.WantsPausedPresents())
+      {
+        // Single core does the video work on this thread: keep an OpenXR headset fed while
+        // paused (FifoManager::RunPausedPresent paces itself to the display).
+        while (!m_state_cpu_cvar.wait_for(state_lock, std::chrono::milliseconds(2), stop_waiting))
+        {
+          state_lock.unlock();
+          const bool presented = fifo.RunPausedPresent();
+          state_lock.lock();
+          if (!presented && !fifo.WantsPausedPresents())
+          {
+            m_state_cpu_cvar.wait(state_lock, stop_waiting);
+            break;
+          }
+        }
+      }
+      else
+      {
+        m_state_cpu_cvar.wait(state_lock, stop_waiting);
+      }
       if (!IsStepping())
       {
         // Signal event if the mode changes.
@@ -204,6 +227,7 @@ void CPUManager::Run()
       FlushStepSyncEventLocked();
       Host_UpdateDisasmDialog();
       break;
+    }
 
     case State::PowerDown:
       break;

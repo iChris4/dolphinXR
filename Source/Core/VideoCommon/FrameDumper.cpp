@@ -347,13 +347,12 @@ void FrameDumper::SaveScreenshot(std::string filename)
 
 bool FrameDumper::IsFrameDumping() const
 {
-  if (m_screenshot_request.IsSet())
-    return true;
+  return IsScreenshotRequested() || IsDumpingFrames();
+}
 
-  if (Config::Get(Config::MAIN_MOVIE_DUMP_FRAMES))
-    return true;
-
-  return false;
+bool FrameDumper::IsDumpingFrames() const
+{
+  return Config::Get(Config::MAIN_MOVIE_DUMP_FRAMES);
 }
 
 int FrameDumper::GetRequiredResolutionLeastCommonMultiple() const

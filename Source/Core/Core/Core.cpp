@@ -85,6 +85,10 @@
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 #include "InputCommon/GCAdapter.h"
 
+#ifdef ENABLE_VR
+#include "Common/VR/OpenXRInputState.h"
+#endif
+
 #include "VideoCommon/AsyncRequests.h"
 #include "VideoCommon/Fifo.h"
 #include "VideoCommon/FrameDumper.h"
@@ -882,6 +886,15 @@ static void RestoreStateAndUnlock(Core::System& system, const bool unpause_on_un
   system.GetCPU().RestoreStateAndUnlock(unpause_on_unlock);
 }
 
+bool TryRunUnlessPausedAndLocked(const std::function<void()>& function)
+{
+  std::unique_lock lock(s_core_mutex, std::try_to_lock);
+  if (!lock.owns_lock())
+    return false;
+  function();
+  return true;
+}
+
 void RunOnCPUThread(Core::System& system, Common::MoveOnlyFunction<void()> function)
 {
   if (IsCPUThread())
@@ -1087,6 +1100,15 @@ void DoFrameStep(Core::System& system)
 
 void UpdateInputGate(bool require_focus, bool require_full_focus)
 {
+#ifdef ENABLE_VR
+  // The in-game VR menu is capturing a controller input to bind; it must not reach the game.
+  if (Common::VR::OpenXRInputState::IsBindingCaptureActive())
+  {
+    ControlReference::SetInputGate(false);
+    return;
+  }
+#endif
+
   // If the user accepts background input, controls should pass even if an on screen interface is on
   const bool focus_passes =
       !require_focus ||

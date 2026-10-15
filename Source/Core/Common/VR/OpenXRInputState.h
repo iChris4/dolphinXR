@@ -69,6 +69,10 @@ struct OpenXRMenuInput
   // Game-facing input reads as neutral: the menu is open, or a button pressed while it was
   // open (including the one that closed it) is still held.
   bool input_withheld = false;
+  // The menu is capturing a VR controller input to bind to an emulated control: the menu's own
+  // buttons are suspended, the OpenXR input device reports the raw controllers, and the game's
+  // controls are gated closed instead.
+  bool binding_capture = false;
   // Increments each time the menu opens.
   uint32_t open_serial = 0;
   // Per hand (0 = left, 1 = right): monotonic counts of select presses/releases (trigger or
@@ -178,6 +182,12 @@ public:
     s_state.session_focused = focused;
     s_state.sample_time_ns = sample_time_ns;
     ++s_state.generation;
+  }
+
+  static bool IsBindingCaptureActive()
+  {
+    std::lock_guard lk(s_state_mutex);
+    return s_state.menu.binding_capture;
   }
 
   static std::string GetDiagnosticString()

@@ -3,6 +3,10 @@
 
 #include "VideoCommon/Fifo.h"
 
+#include <algorithm>
+#include <chrono>
+#include <thread>
+
 #include <atomic>
 #include <cstring>
 
@@ -14,9 +18,11 @@
 #include "Common/MemoryUtil.h"
 #include "Common/MsgHandler.h"
 #include "Common/Thread.h"
+#include "Common/Timer.h"
 
 #include "Core/Config/MainSettings.h"
 #include "Core/ConfigManager.h"
+#include "Core/Core.h"
 #include "Core/CoreTiming.h"
 #include "Core/HW/GPFifo.h"
 #include "Core/HW/Memmap.h"
@@ -31,7 +37,12 @@
 #include "VideoCommon/OpcodeDecoding.h"
 #include "VideoCommon/VertexLoaderManager.h"
 #include "VideoCommon/VertexManagerBase.h"
+#include "VideoCommon/Present.h"
 #include "VideoCommon/VideoBackendBase.h"
+#include "VideoCommon/VideoConfig.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/OpenXRManager.h"
+#endif
 
 namespace Fifo
 {
@@ -83,7 +94,9 @@ void FifoManager::PauseAndLock()
   if (!m_system.IsDualCoreMode() || m_use_deterministic_gpu_thread)
     return;
 
+  ++m_gpu_loop_waiters;
   m_gpu_mainloop.WaitYield(std::chrono::milliseconds(100), Host_YieldToUI);
+  --m_gpu_loop_waiters;
 }
 
 void FifoManager::RestoreState(const bool was_running)
@@ -300,6 +313,11 @@ void FifoManager::RunGpuLoop()
         // Run events from the CPU thread.
         AsyncRequests::GetInstance()->PullEvents();
 
+        // Keep an OpenXR headset fed while emulation is paused. The loop otherwise only wakes
+        // every 100 ms when idle; stay awake unless someone waits for it to settle.
+        if (RunPausedPresent() && m_gpu_loop_waiters.load() == 0)
+          m_gpu_mainloop.Wakeup();
+
         // Do nothing while paused
         if (!m_emu_running_state.IsSet())
           return;
@@ -404,7 +422,51 @@ void FifoManager::FlushGpu()
   if (!m_system.IsDualCoreMode() || m_use_deterministic_gpu_thread)
     return;
 
+  ++m_gpu_loop_waiters;
   m_gpu_mainloop.Wait();
+  --m_gpu_loop_waiters;
+}
+
+bool FifoManager::WantsPausedPresents() const
+{
+#ifdef ENABLE_VR
+  return g_presenter && g_ActiveConfig.VRSessionActive() && VR::g_openxr &&
+         VR::g_openxr->IsSessionRunning() && Core::GetState(m_system) == Core::State::Paused;
+#else
+  return false;
+#endif
+}
+
+bool FifoManager::RunPausedPresent()
+{
+#ifdef ENABLE_VR
+  if (!WantsPausedPresents())
+    return false;
+
+  // About one present per display period. When the inline XR frame flow is used, Present()
+  // itself blocks in xrWaitFrame and no extra wait happens here.
+  const double period_ms = VR::g_openxr->GetNativeDisplayPeriodMs();
+  const u64 interval_us =
+      period_ms > 1.0 ? static_cast<u64>(period_ms * 1000.0) : 1'000'000 / 72;
+  const u64 now_us = Common::Timer::NowUs();
+  if (now_us < m_next_paused_present_us)
+  {
+    std::this_thread::sleep_for(
+        std::chrono::microseconds(std::min(m_next_paused_present_us - now_us, interval_us)));
+  }
+  m_next_paused_present_us = Common::Timer::NowUs() + interval_us;
+
+  bool presented = false;
+  Core::TryRunUnlessPausedAndLocked([&] {
+    if (!WantsPausedPresents())
+      return;
+    g_presenter->PresentWhilePaused();
+    presented = true;
+  });
+  return presented;
+#else
+  return false;
+#endif
 }
 
 void FifoManager::GpuMaySleep()

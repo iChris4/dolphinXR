@@ -48,6 +48,9 @@ public:
   void SetNextSwapEstimatedTime(u64 ticks, TimePoint host_time);
 
   void Present(PresentInfo* present_info = nullptr);
+  // Re-presents the last frame while emulation is paused (see FifoManager::RunPausedPresent),
+  // taking a requested screenshot from it since no new frame will come.
+  void PresentWhilePaused();
   void ClearLastXfbId() { m_last_xfb_id = std::numeric_limits<u64>::max(); }
 
   bool Initialize();

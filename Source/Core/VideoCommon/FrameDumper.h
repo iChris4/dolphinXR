@@ -33,6 +33,9 @@ public:
   void SaveScreenshot(std::string filename);
 
   bool IsFrameDumping() const;
+  // The parts of IsFrameDumping: a pending screenshot, and frame dumping turned on.
+  bool IsScreenshotRequested() const { return m_screenshot_request.IsSet(); }
+  bool IsDumpingFrames() const;
   int GetRequiredResolutionLeastCommonMultiple() const;
 
   void DoState(PointerWrap& p);

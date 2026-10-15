@@ -158,7 +158,7 @@ private:
     m_last_refresh_us = Common::Timer::NowUs();
     if (m_slots->refreshing.exchange(true))
       return;
-    context.actions.Run({}, [slots_info = m_slots](Core::System&) {
+    context.actions.RunInBackground([slots_info = m_slots](Core::System&) {
       SlotList slots;
       for (u32 i = 0; i < SLOT_COUNT; ++i)
       {
@@ -173,7 +173,6 @@ private:
         slots_info->valid = true;
       }
       slots_info->refreshing = false;
-      return std::string();
     });
   }
 

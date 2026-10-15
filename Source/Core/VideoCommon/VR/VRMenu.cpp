@@ -66,6 +66,7 @@ size_t DefaultPointerHand()
 
 VRMenu::VRMenu()
 {
+  m_tabs.push_back(CreateMainTab());
   m_tabs.push_back(CreateVRSettingsTab());
   m_tabs.push_back(CreateControlsTab());
   m_tabs.push_back(CreateAudioTab());
@@ -171,10 +172,8 @@ void VRMenu::Close()
 
   // Settings changed from the menu go to the global config file, like the desktop panes.
   // Layer::Save only writes when the layer changed.
-  m_actions.Run({}, [](Core::System&) {
-    Config::GetLayer(Config::LayerType::Base)->Save();
-    return std::string();
-  });
+  m_actions.RunInBackground(
+      [](Core::System&) { Config::GetLayer(Config::LayerType::Base)->Save(); });
 }
 
 void VRMenu::FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot)
@@ -206,6 +205,16 @@ void VRMenu::FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot)
       continue;
     m_hit[hand] = true;
     m_hit_position[hand] = {u * CANVAS_WIDTH, v * CANVAS_HEIGHT};
+  }
+
+  // While a binding is captured the controller buttons are not menu input.
+  if (menu.binding_capture)
+  {
+    if (m_mouse_down)
+      io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    m_mouse_down = false;
+    m_seen_presses = menu.select_presses;
+    m_seen_releases = menu.select_releases;
   }
 
   // The cursor follows the hand that clicked last; while idle it moves to whichever hand

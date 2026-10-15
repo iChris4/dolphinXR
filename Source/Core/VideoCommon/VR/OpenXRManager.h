@@ -332,6 +332,12 @@ public:
   // Video thread, every present. The panel is drawn at present time, so the menu only opens
   // while presents keep coming (not while paused or stuck loading).
   void NotifyMenuPresent();
+  // While the menu captures a controller input to bind (see OpenXRMenuInput::binding_capture),
+  // its toggle, close and select buttons are ignored so any button can be bound. Any thread.
+  void SetMenuBindingCapture(bool active)
+  {
+    m_menu_binding_capture.store(active, std::memory_order_release);
+  }
   // Increments whenever a recenter is applied. Video thread only, like LocateViews.
   u64 GetRecenterGeneration() const { return m_recenter_generation; }
   // Debug hook (Android adb): a pointer on the menu panel (u, v in 0..1 from the top left) the
@@ -786,6 +792,7 @@ private:
     Close,
   };
   std::atomic<MenuRequest> m_menu_request{MenuRequest::None};
+  std::atomic<bool> m_menu_binding_capture{false};
   std::atomic<u64> m_menu_last_present_us{0};
   // Panel layer shown by EndFrameDetached. m_menu_layer_serial is the open serial the layer may
   // be shown for (0 = closed); SetMenuLayer calls for an older serial are dropped.

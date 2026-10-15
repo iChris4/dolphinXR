@@ -61,8 +61,12 @@ public:
 
   Core::DeviceRemoval UpdateInput() override
   {
-    // Neutral while the in-game VR menu holds the controllers (game pads and hotkeys alike).
-    m_snapshot = Common::VR::OpenXRInputState::GetGameSnapshot();
+    // Neutral while the in-game VR menu holds the controllers (game pads and hotkeys alike),
+    // except while it captures an input to bind: then the game is gated closed instead
+    // (Core::UpdateInputGate) and this device must report what is pressed.
+    m_snapshot = Common::VR::OpenXRInputState::IsBindingCaptureActive() ?
+                     Common::VR::OpenXRInputState::GetSnapshot() :
+                     Common::VR::OpenXRInputState::GetGameSnapshot();
     UpdateMotionState(Hand::Left);
     UpdateMotionState(Hand::Right);
     return Core::DeviceRemoval::Keep;

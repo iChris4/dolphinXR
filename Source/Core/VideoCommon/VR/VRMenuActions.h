@@ -28,14 +28,18 @@ public:
   VRMenuActions();
 
   // Queues `job` on the host thread. The returned text (if any) replaces the status line.
-  // `pending_status` is shown until the job finishes.
+  // `pending_status` is shown until the job finishes, and GetPendingJobs() counts it.
   void Run(std::string pending_status, std::function<std::string(Core::System&)> job);
+
+  // Queues housekeeping on the host thread (refreshing displayed state, saving config) that
+  // neither shows in the status line nor counts as a pending action.
+  void RunInBackground(std::function<void(Core::System&)> job);
 
   // Thread-safe status line access. The text fades after a few seconds.
   void SetStatus(std::string text);
   std::string GetStatus() const;
 
-  // Number of queued or running jobs.
+  // Number of queued or running Run() jobs.
   int GetPendingJobs() const;
 
 private:

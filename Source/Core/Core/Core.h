@@ -160,6 +160,11 @@ void OnFrameEnd(Core::System& system);
 // Run a function on the CPU thread, asynchronously.
 void RunOnCPUThread(Core::System& system, Common::MoveOnlyFunction<void()> function);
 
+// Runs `function` on the calling thread unless another thread is pausing the emulated system
+// right now (PauseAndLock: savestates, CPU-thread jobs, ...), whose work must not overlap it.
+// Never waits for that. Returns whether `function` ran.
+bool TryRunUnlessPausedAndLocked(const std::function<void()>& function);
+
 // for calling back into UI code without introducing a dependency on it in core
 using StateChangedCallbackFunc = std::function<void(Core::State)>;
 

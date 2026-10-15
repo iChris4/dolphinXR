@@ -76,6 +76,14 @@ public:
   void EmulatorState(bool running);
   void ResetVideoBuffer();
 
+  // While emulation is paused, an OpenXR session still needs frames, and the in-game VR menu
+  // is drawn at present time: keep presenting the last frame, about once per display period.
+  // Runs on the thread doing video work (the GPU loop in dual core, the CPU thread's pause wait
+  // in single core), never while another thread holds PauseAndLock. Returns whether it
+  // presented.
+  bool RunPausedPresent();
+  bool WantsPausedPresents() const;
+
 private:
   void RefreshConfig();
   void ReadDataFromFifo(u32 read_ptr);
@@ -87,6 +95,10 @@ private:
   static constexpr u32 FIFO_SIZE = 2 * 1024 * 1024;
 
   Common::BlockingLoop m_gpu_mainloop;
+  // Threads waiting for m_gpu_mainloop to go idle. The paused-present tick only keeps the loop
+  // awake while there are none, so their waits can complete.
+  std::atomic<int> m_gpu_loop_waiters = 0;
+  u64 m_next_paused_present_us = 0;
 
   Common::Flag m_emu_running_state;
 

@@ -46,10 +46,9 @@ private:
   {
     if (m_update_queued->exchange(true))
       return;
-    context.actions.Run({}, [queued = m_update_queued](Core::System& system) {
+    context.actions.RunInBackground([queued = m_update_queued](Core::System& system) {
       queued->store(false);
       AudioCommon::UpdateSoundStream(system);
-      return std::string();
     });
   }
 

@@ -1259,6 +1259,15 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
   }
 }
 
+void Presenter::PresentWhilePaused()
+{
+  // A screenshot is normally taken from the next frame shown; while paused that is this one.
+  // Frame dumps (videos) are left alone: they would record the paused frame over and over.
+  if (g_frame_dumper->IsScreenshotRequested() && !g_frame_dumper->IsDumpingFrames())
+    ProcessFrameDumping(m_last_xfb_ticks);
+  Present();
+}
+
 void Presenter::Present(PresentInfo* present_info)
 {
   m_present_count++;

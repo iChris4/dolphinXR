@@ -34,9 +34,10 @@ namespace VR
 class VRMenuTab;
 struct VRMenuContext;
 
-// In-game VR settings menu: a panel in the headset, operated with a controller laser pointer,
-// with tabs for VR settings, controls, audio and savestates. The game keeps running while it
-// is open; the OpenXR input thread withholds the VR controllers from the game meanwhile.
+// In-game VR menu: a panel in the headset, operated with a controller laser pointer, with tabs
+// for emulation control (pause, screenshot, disc change, exit), VR settings, controls, audio
+// and savestates. Opening it does not pause the game; the OpenXR input thread withholds the VR
+// controllers from the game meanwhile.
 //
 // Opening and closing are decided on the input thread (OpenXRManager::UpdateMenuGate). This
 // class runs on the video thread: it draws the panel with its own ImGui context into the

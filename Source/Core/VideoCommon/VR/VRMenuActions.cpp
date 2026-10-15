@@ -48,6 +48,11 @@ void VRMenuActions::Run(std::string pending_status,
   });
 }
 
+void VRMenuActions::RunInBackground(std::function<void(Core::System&)> job)
+{
+  Core::QueueHostJob(std::move(job));
+}
+
 void VRMenuActions::SetStatus(std::string text)
 {
   std::lock_guard lock(m_shared->mutex);
