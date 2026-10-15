@@ -67,9 +67,97 @@ public:
         Config::GFX_VR_MENU_TOGGLE_BUTTON, MENU_BUTTONS, touched);
 
     DrawSaveForGameSection(context);
+    DrawVRHacks(touched);
   }
 
 private:
+  // The "VR Hacks" group of the desktop VR settings, collapsed by default.
+  static void DrawVRHacks(MenuWidgets::TouchedKeys* touched)
+  {
+    ImGui::Spacing();
+    if (!ImGui::CollapsingHeader("VR Hacks"))
+      return;
+
+    if (g_backend_info.api_type == APIType::Vulkan)
+    {
+      // The renderer reads this live, but the eye swapchains were created for one mode: like the
+      // desktop pane, only show it while a game runs.
+      ImGui::BeginDisabled();
+      MenuWidgets::Checkbox(
+          "Use Vulkan Multiview",
+          "Renders both eyes through a multiview render pass instead of geometry-shader stereo "
+          "expansion, which can be much faster on Quest/Adreno. Can only be changed while no "
+          "game is running. If unsure on Quest, leave this checked.",
+          Config::GFX_VR_USE_VULKAN_MULTIVIEW, touched);
+      ImGui::EndDisabled();
+    }
+    MenuWidgets::Checkbox(
+        "Don't Clear Screen",
+        "Prevents clearing the VR eye framebuffers before rendering each frame. By default the "
+        "screen is cleared to black, which prevents image trails when looking outside the "
+        "rendered area. Enable this if clearing causes visual glitches in specific games.",
+        Config::GFX_VR_DONT_CLEAR_SCREEN, touched);
+    MenuWidgets::Checkbox(
+        "Head-Rotated CPU Culling",
+        "Skips draw calls that are entirely outside the view cone that follows your head, before "
+        "they reach the GPU. Reduces CPU load in open areas, most noticeably on standalone "
+        "headsets. If unsure, leave this checked.",
+        Config::GFX_VR_HEAD_CPU_CULL, touched);
+    MenuWidgets::Checkbox(
+        "Non-Blocking EFB Reads",
+        "When a game reads the frame buffer from the CPU (such as Super Mario Galaxy's depth "
+        "reads), answers from the last completed readback instead of waiting for the newest one "
+        "(up to about a frame old). Uncheck it if an effect driven by such reads (lens flares, "
+        "cursors, visibility tests) misbehaves.",
+        Config::GFX_VR_NONBLOCKING_EFB_ACCESS, touched);
+    MenuWidgets::Checkbox(
+        "Remove Cinematic Bars",
+        "Expands the scissor and viewport to fill the full rendering area for perspective draws, "
+        "removing cinematic letterbox bars (e.g. Metroid Prime). Disable it if it causes visual "
+        "artifacts in a game.",
+        Config::GFX_VR_REMOVE_BARS, touched);
+    MenuWidgets::Checkbox(
+        "Frame Size from XFB Copy",
+        "Matches the composed scene to the EFB-to-XFB display copy without changing the game's "
+        "EFB viewport. Preserves Metroid Prime Trilogy blur/visor effects and corrects Mario "
+        "Golf's 480-line scene. Turn off for the legacy clear-based behavior.",
+        Config::GFX_VR_FRAME_SIZE_FROM_XFB, touched);
+    MenuWidgets::Checkbox(
+        "Small 3D Viewports on Screen",
+        "Draws 3D models rendered into small menu panes (e.g. Mario Kart: Double Dash!! character "
+        "select) on the 2D virtual screen instead of head-tracking them.",
+        Config::GFX_VR_PANES_ON_SCREEN, touched);
+    MenuWidgets::Checkbox(
+        "Detect Render-to-Texture Viewports",
+        "Excludes square render-to-texture passes (shadow/environment maps) from VR reprojection "
+        "so their textures don't bake in the head pose. Experimental.",
+        Config::GFX_VR_DETECT_RENDER_TARGETS, touched);
+    MenuWidgets::Checkbox(
+        "Ortho Scissor Fix",
+        "Expands the scissor to the full rendering area for orthographic VR draws, fixing 2D "
+        "content clipped on the virtual screen (e.g. the Mario Kart: Double Dash!! item "
+        "roulette). If unsure, leave this checked.",
+        Config::GFX_VR_ORTHO_SCISSOR_FIX, touched);
+    MenuWidgets::Checkbox(
+        "Detect Skybox",
+        "Treats objects drawn at the camera origin as a skybox and locks them to head rotation "
+        "only, so the sky renders at infinity instead of a meter or two away (e.g. Metroid "
+        "Prime). If unsure, leave this unchecked.",
+        Config::GFX_VR_DETECT_SKYBOX, touched);
+    // One option on the desktop too: it drives both palette fixes.
+    if (MenuWidgets::Checkbox(
+            "Layered Palette Conversion Path",
+            "Keeps Metroid Prime's thermal visor EFB copy stereo during palette conversion "
+            "(Vulkan, D3D11) instead of flattening it to one eye. If unsure, leave this checked.",
+            Config::GFX_VR_METROID_THERMAL_VISOR_FIX, touched))
+    {
+      Config::SetBaseOrCurrent(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX,
+                               Config::Get(Config::GFX_VR_METROID_THERMAL_VISOR_FIX));
+      if (touched)
+        touched->Add(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX.GetLocation());
+    }
+  }
+
   static void DrawRendering(MenuWidgets::TouchedKeys* touched)
   {
     MenuWidgets::SectionHeader("Rendering");
@@ -151,7 +239,6 @@ private:
                           "Keeps the game's own depth on the virtual screen. Turn off if 2D "
                           "elements flicker (e.g. Mario Kart: Double Dash!!).",
                           Config::GFX_VR_EXACT_SCREEN_DEPTH, touched);
-    MenuWidgets::Checkbox("Remove Cinematic Bars", nullptr, Config::GFX_VR_REMOVE_BARS, touched);
   }
 
   static void DrawCamera(MenuWidgets::TouchedKeys* touched)

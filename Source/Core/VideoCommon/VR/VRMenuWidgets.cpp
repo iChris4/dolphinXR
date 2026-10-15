@@ -28,8 +28,16 @@ float StepButtonWidth()
 
 void Tooltip(const char* text)
 {
-  if (text && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-    ImGui::SetTooltip("%s", text);
+  if (!text || !ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    return;
+  // Long descriptions wrap instead of running off the panel.
+  if (ImGui::BeginTooltip())
+  {
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
+    ImGui::TextUnformatted(text);
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+  }
 }
 
 void MarkTouched(TouchedKeys* touched, const Config::Location& location)
