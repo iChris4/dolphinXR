@@ -8,6 +8,7 @@
 #include <optional>
 
 #include <fmt/format.h>
+#include <implot.h>
 
 #include "Common/CommonPaths.h"
 #include "Common/Config/Config.h"
@@ -38,22 +39,29 @@ constexpr float FONT_SIZE = 28.0f;
 constexpr std::array<ImU32, 2> POINTER_COLORS{IM_COL32(255, 170, 35, 255),
                                               IM_COL32(35, 210, 255, 255)};
 
-// Makes `context` ImGui's current context for the scope and restores the previous one. The
-// current-context pointer is process-wide, so the caller holds the OSD's ImGui lock.
+// Makes `context` (and `implot_context`) current for the scope and restores the previous ones.
+// The current-context pointers are process-wide, so the caller holds the OSD's ImGui lock.
 class ScopedImGuiContext
 {
 public:
-  explicit ScopedImGuiContext(ImGuiContext* context) : m_previous(ImGui::GetCurrentContext())
+  ScopedImGuiContext(ImGuiContext* context, ImPlotContext* implot_context)
+      : m_previous(ImGui::GetCurrentContext()), m_previous_implot(ImPlot::GetCurrentContext())
   {
     ImGui::SetCurrentContext(context);
+    ImPlot::SetCurrentContext(implot_context);
   }
-  ~ScopedImGuiContext() { ImGui::SetCurrentContext(m_previous); }
+  ~ScopedImGuiContext()
+  {
+    ImGui::SetCurrentContext(m_previous);
+    ImPlot::SetCurrentContext(m_previous_implot);
+  }
 
   ScopedImGuiContext(const ScopedImGuiContext&) = delete;
   ScopedImGuiContext& operator=(const ScopedImGuiContext&) = delete;
 
 private:
   ImGuiContext* m_previous;
+  ImPlotContext* m_previous_implot;
 };
 
 size_t DefaultPointerHand()
@@ -71,12 +79,16 @@ VRMenu::VRMenu()
   m_tabs.push_back(CreateControlsTab());
   m_tabs.push_back(CreateAudioTab());
   m_tabs.push_back(CreateSavestatesTab());
+  m_tabs.push_back(CreateStatsTab());
 }
 
 VRMenu::~VRMenu()
 {
   // The owner holds the OSD's ImGui lock here. DestroyContext switches to the context it
-  // destroys and back, so it leaves the OSD context current.
+  // destroys and back, so it leaves the OSD context current. ImPlot's only resets the current
+  // context when it is the one destroyed, which ours never is outside OnPresent.
+  if (m_implot_context)
+    ImPlot::DestroyContext(m_implot_context);
   if (m_context)
     ImGui::DestroyContext(m_context);
 }
@@ -89,6 +101,8 @@ bool VRMenu::InitializeContext()
   if (!m_context)
     return false;
   ImGui::SetCurrentContext(m_context);
+  m_implot_context = ImPlot::CreateContext();
+  ImPlot::SetCurrentContext(m_implot_context);
 
   ImGuiIO& io = ImGui::GetIO();
   io.IniFilename = nullptr;
@@ -415,7 +429,7 @@ void VRMenu::OnPresent(VideoCommon::OnScreenUI* osd)
 
   std::unique_lock<std::mutex> imgui_lock =
       osd ? osd->GetImGuiLock() : std::unique_lock<std::mutex>(m_fallback_imgui_mutex);
-  ScopedImGuiContext context_scope(m_context);
+  ScopedImGuiContext context_scope(m_context, m_implot_context);
   if (!m_context && !InitializeContext())
   {
     ERROR_LOG_FMT(OPENXR, "VRMenu: ImGui initialization failed; the menu is unavailable");

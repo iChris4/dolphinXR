@@ -20,6 +20,7 @@
 #include "VideoCommon/VR/VRMenuActions.h"
 #include "VideoCommon/VR/VRMenuWidgets.h"
 
+struct ImPlotContext;
 namespace Common::VR
 {
 struct OpenXRInputSnapshot;
@@ -35,8 +36,8 @@ class VRMenuTab;
 struct VRMenuContext;
 
 // In-game VR menu: a panel in the headset, operated with a controller laser pointer, with tabs
-// for emulation control (pause, screenshot, disc change, exit), VR settings, controls, audio
-// and savestates. Opening it does not pause the game; the OpenXR input thread withholds the VR
+// for emulation control (pause, screenshot, disc change, exit), VR settings, controls, audio,
+// savestates and performance statistics. Opening it does not pause the game; the OpenXR input thread withholds the VR
 // controllers from the game meanwhile.
 //
 // Opening and closing are decided on the input thread (OpenXRManager::UpdateMenuGate). This
@@ -70,6 +71,8 @@ private:
   void DrawPointers() const;
 
   ImGuiContext* m_context = nullptr;
+  // ImPlot keeps per-context state too (the Stats tab's graph).
+  ImPlotContext* m_implot_context = nullptr;
   VideoCommon::ImGuiRenderer m_renderer;
   bool m_context_failed = false;
   bool m_swapchain_failed = false;

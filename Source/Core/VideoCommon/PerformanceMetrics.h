@@ -10,6 +10,8 @@
 #include "Common/HookableEvent.h"
 #include "VideoCommon/PerformanceTracker.h"
 
+struct ImVec2;
+
 namespace Core
 {
 class System;
@@ -47,8 +49,14 @@ public:
 
   // ImGui Functions
   void DrawImGuiStats(const float backbuffer_scale);
+  // The same statistics laid out in the current ImGui window, all of them regardless of the
+  // on-screen display settings (the in-game VR menu's Stats tab).
+  void DrawImGuiStatsPanel(float graph_height, float line_weight);
 
 private:
+  // The frame time graph. `graph_max_time` is the smoothed top of the time axis, kept per caller.
+  void DrawFrameTimesPlot(const ImVec2& size, float line_weight, double* graph_max_time);
+
   struct FrameBufferSize
   {
     FrameBufferSize() : width(0), height(0) {}
@@ -61,6 +69,7 @@ private:
   PerformanceTracker m_vps_counter{"vblank_times.txt"};
 
   double m_graph_max_time = 0.0;
+  double m_panel_graph_max_time = 0.0;
 
   std::atomic<double> m_speed{};
   std::atomic<double> m_max_speed{};

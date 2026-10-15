@@ -46,6 +46,7 @@ std::unique_ptr<VRMenuTab> CreateVRSettingsTab();
 std::unique_ptr<VRMenuTab> CreateControlsTab();
 std::unique_ptr<VRMenuTab> CreateAudioTab();
 std::unique_ptr<VRMenuTab> CreateSavestatesTab();
+std::unique_ptr<VRMenuTab> CreateStatsTab();
 }  // namespace VR
 
 #endif  // ENABLE_VR
