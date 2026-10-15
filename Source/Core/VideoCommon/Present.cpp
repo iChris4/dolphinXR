@@ -30,6 +30,7 @@
 #include "Common/Logging/Log.h"
 #include "Common/Timer.h"
 #include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRMenu.h"
 #endif
 
 std::unique_ptr<VideoCommon::Presenter> g_presenter;
@@ -117,6 +118,18 @@ Presenter::~Presenter()
 {
   // Disable ControllerInterface's aspect ratio adjustments so mapping dialog behaves normally.
   g_controller_interface.SetAspectRatioAdjustment(1);
+
+#ifdef ENABLE_VR
+  // The menu destroys its ImGui context, which briefly switches ImGui's process-wide current
+  // context: hold the OSD's ImGui lock like every other context switch does.
+  if (m_vr_menu)
+  {
+    std::unique_lock<std::mutex> imgui_lock;
+    if (m_onscreen_ui)
+      imgui_lock = m_onscreen_ui->GetImGuiLock();
+    m_vr_menu.reset();
+  }
+#endif
 }
 
 bool Presenter::Initialize()
@@ -1346,6 +1359,23 @@ void Presenter::Present(PresentInfo* present_info)
 #endif
 
   g_gfx->BeginUtilityDrawing();
+#ifdef ENABLE_VR
+  // Swapchains are only swapped at a present that publishes a new frame, so the frame rendered
+  // into the new ones reaches the pacing thread right away.
+  if (vr_frame_started && !vr_skip_duplicate_publish && m_xfb_entry)
+    UpdateEyeResolutionScale();
+  if (VR::g_openxr && VR::g_openxr->GetSwapchain())
+    VR::g_openxr->GetSwapchain()->CollectRetiredSwapchains(false);
+
+  // In-game VR menu: drawn into its own OpenXR swapchain and composited as a quad layer over
+  // whatever frame the headset shows.
+  if (vr_frame_started)
+  {
+    if (!m_vr_menu)
+      m_vr_menu = std::make_unique<VR::VRMenu>();
+    m_vr_menu->OnPresent(m_onscreen_ui.get());
+  }
+#endif
   const bool backbuffer_bound =
       !openxr_direct_to_hmd && g_gfx->BindBackbuffer({{0.0f, 0.0f, 0.0f, 1.0f}});
   // A hidden window is still bound and presented (see above), but nothing is drawn into it.
@@ -1438,6 +1468,42 @@ void Presenter::Present(PresentInfo* present_info)
   PrepareNextOpenXRFrame();
 #endif
 }
+
+#ifdef ENABLE_VR
+void Presenter::UpdateEyeResolutionScale()
+{
+  VR::OpenXRManager* manager = VR::g_openxr.get();
+  VR::IOpenXRSwapchain* swapchain = manager->GetSwapchain();
+  const float wanted = g_ActiveConfig.vr_resolution_scale;
+  if (std::abs(wanted - manager->GetEyeResolutionScale()) < 0.001f ||
+      std::abs(wanted - manager->GetFailedEyeResolutionScale()) < 0.001f)
+  {
+    m_pending_eye_resolution_scale = 0.0f;
+    return;
+  }
+
+  const u64 now_us = Common::Timer::NowUs();
+  if (wanted != m_pending_eye_resolution_scale)
+  {
+    m_pending_eye_resolution_scale = wanted;
+    m_pending_eye_resolution_since_us = now_us;
+    return;
+  }
+  constexpr u64 SETTLE_TIME_US = 300'000;
+  if (now_us - m_pending_eye_resolution_since_us < SETTLE_TIME_US)
+    return;
+  m_pending_eye_resolution_scale = 0.0f;
+
+  const bool was_foveated = swapchain->HasFoveatedFramebuffers();
+  if (manager->ChangeEyeResolutionScale(wanted) && m_post_processor &&
+      swapchain->HasFoveatedFramebuffers() != was_foveated)
+  {
+    // The eye blit pipelines are compiled against (non-)foveated render passes.
+    g_gfx->WaitForGPUIdle();
+    m_post_processor->RecompilePipeline();
+  }
+}
+#endif
 
 TimePoint Presenter::GetUpdatedPresentationTime(TimePoint intended_presentation_time)
 {

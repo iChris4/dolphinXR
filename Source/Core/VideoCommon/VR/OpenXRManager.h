@@ -26,6 +26,7 @@
 #include "Common/Matrix.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "VideoCommon/AbstractFramebuffer.h"
+#include "VideoCommon/VR/VRPanelMath.h"
 
 // OpenXRManager owns the XrInstance, XrSystemId, XrSession, and reference XrSpace.
 // It handles the OpenXR session state machine and per-frame timing.
@@ -87,6 +88,29 @@ public:
   // Defined in OpenXRManager.cpp; delegates the quad math to OpenXRManager::SubmitFlatQuadFrame.
   virtual bool SubmitFlatFrame();
 
+  // ---- In-game VR menu panel (VR::VRMenu) ----
+  // One extra non-foveated color swapchain the menu is drawn into and composited as a quad
+  // layer. Same format and view handling as the eye swapchains, so the UI's gamma-encoded
+  // colors reach the compositor exactly like the game image. Created on first use and kept
+  // until the swapchains are torn down.
+  virtual bool CreateMenuSwapchain(uint32_t width, uint32_t height) { return false; }
+  virtual XrSwapchain GetMenuSwapchain() const { return XR_NULL_HANDLE; }
+  // Acquire the next menu image (pair with ReleaseMenuTexture after drawing into it).
+  virtual AbstractFramebuffer* AcquireMenuFramebuffer() { return nullptr; }
+  // Submit the menu draws and release the image to the runtime. Returns true once the
+  // runtime has a fully rendered image it may composite.
+  virtual bool ReleaseMenuTexture() { return false; }
+
+  // ---- Live eye resolution change (OpenXRManager::ChangeEyeResolutionScale) ----
+  // Replaces the eye swapchains with new ones at the current GetViewConfigViews() size. The old
+  // ones are retired, not destroyed: frames already handed to the compositor, and pacing-thread
+  // re-submits until the next publish, still reference them. Nothing may be acquired. On
+  // failure the old swapchains stay in use.
+  virtual bool RecreateEyeSwapchains(u64 retiring_generation) { return false; }
+  // Destroys the retired swapchains the compositor and the GPU are done with; all of them with
+  // `force` (after the session stopped).
+  virtual void CollectRetiredSwapchains(bool force) {}
+
   // Vulkan-backed OpenXR calls can touch the VkQueue bound to the XrSession. Backends that need
   // external queue synchronization return a held lock here; other backends return an empty lock.
   virtual std::unique_lock<std::mutex> AcquireGraphicsQueueLock() { return {}; }
@@ -102,6 +126,13 @@ public:
   // Pixel dimensions of the eye render targets (typically HMD recommended resolution).
   virtual uint32_t GetEyeWidth() const = 0;
   virtual uint32_t GetEyeHeight() const = 0;
+
+protected:
+  // xrAcquireSwapchainImage + xrWaitSwapchainImage for a swapchain that is not part of the eye
+  // set (the menu panel), with the backend's queue lock around the runtime calls that need it.
+  // The image is released again if the wait fails.
+  bool AcquireExtraSwapchainImage(XrSwapchain swapchain, uint32_t* out_index, const char* what);
+  bool ReleaseExtraSwapchainImage(XrSwapchain swapchain, const char* what);
 };
 
 class OpenXRManager
@@ -191,10 +222,12 @@ public:
 
   // xrEndFrame — submits the completed layer stack to the compositor.
   bool EndFrame(const std::vector<XrCompositionLayerBaseHeader*>& layers);
+  // `content_generation`: swapchain generation the layers were rendered into (default: current).
   bool EndFrameDetached(XrTime display_time, XrEnvironmentBlendMode environment_blend_mode,
                         bool should_render,
                         const std::vector<XrCompositionLayerBaseHeader*>& layers,
-                        bool lock_graphics_queue = true);
+                        bool lock_graphics_queue = true,
+                        std::optional<u64> content_generation = std::nullopt);
 
   // ---- XR pacing thread ----
   // Owns the xrWaitFrame → xrBeginFrame → xrEndFrame loop (and the session event pump),
@@ -276,6 +309,55 @@ public:
   // SubmitFlatFrame(); passthrough layers are prepended centrally in EndFrameDetached.
   bool SubmitFlatQuadFrame(XrSwapchain swapchain, uint32_t width, uint32_t height);
 
+  // ---- In-game VR menu (VR::VRMenu) ----
+  // The input thread decides when the menu is open (UpdateMenuGate, published in the input
+  // snapshot), the video thread draws the panel into the backend's menu swapchain at present
+  // time, and EndFrameDetached composites it on top of every submitted frame, including the
+  // pacing thread's re-submits.
+  struct MenuLayerDesc
+  {
+    XrPosef pose{{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
+    XrExtent2Df size{};
+    XrSwapchain swapchain = XR_NULL_HANDLE;
+    XrExtent2Di image_size{};
+  };
+  // Video thread, once a panel image was released: show it at this placement. Ignored when the
+  // menu closed or reopened since `open_serial` was read from the input snapshot.
+  void SetMenuLayer(const MenuLayerDesc& layer, uint32_t open_serial);
+  // Removes the panel from the submitted frames. Any thread.
+  void HideMenuLayer();
+  // Open or close the menu from the UI (Close button) or debug hooks. Any thread; applied by
+  // the input thread like a button press.
+  void RequestMenuOpen(bool open);
+  // Video thread, every present. The panel is drawn at present time, so the menu only opens
+  // while presents keep coming (not while paused or stuck loading).
+  void NotifyMenuPresent();
+  // Increments whenever a recenter is applied. Video thread only, like LocateViews.
+  u64 GetRecenterGeneration() const { return m_recenter_generation; }
+  // Debug hook (Android adb): a pointer on the menu panel (u, v in 0..1 from the top left) the
+  // menu uses for a few seconds while no controller points at it; `click` presses there once.
+  struct MenuDebugPointer
+  {
+    bool active = false;
+    float u = 0.0f;
+    float v = 0.0f;
+    bool click = false;
+  };
+  void InjectMenuDebugPointer(float u, float v, bool click);
+  // Video thread: the current debug pointer; consumes its click.
+  MenuDebugPointer TakeMenuDebugPointer();
+
+  // ---- Live eye resolution (GFX_VR_RESOLUTION_SCALE) ----
+  // Video thread, at a present that will publish a frame: rebuilds the eye swapchains at the
+  // given scale, with the pacing thread parked meanwhile. Returns false and keeps the old
+  // swapchains (and scale) on failure.
+  bool ChangeEyeResolutionScale(float scale);
+  // Generation of the eye swapchains; increments with every recreation.
+  u64 GetSwapchainGeneration() const { return m_swapchain_generation.load(); }
+  // True once frames rendered into newer swapchains were submitted for long enough that the
+  // compositor can no longer reference swapchains of `generation`.
+  bool IsSwapchainGenerationRetired(u64 generation) const;
+
   // ---- Accessors ----
 
   XrInstance GetInstance() const { return m_instance; }
@@ -332,6 +414,10 @@ public:
   {
     return m_view_config_views;
   }
+  // The eye resolution scale (GFX_VR_RESOLUTION_SCALE) baked into GetViewConfigViews().
+  float GetEyeResolutionScale() const { return m_eye_resolution_scale; }
+  // Scale whose swapchain recreation failed; not retried until the setting changes. 0 = none.
+  float GetFailedEyeResolutionScale() const { return m_failed_eye_resolution_scale; }
 
   // Compute per-eye projection rows with head rotation and eye position baked in.
   //
@@ -482,6 +568,10 @@ private:
   void DestroyInputActions();
   void UpdateInputActions();
   void UpdateHaptics();
+  // In-game VR menu: open/close edges, release latch, select and scroll accumulation from the
+  // raw controller state. Input thread only.
+  void UpdateMenuGate(const std::array<Common::VR::OpenXRControllerState, 2>& controllers);
+  void ResetMenuGate();
   // Core of GetControllerAnchorViewPose without the per-frame cache: maps an aim pose
   // (reference space) into game view space. Frame/video-thread only.
   bool MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim, float units_per_meter,
@@ -500,9 +590,12 @@ private:
   std::array<XREyeView, 2> GetTrackingAdjustedEyeViews() const;
   void ResetInputActionsState();
   void HandleSessionStateChange(XrSessionState new_state);
-  // World-locked quad pose for the flat panel, in reference space. Captured lazily from the
-  // current head pose and invalidated on recenter.
+  // World-locked quad pose for the flat panel, in reference space. Anchored lazily to the
+  // current head pose (video thread) and re-anchored after a recenter.
   XrPosef GetFlatScreenPose() const;
+  // Same pose for the input thread, which must not capture the anchor (eye views belong to
+  // the video thread). Returns nullopt until the video thread has anchored the panel.
+  std::optional<XrPosef> GetAnchoredFlatScreenPose() const;
   void CaptureStartupDisplayRefreshRateFromExtension();
   void SetStartupDisplayRefreshRate(float refresh_rate_hz, std::string_view source);
 
@@ -630,6 +723,8 @@ private:
 
   struct PublishedXRFrame
   {
+    // Swapchain generation the content was rendered into.
+    u64 generation = 0;
     bool is_quad = false;
     std::array<XrCompositionLayerProjectionView, 2> views{};
     XrCompositionLayerFlags layer_flags = 0;
@@ -667,9 +762,62 @@ private:
   std::array<XrSpace, 2> m_aim_spaces{XR_NULL_HANDLE, XR_NULL_HANDLE};
   std::array<XrSpace, 2> m_grip_spaces{XR_NULL_HANDLE, XR_NULL_HANDLE};
   std::array<bool, 2> m_haptics_active{false, false};
+  // Until when (Common::Timer::NowUs) a one-shot UI pulse is playing; game rumble must not
+  // stop it early.
+  std::array<u64, 2> m_haptic_pulse_until_us{};
+
+  // In-game VR menu gate (input thread only, see UpdateMenuGate).
+  struct MenuGateState
+  {
+    Common::VR::OpenXRMenuInput input;
+    bool release_pending = false;
+    bool previous_toggle = false;
+    bool previous_close = false;
+    std::array<bool, 2> select_held{};
+    // A hand's select only counts after it was seen released while the menu is open, so a
+    // trigger held in game does not click the moment the panel appears.
+    std::array<bool, 2> select_armed{};
+  };
+  MenuGateState m_menu_gate;
+  enum class MenuRequest : int
+  {
+    None,
+    Open,
+    Close,
+  };
+  std::atomic<MenuRequest> m_menu_request{MenuRequest::None};
+  std::atomic<u64> m_menu_last_present_us{0};
+  // Panel layer shown by EndFrameDetached. m_menu_layer_serial is the open serial the layer may
+  // be shown for (0 = closed); SetMenuLayer calls for an older serial are dropped.
+  std::mutex m_menu_debug_pointer_mutex;
+  MenuDebugPointer m_menu_debug_pointer;
+  u64 m_menu_debug_pointer_time_us = 0;
+  std::mutex m_menu_layer_mutex;
+  bool m_menu_layer_visible = false;
+  uint32_t m_menu_layer_serial = 0;
+  XrCompositionLayerQuad m_menu_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  u64 m_recenter_generation = 0;  // Video thread only.
   std::array<XrPath, 2> m_logged_interaction_profiles{XR_NULL_PATH, XR_NULL_PATH};
 
   std::array<XrViewConfigurationView, 2> m_view_config_views{};
+  // The runtime's recommended sizes before the resolution scale.
+  std::array<XrViewConfigurationView, 2> m_recommended_view_config_views{};
+  float m_eye_resolution_scale = 1.0f;
+  float m_failed_eye_resolution_scale = 0.0f;  // Video thread only.
+  void ApplyEyeResolutionScale(float scale);
+
+  // Eye swapchain generations (see IsSwapchainGenerationRetired).
+  std::atomic<u64> m_swapchain_generation{0};
+  mutable std::mutex m_generation_mutex;
+  u64 m_last_submitted_generation = 0;
+  u32 m_end_frames_with_generation = 0;
+
+  // Parks the pacing thread between frames (outside the Wait/Begin/End protocol) so the video
+  // thread can swap swapchains. The thread keeps its last frame to re-submit afterwards.
+  bool PauseFrameThread();
+  void ResumeFrameThread();
+  std::atomic<bool> m_frame_thread_pause_requested{false};
+  bool m_frame_thread_paused = false;  // Guarded by m_publish_mutex.
   std::array<XrView, 2> m_views{};
   std::vector<XrEnvironmentBlendMode> m_supported_blend_modes;
   std::array<XREyeView, 2> m_eye_views{};
@@ -704,11 +852,13 @@ private:
   mutable XrVector3f m_home_position{0.f, 0.f, 0.f};
   std::atomic<bool> m_recenter_requested{false};
 
-  // Flat mono panel state. The quad pose is captured lazily and invalidated on recenter; the
-  // composition layer member gives stable storage across the xrEndFrame call that references it.
+  // Flat mono panel state. The anchor (head center + heading) is captured lazily on the video
+  // thread and invalidated on recenter; the pose is rebuilt from it with the live screen
+  // distance. Guarded by a mutex because the input thread raycasts against it. The composition
+  // layer member gives stable storage across the xrEndFrame call that references it.
   float m_flat_screen_aspect = 16.0f / 9.0f;
-  mutable bool m_flat_screen_pose_valid = false;
-  mutable XrPosef m_flat_screen_pose{{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
+  mutable std::mutex m_flat_screen_anchor_mutex;
+  mutable std::optional<PanelMath::YawAnchor> m_flat_screen_anchor;
   XrCompositionLayerQuad m_flat_quad_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
 };
 

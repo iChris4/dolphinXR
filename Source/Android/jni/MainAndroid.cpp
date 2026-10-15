@@ -301,6 +301,24 @@ JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_RequestOpenX
 #endif
 }
 
+// Debug hook for the in-game VR menu (EmulationActivity's adb receiver). action: 0 = close,
+// 1 = open, 2 = toggle, anything else = leave as is. With u/v in [0, 1] it also points at the
+// panel (and clicks) as if a controller did.
+JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_DebugVRMenu(
+    JNIEnv*, jclass, jint action, jfloat u, jfloat v, jboolean click)
+{
+#ifdef ENABLE_VR
+  if (!VR::g_openxr)
+    return;
+  if (action == 0 || action == 1)
+    VR::g_openxr->RequestMenuOpen(action == 1);
+  else if (action == 2)
+    VR::g_openxr->RequestMenuOpen(!Common::VR::OpenXRInputState::GetSnapshot().menu.open);
+  if (u >= 0.0f && v >= 0.0f)
+    VR::g_openxr->InjectMenuDebugPointer(u, v, click);
+#endif
+}
+
 JNIEXPORT jboolean JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_StartOpenXRControllerMapper(
     JNIEnv* env, jclass, jobject activity, jint controller_port, jint target_type)
 {

@@ -54,6 +54,9 @@ object QuestVrSettings {
 
     fun trackingModeSetting() = vrIntSetting("TrackingMode", 0)
 
+    // Controller button that opens the in-game VR menu (VRMenuToggleButton; 1 = left stick click).
+    fun menuToggleButtonSetting() = vrIntSetting("MenuToggleButton", 1)
+
     fun unitsPerMeterSetting(): AbstractFloatSetting = FloatSetting.GFX_VR_UNITS_PER_METER
 
     fun enableLeanBackAngleSetting() = vrBooleanSetting("EnableLeanBackAngle", true)
@@ -320,7 +323,8 @@ object QuestVrSettings {
             cpuLevel5HintSetting(),
             loadCustomShadersSetting(),
             referenceSpaceModeSetting(),
-            trackingModeSetting()
+            trackingModeSetting(),
+            menuToggleButtonSetting()
         )
 
         resettable.forEach { it.delete(settings) }

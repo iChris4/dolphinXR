@@ -61,7 +61,8 @@ public:
 
   Core::DeviceRemoval UpdateInput() override
   {
-    m_snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+    // Neutral while the in-game VR menu holds the controllers (game pads and hotkeys alike).
+    m_snapshot = Common::VR::OpenXRInputState::GetGameSnapshot();
     UpdateMotionState(Hand::Left);
     UpdateMotionState(Hand::Right);
     return Core::DeviceRemoval::Keep;

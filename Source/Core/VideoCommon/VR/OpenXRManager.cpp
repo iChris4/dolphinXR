@@ -943,36 +943,9 @@ bool OpenXRManager::EnumerateViewConfigurations()
   // Bake the user's resolution scale into the recommended sizes so every consumer
   // (swapchain creation, per-eye blit rects, GetEyeWidth/Height) stays consistent.
   // Read through Config::Get: this can run before g_ActiveConfig is populated.
-  const float configured_scale = Config::Get(Config::GFX_VR_RESOLUTION_SCALE);
-  const float resolution_scale =
-      std::isfinite(configured_scale) ?
-          std::clamp(configured_scale, Config::GFX_VR_RESOLUTION_SCALE_MIN,
-                     Config::GFX_VR_RESOLUTION_SCALE_MAX) :
-          1.0f;
-
-  for (uint32_t i = 0; i < view_count; ++i)
-  {
-    auto& view = m_view_config_views[i];
-    const uint32_t recommended_w = view.recommendedImageRectWidth;
-    const uint32_t recommended_h = view.recommendedImageRectHeight;
-
-    if (std::abs(resolution_scale - 1.0f) > 0.001f)
-    {
-      // Round to a multiple of 4 and clamp to the runtime's limits.
-      const auto scale_dim = [resolution_scale](uint32_t dim, uint32_t max_dim) {
-        const auto scaled = static_cast<uint32_t>(std::lround(dim * resolution_scale / 4.0)) * 4;
-        // std::clamp needs lo <= hi; a runtime maximum below 64 wins.
-        return std::clamp<uint32_t>(scaled, std::min<uint32_t>(64, max_dim), max_dim);
-      };
-      view.recommendedImageRectWidth = scale_dim(recommended_w, view.maxImageRectWidth);
-      view.recommendedImageRectHeight = scale_dim(recommended_h, view.maxImageRectHeight);
-    }
-
-    INFO_LOG_FMT(OPENXR, "OpenXR: Eye {} recommended {}x{} (max {}x{}), using {}x{} (scale {})", i,
-                 recommended_w, recommended_h, view.maxImageRectWidth, view.maxImageRectHeight,
-                 view.recommendedImageRectWidth, view.recommendedImageRectHeight,
-                 resolution_scale);
-  }
+  m_recommended_view_config_views = m_view_config_views;
+  m_failed_eye_resolution_scale = 0.0f;
+  ApplyEyeResolutionScale(Config::Get(Config::GFX_VR_RESOLUTION_SCALE));
 
   uint32_t blend_count = 0;
   xrEnumerateEnvironmentBlendModes(m_instance, m_system_id,
@@ -1015,6 +988,140 @@ void OpenXRManager::SetSession(XrSession session)
     WARN_LOG_FMT(OPENXR, "OpenXR: Controller input actions unavailable.");
     ResetInputActionsState();
   }
+}
+
+void OpenXRManager::ApplyEyeResolutionScale(float scale)
+{
+  const float resolution_scale =
+      std::isfinite(scale) ? std::clamp(scale, Config::GFX_VR_RESOLUTION_SCALE_MIN,
+                                        Config::GFX_VR_RESOLUTION_SCALE_MAX) :
+                             1.0f;
+  m_eye_resolution_scale = resolution_scale;
+
+  for (size_t i = 0; i < m_view_config_views.size(); ++i)
+  {
+    auto& view = m_view_config_views[i];
+    view = m_recommended_view_config_views[i];
+    const uint32_t recommended_w = view.recommendedImageRectWidth;
+    const uint32_t recommended_h = view.recommendedImageRectHeight;
+
+    if (std::abs(resolution_scale - 1.0f) > 0.001f)
+    {
+      // Round to a multiple of 4 and clamp to the runtime's limits.
+      const auto scale_dim = [resolution_scale](uint32_t dim, uint32_t max_dim) {
+        const auto scaled = static_cast<uint32_t>(std::lround(dim * resolution_scale / 4.0)) * 4;
+        // std::clamp needs lo <= hi; a runtime maximum below 64 wins.
+        return std::clamp<uint32_t>(scaled, std::min<uint32_t>(64, max_dim), max_dim);
+      };
+      view.recommendedImageRectWidth = scale_dim(recommended_w, view.maxImageRectWidth);
+      view.recommendedImageRectHeight = scale_dim(recommended_h, view.maxImageRectHeight);
+    }
+
+    INFO_LOG_FMT(OPENXR, "OpenXR: Eye {} recommended {}x{} (max {}x{}), using {}x{} (scale {})", i,
+                 recommended_w, recommended_h, view.maxImageRectWidth, view.maxImageRectHeight,
+                 view.recommendedImageRectWidth, view.recommendedImageRectHeight,
+                 resolution_scale);
+  }
+}
+
+bool OpenXRManager::ChangeEyeResolutionScale(float scale)
+{
+  if (!m_swapchain)
+    return false;
+
+  // Android finalizes frames on the submit worker, which still references the eye images.
+  if (!m_swapchain->WaitForPendingFrameFinalization("eye resolution change"))
+    return false;
+
+  const float old_scale = m_eye_resolution_scale;
+  const std::array<XrViewConfigurationView, 2> old_views = m_view_config_views;
+  ApplyEyeResolutionScale(scale);
+  bool size_changed = false;
+  for (size_t i = 0; i < old_views.size(); ++i)
+  {
+    size_changed |= old_views[i].recommendedImageRectWidth !=
+                        m_view_config_views[i].recommendedImageRectWidth ||
+                    old_views[i].recommendedImageRectHeight !=
+                        m_view_config_views[i].recommendedImageRectHeight;
+  }
+  if (!size_changed)
+    return true;
+
+  const u64 start_us = Common::Timer::NowUs();
+  const bool paused = PauseFrameThread();
+  const u64 generation = m_swapchain_generation.load();
+  // Never swap swapchains under a running pacing thread.
+  const bool recreated = (paused || !IsFrameThreadActive()) &&
+                         m_swapchain->RecreateEyeSwapchains(generation);
+  if (recreated)
+  {
+    m_swapchain_generation.store(generation + 1);
+    m_failed_eye_resolution_scale = 0.0f;
+  }
+  else
+  {
+    m_view_config_views = old_views;
+    m_eye_resolution_scale = old_scale;
+    m_failed_eye_resolution_scale = scale;
+  }
+  if (paused)
+    ResumeFrameThread();
+
+  if (recreated)
+  {
+    INFO_LOG_FMT(OPENXR, "XRResize: eye swapchains {}x{} -> {}x{} (scale {:.2f} -> {:.2f}), "
+                         "generation {} -> {}, {} us",
+                 old_views[0].recommendedImageRectWidth, old_views[0].recommendedImageRectHeight,
+                 m_view_config_views[0].recommendedImageRectWidth,
+                 m_view_config_views[0].recommendedImageRectHeight, old_scale, scale, generation,
+                 generation + 1, Common::Timer::NowUs() - start_us);
+  }
+  else
+  {
+    ERROR_LOG_FMT(OPENXR, "XRResize: could not recreate the eye swapchains at scale {:.2f}; "
+                          "keeping {:.2f}",
+                  scale, old_scale);
+  }
+  return recreated;
+}
+
+bool OpenXRManager::IsSwapchainGenerationRetired(u64 generation) const
+{
+  // Once a newer generation was submitted the pacing thread never re-submits older content.
+  // A few more frames cover compositors that still sample the last image of the old one.
+  constexpr u32 GRACE_END_FRAMES = 8;
+  std::lock_guard lock(m_generation_mutex);
+  return m_last_submitted_generation > generation &&
+         m_end_frames_with_generation >= GRACE_END_FRAMES;
+}
+
+bool OpenXRManager::PauseFrameThread()
+{
+  if (!IsFrameThreadActive())
+    return false;
+
+  std::unique_lock<std::mutex> lock(m_publish_mutex);
+  m_frame_thread_pause_requested.store(true, std::memory_order_release);
+  m_publish_cv.notify_all();
+  // The thread finishes its current frame first; a frame takes at most a few display periods.
+  const bool paused = m_publish_cv.wait_for(lock, std::chrono::milliseconds(250), [&] {
+    return m_frame_thread_paused || !m_frame_thread_running.load(std::memory_order_acquire);
+  });
+  if (!paused || !m_frame_thread_paused)
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: pacing thread did not pause in time.");
+    m_frame_thread_pause_requested.store(false, std::memory_order_release);
+    m_publish_cv.notify_all();
+    return false;
+  }
+  return true;
+}
+
+void OpenXRManager::ResumeFrameThread()
+{
+  std::lock_guard<std::mutex> lock(m_publish_mutex);
+  m_frame_thread_pause_requested.store(false, std::memory_order_release);
+  m_publish_cv.notify_all();
 }
 
 void OpenXRManager::SetSwapchain(IOpenXRSwapchain* swapchain)
@@ -1178,8 +1285,10 @@ void OpenXRManager::DestroySession()
   m_home_set = false;
   m_home_position = {0.f, 0.f, 0.f};
   m_recenter_requested.store(false, std::memory_order_release);
-  m_flat_screen_pose_valid = false;
-  m_flat_screen_pose = {{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
+  {
+    std::lock_guard lock(m_flat_screen_anchor_mutex);
+    m_flat_screen_anchor.reset();
+  }
   m_flat_quad_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
   m_controller_anchor_cache_valid = {false, false};
 }
@@ -1199,6 +1308,7 @@ void OpenXRManager::PublishFrame(const std::array<XrCompositionLayerProjectionVi
   }
 
   std::lock_guard<std::mutex> lock(m_publish_mutex);
+  m_published_frame.generation = m_swapchain_generation.load();
   m_published_frame.is_quad = false;
   m_published_frame.views = views;
   m_published_frame.layer_flags = layer_flags;
@@ -1209,6 +1319,7 @@ void OpenXRManager::PublishFrame(const std::array<XrCompositionLayerProjectionVi
 void OpenXRManager::PublishQuadFrame(const XrCompositionLayerQuad& quad)
 {
   std::lock_guard<std::mutex> lock(m_publish_mutex);
+  m_published_frame.generation = m_swapchain_generation.load();
   m_published_frame.is_quad = true;
   m_published_frame.quad = quad;
   m_publish_serial++;
@@ -1268,6 +1379,20 @@ void OpenXRManager::FrameThreadLoop()
 
   while (!m_frame_thread_should_exit.load(std::memory_order_acquire))
   {
+    // Parked by PauseFrameThread (eye swapchain recreation): between frames, keeping last_frame.
+    if (m_frame_thread_pause_requested.load(std::memory_order_acquire))
+    {
+      std::unique_lock<std::mutex> lock(m_publish_mutex);
+      m_frame_thread_paused = true;
+      m_publish_cv.notify_all();
+      m_publish_cv.wait(lock, [&] {
+        return !m_frame_thread_pause_requested.load(std::memory_order_acquire) ||
+               m_frame_thread_should_exit.load(std::memory_order_acquire);
+      });
+      m_frame_thread_paused = false;
+      continue;
+    }
+
     const bool eager_heartbeat = g_ActiveConfig.vr_eager_heartbeat;
     const u64 cycle_start_us = Common::Timer::NowUs();
     if (!PollEvents())
@@ -1286,10 +1411,13 @@ void OpenXRManager::FrameThreadLoop()
       std::unique_lock<std::mutex> lock(m_publish_mutex);
       m_publish_cv.wait_for(lock, std::chrono::milliseconds(150), [&] {
         return m_publish_serial != consumed_serial ||
-               m_frame_thread_should_exit.load(std::memory_order_acquire);
+               m_frame_thread_should_exit.load(std::memory_order_acquire) ||
+               m_frame_thread_pause_requested.load(std::memory_order_acquire);
       });
       if (m_frame_thread_should_exit.load(std::memory_order_acquire))
         break;
+      if (m_frame_thread_pause_requested.load(std::memory_order_acquire))
+        continue;
     }
 
     const u64 t0 = Common::Timer::NowUs();
@@ -1333,7 +1461,8 @@ void OpenXRManager::FrameThreadLoop()
       {
         m_publish_cv.wait_for(lock, std::chrono::nanoseconds(budget_ns), [&] {
           return m_publish_serial != consumed_serial ||
-                 m_frame_thread_should_exit.load(std::memory_order_acquire);
+                 m_frame_thread_should_exit.load(std::memory_order_acquire) ||
+                 m_frame_thread_pause_requested.load(std::memory_order_acquire);
         });
       }
       if (m_publish_serial != consumed_serial)
@@ -1403,7 +1532,7 @@ void OpenXRManager::FrameThreadLoop()
     }
 
     EndFrameDetached(m_frame_state.predictedDisplayTime, GetActiveBlendMode(), submit_content,
-                     layers, !queue_lock.owns_lock());
+                     layers, !queue_lock.owns_lock(), last_frame.generation);
     if (queue_lock.owns_lock())
       queue_lock.unlock();
     const u64 t4 = Common::Timer::NowUs();
@@ -1957,7 +2086,211 @@ void OpenXRManager::DestroyInputActions()
 void OpenXRManager::ResetInputActionsState()
 {
   m_haptics_active = {false, false};
+  m_haptic_pulse_until_us = {};
+  ResetMenuGate();
   Common::VR::OpenXRInputState::Reset();
+}
+
+void OpenXRManager::ResetMenuGate()
+{
+  if (m_menu_gate.input.open)
+    HideMenuLayer();
+  // Keep the open serial counting up across resets so a stale SetMenuLayer can never match.
+  const uint32_t open_serial = m_menu_gate.input.open_serial;
+  m_menu_gate = {};
+  m_menu_gate.input.open_serial = open_serial;
+}
+
+void OpenXRManager::UpdateMenuGate(
+    const std::array<Common::VR::OpenXRControllerState, 2>& controllers)
+{
+  MenuGateState& gate = m_menu_gate;
+  Common::VR::OpenXRMenuInput& menu = gate.input;
+
+  bool toggle = false;
+  switch (Config::Get(Config::GFX_VR_MENU_TOGGLE_BUTTON))
+  {
+  case VRMenuToggleButton::LeftThumbstick:
+    toggle = controllers[0].thumbstick_button;
+    break;
+  case VRMenuToggleButton::RightThumbstick:
+    toggle = controllers[1].thumbstick_button;
+    break;
+  case VRMenuToggleButton::LeftMenu:
+    toggle = controllers[0].menu_button;
+    break;
+  case VRMenuToggleButton::Disabled:
+  default:
+    break;
+  }
+  // The left menu button also closes the menu (the right one is reserved by most runtimes).
+  const bool close = controllers[0].menu_button;
+  const bool toggle_pressed = toggle && !gate.previous_toggle;
+  const bool close_pressed = close && !gate.previous_close;
+  gate.previous_toggle = toggle;
+  gate.previous_close = close;
+
+  const MenuRequest request = m_menu_request.exchange(MenuRequest::None);
+  bool open = menu.open;
+  if (!open)
+  {
+    // The panel is drawn at present time: refuse to open over a paused or stalled game, it
+    // would never appear.
+    constexpr u64 present_timeout_us = 500'000;
+    const u64 last_present_us = m_menu_last_present_us.load(std::memory_order_acquire);
+    const bool presents_alive =
+        last_present_us != 0 && Common::Timer::NowUs() - last_present_us < present_timeout_us;
+    if ((toggle_pressed || request == MenuRequest::Open) && presents_alive)
+      open = true;
+  }
+  else if (toggle_pressed || close_pressed || request == MenuRequest::Close)
+  {
+    open = false;
+  }
+
+  const auto select_pressed = [&](size_t hand) {
+    const Common::VR::OpenXRControllerState& controller = controllers[hand];
+    // Hysteresis keeps a half-pulled trigger from chattering.
+    const float threshold = gate.select_held[hand] ? 0.45f : 0.6f;
+    return controller.connected &&
+           (controller.trigger_value > threshold || controller.primary_button);
+  };
+
+  if (open != menu.open)
+  {
+    menu.open = open;
+    if (open)
+    {
+      ++menu.open_serial;
+      for (size_t hand = 0; hand < controllers.size(); ++hand)
+      {
+        gate.select_held[hand] = false;
+        gate.select_armed[hand] = !select_pressed(hand);
+      }
+      std::lock_guard lock(m_menu_layer_mutex);
+      m_menu_layer_serial = menu.open_serial;
+      m_menu_layer_visible = false;
+      INFO_LOG_FMT(OPENXR, "VRMenu: opened (serial {})", menu.open_serial);
+    }
+    else
+    {
+      // Hide right away rather than waiting for the video thread, which may be stalled.
+      HideMenuLayer();
+      for (size_t hand = 0; hand < controllers.size(); ++hand)
+      {
+        if (gate.select_held[hand])
+          ++menu.select_releases[hand];
+        gate.select_held[hand] = false;
+      }
+      INFO_LOG_FMT(OPENXR, "VRMenu: closed");
+    }
+    // Whatever opened or closed the menu is still held; keep it from the game until released.
+    gate.release_pending = true;
+  }
+
+  if (menu.open)
+  {
+    const double period_s =
+        std::clamp(static_cast<double>(m_frame_state.predictedDisplayPeriod) / 1e9, 0.0, 0.1);
+    for (size_t hand = 0; hand < controllers.size(); ++hand)
+    {
+      const bool pressed = select_pressed(hand);
+      if (!gate.select_armed[hand])
+      {
+        gate.select_armed[hand] = !pressed;
+      }
+      else if (pressed != gate.select_held[hand])
+      {
+        gate.select_held[hand] = pressed;
+        if (pressed)
+          ++menu.select_presses[hand];
+        else
+          ++menu.select_releases[hand];
+      }
+
+      // Scroll: thumbstick Y past a dead zone, up to 8 wheel steps per second.
+      const float y = controllers[hand].thumbstick_y;
+      const float magnitude = std::max(0.0f, (std::abs(y) - 0.25f) / 0.75f);
+      if (magnitude > 0.0f)
+      {
+        menu.wheel_steps[hand] +=
+            std::copysign(magnitude, y) * 8.0f * static_cast<float>(period_s);
+      }
+    }
+  }
+  else if (gate.release_pending)
+  {
+    bool any_held = false;
+    for (const Common::VR::OpenXRControllerState& controller : controllers)
+    {
+      any_held |= controller.primary_button || controller.secondary_button ||
+                  controller.menu_button || controller.thumbstick_button ||
+                  controller.trigger_button || controller.squeeze_button ||
+                  controller.trigger_value > 0.2f || controller.squeeze_value > 0.2f;
+    }
+    gate.release_pending = any_held;
+  }
+
+  menu.input_withheld = menu.open || gate.release_pending;
+}
+
+void OpenXRManager::SetMenuLayer(const MenuLayerDesc& layer, uint32_t open_serial)
+{
+  std::lock_guard lock(m_menu_layer_mutex);
+  if (open_serial == 0 || open_serial != m_menu_layer_serial)
+    return;
+
+  m_menu_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+  // The panel is rendered with premultiplied alpha (see ImGuiRenderer::TargetDesc::write_alpha).
+  m_menu_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+  m_menu_layer.space = m_reference_space;
+  m_menu_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+  m_menu_layer.pose = layer.pose;
+  m_menu_layer.size = layer.size;
+  m_menu_layer.subImage.swapchain = layer.swapchain;
+  m_menu_layer.subImage.imageArrayIndex = 0;
+  m_menu_layer.subImage.imageRect.offset = {0, 0};
+  m_menu_layer.subImage.imageRect.extent = layer.image_size;
+  m_menu_layer_visible = layer.swapchain != XR_NULL_HANDLE;
+}
+
+void OpenXRManager::HideMenuLayer()
+{
+  std::lock_guard lock(m_menu_layer_mutex);
+  m_menu_layer_visible = false;
+  m_menu_layer_serial = 0;
+}
+
+void OpenXRManager::RequestMenuOpen(bool open)
+{
+  m_menu_request.store(open ? MenuRequest::Open : MenuRequest::Close, std::memory_order_release);
+}
+
+void OpenXRManager::InjectMenuDebugPointer(float u, float v, bool click)
+{
+  std::lock_guard lock(m_menu_debug_pointer_mutex);
+  m_menu_debug_pointer = {true, std::clamp(u, 0.0f, 1.0f), std::clamp(v, 0.0f, 1.0f), click};
+  m_menu_debug_pointer_time_us = Common::Timer::NowUs();
+}
+
+OpenXRManager::MenuDebugPointer OpenXRManager::TakeMenuDebugPointer()
+{
+  constexpr u64 DEBUG_POINTER_DURATION_US = 5'000'000;
+  std::lock_guard lock(m_menu_debug_pointer_mutex);
+  if (!m_menu_debug_pointer.active ||
+      Common::Timer::NowUs() - m_menu_debug_pointer_time_us > DEBUG_POINTER_DURATION_US)
+  {
+    m_menu_debug_pointer.active = false;
+    return {};
+  }
+  const MenuDebugPointer pointer = m_menu_debug_pointer;
+  m_menu_debug_pointer.click = false;
+  return pointer;
+}
+
+void OpenXRManager::NotifyMenuPresent()
+{
+  m_menu_last_present_us.store(Common::Timer::NowUs(), std::memory_order_release);
 }
 
 void OpenXRManager::UpdateHaptics()
@@ -1965,7 +2298,8 @@ void OpenXRManager::UpdateHaptics()
   if (!m_session_running || m_session == XR_NULL_HANDLE || m_action_haptic == XR_NULL_HANDLE)
     return;
 
-  const auto haptics = Common::VR::OpenXRInputState::GetHaptics();
+  const auto haptics = Common::VR::OpenXRInputState::TakeHaptics();
+  const u64 now_us = Common::Timer::NowUs();
 
   // Re-send short pulses while active to approximate continuous rumble.
   constexpr XrDuration vibration_duration_ns = 50'000'000;
@@ -1976,11 +2310,30 @@ void OpenXRManager::UpdateHaptics()
     if (hand_path == XR_NULL_PATH)
       continue;
 
-    const float amplitude = std::clamp(haptics.amplitude[hand], 0.0f, 1.0f);
+    // Game rumble pauses while the in-game VR menu is open.
+    const float amplitude =
+        m_menu_gate.input.open ? 0.0f : std::clamp(haptics.amplitude[hand], 0.0f, 1.0f);
 
     XrHapticActionInfo action_info{XR_TYPE_HAPTIC_ACTION_INFO};
     action_info.action = m_action_haptic;
     action_info.subactionPath = hand_path;
+
+    // One-shot UI pulse (VR menu click feedback).
+    if (haptics.pulse_amplitude[hand] > 0.001f && haptics.pulse_duration_ns[hand] > 0)
+    {
+      XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
+      vibration.amplitude = haptics.pulse_amplitude[hand];
+      vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
+      vibration.duration = haptics.pulse_duration_ns[hand];
+      xrApplyHapticFeedback(
+          m_session, &action_info, reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
+      m_haptics_active[hand] = true;
+      m_haptic_pulse_until_us[hand] =
+          now_us + static_cast<u64>(haptics.pulse_duration_ns[hand] / 1000);
+      continue;
+    }
+    if (amplitude <= 0.001f && now_us < m_haptic_pulse_until_us[hand])
+      continue;
 
     if (amplitude > 0.001f)
     {
@@ -2193,8 +2546,8 @@ void OpenXRManager::UpdateInputActions()
     // Controller Anchor, which must match the rendered frame.
     Common::VR::OpenXRPoseState input_aim;
     locate_space_state(m_aim_spaces[hand], input_time, &input_aim, nullptr);
-    ComputeVirtualScreenHit(input_aim.valid ? input_aim : controller.aim_pose,
-                            &controller.screen_hit);
+    controller.pointer_pose = input_aim.valid ? input_aim : controller.aim_pose;
+    ComputeVirtualScreenHit(controller.pointer_pose, &controller.screen_hit);
 
     controller.trigger_button = trigger_click || controller.trigger_value > 0.5f;
     controller.squeeze_button =
@@ -2234,9 +2587,11 @@ void OpenXRManager::UpdateInputActions()
   for (size_t hand = 0; hand < 2; ++hand)
     profile_strings[hand] = PathToString(m_instance, m_logged_interaction_profiles[hand]);
 
+  UpdateMenuGate(controllers);
+
   Common::VR::OpenXRInputState::SetControllers(controllers, true, head_pose,
                                                profile_strings, m_session_focused,
-                                               input_time);
+                                               input_time, m_menu_gate.input);
 
   UpdateHaptics();
 }
@@ -2624,7 +2979,8 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
                                      XrEnvironmentBlendMode environment_blend_mode,
                                      bool should_render,
                                      const std::vector<XrCompositionLayerBaseHeader*>& layers,
-                                     bool lock_graphics_queue)
+                                     bool lock_graphics_queue,
+                                     std::optional<u64> content_generation)
 {
   // Keep the FB passthrough feed in sync with the Passthrough setting. Gated on a
   // registered swapchain so the controller-binding utility session never starts it.
@@ -2632,8 +2988,19 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
 
   // The passthrough layer composites first (behind the projection layer), replacing the
   // black void with the camera feed wherever the projection layer's alpha is 0.
+  // The in-game VR menu panel composites last, over the game. Copied under its lock: this runs
+  // on the pacing thread, the video thread or the Android submit worker.
+  XrCompositionLayerQuad menu_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  bool show_menu_layer = false;
+  {
+    std::lock_guard lock(m_menu_layer_mutex);
+    show_menu_layer = m_menu_layer_visible;
+    if (show_menu_layer)
+      menu_layer = m_menu_layer;
+  }
+
   std::vector<XrCompositionLayerBaseHeader*> submit_layers;
-  submit_layers.reserve(layers.size() + 1);
+  submit_layers.reserve(layers.size() + 2);
   if (m_fb_passthrough_running && m_fb_passthrough_layer != XR_NULL_HANDLE)
   {
     m_fb_passthrough_composition_layer = {XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
@@ -2644,6 +3011,8 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
         reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_fb_passthrough_composition_layer));
   }
   submit_layers.insert(submit_layers.end(), layers.begin(), layers.end());
+  if (show_menu_layer)
+    submit_layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&menu_layer));
 
   XrFrameEndInfo end_info{XR_TYPE_FRAME_END_INFO};
   end_info.displayTime = display_time;
@@ -2662,6 +3031,22 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
     if (lock_graphics_queue && m_swapchain)
       queue_lock = m_swapchain->AcquireGraphicsQueueLock();
     XR_CHECK(xrEndFrame(m_session, &end_info));
+  }
+
+  // Track which swapchain generation the compositor last received (IsSwapchainGenerationRetired).
+  if (should_render && !layers.empty())
+  {
+    const u64 generation = content_generation.value_or(m_swapchain_generation.load());
+    std::lock_guard lock(m_generation_mutex);
+    if (generation > m_last_submitted_generation)
+    {
+      m_last_submitted_generation = generation;
+      m_end_frames_with_generation = 0;
+    }
+    else if (generation == m_last_submitted_generation)
+    {
+      ++m_end_frames_with_generation;
+    }
   }
   return true;
 }
@@ -2752,8 +3137,12 @@ bool OpenXRManager::LocateViews()
     m_home_position.y = 0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y);
     m_home_position.z = 0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z);
     m_home_set = true;
+    ++m_recenter_generation;
     // Re-place the flat panel in front of the newly recentered head pose.
-    m_flat_screen_pose_valid = false;
+    {
+      std::lock_guard lock(m_flat_screen_anchor_mutex);
+      m_flat_screen_anchor.reset();
+    }
     INFO_LOG_FMT(OPENXR, "OpenXR: Recentered home position to ({:.4f},{:.4f},{:.4f})",
                  m_home_position.x, m_home_position.y, m_home_position.z);
   }
@@ -2770,31 +3159,28 @@ XrPosef OpenXRManager::GetFlatScreenPose() const
 {
   const float distance = g_ActiveConfig.vr_screen_distance;
 
-  // Fall back to a world-origin panel until a real head pose is available. A zero orientation
-  // means xrLocateViews has not produced a valid pose yet; don't cache that.
-  const XrQuaternionf& q = m_eye_views[0].pose.orientation;
-  const bool have_pose = (q.x != 0.f || q.y != 0.f || q.z != 0.f || q.w != 0.f);
-  if (!have_pose)
-    return {{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, -distance}};
-
-  if (m_flat_screen_pose_valid)
-    return m_flat_screen_pose;
-
   // Head center and yaw-only heading, so the panel sits in front of the user, upright and
-  // level (no pitch/roll), matching PPSSPP's flat-screen placement.
-  const XrVector3f& p0 = m_eye_views[0].pose.position;
-  const XrVector3f& p1 = m_eye_views[1].pose.position;
-  const XrVector3f center{0.5f * (p0.x + p1.x), 0.5f * (p0.y + p1.y), 0.5f * (p0.z + p1.z)};
-  const float yaw =
-      std::atan2(2.f * (q.x * q.z + q.w * q.y), 1.f - 2.f * (q.x * q.x + q.y * q.y));
+  // level (no pitch/roll), matching PPSSPP's flat-screen placement. Only the anchor is cached:
+  // the distance is applied on every call so the setting changes live.
+  std::lock_guard lock(m_flat_screen_anchor_mutex);
+  if (!m_flat_screen_anchor)
+  {
+    // Fall back to a world-origin panel until xrLocateViews produced a valid pose; don't
+    // anchor to that.
+    m_flat_screen_anchor =
+        PanelMath::HeadYawAnchor(m_eye_views[0].pose, m_eye_views[1].pose);
+    if (!m_flat_screen_anchor)
+      return {{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, -distance}};
+  }
+  return PanelMath::PoseInFront(*m_flat_screen_anchor, distance);
+}
 
-  XrPosef pose{};
-  pose.orientation = {0.f, std::sin(yaw * 0.5f), 0.f, std::cos(yaw * 0.5f)};
-  pose.position = {center.x - std::sin(yaw) * distance, center.y,
-                   center.z - std::cos(yaw) * distance};
-  m_flat_screen_pose = pose;
-  m_flat_screen_pose_valid = true;
-  return m_flat_screen_pose;
+std::optional<XrPosef> OpenXRManager::GetAnchoredFlatScreenPose() const
+{
+  std::lock_guard lock(m_flat_screen_anchor_mutex);
+  if (!m_flat_screen_anchor)
+    return std::nullopt;
+  return PanelMath::PoseInFront(*m_flat_screen_anchor, g_ActiveConfig.vr_screen_distance);
 }
 
 bool OpenXRManager::SubmitFlatQuadFrame(XrSwapchain swapchain, uint32_t width, uint32_t height)
@@ -2827,6 +3213,55 @@ bool OpenXRManager::SubmitFlatQuadFrame(XrSwapchain swapchain, uint32_t width, u
   const std::vector<XrCompositionLayerBaseHeader*> layers = {
       reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_flat_quad_layer)};
   return EndFrame(layers);
+}
+
+bool IOpenXRSwapchain::AcquireExtraSwapchainImage(XrSwapchain swapchain, uint32_t* out_index,
+                                                  const char* what)
+{
+  if (swapchain == XR_NULL_HANDLE)
+    return false;
+
+  XrSwapchainImageAcquireInfo acquire_info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+  XrResult result = XR_SUCCESS;
+  {
+    auto queue_lock = AcquireGraphicsQueueLock();
+    result = xrAcquireSwapchainImage(swapchain, &acquire_info, out_index);
+  }
+  if (XR_FAILED(result))
+  {
+    ERROR_LOG_FMT(OPENXR, "OpenXR: xrAcquireSwapchainImage failed for {} ({}).", what,
+                  static_cast<int>(result));
+    return false;
+  }
+
+  XrSwapchainImageWaitInfo wait_info{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+  wait_info.timeout = XR_INFINITE_DURATION;
+  result = xrWaitSwapchainImage(swapchain, &wait_info);
+  if (XR_FAILED(result))
+  {
+    ERROR_LOG_FMT(OPENXR, "OpenXR: xrWaitSwapchainImage failed for {} ({}).", what,
+                  static_cast<int>(result));
+    ReleaseExtraSwapchainImage(swapchain, what);
+    return false;
+  }
+  return true;
+}
+
+bool IOpenXRSwapchain::ReleaseExtraSwapchainImage(XrSwapchain swapchain, const char* what)
+{
+  XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+  XrResult result = XR_SUCCESS;
+  {
+    auto queue_lock = AcquireGraphicsQueueLock();
+    result = xrReleaseSwapchainImage(swapchain, &release_info);
+  }
+  if (XR_FAILED(result))
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: xrReleaseSwapchainImage failed for {} ({}).", what,
+                 static_cast<int>(result));
+    return false;
+  }
+  return true;
 }
 
 bool IOpenXRSwapchain::SubmitFlatFrame()
@@ -3260,41 +3695,23 @@ void OpenXRManager::ComputeVirtualScreenHit(const Common::VR::OpenXRPoseState& a
   if (g_ActiveConfig.vr_flat_screen)
   {
     // Flat panel: a world-locked quad in reference space (meters), yaw-only orientation.
-    // Bring the aim ray into quad-local space (quad plane is z=0, +z toward the viewer).
-    const XrPosef quad = GetFlatScreenPose();
-    const float yaw = 2.0f * std::atan2(quad.orientation.y, quad.orientation.w);
-    const float cy = std::cos(yaw), sy = std::sin(yaw);
-    const auto to_quad_local = [&](float x, float y, float z) -> std::array<float, 3> {
-      // Inverse yaw rotation about Y.
-      return {cy * x - sy * z, y, sy * x + cy * z};
-    };
-
-    const std::array<float, 3> p = to_quad_local(aim.position[0] - quad.position.x,
-                                                 aim.position[1] - quad.position.y,
-                                                 aim.position[2] - quad.position.z);
-    // Aim forward = orientation * (0,0,-1).
-    const float qx = aim.orientation[0], qy = aim.orientation[1];
-    const float qz = aim.orientation[2], qw = aim.orientation[3];
-    const float fx = -(2.0f * (qx * qz + qw * qy));
-    const float fy = -(2.0f * (qy * qz - qw * qx));
-    const float fz = -(1.0f - 2.0f * (qx * qx + qy * qy));
-    const std::array<float, 3> d = to_quad_local(fx, fy, fz);
-
-    if (std::abs(d[2]) < 1e-6f)
+    const std::optional<XrPosef> quad = GetAnchoredFlatScreenPose();
+    if (!quad)
       return;
-    const float t = -p[2] / d[2];
-    if (t <= 0.0f)
+    const std::optional<PanelMath::QuadHit> hit =
+        PanelMath::IntersectRayQuad(PanelMath::ToXrPose(aim), *quad);
+    if (!hit)
       return;
 
     const float half_h = std::max(g_ActiveConfig.vr_screen_size * 0.5f, 1e-4f);
     const float aspect = m_flat_screen_aspect > 0.0f ? m_flat_screen_aspect : (16.0f / 9.0f);
     const float half_w = half_h * aspect;
     out_hit->valid = true;
-    out_hit->u = (p[0] + t * d[0]) / half_w;
-    out_hit->v = (p[1] + t * d[1]) / half_h;
+    out_hit->u = hit->x / half_w;
+    out_hit->v = hit->y / half_h;
     // Perpendicular distance, not ray length: rotating the controller must not change
     // the emulated sensor-bar distance (ray length grows toward the screen corners).
-    out_hit->distance_m = p[2];
+    out_hit->distance_m = hit->plane_distance;
     return;
   }
 

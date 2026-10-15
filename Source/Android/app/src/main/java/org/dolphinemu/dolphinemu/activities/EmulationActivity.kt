@@ -201,10 +201,30 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
     //   adb shell am broadcast -a org.dolphinemu.dolphinemu.SAVESTATE --es action save --ei slot 1
     //   adb shell am broadcast -a org.dolphinemu.dolphinemu.SAVESTATE --es action load --ei slot 1
     //   adb shell am broadcast -a org.dolphinemu.dolphinemu.SAVESTATE --es action save --es path /sdcard/x.sav
+    //
+    // Also drives the in-game VR menu, which otherwise needs the headset on:
+    //   adb shell am broadcast -a org.dolphinemu.dolphinemu.VRMENU --es action toggle
+    //   adb shell am broadcast -a org.dolphinemu.dolphinemu.VRMENU --ef u 0.5 --ef v 0.1 --ez click true
+    // (action: open, close or toggle; u/v: panel position from the top left, 0..1).
     private val savestateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (!NativeLibrary.IsRunning())
                 return
+            if (intent.action == ACTION_VRMENU) {
+                val action = when (intent.getStringExtra("action")) {
+                    "close" -> 0
+                    "open" -> 1
+                    "toggle" -> 2
+                    else -> -1
+                }
+                NativeLibrary.DebugVRMenu(
+                    action,
+                    intent.getFloatExtra("u", -1f),
+                    intent.getFloatExtra("v", -1f),
+                    intent.getBooleanExtra("click", false)
+                )
+                return
+            }
             val path = intent.getStringExtra("path")
             val slot = intent.getIntExtra("slot", 1).coerceIn(0, 99)
             when (intent.getStringExtra("action")) {
@@ -225,7 +245,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
             ContextCompat.registerReceiver(
                 this,
                 savestateReceiver,
-                IntentFilter(ACTION_SAVESTATE),
+                IntentFilter(ACTION_SAVESTATE).apply { addAction(ACTION_VRMENU) },
                 "android.permission.DUMP",
                 null,
                 ContextCompat.RECEIVER_EXPORTED
@@ -1106,6 +1126,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
 
         const val EXTRA_SELECTED_GAMES = "SelectedGames"
         private const val ACTION_SAVESTATE = "org.dolphinemu.dolphinemu.SAVESTATE"
+        private const val ACTION_VRMENU = "org.dolphinemu.dolphinemu.VRMENU"
         const val EXTRA_RIIVOLUTION = "Riivolution"
         const val EXTRA_SYSTEM_MENU = "SystemMenu"
         const val EXTRA_USER_PAUSED_EMULATION = "sUserPausedEmulation"

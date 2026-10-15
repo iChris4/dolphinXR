@@ -148,6 +148,17 @@ public:
   XrSwapchain GetFlatSwapchain() const override { return m_eye_swapchains[0].swapchain; }
   bool SubmitFlatFrame() override;
 
+  // In-game VR menu panel. The release submits the menu draws synchronously, independent of
+  // the eye images' (possibly asynchronous) frame finalization.
+  bool CreateMenuSwapchain(uint32_t width, uint32_t height) override;
+  XrSwapchain GetMenuSwapchain() const override { return m_menu_swapchain.swapchain; }
+  AbstractFramebuffer* AcquireMenuFramebuffer() override;
+  bool ReleaseMenuTexture() override;
+
+  // Live eye resolution change.
+  bool RecreateEyeSwapchains(u64 retiring_generation) override;
+  void CollectRetiredSwapchains(bool force) override;
+
 private:
   struct PendingXRFrame
   {
@@ -171,8 +182,16 @@ private:
 
   // Allocates m_eye_swapchains and wraps images as VKTexture / VKFramebuffer.
   bool CreateSwapchains();
+  // The layered (multiview) and per-eye swapchains at the current view configuration size.
+  // Leaves whatever it created in place on failure.
+  bool CreateSwapchainSet(int64_t swapchain_format);
   bool CreateLayeredSwapchain(int64_t swapchain_format);
   bool CreateEyeSwapchains(int64_t swapchain_format);
+  // Creates one arraySize=1 color swapchain and wraps its images; with `foveate`, asks for a
+  // fragment density map and reports whether one was attached in `out_foveated`.
+  static bool CreateColorSwapchain(int64_t swapchain_format, uint32_t width, uint32_t height,
+                                   bool foveate, const char* name, XRVkEyeSwapchain* sc,
+                                   bool* out_foveated);
 
   // True when swapchains should be created with a fragment density map (VR foveation).
   static bool ShouldUseFoveation();
@@ -189,6 +208,23 @@ private:
 
   std::array<XRVkEyeSwapchain, 2> m_eye_swapchains{};
   XRVkLayeredSwapchain m_layered_swapchain{};
+  int64_t m_swapchain_format = 0;
+
+  XRVkEyeSwapchain m_menu_swapchain{};
+  uint32_t m_menu_image_index = 0;
+  bool m_menu_image_acquired = false;
+
+  // Eye swapchains replaced by a resolution change, kept until the compositor (swapchain
+  // generation) and the GPU (fence) are done with them.
+  struct RetiredSwapchains
+  {
+    u64 generation = 0;
+    u64 fence_counter = 0;
+    std::array<XRVkEyeSwapchain, 2> eyes;
+    XRVkLayeredSwapchain layered;
+  };
+  void DestroyRetiredSwapchains(RetiredSwapchains& retired);
+  std::vector<RetiredSwapchains> m_retired_swapchains;
 
   // Image index selected by xrAcquireSwapchainImage for the current frame.
   std::array<uint32_t, 2> m_acquired_image_index{0, 0};

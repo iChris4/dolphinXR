@@ -127,6 +127,8 @@ add_library(videocommon
   NetPlayGolfUI.h
   OnScreenDisplay.cpp
   OnScreenDisplay.h
+  ImGuiRenderer.cpp
+  ImGuiRenderer.h
   OnScreenUI.cpp
   OnScreenUI.h
   OnScreenUIKeyMap.h
@@ -314,6 +316,18 @@ if(ENABLE_VR)
   target_sources(videocommon PRIVATE
     VR/OpenXRManager.cpp
     VR/OpenXRManager.h
+    VR/VRMenu.cpp
+    VR/VRMenu.h
+    VR/VRMenuActions.cpp
+    VR/VRMenuActions.h
+    VR/VRMenuTabAudio.cpp
+    VR/VRMenuTabControls.cpp
+    VR/VRMenuTabs.h
+    VR/VRMenuTabSavestates.cpp
+    VR/VRMenuTabVR.cpp
+    VR/VRMenuWidgets.cpp
+    VR/VRMenuWidgets.h
+    VR/VRPanelMath.h
   )
   # Expose the OpenXR headers to all targets that depend on videocommon.
   target_include_directories(videocommon PUBLIC "${CMAKE_SOURCE_DIR}/Externals/OpenXR/include")

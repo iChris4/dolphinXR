@@ -19,6 +19,12 @@
 class AbstractTexture;
 struct SurfaceInfo;
 enum class DolphinKey;
+#ifdef ENABLE_VR
+namespace VR
+{
+class VRMenu;
+}
+#endif
 
 namespace VideoCommon
 {
@@ -227,6 +233,13 @@ private:
   u32 m_openxr_timing_frames = 0;
   double m_openxr_timing_wait_ms = 0.0;
   double m_openxr_timing_locate_ms = 0.0;
+  // In-game VR settings menu, created with the first VR present.
+  std::unique_ptr<VR::VRMenu> m_vr_menu;
+  // Live eye resolution changes (GFX_VR_RESOLUTION_SCALE): applied once the value has been
+  // stable for a moment, since the desktop slider writes every step while it is dragged.
+  void UpdateEyeResolutionScale();
+  float m_pending_eye_resolution_scale = 0.0f;
+  u64 m_pending_eye_resolution_since_us = 0;
 #endif
 };
 

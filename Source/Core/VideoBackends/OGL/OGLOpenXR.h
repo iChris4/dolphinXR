@@ -90,6 +90,16 @@ public:
   // Flat mono panel path reuses eye swapchain #0; the base class handles acquire/release/submit.
   XrSwapchain GetFlatSwapchain() const override { return m_eye_swapchains[0].swapchain; }
 
+  // In-game VR menu panel.
+  bool CreateMenuSwapchain(uint32_t width, uint32_t height) override;
+  XrSwapchain GetMenuSwapchain() const override { return m_menu_swapchain.swapchain; }
+  AbstractFramebuffer* AcquireMenuFramebuffer() override;
+  bool ReleaseMenuTexture() override;
+
+  // Live eye resolution change.
+  bool RecreateEyeSwapchains(u64 retiring_generation) override;
+  void CollectRetiredSwapchains(bool force) override;
+
 private:
   // Creates XrSession with the platform-specific GL graphics binding
   // (Win32/WGL or Android/EGL).
@@ -100,6 +110,10 @@ private:
 
   // Allocates m_eye_swapchains and wraps images as OGLTexture / OGLFramebuffer.
   bool CreateSwapchains();
+  // Creates one color swapchain in m_swapchain_format and wraps its images.
+  bool CreateColorSwapchain(uint32_t width, uint32_t height, bool foveate, const char* name,
+                            XREyeSwapchainGL* sc) const;
+  static void DestroyColorSwapchain(XREyeSwapchainGL* sc, const char* name);
 
   void DestroySwapchains();
 
@@ -108,6 +122,21 @@ private:
   bool m_gles = false;
 
   std::array<XREyeSwapchainGL, 2> m_eye_swapchains{};
+  int64_t m_swapchain_format = 0;
+  AbstractTextureFormat m_swapchain_abstract_format = AbstractTextureFormat::Undefined;
+
+  XREyeSwapchainGL m_menu_swapchain{};
+  uint32_t m_menu_image_index = 0;
+  bool m_menu_image_acquired = false;
+
+  // Eye swapchains replaced by a resolution change, kept until the compositor is done with
+  // them. GL keeps objects alive while pending commands use them.
+  struct RetiredSwapchains
+  {
+    u64 generation = 0;
+    std::array<XREyeSwapchainGL, 2> eyes;
+  };
+  std::vector<RetiredSwapchains> m_retired_swapchains;
 
   // Image index selected by xrAcquireSwapchainImage for the current frame.
   std::array<uint32_t, 2> m_acquired_image_index{0, 0};

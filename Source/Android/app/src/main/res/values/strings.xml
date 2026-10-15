@@ -844,6 +844,12 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_reference_space_stage_height">STAGE + Height</string>
     <string name="quest_reference_space_stage">STAGE</string>
     <string name="quest_tracking_mode">Tracking Mode</string>
+    <string name="quest_vr_menu_button">In-Game VR Menu Button</string>
+    <string name="quest_vr_menu_button_description">Controller button that opens the VR settings menu inside the headset while a game runs (VR settings, controls, audio, savestates). Left Menu also closes it.</string>
+    <string name="quest_vr_menu_button_left_stick">Left Thumbstick Click</string>
+    <string name="quest_vr_menu_button_right_stick">Right Thumbstick Click</string>
+    <string name="quest_vr_menu_button_left_menu">Left Menu Button</string>
+    <string name="quest_vr_menu_button_disabled">Disabled</string>
     <string name="quest_tracking_mode_description">Chooses how headset tracking affects the VR camera. 6DoF uses full rotation and position. 3DoF uses rotation only. None disables both.</string>
     <string name="quest_tracking_mode_6dof">6DoF</string>
     <string name="quest_tracking_mode_3dof">3DoF</string>

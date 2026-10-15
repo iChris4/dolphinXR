@@ -238,6 +238,8 @@ const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{
     {System::GFX, "VR", "ReferenceSpaceMode"}, OpenXRReferenceSpaceMode::Local};
 const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE{{System::GFX, "VR", "TrackingMode"},
                                                     OpenXRTrackingMode::Full6DoF};
+const Info<VRMenuToggleButton> GFX_VR_MENU_TOGGLE_BUTTON{{System::GFX, "VR", "MenuToggleButton"},
+                                                         VRMenuToggleButton::LeftThumbstick};
 const Info<bool> GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER{
     {System::GFX, "VR", "UseOpenXRPlaySpaceCenter"}, false};
 const Info<bool> GFX_VR_USE_XR_PACING_THREAD{{System::GFX, "VR", "UseXRPacingThread"}, true};

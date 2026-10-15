@@ -63,6 +63,15 @@ enum class OpenXRTrackingMode : int
   None = 2,
 };
 
+// Controller button that opens and closes the in-game VR menu.
+enum class VRMenuToggleButton : int
+{
+  Disabled = 0,
+  LeftThumbstick = 1,
+  RightThumbstick = 2,
+  LeftMenu = 3,
+};
+
 enum class VRPassthroughCoverageMode : int
 {
   Exact = 0,

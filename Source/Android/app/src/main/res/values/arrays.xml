@@ -378,6 +378,18 @@
         <item>2</item>
     </integer-array>
 
+    <string-array name="questVrMenuButtonEntries">
+        <item>@string/quest_vr_menu_button_left_stick</item>
+        <item>@string/quest_vr_menu_button_right_stick</item>
+        <item>@string/quest_vr_menu_button_left_menu</item>
+        <item>@string/quest_vr_menu_button_disabled</item>
+    </string-array>
+    <integer-array name="questVrMenuButtonValues">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+        <item>0</item>
+    </integer-array>
     <string-array name="questTrackingModeEntries">
         <item>@string/quest_tracking_mode_6dof</item>
         <item>@string/quest_tracking_mode_3dof</item>

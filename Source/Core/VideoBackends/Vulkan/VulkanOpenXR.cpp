@@ -885,7 +885,19 @@ bool VulkanOpenXR::CreateSwapchains()
   int64_t swapchain_format = 0;
   if (!SelectSwapchainFormat(VR::g_openxr->GetSession(), &swapchain_format))
     return false;
+  m_swapchain_format = swapchain_format;
 
+  if (!CreateSwapchainSet(swapchain_format))
+  {
+    DestroySwapchains();
+    return false;
+  }
+
+  return true;
+}
+
+bool VulkanOpenXR::CreateSwapchainSet(int64_t swapchain_format)
+{
   m_use_layered_swapchain = false;
   m_frame_uses_layered_swapchain = false;
   m_foveated = false;
@@ -924,13 +936,95 @@ bool VulkanOpenXR::CreateSwapchains()
   }
 #endif
 
-  if (!CreateEyeSwapchains(swapchain_format))
+  return CreateEyeSwapchains(swapchain_format);
+}
+
+bool VulkanOpenXR::RecreateEyeSwapchains(u64 retiring_generation)
+{
+  DrainRecordingWorkerForDirectAccess();
+  if (m_image_acquired[0] || m_image_acquired[1] || m_layered_image_acquired)
   {
-    DestroySwapchains();
+    WARN_LOG_FMT(VIDEO, "OpenXR: eye images are acquired; not recreating the eye swapchains.");
     return false;
   }
 
+  // Work recorded so far may reference the old images: submit it and remember its fence, so
+  // the old image views outlive it.
+  StateTracker::GetInstance()->EndRenderPass();
+  const u64 fence_counter = g_command_buffer_mgr->GetCurrentFenceCounter();
+  g_command_buffer_mgr->SubmitCommandBuffer(false, false);
+  StateTracker::GetInstance()->InvalidateCachedState();
+
+  RetiredSwapchains retired;
+  retired.generation = retiring_generation;
+  retired.fence_counter = fence_counter;
+  retired.eyes = std::move(m_eye_swapchains);
+  retired.layered = std::move(m_layered_swapchain);
+  m_eye_swapchains = {};
+  m_layered_swapchain = {};
+  const bool old_use_layered = m_use_layered_swapchain;
+  const bool old_foveated = m_foveated;
+
+  bool created = false;
+  {
+    // The runtime may use our graphics queue while creating swapchain images.
+    auto queue_lock = AcquireGraphicsQueueLock();
+    created = CreateSwapchainSet(m_swapchain_format);
+  }
+  if (!created)
+  {
+    // Nothing referenced the partially created set yet; drop it and keep the old swapchains.
+    RetiredSwapchains partial;
+    partial.eyes = std::move(m_eye_swapchains);
+    partial.layered = std::move(m_layered_swapchain);
+    DestroyRetiredSwapchains(partial);
+    m_eye_swapchains = std::move(retired.eyes);
+    m_layered_swapchain = std::move(retired.layered);
+    m_use_layered_swapchain = old_use_layered;
+    m_frame_uses_layered_swapchain = false;
+    m_foveated = old_foveated;
+    return false;
+  }
+
+  m_retired_swapchains.push_back(std::move(retired));
   return true;
+}
+
+void VulkanOpenXR::DestroyRetiredSwapchains(RetiredSwapchains& retired)
+{
+  DestroySwapchainVulkanObjects(retired.layered);
+  for (auto& eye : retired.eyes)
+    DestroySwapchainVulkanObjects(eye);
+
+  auto queue_lock = AcquireGraphicsQueueLock();
+  if (retired.layered.swapchain != XR_NULL_HANDLE)
+  {
+    xrDestroySwapchain(retired.layered.swapchain);
+    retired.layered.swapchain = XR_NULL_HANDLE;
+  }
+  for (auto& eye : retired.eyes)
+  {
+    if (eye.swapchain != XR_NULL_HANDLE)
+    {
+      xrDestroySwapchain(eye.swapchain);
+      eye.swapchain = XR_NULL_HANDLE;
+    }
+  }
+}
+
+void VulkanOpenXR::CollectRetiredSwapchains(bool force)
+{
+  std::erase_if(m_retired_swapchains, [&](RetiredSwapchains& retired) {
+    if (!force && (!VR::g_openxr || !VR::g_openxr->IsSwapchainGenerationRetired(retired.generation) ||
+                   !g_command_buffer_mgr->PollFenceCounter(retired.fence_counter)))
+    {
+      return false;
+    }
+    DestroyRetiredSwapchains(retired);
+    INFO_LOG_FMT(VIDEO, "OpenXR: destroyed the eye swapchains of generation {}.",
+                 retired.generation);
+    return true;
+  });
 }
 
 bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format)
@@ -1101,137 +1195,207 @@ bool VulkanOpenXR::CreateEyeSwapchains(int64_t swapchain_format)
   ASSERT(VR::g_openxr != nullptr);
 
   const auto& view_cfgs = VR::g_openxr->GetViewConfigViews();
-  const AbstractTextureFormat abstract_format =
-      VkFormatToAbstractFormat(static_cast<VkFormat>(swapchain_format));
-
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
-    auto& sc = m_eye_swapchains[eye];
-    sc.width = view_cfgs[eye].recommendedImageRectWidth;
-    sc.height = view_cfgs[eye].recommendedImageRectHeight;
-
-    // Format must come from xrEnumerateSwapchainFormats.
-    XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
-    info.arraySize = 1;
-    info.format = swapchain_format;
-    info.width = sc.width;
-    info.height = sc.height;
-    info.mipCount = 1;
-    info.faceCount = 1;
-    info.sampleCount = 1;
-    info.usageFlags =
-        XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
-
-    const VkFormat vk_sc_format = static_cast<VkFormat>(swapchain_format);
-    const VkFormat vk_view_format = VKTexture::GetLinearFormat(vk_sc_format);
-    const std::array<VkFormat, 2> view_formats = {vk_sc_format, vk_view_format};
-    XrVulkanSwapchainFormatListCreateInfoKHR format_list{
-        XR_TYPE_VULKAN_SWAPCHAIN_FORMAT_LIST_CREATE_INFO_KHR};
-    if (vk_view_format != vk_sc_format)
+    bool foveated = false;
+    if (!CreateColorSwapchain(swapchain_format, view_cfgs[eye].recommendedImageRectWidth,
+                              view_cfgs[eye].recommendedImageRectHeight, ShouldUseFoveation(),
+                              eye == 0 ? "left eye" : "right eye", &m_eye_swapchains[eye],
+                              &foveated))
     {
-      info.usageFlags |= XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
-
-      if (VR::g_openxr->IsExtensionEnabled(XR_KHR_VULKAN_SWAPCHAIN_FORMAT_LIST_EXTENSION_NAME))
-      {
-        format_list.viewFormatCount = static_cast<uint32_t>(view_formats.size());
-        format_list.viewFormats = view_formats.data();
-        info.next = &format_list;
-      }
-    }
-
-    // Fixed foveated rendering: ask the runtime to allocate fragment density maps.
-    XrSwapchainCreateInfoFoveationFB foveation_info{XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
-    bool foveated = ShouldUseFoveation();
-    if (foveated)
-    {
-      foveation_info.flags = XR_SWAPCHAIN_CREATE_FOVEATION_FRAGMENT_DENSITY_MAP_BIT_FB;
-      // XrSwapchainCreateInfoFoveationFB::next is (non-const) void*.
-      foveation_info.next = const_cast<void*>(info.next);
-      info.next = &foveation_info;
-    }
-
-    XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc.swapchain);
-    if (XR_FAILED(result) && foveated)
-    {
-      WARN_LOG_FMT(VIDEO,
-                   "OpenXR: Foveated swapchain creation failed for eye {} ({}); retrying "
-                   "without foveation.",
-                   eye, static_cast<int>(result));
-      info.next = foveation_info.next;
-      foveated = false;
-      result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc.swapchain);
-    }
-    if (XR_FAILED(result))
-    {
-      ERROR_LOG_FMT(VIDEO, "OpenXR: xrCreateSwapchain failed for eye {} ({}).", eye,
-                    static_cast<int>(result));
       return false;
     }
-
-    // Enumerate the Vulkan images backing this swapchain.
-    uint32_t image_count = 0;
-    xrEnumerateSwapchainImages(sc.swapchain, 0, &image_count, nullptr);
-
-    std::vector<XrSwapchainImageVulkanKHR> images(image_count,
-                                                   {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR});
-    std::vector<XrSwapchainImageFoveationVulkanFB> fdm_images;
-    if (foveated)
-    {
-      fdm_images.resize(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_FOVEATION_VULKAN_FB});
-      for (uint32_t i = 0; i < image_count; ++i)
-        images[i].next = &fdm_images[i];
-    }
-    xrEnumerateSwapchainImages(sc.swapchain, image_count, &image_count,
-                               reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
-
-    if (foveated && !PrepareFoveationImages(fdm_images, &sc.fdm_views))
-    {
-      WARN_LOG_FMT(VIDEO, "OpenXR: Eye {} swapchain continues without foveation.", eye);
-      foveated = false;
-    }
-
-    sc.textures.resize(image_count);
-    sc.framebuffers.resize(image_count);
-
-    for (uint32_t i = 0; i < image_count; ++i)
-    {
-      // Build a TextureConfig matching the swapchain image properties.
-      TextureConfig tex_config(sc.width, sc.height, /*levels=*/1, /*layers=*/1, /*samples=*/1,
-                               abstract_format, AbstractTextureFlag_RenderTarget,
-                               AbstractTextureType::Texture_2D);
-
-      // Adopt the runtime-owned VkImage. For sRGB swapchains, use a UNORM view alias so
-      // BlitFromTexture writes raw sRGB-encoded bytes without a second sRGB encode.
-      sc.textures[i] =
-          VKTexture::CreateAdopted(tex_config, images[i].image, VK_IMAGE_VIEW_TYPE_2D,
-                                   VK_IMAGE_LAYOUT_UNDEFINED, vk_view_format);
-      if (!sc.textures[i])
-      {
-        ERROR_LOG_FMT(VIDEO, "OpenXR: VKTexture::CreateAdopted failed for eye {}, image {}.", eye,
-                      i);
-        return false;
-      }
-
-      sc.framebuffers[i] = VKFramebuffer::Create(sc.textures[i].get(), nullptr, {},
-                                                 foveated ? sc.fdm_views[i] : VK_NULL_HANDLE);
-      if (!sc.framebuffers[i])
-      {
-        ERROR_LOG_FMT(VIDEO, "OpenXR: VKFramebuffer::Create failed for eye {}, image {}.", eye, i);
-        return false;
-      }
-    }
-
-    if (foveated)
-    {
-      VR::g_openxr->ApplyFoveationToSwapchain(sc.swapchain);
-      m_foveated = true;
-    }
-
-    INFO_LOG_FMT(VIDEO, "OpenXR: Eye {} swapchain ready: {}x{}, {} images{}.", eye, sc.width,
-                 sc.height, image_count, foveated ? ", foveated" : "");
+    m_foveated |= foveated;
   }
 
   return true;
+}
+
+bool VulkanOpenXR::CreateColorSwapchain(int64_t swapchain_format, uint32_t width, uint32_t height,
+                                        bool foveate, const char* name, XRVkEyeSwapchain* sc,
+                                        bool* out_foveated)
+{
+  const AbstractTextureFormat abstract_format =
+      VkFormatToAbstractFormat(static_cast<VkFormat>(swapchain_format));
+  sc->width = width;
+  sc->height = height;
+  *out_foveated = false;
+
+  // Format must come from xrEnumerateSwapchainFormats.
+  XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+  info.arraySize = 1;
+  info.format = swapchain_format;
+  info.width = width;
+  info.height = height;
+  info.mipCount = 1;
+  info.faceCount = 1;
+  info.sampleCount = 1;
+  info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+
+  const VkFormat vk_sc_format = static_cast<VkFormat>(swapchain_format);
+  const VkFormat vk_view_format = VKTexture::GetLinearFormat(vk_sc_format);
+  const std::array<VkFormat, 2> view_formats = {vk_sc_format, vk_view_format};
+  XrVulkanSwapchainFormatListCreateInfoKHR format_list{
+      XR_TYPE_VULKAN_SWAPCHAIN_FORMAT_LIST_CREATE_INFO_KHR};
+  if (vk_view_format != vk_sc_format)
+  {
+    info.usageFlags |= XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+
+    if (VR::g_openxr->IsExtensionEnabled(XR_KHR_VULKAN_SWAPCHAIN_FORMAT_LIST_EXTENSION_NAME))
+    {
+      format_list.viewFormatCount = static_cast<uint32_t>(view_formats.size());
+      format_list.viewFormats = view_formats.data();
+      info.next = &format_list;
+    }
+  }
+
+  // Fixed foveated rendering: ask the runtime to allocate fragment density maps.
+  XrSwapchainCreateInfoFoveationFB foveation_info{XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
+  bool foveated = foveate;
+  if (foveated)
+  {
+    foveation_info.flags = XR_SWAPCHAIN_CREATE_FOVEATION_FRAGMENT_DENSITY_MAP_BIT_FB;
+    // XrSwapchainCreateInfoFoveationFB::next is (non-const) void*.
+    foveation_info.next = const_cast<void*>(info.next);
+    info.next = &foveation_info;
+  }
+
+  XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc->swapchain);
+  if (XR_FAILED(result) && foveated)
+  {
+    WARN_LOG_FMT(VIDEO,
+                 "OpenXR: Foveated swapchain creation failed for {} ({}); retrying "
+                 "without foveation.",
+                 name, static_cast<int>(result));
+    info.next = foveation_info.next;
+    foveated = false;
+    result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc->swapchain);
+  }
+  if (XR_FAILED(result))
+  {
+    ERROR_LOG_FMT(VIDEO, "OpenXR: xrCreateSwapchain failed for {} ({}).", name,
+                  static_cast<int>(result));
+    return false;
+  }
+
+  // Enumerate the Vulkan images backing this swapchain.
+  uint32_t image_count = 0;
+  xrEnumerateSwapchainImages(sc->swapchain, 0, &image_count, nullptr);
+
+  std::vector<XrSwapchainImageVulkanKHR> images(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR});
+  std::vector<XrSwapchainImageFoveationVulkanFB> fdm_images;
+  if (foveated)
+  {
+    fdm_images.resize(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_FOVEATION_VULKAN_FB});
+    for (uint32_t i = 0; i < image_count; ++i)
+      images[i].next = &fdm_images[i];
+  }
+  xrEnumerateSwapchainImages(sc->swapchain, image_count, &image_count,
+                             reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
+
+  if (foveated && !PrepareFoveationImages(fdm_images, &sc->fdm_views))
+  {
+    WARN_LOG_FMT(VIDEO, "OpenXR: {} swapchain continues without foveation.", name);
+    foveated = false;
+  }
+
+  sc->textures.resize(image_count);
+  sc->framebuffers.resize(image_count);
+
+  for (uint32_t i = 0; i < image_count; ++i)
+  {
+    // Build a TextureConfig matching the swapchain image properties.
+    TextureConfig tex_config(width, height, /*levels=*/1, /*layers=*/1, /*samples=*/1,
+                             abstract_format, AbstractTextureFlag_RenderTarget,
+                             AbstractTextureType::Texture_2D);
+
+    // Adopt the runtime-owned VkImage. For sRGB swapchains, use a UNORM view alias so
+    // BlitFromTexture writes raw sRGB-encoded bytes without a second sRGB encode.
+    sc->textures[i] = VKTexture::CreateAdopted(tex_config, images[i].image, VK_IMAGE_VIEW_TYPE_2D,
+                                               VK_IMAGE_LAYOUT_UNDEFINED, vk_view_format);
+    if (!sc->textures[i])
+    {
+      ERROR_LOG_FMT(VIDEO, "OpenXR: VKTexture::CreateAdopted failed for {}, image {}.", name, i);
+      return false;
+    }
+
+    sc->framebuffers[i] = VKFramebuffer::Create(sc->textures[i].get(), nullptr, {},
+                                                foveated ? sc->fdm_views[i] : VK_NULL_HANDLE);
+    if (!sc->framebuffers[i])
+    {
+      ERROR_LOG_FMT(VIDEO, "OpenXR: VKFramebuffer::Create failed for {}, image {}.", name, i);
+      return false;
+    }
+  }
+
+  if (foveated)
+    VR::g_openxr->ApplyFoveationToSwapchain(sc->swapchain);
+  *out_foveated = foveated;
+
+  INFO_LOG_FMT(VIDEO, "OpenXR: {} swapchain ready: {}x{}, {} images{}.", name, sc->width,
+               sc->height, image_count, foveated ? ", foveated" : "");
+  return true;
+}
+
+bool VulkanOpenXR::CreateMenuSwapchain(uint32_t width, uint32_t height)
+{
+  if (m_menu_swapchain.swapchain != XR_NULL_HANDLE)
+    return true;
+
+  bool foveated = false;
+  bool created = false;
+  {
+    // The runtime may use our graphics queue while creating swapchain images.
+    auto queue_lock = AcquireGraphicsQueueLock();
+    created = CreateColorSwapchain(m_swapchain_format, width, height, false, "VR menu",
+                                   &m_menu_swapchain, &foveated);
+  }
+  if (created)
+    return true;
+
+  // Nothing was rendered with a partially created set: drop it right away.
+  DestroySwapchainVulkanObjects(m_menu_swapchain);
+  if (m_menu_swapchain.swapchain != XR_NULL_HANDLE)
+  {
+    auto queue_lock = AcquireGraphicsQueueLock();
+    xrDestroySwapchain(m_menu_swapchain.swapchain);
+    m_menu_swapchain.swapchain = XR_NULL_HANDLE;
+  }
+  return false;
+}
+
+AbstractFramebuffer* VulkanOpenXR::AcquireMenuFramebuffer()
+{
+  if (!AcquireExtraSwapchainImage(m_menu_swapchain.swapchain, &m_menu_image_index, "VR menu"))
+    return nullptr;
+  m_menu_image_acquired = true;
+  // The menu is cleared on bind, so the image's previous contents and layout don't matter.
+  m_menu_swapchain.textures[m_menu_image_index]->OverrideImageLayout(VK_IMAGE_LAYOUT_UNDEFINED);
+  return m_menu_swapchain.framebuffers[m_menu_image_index].get();
+}
+
+bool VulkanOpenXR::ReleaseMenuTexture()
+{
+  DrainRecordingWorkerForDirectAccess();
+  if (!m_menu_image_acquired)
+    return false;
+  m_menu_image_acquired = false;
+
+  // The spec only requires the menu draws to be submitted before the release. Submit them now
+  // on this thread rather than deferring to the frame's eye submit: the menu also redraws on
+  // presents that publish no eye images, and on Android the eye release is asynchronous. Keep
+  // the PC fallback drain for runtimes that need it (see ReleaseEyeTexture).
+  StateTracker::GetInstance()->EndRenderPass();
+#if defined(ANDROID)
+  constexpr bool wait_for_completion = false;
+#else
+  const bool wait_for_completion = !g_vulkan_context->SupportsTimelineSemaphores() &&
+                                   VR::g_openxr && VR::g_openxr->IsQuestOrVirtualDesktopRuntime();
+#endif
+  g_command_buffer_mgr->SubmitCommandBuffer(false, wait_for_completion);
+  StateTracker::GetInstance()->InvalidateCachedState();
+
+  return ReleaseExtraSwapchainImage(m_menu_swapchain.swapchain, "VR menu");
 }
 
 void VulkanOpenXR::DestroySwapchains()
@@ -1246,6 +1410,12 @@ void VulkanOpenXR::DestroySwapchains()
     g_gfx->WaitForGPUIdle();
   else if (g_vulkan_context && (!g_command_buffer_mgr || !g_command_buffer_mgr->IsDeviceLost()))
     vkDeviceWaitIdle(g_vulkan_context->GetDevice());
+
+  if (m_menu_image_acquired)
+  {
+    ReleaseExtraSwapchainImage(m_menu_swapchain.swapchain, "VR menu");
+    m_menu_image_acquired = false;
+  }
 
   if (m_layered_image_acquired && m_layered_swapchain.swapchain != XR_NULL_HANDLE)
   {
@@ -1292,6 +1462,20 @@ void VulkanOpenXR::DestroySwapchains()
   // destroying the swapchains referenced by those layers.
   if (VR::g_openxr)
     VR::g_openxr->ShutdownSession();
+
+  CollectRetiredSwapchains(true);
+
+  DestroySwapchainVulkanObjects(m_menu_swapchain);
+  if (m_menu_swapchain.swapchain != XR_NULL_HANDLE)
+  {
+    const XrResult destroy_result = xrDestroySwapchain(m_menu_swapchain.swapchain);
+    if (XR_FAILED(destroy_result))
+    {
+      WARN_LOG_FMT(VIDEO, "OpenXR: xrDestroySwapchain failed for VR menu ({}).",
+                   static_cast<int>(destroy_result));
+    }
+    m_menu_swapchain.swapchain = XR_NULL_HANDLE;
+  }
 
   DestroySwapchainVulkanObjects(m_layered_swapchain);
 

@@ -10,12 +10,10 @@
 #include <vector>
 
 #include "Common/CommonTypes.h"
+#include "VideoCommon/ImGuiRenderer.h"
 #include "VideoCommon/OnScreenUIKeyMap.h"
 
-class NativeVertexFormat;
 class AbstractTexture;
-class AbstractPipeline;
-struct ImTextureData;
 
 namespace VideoCommon
 {
@@ -63,12 +61,9 @@ public:
 private:
   void DrawDebugText();
   void DrawChallengesAndLeaderboards();
-  void UpdateImguiTexture(ImTextureData* tex);
 
   // ImGui resources.
-  std::unique_ptr<NativeVertexFormat> m_imgui_vertex_format;
-  std::vector<std::unique_ptr<AbstractTexture>> m_imgui_textures;
-  std::unique_ptr<AbstractPipeline> m_imgui_pipeline;
+  ImGuiRenderer m_renderer;
   std::map<u32, int> m_dolphin_to_imgui_map;
   std::mutex m_imgui_mutex;
   u64 m_imgui_last_frame_time = 0;

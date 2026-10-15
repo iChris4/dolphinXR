@@ -242,7 +242,8 @@ ControllerEmu::InputOverrideFunction CreateOpenXRInputOverrideFunction(unsigned 
     if (s_wiimote_sources[wiimote_index].load() != WiimoteSource::OpenXR)
       return std::nullopt;
 
-    const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+    const Common::VR::OpenXRInputSnapshot snapshot =
+        Common::VR::OpenXRInputState::GetGameSnapshot();
     if (!snapshot.runtime_active)
       return std::nullopt;
 
@@ -333,7 +334,16 @@ ControllerEmu::InputOverrideFunction CreateOpenXRInputOverrideFunction(unsigned 
   };
 }
 
-std::array<bool, MAX_BBMOTES> s_openxr_overrides_enabled{};
+// What UpdateOpenXRInputOverride last installed per remote. Config-changed callbacks call it on
+// every config write (a dragged VR slider writes every frame), so it only reinstalls when the
+// outcome changes: a reinstall resets the closures' velocity history and IR debounce.
+struct OpenXROverrideInstall
+{
+  bool enabled = false;
+  bool prefer_left_hand = false;
+  const void* controller = nullptr;
+};
+std::array<OpenXROverrideInstall, MAX_BBMOTES> s_openxr_overrides{};
 
 void UpdateOpenXRInputOverride(unsigned int index, WiimoteSource source)
 {
@@ -341,6 +351,24 @@ void UpdateOpenXRInputOverride(unsigned int index, WiimoteSource source)
       static_cast<WiimoteEmu::Wiimote*>(::Wiimote::GetConfig()->GetController(index));
   if (!wiimote)
     return;
+
+  OpenXROverrideInstall& installed = s_openxr_overrides[index];
+  const bool enable = source == WiimoteSource::OpenXR;
+  const bool prefer_left_hand =
+      enable && Config::Get(Config::Info<bool>{{Config::System::Main, "Android", "QuestLeftHanded"},
+                                               false});
+  if (enable == installed.enabled && wiimote == installed.controller &&
+      (!enable ||
+       (prefer_left_hand == installed.prefer_left_hand && wiimote->HasInputOverrideFunction())))
+  {
+    return;
+  }
+  if (!enable && !installed.enabled)
+    return;
+
+  // The CPU thread calls the override functions while holding the state lock; replacing a
+  // std::function another thread is executing is undefined behavior.
+  const auto state_lock = ControllerEmu::EmulatedController::GetStateLock();
 
   auto apply_to_attachments = [wiimote](const ControllerEmu::InputOverrideFunction& override_func) {
     auto* attachments_group = static_cast<ControllerEmu::Attachments*>(
@@ -360,22 +388,18 @@ void UpdateOpenXRInputOverride(unsigned int index, WiimoteSource source)
     }
   };
 
-  if (source == WiimoteSource::OpenXR)
+  if (enable)
   {
-    const bool prefer_left_hand =
-        Config::Get(Config::Info<bool>{{Config::System::Main, "Android", "QuestLeftHanded"},
-                                       false});
     wiimote->SetInputOverrideFunction(
         CreateOpenXRInputOverrideFunction(index, prefer_left_hand));
     apply_to_attachments(CreateOpenXRInputOverrideFunction(index, !prefer_left_hand));
-    s_openxr_overrides_enabled[index] = true;
   }
-  else if (s_openxr_overrides_enabled[index])
+  else
   {
     wiimote->ClearInputOverrideFunction();
     apply_to_attachments({});
-    s_openxr_overrides_enabled[index] = false;
   }
+  installed = {enable, prefer_left_hand, wiimote};
 }
 #else
 void UpdateOpenXRInputOverride(unsigned int, WiimoteSource)
@@ -486,7 +510,7 @@ std::optional<OpenXRWiiRemoteState> GetOpenXRWiiRemoteState(unsigned int index)
 std::optional<OpenXRWiiRemoteState> GetOpenXRHandState(bool left_hand)
 {
 #ifdef ENABLE_VR
-  const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+  const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetGameSnapshot();
   if (!snapshot.runtime_active)
     return std::nullopt;
 
@@ -570,6 +594,9 @@ void Shutdown()
   s_config.UnregisterHotplugCallback();
 
   s_config.ClearControllers();
+#ifdef ENABLE_VR
+  s_openxr_overrides = {};
+#endif
 
   WiimoteReal::Stop();
 

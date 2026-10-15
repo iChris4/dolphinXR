@@ -377,6 +377,13 @@ object NativeLibrary {
 
     @JvmStatic
     external fun RequestOpenXRRecenter()
+
+    /**
+     * Debug hook for the in-game VR menu: action 0 = close, 1 = open, 2 = toggle (other values
+     * leave it); u/v in [0, 1] point at the panel, optionally clicking.
+     */
+    @JvmStatic
+    external fun DebugVRMenu(action: Int, u: Float, v: Float, click: Boolean)
     external fun StartOpenXRControllerMapper(activity: Activity, controllerPort: Int, targetType: Int): Boolean
     external fun GetOpenXRControllerMapperState(): Int
     external fun GetOpenXRControllerMapperFailure(): String

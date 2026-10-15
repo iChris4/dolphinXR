@@ -22,6 +22,7 @@ enum class VertexLoaderType : int;
 enum class OpenXRMirrorView : int;
 enum class OpenXRReferenceSpaceMode : int;
 enum class OpenXRTrackingMode : int;
+enum class VRMenuToggleButton : int;
 enum class VRPassthroughCoverageMode : int;
 
 namespace Config
@@ -229,6 +230,8 @@ extern const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS;
 extern const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW;
 extern const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE;
 extern const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE;
+// Controller button that opens the in-game VR menu (read by the OpenXR input thread).
+extern const Info<VRMenuToggleButton> GFX_VR_MENU_TOGGLE_BUTTON;
 extern const Info<bool> GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER;
 extern const Info<int> GFX_VR_FORCED_VBI_FREQUENCY;
 // Dedicated XR frame-pacing thread: owns xrWaitFrame/xrBeginFrame/xrEndFrame and

@@ -186,7 +186,12 @@ bool D3D12OpenXR::CreateSwapchains()
   int64_t swapchain_format = 0;
   if (!VR::D3D11OpenXR::SelectSwapchainFormat(VR::g_openxr->GetSession(), &swapchain_format))
     return false;
+  m_swapchain_format = swapchain_format;
+  return CreateSwapchainSet(swapchain_format);
+}
 
+bool D3D12OpenXR::CreateSwapchainSet(int64_t swapchain_format)
+{
   m_use_layered_swapchain = false;
   m_frame_uses_layered_swapchain = false;
 
@@ -353,83 +358,259 @@ bool D3D12OpenXR::CreateEyeSwapchains(int64_t swapchain_format)
 
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
-    auto& sc = m_eye_swapchains[eye];
-    sc.width = view_cfgs[eye].recommendedImageRectWidth;
-    sc.height = view_cfgs[eye].recommendedImageRectHeight;
-
-    // Format must come from xrEnumerateSwapchainFormats.
-    XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
-    info.arraySize = 1;
-    info.format = swapchain_format;
-    info.width = sc.width;
-    info.height = sc.height;
-    info.mipCount = 1;
-    info.faceCount = 1;
-    info.sampleCount = 1;
-    // We render into this swapchain image as a color target, but never sample from it.
-    // Some runtimes reject the extra SAMPLED usage for certain formats.
-    //
-    // MUTABLE_FORMAT lets us keep the swapchain declared as sRGB (so the compositor
-    // decodes correctly) while creating a UNORM RTV on the underlying texture, so
-    // BlitFromTexture writes raw sRGB-encoded bytes without a double gamma encode.
-    // With this flag the runtime must back the texture with a DXGI _TYPELESS format.
-    info.usageFlags =
-        XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
-
-    XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc.swapchain);
-    if (XR_FAILED(result))
+    if (!CreateColorSwapchain(swapchain_format, view_cfgs[eye].recommendedImageRectWidth,
+                              view_cfgs[eye].recommendedImageRectHeight,
+                              eye == 0 ? "left eye" : "right eye", &m_eye_swapchains[eye]))
     {
-      ERROR_LOG_FMT(VIDEO, "OpenXR: xrCreateSwapchain failed for eye {} ({}).", eye,
-                    static_cast<int>(result));
       return false;
     }
-
-    // Enumerate the D3D12 resources backing this swapchain.
-    uint32_t image_count = 0;
-    xrEnumerateSwapchainImages(sc.swapchain, 0, &image_count, nullptr);
-
-    std::vector<XrSwapchainImageD3D12KHR> images(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
-    xrEnumerateSwapchainImages(sc.swapchain, image_count, &image_count,
-                               reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
-
-    sc.textures.resize(image_count);
-    sc.framebuffers.resize(image_count);
-
-    for (uint32_t i = 0; i < image_count; ++i)
-    {
-      // Adopt the runtime-owned resource. DXTexture::CreateAdopted reads the resource
-      // descriptor to build the TextureConfig and AddRefs the underlying resource.
-      // The runtime guarantees acquired color images are in a RENDER_TARGET-compatible
-      // state and expects them back in that state on release, so start tracking there.
-      sc.textures[i] =
-          DXTexture::CreateAdopted(images[i].texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
-      if (!sc.textures[i])
-      {
-        ERROR_LOG_FMT(VIDEO, "OpenXR: DXTexture::CreateAdopted failed for eye {}, image {}.",
-                      eye, i);
-        return false;
-      }
-
-      // No depth attachment; the compositor only consumes the color layer.
-      sc.framebuffers[i] = DXFramebuffer::Create(sc.textures[i].get(), nullptr, {});
-      if (!sc.framebuffers[i])
-      {
-        ERROR_LOG_FMT(VIDEO, "OpenXR: DXFramebuffer::Create failed for eye {}, image {}.",
-                      eye, i);
-        return false;
-      }
-    }
-
-    INFO_LOG_FMT(VIDEO, "OpenXR: Eye {} swapchain ready: {}x{}, {} images.", eye, sc.width,
-                 sc.height, image_count);
   }
 
   return true;
 }
 
+bool D3D12OpenXR::CreateColorSwapchain(int64_t swapchain_format, uint32_t width, uint32_t height,
+                                       const char* name, XREyeSwapchain* sc)
+{
+  sc->width = width;
+  sc->height = height;
+
+  // Format must come from xrEnumerateSwapchainFormats.
+  XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+  info.arraySize = 1;
+  info.format = swapchain_format;
+  info.width = width;
+  info.height = height;
+  info.mipCount = 1;
+  info.faceCount = 1;
+  info.sampleCount = 1;
+  // We render into this swapchain image as a color target, but never sample from it.
+  // Some runtimes reject the extra SAMPLED usage for certain formats.
+  //
+  // MUTABLE_FORMAT lets us keep the swapchain declared as sRGB (so the compositor
+  // decodes correctly) while creating a UNORM RTV on the underlying texture, so
+  // BlitFromTexture writes raw sRGB-encoded bytes without a double gamma encode.
+  // With this flag the runtime must back the texture with a DXGI _TYPELESS format.
+  info.usageFlags =
+      XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+
+  XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc->swapchain);
+  if (XR_FAILED(result))
+  {
+    ERROR_LOG_FMT(VIDEO, "OpenXR: xrCreateSwapchain failed for {} ({}).", name,
+                  static_cast<int>(result));
+    return false;
+  }
+
+  // Enumerate the D3D12 resources backing this swapchain.
+  uint32_t image_count = 0;
+  xrEnumerateSwapchainImages(sc->swapchain, 0, &image_count, nullptr);
+
+  std::vector<XrSwapchainImageD3D12KHR> images(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
+  xrEnumerateSwapchainImages(sc->swapchain, image_count, &image_count,
+                             reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
+
+  sc->textures.resize(image_count);
+  sc->framebuffers.resize(image_count);
+
+  for (uint32_t i = 0; i < image_count; ++i)
+  {
+    // Adopt the runtime-owned resource. DXTexture::CreateAdopted reads the resource
+    // descriptor to build the TextureConfig and AddRefs the underlying resource.
+    // The runtime guarantees acquired color images are in a RENDER_TARGET-compatible
+    // state and expects them back in that state on release, so start tracking there.
+    sc->textures[i] =
+        DXTexture::CreateAdopted(images[i].texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    if (!sc->textures[i])
+    {
+      ERROR_LOG_FMT(VIDEO, "OpenXR: DXTexture::CreateAdopted failed for {}, image {}.", name, i);
+      return false;
+    }
+
+    // No depth attachment; the compositor only consumes the color layer.
+    sc->framebuffers[i] = DXFramebuffer::Create(sc->textures[i].get(), nullptr, {});
+    if (!sc->framebuffers[i])
+    {
+      ERROR_LOG_FMT(VIDEO, "OpenXR: DXFramebuffer::Create failed for {}, image {}.", name, i);
+      return false;
+    }
+  }
+
+  INFO_LOG_FMT(VIDEO, "OpenXR: {} swapchain ready: {}x{}, {} images.", name, sc->width,
+               sc->height, image_count);
+  return true;
+}
+
+bool D3D12OpenXR::RecreateEyeSwapchains(u64 retiring_generation)
+{
+  if (m_image_acquired[0] || m_image_acquired[1] || m_layered_image_acquired)
+  {
+    WARN_LOG_FMT(VIDEO, "OpenXR: eye images are acquired; not recreating the eye swapchains.");
+    return false;
+  }
+  // Submit the work recorded against the old images before they are retired.
+  Gfx::GetInstance()->ExecuteCommandList(false);
+
+  RetiredSwapchains retired;
+  retired.generation = retiring_generation;
+  retired.eyes = std::move(m_eye_swapchains);
+  retired.layered = std::move(m_layered_swapchain);
+  m_eye_swapchains = {};
+  m_layered_swapchain = {};
+  const bool old_use_layered = m_use_layered_swapchain;
+
+  if (!CreateSwapchainSet(m_swapchain_format))
+  {
+    // Nothing referenced the partially created set yet; drop it and keep the old swapchains.
+    RetiredSwapchains partial;
+    partial.eyes = std::move(m_eye_swapchains);
+    partial.layered = std::move(m_layered_swapchain);
+    ReleaseRetiredWrappers(partial);
+    Gfx::GetInstance()->ExecuteCommandList(true);
+    DestroyRetiredSwapchains(partial);
+    m_eye_swapchains = std::move(retired.eyes);
+    m_layered_swapchain = std::move(retired.layered);
+    m_use_layered_swapchain = old_use_layered;
+    m_frame_uses_layered_swapchain = false;
+    return false;
+  }
+
+  m_retired_swapchains.push_back(std::move(retired));
+  return true;
+}
+
+bool D3D12OpenXR::ReleaseRetiredWrappers(RetiredSwapchains& retired)
+{
+  // The DXTexture destructor defers the release of its reference until the current command
+  // list's fence passes.
+  bool had_wrappers = !retired.layered.textures.empty();
+  retired.layered.framebuffers.clear();
+  retired.layered.textures.clear();
+  for (auto& eye : retired.eyes)
+  {
+    had_wrappers |= !eye.textures.empty();
+    eye.framebuffers.clear();
+    eye.textures.clear();
+  }
+  retired.wrappers_released = true;
+  return had_wrappers;
+}
+
+void D3D12OpenXR::DestroyRetiredSwapchains(RetiredSwapchains& retired)
+{
+  if (retired.layered.swapchain != XR_NULL_HANDLE)
+  {
+    xrDestroySwapchain(retired.layered.swapchain);
+    retired.layered.swapchain = XR_NULL_HANDLE;
+  }
+  for (auto& eye : retired.eyes)
+  {
+    if (eye.swapchain != XR_NULL_HANDLE)
+    {
+      xrDestroySwapchain(eye.swapchain);
+      eye.swapchain = XR_NULL_HANDLE;
+    }
+  }
+}
+
+void D3D12OpenXR::CollectRetiredSwapchains(bool force)
+{
+  if (m_retired_swapchains.empty())
+    return;
+
+  if (force)
+  {
+    for (auto& retired : m_retired_swapchains)
+      ReleaseRetiredWrappers(retired);
+    if (g_gfx)
+      Gfx::GetInstance()->ExecuteCommandList(true);
+    else if (g_dx_context)
+      g_dx_context->ExecuteCommandList(true);
+    for (auto& retired : m_retired_swapchains)
+      DestroyRetiredSwapchains(retired);
+    m_retired_swapchains.clear();
+    return;
+  }
+
+  bool submit = false;
+  std::erase_if(m_retired_swapchains, [&](RetiredSwapchains& retired) {
+    if (!retired.wrappers_released)
+    {
+      if (!VR::g_openxr || !VR::g_openxr->IsSwapchainGenerationRetired(retired.generation))
+        return false;
+      ReleaseRetiredWrappers(retired);
+      retired.fence_value = g_dx_context->GetCurrentFenceValue();
+      submit = true;
+      return false;
+    }
+    if (g_dx_context->GetCompletedFenceValue() < retired.fence_value)
+      return false;
+    DestroyRetiredSwapchains(retired);
+    INFO_LOG_FMT(VIDEO, "OpenXR: destroyed the eye swapchains of generation {}.",
+                 retired.generation);
+    return true;
+  });
+  if (submit)
+    Gfx::GetInstance()->ExecuteCommandList(false);
+}
+
+bool D3D12OpenXR::CreateMenuSwapchain(uint32_t width, uint32_t height)
+{
+  if (m_menu_swapchain.swapchain != XR_NULL_HANDLE)
+    return true;
+  if (CreateColorSwapchain(m_swapchain_format, width, height, "VR menu", &m_menu_swapchain))
+    return true;
+
+  // Nothing was rendered with a partially created set: drop it right away.
+  m_menu_swapchain.framebuffers.clear();
+  m_menu_swapchain.textures.clear();
+  Gfx::GetInstance()->ExecuteCommandList(true);
+  if (m_menu_swapchain.swapchain != XR_NULL_HANDLE)
+  {
+    xrDestroySwapchain(m_menu_swapchain.swapchain);
+    m_menu_swapchain.swapchain = XR_NULL_HANDLE;
+  }
+  return false;
+}
+
+AbstractFramebuffer* D3D12OpenXR::AcquireMenuFramebuffer()
+{
+  if (!AcquireExtraSwapchainImage(m_menu_swapchain.swapchain, &m_menu_image_index, "VR menu"))
+    return nullptr;
+  m_menu_image_acquired = true;
+  // Acquired color images come in a RENDER_TARGET-compatible state (see AcquireEyeFramebuffer).
+  m_menu_swapchain.textures[m_menu_image_index]->OverrideState(D3D12_RESOURCE_STATE_RENDER_TARGET);
+  return m_menu_swapchain.framebuffers[m_menu_image_index].get();
+}
+
+bool D3D12OpenXR::ReleaseMenuTexture()
+{
+  if (!m_menu_image_acquired)
+    return false;
+  m_menu_image_acquired = false;
+
+  // Same rules as ReleaseEyeTexture: back to RENDER_TARGET, and the draws submitted to the
+  // queue before the release.
+  m_menu_swapchain.textures[m_menu_image_index]->TransitionToState(
+      D3D12_RESOURCE_STATE_RENDER_TARGET);
+  Gfx::GetInstance()->ExecuteCommandList(false);
+  return ReleaseExtraSwapchainImage(m_menu_swapchain.swapchain, "VR menu");
+}
+
 void D3D12OpenXR::DestroySwapchains()
 {
+  CollectRetiredSwapchains(true);
+
   bool had_wrappers = false;
+
+  if (m_menu_image_acquired)
+  {
+    ReleaseExtraSwapchainImage(m_menu_swapchain.swapchain, "VR menu");
+    m_menu_image_acquired = false;
+  }
+  had_wrappers |= !m_menu_swapchain.textures.empty() || !m_menu_swapchain.framebuffers.empty();
+  m_menu_swapchain.framebuffers.clear();
+  m_menu_swapchain.textures.clear();
 
   if (m_layered_image_acquired && m_layered_swapchain.swapchain != XR_NULL_HANDLE)
   {
@@ -499,6 +680,17 @@ void D3D12OpenXR::DestroySwapchains()
   m_layered_swapchain.height = 0;
   m_use_layered_swapchain = false;
   m_frame_uses_layered_swapchain = false;
+
+  if (m_menu_swapchain.swapchain != XR_NULL_HANDLE)
+  {
+    const XrResult destroy_result = xrDestroySwapchain(m_menu_swapchain.swapchain);
+    if (XR_FAILED(destroy_result))
+    {
+      WARN_LOG_FMT(VIDEO, "OpenXR: xrDestroySwapchain failed for VR menu ({}).",
+                   static_cast<int>(destroy_result));
+    }
+    m_menu_swapchain.swapchain = XR_NULL_HANDLE;
+  }
 
   for (uint32_t eye = 0; eye < 2; ++eye)
   {

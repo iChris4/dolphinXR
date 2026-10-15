@@ -111,6 +111,16 @@ public:
   // Flat mono panel path reuses eye swapchain #0; the base class handles acquire/release/submit.
   XrSwapchain GetFlatSwapchain() const override { return m_eye_swapchains[0].swapchain; }
 
+  // In-game VR menu panel.
+  bool CreateMenuSwapchain(uint32_t width, uint32_t height) override;
+  XrSwapchain GetMenuSwapchain() const override { return m_menu_swapchain.swapchain; }
+  AbstractFramebuffer* AcquireMenuFramebuffer() override;
+  bool ReleaseMenuTexture() override;
+
+  // Live eye resolution change.
+  bool RecreateEyeSwapchains(u64 retiring_generation) override;
+  void CollectRetiredSwapchains(bool force) override;
+
   const XREyeSwapchain& GetEyeSwapchain(uint32_t eye) const { return m_eye_swapchains[eye]; }
 
 private:
@@ -121,12 +131,38 @@ private:
   // The layered swapchain is optional (falls back to per-eye); the per-eye
   // swapchains are always created (fallback path + flat panel mode).
   bool CreateSwapchains();
+  // The layered and per-eye swapchains at the current view configuration size. Leaves
+  // whatever it created in place on failure.
+  bool CreateSwapchainSet(int64_t swapchain_format);
   bool CreateLayeredSwapchain(int64_t swapchain_format);
   bool CreateEyeSwapchains(int64_t swapchain_format);
+  // Creates one arraySize=1 color swapchain and wraps its images.
+  static bool CreateColorSwapchain(int64_t swapchain_format, uint32_t width, uint32_t height,
+                                   const char* name, XREyeSwapchain* sc);
 
   void DestroySwapchains();
 
   std::array<XREyeSwapchain, 2> m_eye_swapchains{};
+  int64_t m_swapchain_format = 0;
+
+  XREyeSwapchain m_menu_swapchain;
+  uint32_t m_menu_image_index = 0;
+  bool m_menu_image_acquired = false;
+
+  // Eye swapchains replaced by a resolution change. Once the compositor is done with them
+  // (swapchain generation) our wrappers are dropped; the runtime swapchains are destroyed once
+  // the GPU passed `fence_value`, when those wrappers' deferred releases have run.
+  struct RetiredSwapchains
+  {
+    u64 generation = 0;
+    bool wrappers_released = false;
+    u64 fence_value = 0;
+    std::array<XREyeSwapchain, 2> eyes;
+    XRLayeredSwapchain layered;
+  };
+  static bool ReleaseRetiredWrappers(RetiredSwapchains& retired);
+  static void DestroyRetiredSwapchains(RetiredSwapchains& retired);
+  std::vector<RetiredSwapchains> m_retired_swapchains;
   XRLayeredSwapchain m_layered_swapchain{};
 
   // Image index selected by xrAcquireSwapchainImage for the current frame.

@@ -53,6 +53,8 @@ add_library(core
   ConfigLoaders/MovieConfigLoader.h
   ConfigLoaders/NetPlayConfigLoader.cpp
   ConfigLoaders/NetPlayConfigLoader.h
+  ConfigLoaders/VRGameConfigLoader.cpp
+  ConfigLoaders/VRGameConfigLoader.h
   ConfigManager.cpp
   ConfigManager.h
   Core.cpp

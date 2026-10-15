@@ -346,6 +346,8 @@ bool OGLOpenXR::CreateSwapchains()
     return false;
 
   const AbstractTextureFormat abstract_format = GetAbstractFormatForGLFormat(swapchain_format);
+  m_swapchain_format = swapchain_format;
+  m_swapchain_abstract_format = abstract_format;
   if (abstract_format == AbstractTextureFormat::Undefined)
   {
     ERROR_LOG_FMT(VIDEO, "OpenXR GL: No AbstractTextureFormat for swapchain format {:#x}.",
@@ -368,107 +370,226 @@ bool OGLOpenXR::CreateSwapchains()
 
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
-    auto& sc = m_eye_swapchains[eye];
-    sc.width = view_cfgs[eye].recommendedImageRectWidth;
-    sc.height = view_cfgs[eye].recommendedImageRectHeight;
-
-    // Format must come from xrEnumerateSwapchainFormats.
-    XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
-    info.arraySize = 1;
-    info.format = swapchain_format;
-    info.width = sc.width;
-    info.height = sc.height;
-    info.mipCount = 1;
-    info.faceCount = 1;
-    info.sampleCount = 1;
-    // We render into this swapchain image as a color target, but never sample from it.
-    // Unlike D3D11, no MUTABLE_FORMAT is needed to write raw bytes to sRGB storage:
-    // GL only applies the sRGB encode when GL_FRAMEBUFFER_SRGB is enabled (see above).
-    info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
-
-    // GLES foveation uses the Adreno scaled-bin method: the driver renders peripheral
-    // bins at reduced resolution and upscales them when the render pass resolves.
-    XrSwapchainCreateInfoFoveationFB foveation_info{XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
-    bool foveated = use_foveation;
-    if (foveated)
+    if (!CreateColorSwapchain(view_cfgs[eye].recommendedImageRectWidth,
+                              view_cfgs[eye].recommendedImageRectHeight, use_foveation,
+                              eye == 0 ? "left eye" : "right eye", &m_eye_swapchains[eye]))
     {
-      foveation_info.flags = XR_SWAPCHAIN_CREATE_FOVEATION_SCALED_BIN_BIT_FB;
-      // XrSwapchainCreateInfoFoveationFB::next is (non-const) void*.
-      foveation_info.next = const_cast<void*>(info.next);
-      info.next = &foveation_info;
-    }
-
-    XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc.swapchain);
-    if (XR_FAILED(result) && foveated)
-    {
-      WARN_LOG_FMT(VIDEO,
-                   "OpenXR: Foveated swapchain creation failed for eye {} ({}); retrying "
-                   "without foveation.",
-                   eye, static_cast<int>(result));
-      info.next = foveation_info.next;
-      foveated = false;
-      result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc.swapchain);
-    }
-    if (XR_FAILED(result))
-    {
-      ERROR_LOG_FMT(VIDEO, "OpenXR: xrCreateSwapchain failed for eye {} ({}).", eye,
-                    static_cast<int>(result));
       return false;
     }
-
-    if (foveated)
-      VR::g_openxr->ApplyFoveationToSwapchain(sc.swapchain);
-
-    // Enumerate the GL textures backing this swapchain.
-    uint32_t image_count = 0;
-    xrEnumerateSwapchainImages(sc.swapchain, 0, &image_count, nullptr);
-
-#if defined(ANDROID)
-    std::vector<XrSwapchainImageOpenGLESKHR> images(image_count,
-                                                    {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR});
-#else
-    std::vector<XrSwapchainImageOpenGLKHR> images(image_count,
-                                                  {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR});
-#endif
-    xrEnumerateSwapchainImages(sc.swapchain, image_count, &image_count,
-                               reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
-
-    sc.textures.resize(image_count);
-    sc.framebuffers.resize(image_count);
-
-    const TextureConfig config(sc.width, sc.height, 1, 1, 1, abstract_format,
-                               AbstractTextureFlag_RenderTarget, AbstractTextureType::Texture_2D);
-
-    for (uint32_t i = 0; i < image_count; ++i)
-    {
-      // Adopt the runtime-owned GL texture; OGLTexture will not delete it.
-      sc.textures[i] = OGLTexture::CreateAdopted(static_cast<GLuint>(images[i].image), config);
-      if (!sc.textures[i])
-      {
-        ERROR_LOG_FMT(VIDEO, "OpenXR: OGLTexture::CreateAdopted failed for eye {}, image {}.", eye,
-                      i);
-        return false;
-      }
-
-      // No depth attachment; the eye image only receives the final XFB blit.
-      sc.framebuffers[i] = OGLFramebuffer::Create(sc.textures[i].get(), nullptr, {});
-      if (!sc.framebuffers[i])
-      {
-        ERROR_LOG_FMT(VIDEO, "OpenXR: OGLFramebuffer::Create failed for eye {}, image {}.", eye,
-                      i);
-        return false;
-      }
-    }
-
-    INFO_LOG_FMT(VIDEO, "OpenXR: Eye {} swapchain ready: {}x{}, {} images.", eye, sc.width,
-                 sc.height, image_count);
   }
 
   return true;
 }
 
+bool OGLOpenXR::CreateColorSwapchain(uint32_t width, uint32_t height, bool foveate,
+                                     const char* name, XREyeSwapchainGL* sc) const
+{
+  sc->width = width;
+  sc->height = height;
+
+  // Format must come from xrEnumerateSwapchainFormats.
+  XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+  info.arraySize = 1;
+  info.format = m_swapchain_format;
+  info.width = width;
+  info.height = height;
+  info.mipCount = 1;
+  info.faceCount = 1;
+  info.sampleCount = 1;
+  // We render into this swapchain image as a color target, but never sample from it.
+  // Unlike D3D11, no MUTABLE_FORMAT is needed to write raw bytes to sRGB storage:
+  // GL only applies the sRGB encode when GL_FRAMEBUFFER_SRGB is enabled (see above).
+  info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+
+  // GLES foveation uses the Adreno scaled-bin method: the driver renders peripheral
+  // bins at reduced resolution and upscales them when the render pass resolves.
+  XrSwapchainCreateInfoFoveationFB foveation_info{XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
+  bool foveated = foveate;
+  if (foveated)
+  {
+    foveation_info.flags = XR_SWAPCHAIN_CREATE_FOVEATION_SCALED_BIN_BIT_FB;
+    // XrSwapchainCreateInfoFoveationFB::next is (non-const) void*.
+    foveation_info.next = const_cast<void*>(info.next);
+    info.next = &foveation_info;
+  }
+
+  XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc->swapchain);
+  if (XR_FAILED(result) && foveated)
+  {
+    WARN_LOG_FMT(VIDEO,
+                 "OpenXR: Foveated swapchain creation failed for {} ({}); retrying "
+                 "without foveation.",
+                 name, static_cast<int>(result));
+    info.next = foveation_info.next;
+    foveated = false;
+    result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc->swapchain);
+  }
+  if (XR_FAILED(result))
+  {
+    ERROR_LOG_FMT(VIDEO, "OpenXR: xrCreateSwapchain failed for {} ({}).", name,
+                  static_cast<int>(result));
+    return false;
+  }
+
+  if (foveated)
+    VR::g_openxr->ApplyFoveationToSwapchain(sc->swapchain);
+
+  // Enumerate the GL textures backing this swapchain.
+  uint32_t image_count = 0;
+  xrEnumerateSwapchainImages(sc->swapchain, 0, &image_count, nullptr);
+
+#if defined(ANDROID)
+  std::vector<XrSwapchainImageOpenGLESKHR> images(image_count,
+                                                  {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR});
+#else
+  std::vector<XrSwapchainImageOpenGLKHR> images(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR});
+#endif
+  xrEnumerateSwapchainImages(sc->swapchain, image_count, &image_count,
+                             reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
+
+  sc->textures.resize(image_count);
+  sc->framebuffers.resize(image_count);
+
+  const TextureConfig config(width, height, 1, 1, 1, m_swapchain_abstract_format,
+                             AbstractTextureFlag_RenderTarget, AbstractTextureType::Texture_2D);
+
+  for (uint32_t i = 0; i < image_count; ++i)
+  {
+    // Adopt the runtime-owned GL texture; OGLTexture will not delete it.
+    sc->textures[i] = OGLTexture::CreateAdopted(static_cast<GLuint>(images[i].image), config);
+    if (!sc->textures[i])
+    {
+      ERROR_LOG_FMT(VIDEO, "OpenXR: OGLTexture::CreateAdopted failed for {}, image {}.", name, i);
+      return false;
+    }
+
+    // No depth attachment; the compositor only consumes the color layer.
+    sc->framebuffers[i] = OGLFramebuffer::Create(sc->textures[i].get(), nullptr, {});
+    if (!sc->framebuffers[i])
+    {
+      ERROR_LOG_FMT(VIDEO, "OpenXR: OGLFramebuffer::Create failed for {}, image {}.", name, i);
+      return false;
+    }
+  }
+
+  INFO_LOG_FMT(VIDEO, "OpenXR: {} swapchain ready: {}x{}, {} images.", name, sc->width,
+               sc->height, image_count);
+  return true;
+}
+
+void OGLOpenXR::DestroyColorSwapchain(XREyeSwapchainGL* sc, const char* name)
+{
+  // Release Dolphin wrappers before destroying the swapchain so the
+  // runtime's textures are only freed after our references are gone.
+  sc->framebuffers.clear();
+  sc->textures.clear();
+
+  if (sc->swapchain != XR_NULL_HANDLE)
+  {
+    const XrResult destroy_result = xrDestroySwapchain(sc->swapchain);
+    if (XR_FAILED(destroy_result))
+    {
+      WARN_LOG_FMT(VIDEO, "OpenXR: xrDestroySwapchain failed for {} ({}).", name,
+                   static_cast<int>(destroy_result));
+    }
+    sc->swapchain = XR_NULL_HANDLE;
+  }
+}
+
+bool OGLOpenXR::RecreateEyeSwapchains(u64 retiring_generation)
+{
+  if (m_image_acquired[0] || m_image_acquired[1])
+  {
+    WARN_LOG_FMT(VIDEO, "OpenXR: eye images are acquired; not recreating the eye swapchains.");
+    return false;
+  }
+  glFlush();
+
+  RetiredSwapchains retired;
+  retired.generation = retiring_generation;
+  retired.eyes = std::move(m_eye_swapchains);
+  m_eye_swapchains = {};
+
+  // Same choice as CreateSwapchains.
+  const bool use_foveation = g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+                             VR::g_openxr->IsFoveationUsable();
+  const auto& view_cfgs = VR::g_openxr->GetViewConfigViews();
+  for (uint32_t eye = 0; eye < 2; ++eye)
+  {
+    if (CreateColorSwapchain(view_cfgs[eye].recommendedImageRectWidth,
+                             view_cfgs[eye].recommendedImageRectHeight, use_foveation,
+                             eye == 0 ? "left eye" : "right eye", &m_eye_swapchains[eye]))
+    {
+      continue;
+    }
+    // Nothing referenced the partially created set yet; drop it and keep the old swapchains.
+    for (auto& sc : m_eye_swapchains)
+      DestroyColorSwapchain(&sc, "eye");
+    m_eye_swapchains = std::move(retired.eyes);
+    return false;
+  }
+
+  m_retired_swapchains.push_back(std::move(retired));
+  return true;
+}
+
+void OGLOpenXR::CollectRetiredSwapchains(bool force)
+{
+  std::erase_if(m_retired_swapchains, [&](RetiredSwapchains& retired) {
+    if (!force &&
+        (!VR::g_openxr || !VR::g_openxr->IsSwapchainGenerationRetired(retired.generation)))
+    {
+      return false;
+    }
+    for (auto& sc : retired.eyes)
+      DestroyColorSwapchain(&sc, "retired eye");
+    INFO_LOG_FMT(VIDEO, "OpenXR: destroyed the eye swapchains of generation {}.",
+                 retired.generation);
+    return true;
+  });
+}
+
+bool OGLOpenXR::CreateMenuSwapchain(uint32_t width, uint32_t height)
+{
+  if (m_menu_swapchain.swapchain != XR_NULL_HANDLE)
+    return true;
+  if (m_swapchain_abstract_format == AbstractTextureFormat::Undefined)
+    return false;
+  if (CreateColorSwapchain(width, height, false, "VR menu", &m_menu_swapchain))
+    return true;
+  DestroyColorSwapchain(&m_menu_swapchain, "VR menu");
+  return false;
+}
+
+AbstractFramebuffer* OGLOpenXR::AcquireMenuFramebuffer()
+{
+  if (!AcquireExtraSwapchainImage(m_menu_swapchain.swapchain, &m_menu_image_index, "VR menu"))
+    return nullptr;
+  m_menu_image_acquired = true;
+  return m_menu_swapchain.framebuffers[m_menu_image_index].get();
+}
+
+bool OGLOpenXR::ReleaseMenuTexture()
+{
+  if (!m_menu_image_acquired)
+    return false;
+  m_menu_image_acquired = false;
+  // See ReleaseEyeTexture.
+  glFlush();
+  return ReleaseExtraSwapchainImage(m_menu_swapchain.swapchain, "VR menu");
+}
+
 void OGLOpenXR::DestroySwapchains()
 {
+  CollectRetiredSwapchains(true);
+
+  if (m_menu_image_acquired)
+  {
+    ReleaseExtraSwapchainImage(m_menu_swapchain.swapchain, "VR menu");
+    m_menu_image_acquired = false;
+  }
+  DestroyColorSwapchain(&m_menu_swapchain, "VR menu");
+
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
     auto& sc = m_eye_swapchains[eye];

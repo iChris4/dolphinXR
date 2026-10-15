@@ -71,6 +71,7 @@
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/VR/OpenXRBindingWizardModel.h"
 #include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRPanelMath.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace VR
@@ -603,15 +604,6 @@ VkFormat SelectSwapchainFormat(XrSession session)
   return VK_FORMAT_UNDEFINED;
 }
 
-XrVector3f RotateVector(const XrQuaternionf& q, const XrVector3f& v)
-{
-  const XrVector3f qv{q.x, q.y, q.z};
-  const XrVector3f uv{qv.y * v.z - qv.z * v.y, qv.z * v.x - qv.x * v.z, qv.x * v.y - qv.y * v.x};
-  const XrVector3f uuv{qv.y * uv.z - qv.z * uv.y, qv.z * uv.x - qv.x * uv.z,
-                       qv.x * uv.y - qv.y * uv.x};
-  return {v.x + 2.0f * (q.w * uv.x + uuv.x), v.y + 2.0f * (q.w * uv.y + uuv.y),
-          v.z + 2.0f * (q.w * uv.z + uuv.z)};
-}
 }  // namespace
 
 struct OpenXRUtilitySession::Impl
@@ -1003,20 +995,12 @@ struct OpenXRUtilitySession::Impl
       const auto& controller = snapshot.controllers[hand];
       if (!controller.connected || !controller.aim_pose.valid)
         continue;
-      const auto& pose = controller.aim_pose;
-      const XrQuaternionf orientation{pose.orientation[0], pose.orientation[1], pose.orientation[2],
-                                      pose.orientation[3]};
-      const XrVector3f origin{pose.position[0], pose.position[1], pose.position[2]};
-      const XrVector3f direction = RotateVector(orientation, {0.0f, 0.0f, -1.0f});
-      if (std::abs(direction.z) < 0.0001f)
+      const std::optional<PanelMath::QuadHit> hit =
+          PanelMath::IntersectRayQuad(PanelMath::ToXrPose(controller.aim_pose), quad.pose);
+      if (!hit)
         continue;
-      const float t = (quad.pose.position.z - origin.z) / direction.z;
-      if (t <= 0.0f)
-        continue;
-      const float x = origin.x + direction.x * t - quad.pose.position.x;
-      const float y = origin.y + direction.y * t - quad.pose.position.y;
-      const float u = x / quad.size.width + 0.5f;
-      const float v = 0.5f - y / quad.size.height;
+      const float u = hit->x / quad.size.width + 0.5f;
+      const float v = 0.5f - hit->y / quad.size.height;
       if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f)
         continue;
       pointer_visible[hand] = true;

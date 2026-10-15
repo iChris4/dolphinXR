@@ -225,6 +225,7 @@ public:
 
   void SetInputOverrideFunction(InputOverrideFunction override_func);
   void ClearInputOverrideFunction();
+  bool HasInputOverrideFunction() const { return static_cast<bool>(m_input_override_function); }
 
   std::vector<std::unique_ptr<ControlGroup>> groups;
 

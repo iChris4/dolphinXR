@@ -78,6 +78,16 @@ public:
   // Flat mono panel path reuses eye swapchain #0; the base class handles acquire/release/submit.
   XrSwapchain GetFlatSwapchain() const override { return m_eye_swapchains[0].swapchain; }
 
+  // In-game VR menu panel.
+  bool CreateMenuSwapchain(uint32_t width, uint32_t height) override;
+  XrSwapchain GetMenuSwapchain() const override { return m_menu_swapchain.swapchain; }
+  AbstractFramebuffer* AcquireMenuFramebuffer() override;
+  bool ReleaseMenuTexture() override;
+
+  // Live eye resolution change.
+  bool RecreateEyeSwapchains(u64 retiring_generation) override;
+  void CollectRetiredSwapchains(bool force) override;
+
   const XREyeSwapchain& GetEyeSwapchain(uint32_t eye) const { return m_eye_swapchains[eye]; }
 
 private:
@@ -86,10 +96,28 @@ private:
 
   // Allocates m_eye_swapchains and wraps images as DXTexture / DXFramebuffer.
   bool CreateSwapchains();
+  // Creates one color swapchain in m_swapchain_format and wraps its images.
+  bool CreateColorSwapchain(uint32_t width, uint32_t height, const char* name,
+                            XREyeSwapchain* sc) const;
+  static void DestroyColorSwapchain(XREyeSwapchain* sc, const char* name);
 
   void DestroySwapchains();
 
   std::array<XREyeSwapchain, 2> m_eye_swapchains{};
+  int64_t m_swapchain_format = 0;
+
+  XREyeSwapchain m_menu_swapchain;
+  uint32_t m_menu_image_index = 0;
+  bool m_menu_image_acquired = false;
+
+  // Eye swapchains replaced by a resolution change, kept until the compositor is done with
+  // them. D3D11 resources are reference counted, so GPU work needs no extra tracking.
+  struct RetiredSwapchains
+  {
+    u64 generation = 0;
+    std::array<XREyeSwapchain, 2> eyes;
+  };
+  std::vector<RetiredSwapchains> m_retired_swapchains;
 
   // Image index selected by xrAcquireSwapchainImage for the current frame.
   std::array<uint32_t, 2> m_acquired_image_index{0, 0};

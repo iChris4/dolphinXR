@@ -3645,6 +3645,16 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(
+            SingleChoiceSetting(
+                context,
+                QuestVrSettings.menuToggleButtonSetting(),
+                R.string.quest_vr_menu_button,
+                R.string.quest_vr_menu_button_description,
+                R.array.questVrMenuButtonEntries,
+                R.array.questVrMenuButtonValues
+            )
+        )
+        sl.add(
             RunRunnable(
                 context,
                 R.string.quest_recenter_now,
