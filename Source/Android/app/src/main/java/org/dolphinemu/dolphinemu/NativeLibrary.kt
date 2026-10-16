@@ -384,6 +384,20 @@ object NativeLibrary {
      */
     @JvmStatic
     external fun DebugVRMenu(action: Int, u: Float, v: Float, click: Boolean)
+
+    /**
+     * Shows the system keyboard (the Quest keyboard overlay) to edit a text field of the in-game
+     * VR menu, starting from [text]. Called from native code; each edit goes back through
+     * [SetVRMenuText].
+     */
+    @JvmStatic
+    @Keep
+    fun showVRMenuKeyboard(text: String) {
+        emulationActivityRef.get()?.showVRMenuKeyboard(text)
+    }
+
+    @JvmStatic
+    external fun SetVRMenuText(text: String)
     external fun StartOpenXRControllerMapper(activity: Activity, controllerPort: Int, targetType: Int): Boolean
     external fun GetOpenXRControllerMapperState(): Int
     external fun GetOpenXRControllerMapperFailure(): String

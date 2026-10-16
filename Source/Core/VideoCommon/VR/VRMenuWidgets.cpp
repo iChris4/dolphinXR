@@ -95,13 +95,12 @@ void ValueRow(const char* label, const std::string& value, const char* tooltip)
   ImGui::TextUnformatted(value.c_str());
 }
 
-bool SliderFloat(const char* label, const char* tooltip, const Config::Info<float>& info,
-                 const FloatRange& range, Apply apply, TouchedKeys* touched)
+namespace
 {
-  ImGui::PushID(label);
-  BeginRow(label, tooltip, Config::GetActiveLayerForConfig(info));
-
-  const float value = Config::Get(info);
+// [-] slider [+] for `value` on the current row. Returns true with `*result` set when a different
+// value should be stored.
+bool SliderFloatControl(float value, const FloatRange& range, Apply apply, float* result)
+{
   float new_value = value;
   bool commit = false;
 
@@ -155,12 +154,32 @@ bool SliderFloat(const char* label, const char* tooltip, const Config::Info<floa
     commit = true;
   }
 
-  const bool changed = commit && new_value != value;
+  *result = new_value;
+  return commit && new_value != value;
+}
+}  // namespace
+
+bool SliderFloat(const char* label, const char* tooltip, const Config::Info<float>& info,
+                 const FloatRange& range, Apply apply, TouchedKeys* touched)
+{
+  ImGui::PushID(label);
+  BeginRow(label, tooltip, Config::GetActiveLayerForConfig(info));
+  float new_value;
+  const bool changed = SliderFloatControl(Config::Get(info), range, apply, &new_value);
   if (changed)
   {
     Config::SetBaseOrCurrent(info, new_value);
     MarkTouched(touched, info.GetLocation());
   }
+  ImGui::PopID();
+  return changed;
+}
+
+bool SliderFloat(const char* label, const char* tooltip, float* value, const FloatRange& range)
+{
+  ImGui::PushID(label);
+  BeginRow(label, tooltip, Config::LayerType::Base);
+  const bool changed = SliderFloatControl(*value, range, Apply::Live, value);
   ImGui::PopID();
   return changed;
 }
@@ -265,6 +284,15 @@ bool Checkbox(const char* label, const char* tooltip, const Config::Info<bool>& 
     Config::SetBaseOrCurrent(info, value);
     MarkTouched(touched, info.GetLocation());
   }
+  ImGui::PopID();
+  return changed;
+}
+
+bool Checkbox(const char* label, const char* tooltip, bool* value)
+{
+  ImGui::PushID(label);
+  BeginRow(label, tooltip, Config::LayerType::Base);
+  const bool changed = ImGui::Checkbox("##checkbox", value);
   ImGui::PopID();
   return changed;
 }

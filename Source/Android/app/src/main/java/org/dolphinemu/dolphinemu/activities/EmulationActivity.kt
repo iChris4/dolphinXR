@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import android.util.SparseIntArray
 import android.view.KeyEvent
 import android.view.MenuItem
@@ -20,6 +21,10 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup.MarginLayoutParams
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -29,6 +34,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentManager
@@ -70,6 +76,7 @@ import org.dolphinemu.dolphinemu.ui.main.ThemeProvider
 import org.dolphinemu.dolphinemu.utils.AfterDirectoryInitializationRunner
 import org.dolphinemu.dolphinemu.utils.DirectoryInitialization
 import org.dolphinemu.dolphinemu.utils.FileBrowserHelper
+import org.dolphinemu.dolphinemu.utils.Log
 import org.dolphinemu.dolphinemu.utils.RateLimiter
 import org.dolphinemu.dolphinemu.utils.ThemeHelper
 import kotlin.math.roundToInt
@@ -98,6 +105,9 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
     private lateinit var infinityBinding: DialogNfcFiguresManagerBinding
 
     private lateinit var binding: ActivityEmulationBinding
+
+    // The VR menu's text entry (see showVRMenuKeyboard), created on first use.
+    private var vrMenuTextField: EditText? = null
 
     private val refreshInputOverlayRateLimiter = RateLimiter(Handler(Looper.getMainLooper()), 100) {
         emulationFragment?.refreshInputOverlay()
@@ -450,6 +460,47 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
         return super.onKeyLongPress(keyCode, event)
     }
 
+    /**
+     * Text entry for the in-game VR menu. A focused text field asks for the keyboard, which Quest
+     * shows as its keyboard overlay over the immersive session (manifest feature
+     * oculus.software.overlay_keyboard). The field itself is invisible; the VR menu shows the text,
+     * which goes back to native code after each edit. Enter closes the keyboard.
+     */
+    fun showVRMenuKeyboard(text: String) {
+        runOnUiThread {
+            val field = vrMenuTextField ?: createVRMenuTextField().also { vrMenuTextField = it }
+            field.setText(text)
+            field.setSelection(field.length())
+            field.requestFocus()
+            // After the layout pass that attaches a new field.
+            field.post {
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+                if (!imm.showSoftInput(field, 0))
+                    Log.warning("[EmulationActivity] The VR menu keyboard could not be shown")
+            }
+        }
+    }
+
+    private fun createVRMenuTextField(): EditText {
+        val field = EditText(this).apply {
+            alpha = 0f
+            isSingleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            doAfterTextChanged { NativeLibrary.SetVRMenuText(it?.toString() ?: "") }
+            setOnEditorActionListener { view, actionId, _ ->
+                if (actionId != EditorInfo.IME_ACTION_DONE)
+                    return@setOnEditorActionListener false
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.hideSoftInputFromWindow(view.windowToken, 0)
+                view.clearFocus()
+                true
+            }
+        }
+        binding.root.addView(field, FrameLayout.LayoutParams(1, 1))
+        return field
+    }
+
     private fun enableFullscreenImmersive() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).let { controller ->
@@ -638,7 +689,9 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
 
     // Gets button presses
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (!menuVisible) {
+        // Keys of the VR menu's keyboard (some keyboards send Backspace/Enter as key events) go to
+        // its text field, not to the game.
+        if (!menuVisible && vrMenuTextField?.hasFocus() != true) {
             if (ControllerInterface.dispatchKeyEvent(event)) {
                 return true
             }

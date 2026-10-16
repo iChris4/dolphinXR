@@ -347,7 +347,15 @@ public:
 
   HuntingStatus GetHuntingStatusForOSD() const;
   std::optional<RuntimeElementSignature> GetSelectedRuntimeElementSignature() const;
-  bool SaveSelectedShaderOverride(const std::string& game_id, HandlingType handling);
+  // Saves the hunted shader as an override named `name` ("Shader <hash>" when empty) and reloads
+  // the overrides. An override of that name for the same shader is replaced; when another shader
+  // has the name, a number is appended. `units_per_meter` is the scale for UnitsPerMeter
+  // handling; <= 0 uses the current global value. Returns the override's name, or nothing when
+  // no shader is selected or, in Shader Family mode, its family signature is not known yet.
+  std::optional<std::string> SaveSelectedShaderOverride(const std::string& game_id,
+                                                        HandlingType handling,
+                                                        float units_per_meter = -1.0f,
+                                                        const std::string& name = {});
 
 private:
   ShaderHunter() = default;

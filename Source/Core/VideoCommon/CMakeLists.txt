@@ -332,6 +332,8 @@ if(ENABLE_VR)
     VR/VRMenuWidgets.cpp
     VR/VRMenuWidgets.h
     VR/VRPanelMath.h
+    VR/VRTextInput.cpp
+    VR/VRTextInput.h
   )
   # Expose the OpenXR headers to all targets that depend on videocommon.
   target_include_directories(videocommon PUBLIC "${CMAKE_SOURCE_DIR}/Externals/OpenXR/include")

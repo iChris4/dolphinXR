@@ -25,6 +25,11 @@
     <uses-feature
         android:name="com.oculus.feature.PASSTHROUGH"
         android:required="false" />
+    <!-- Lets the system keyboard show over the immersive session as an overlay: the in-game VR
+         menu's text fields use it (EmulationActivity.showVRMenuKeyboard). -->
+    <uses-feature
+        android:name="oculus.software.overlay_keyboard"
+        android:required="false" />
 
     <application>
         <uses-native-library

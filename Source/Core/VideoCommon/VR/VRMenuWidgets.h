@@ -64,6 +64,10 @@ bool Checkbox(const char* label, const char* tooltip, const Config::Info<bool>& 
 bool CheckboxInverted(const char* label, const char* tooltip, const Config::Info<bool>& info,
                       TouchedKeys* touched);
 
+// Rows for a plain value instead of a config key (tool state, values of an action).
+bool SliderFloat(const char* label, const char* tooltip, float* value, const FloatRange& range);
+bool Checkbox(const char* label, const char* tooltip, bool* value);
+
 // GFX_EFB_SCALE as a list of multipliers of the native resolution.
 bool InternalResolutionCombo(TouchedKeys* touched);
 
@@ -76,14 +80,10 @@ void BeginRow(const char* label, const char* tooltip, Config::LayerType active_l
 // Width left for the control on the current row.
 float ControlWidth();
 
+// The combo box of a Combo row. Returns true with `*result` set when another item was picked.
 template <typename T>
-bool Combo(const char* label, const char* tooltip, const Config::Info<T>& info,
-           std::span<const std::pair<T, const char*>> items, TouchedKeys* touched)
+bool ComboControl(T value, std::span<const std::pair<T, const char*>> items, T* result)
 {
-  ImGui::PushID(label);
-  BeginRow(label, tooltip, Config::GetActiveLayerForConfig(info));
-
-  const T value = Config::Get(info);
   const char* preview = "?";
   for (const auto& [item_value, item_name] : items)
   {
@@ -100,9 +100,7 @@ bool Combo(const char* label, const char* tooltip, const Config::Info<T>& info,
       const bool selected = item_value == value;
       if (ImGui::Selectable(item_name, selected) && !selected)
       {
-        Config::SetBaseOrCurrent(info, item_value);
-        if (touched)
-          touched->Add(info.GetLocation());
+        *result = item_value;
         changed = true;
       }
       if (selected)
@@ -110,6 +108,34 @@ bool Combo(const char* label, const char* tooltip, const Config::Info<T>& info,
     }
     ImGui::EndCombo();
   }
+  return changed;
+}
+
+template <typename T>
+bool Combo(const char* label, const char* tooltip, const Config::Info<T>& info,
+           std::span<const std::pair<T, const char*>> items, TouchedKeys* touched)
+{
+  ImGui::PushID(label);
+  BeginRow(label, tooltip, Config::GetActiveLayerForConfig(info));
+  T new_value{};
+  const bool changed = ComboControl<T>(Config::Get(info), items, &new_value);
+  if (changed)
+  {
+    Config::SetBaseOrCurrent(info, new_value);
+    if (touched)
+      touched->Add(info.GetLocation());
+  }
+  ImGui::PopID();
+  return changed;
+}
+
+template <typename T>
+bool Combo(const char* label, const char* tooltip, T* value,
+           std::span<const std::pair<T, const char*>> items)
+{
+  ImGui::PushID(label);
+  BeginRow(label, tooltip, Config::LayerType::Base);
+  const bool changed = ComboControl<T>(*value, items, value);
   ImGui::PopID();
   return changed;
 }

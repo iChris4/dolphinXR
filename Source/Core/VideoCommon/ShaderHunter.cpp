@@ -2459,7 +2459,10 @@ ShaderHunter::GetSelectedRuntimeElementSignature() const
   return m_selected_draw_signature;
 }
 
-bool ShaderHunter::SaveSelectedShaderOverride(const std::string& game_id, HandlingType handling)
+std::optional<std::string> ShaderHunter::SaveSelectedShaderOverride(const std::string& game_id,
+                                                                    HandlingType handling,
+                                                                    float units_per_meter,
+                                                                    const std::string& name)
 {
   ShaderType type = ShaderType::Pixel;
   MatchMode match_mode = MatchMode::ShaderFamily;
@@ -2470,7 +2473,7 @@ bool ShaderHunter::SaveSelectedShaderOverride(const std::string& game_id, Handli
     std::lock_guard lock(m_mutex);
     const int t = static_cast<int>(m_active_type);
     if (game_id.empty() || m_selected_pos[t] < 0 || m_selected_hash[t] == ~0ULL)
-      return false;
+      return std::nullopt;
 
     type = m_active_type;
     match_mode = m_hunting_match_mode;
@@ -2480,12 +2483,21 @@ bool ShaderHunter::SaveSelectedShaderOverride(const std::string& game_id, Handli
 
   const auto family_signature = GetShaderFamilySignature(type, hash);
   if (match_mode == MatchMode::ShaderFamily && !family_signature.has_value())
-    return false;
+    return std::nullopt;
 
   auto all = LoadOverridesFromINI(game_id);
 
   ShaderOverride entry;
-  entry.name = fmt::format("Shader {:08x}", static_cast<u32>(hash));
+  const std::string base_name =
+      name.empty() ? fmt::format("Shader {:08x}", static_cast<u32>(hash)) : name;
+  entry.name = base_name;
+  for (int number = 2;; ++number)
+  {
+    const auto same_name = std::ranges::find(all, entry.name, &ShaderOverride::name);
+    if (same_name == all.end() || (same_name->type == type && same_name->hash == hash))
+      break;
+    entry.name = fmt::format("{} {}", base_name, number);
+  }
   entry.hash = hash;
   entry.type = type;
   entry.handling = handling;
@@ -2501,12 +2513,21 @@ bool ShaderHunter::SaveSelectedShaderOverride(const std::string& game_id, Handli
   if (handling == HandlingType::Flag)
     entry.flag_group = entry.name;
   if (handling == HandlingType::UnitsPerMeter)
-    entry.units_per_meter = g_Config.vr_units_per_meter;
+  {
+    entry.units_per_meter =
+        units_per_meter > 0.0f ? units_per_meter : g_Config.vr_units_per_meter;
+  }
   if (texture_hash != 0)
     entry.texture_hashes.push_back(texture_hash);
 
-  all.push_back(entry);
+  // Saving the same shader under its name again changes its override. (A duplicate name would
+  // load as the last entry anyway.)
+  const auto existing = std::ranges::find(all, entry.name, &ShaderOverride::name);
+  if (existing != all.end())
+    *existing = entry;
+  else
+    all.push_back(entry);
   SaveOverridesToINI(game_id, all);
   LoadOverrides(game_id);
-  return true;
+  return entry.name;
 }

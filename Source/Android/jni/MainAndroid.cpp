@@ -74,6 +74,7 @@
 #include "VideoCommon/VideoBackendBase.h"
 #ifdef ENABLE_VR
 #include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRTextInput.h"
 #if defined(HAS_VULKAN)
 #include "VideoCommon/VR/OpenXRUtilitySession.h"
 #endif
@@ -249,6 +250,21 @@ static bool MsgAlert(const char* caption, const char* text, bool yes_no, Common:
   return result != JNI_FALSE;
 }
 
+#ifdef ENABLE_VR
+// Keyboard of the in-game VR menu's text fields: EmulationActivity's hidden text field, which the
+// Quest keyboard overlay edits. Typed text comes back through SetVRMenuText.
+static void ShowVRMenuKeyboard(const std::string& text)
+{
+  JNIEnv* env = IDCache::GetEnvForThread();
+  static const jmethodID show_keyboard = env->GetStaticMethodID(
+      IDCache::GetNativeLibraryClass(), "showVRMenuKeyboard", "(Ljava/lang/String;)V");
+
+  jstring j_text = ToJString(env, text);
+  env->CallStaticVoidMethod(IDCache::GetNativeLibraryClass(), show_keyboard, j_text);
+  env->DeleteLocalRef(j_text);
+}
+#endif
+
 static std::string GetAnalyticValue(const std::string& key)
 {
   JNIEnv* env = IDCache::GetEnvForThread();
@@ -316,6 +332,16 @@ JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_DebugVRMenu(
     VR::g_openxr->RequestMenuOpen(!Common::VR::OpenXRInputState::GetSnapshot().menu.open);
   if (u >= 0.0f && v >= 0.0f)
     VR::g_openxr->InjectMenuDebugPointer(u, v, click);
+#endif
+}
+
+// Text of the VR menu's keyboard field after each edit (see ShowVRMenuKeyboard).
+JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_SetVRMenuText(JNIEnv* env,
+                                                                                   jclass,
+                                                                                   jstring text)
+{
+#ifdef ENABLE_VR
+  VR::TextInput::SetText(GetJString(env, text));
 #endif
 }
 
@@ -714,6 +740,9 @@ JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_Initialize(J
   UICommon::CreateDirectories();
   Common::RegisterMsgAlertHandler(&MsgAlert);
   DolphinAnalytics::AndroidSetGetValFunc(&GetAnalyticValue);
+#ifdef ENABLE_VR
+  VR::TextInput::SetShowKeyboardFunction(&ShowVRMenuKeyboard);
+#endif
 
   WiimoteReal::InitAdapterClass();
   UICommon::Init();
