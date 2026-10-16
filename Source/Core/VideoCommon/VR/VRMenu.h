@@ -37,7 +37,7 @@ struct VRMenuContext;
 
 // In-game VR menu: a panel in the headset, operated with a controller laser pointer, with tabs
 // for emulation control (pause, screenshot, disc change, exit), VR and graphics settings,
-// controls, audio, savestates and performance statistics. Opening it does not pause the game; the OpenXR input thread withholds the VR
+// the game's overrides, controls, audio, savestates and performance statistics. Opening it does not pause the game; the OpenXR input thread withholds the VR
 // controllers from the game meanwhile.
 //
 // Opening and closing are decided on the input thread (OpenXRManager::UpdateMenuGate). This

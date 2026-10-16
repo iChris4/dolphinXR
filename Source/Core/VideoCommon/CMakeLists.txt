@@ -324,6 +324,7 @@ if(ENABLE_VR)
     VR/VRMenuTabControls.cpp
     VR/VRMenuTabGraphics.cpp
     VR/VRMenuTabMain.cpp
+    VR/VRMenuTabOverrides.cpp
     VR/VRMenuTabs.h
     VR/VRMenuTabSavestates.cpp
     VR/VRMenuTabStats.cpp

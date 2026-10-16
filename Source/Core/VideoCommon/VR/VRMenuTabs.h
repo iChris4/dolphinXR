@@ -44,6 +44,7 @@ public:
 std::unique_ptr<VRMenuTab> CreateMainTab();
 std::unique_ptr<VRMenuTab> CreateVRSettingsTab();
 std::unique_ptr<VRMenuTab> CreateGraphicsTab();
+std::unique_ptr<VRMenuTab> CreateOverridesTab();
 std::unique_ptr<VRMenuTab> CreateControlsTab();
 std::unique_ptr<VRMenuTab> CreateAudioTab();
 std::unique_ptr<VRMenuTab> CreateSavestatesTab();

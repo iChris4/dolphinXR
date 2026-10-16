@@ -77,6 +77,7 @@ VRMenu::VRMenu()
   m_tabs.push_back(CreateMainTab());
   m_tabs.push_back(CreateVRSettingsTab());
   m_tabs.push_back(CreateGraphicsTab());
+  m_tabs.push_back(CreateOverridesTab());
   m_tabs.push_back(CreateControlsTab());
   m_tabs.push_back(CreateAudioTab());
   m_tabs.push_back(CreateSavestatesTab());
