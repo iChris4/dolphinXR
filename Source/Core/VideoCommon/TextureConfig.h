@@ -41,9 +41,6 @@ enum AbstractTextureFlag : u32
 {
   AbstractTextureFlag_RenderTarget = (1 << 0),  // Texture is used as a framebuffer.
   AbstractTextureFlag_ComputeImage = (1 << 1),  // Texture is used as a compute image.
-  // Framebuffer attachment whose contents are never read: render passes neither load nor
-  // store it (honored by Vulkan, ignored elsewhere).
-  AbstractTextureFlag_DiscardedAttachment = (1 << 2),
 };
 
 enum class AbstractTextureType : u8
@@ -72,10 +69,6 @@ struct TextureConfig
   bool IsMultisampled() const { return samples > 1; }
   bool IsRenderTarget() const { return (flags & AbstractTextureFlag_RenderTarget) != 0; }
   bool IsComputeImage() const { return (flags & AbstractTextureFlag_ComputeImage) != 0; }
-  bool IsDiscardedAttachment() const
-  {
-    return (flags & AbstractTextureFlag_DiscardedAttachment) != 0;
-  }
 
   u32 width = 0;
   u32 height = 0;

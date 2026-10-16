@@ -1246,9 +1246,6 @@ CreateFramebufferInternal(VKTexture* color_attachment, VKTexture* depth_attachme
       additional_color_attachments.empty() ?
           VK_FORMAT_UNDEFINED :
           static_cast<VKTexture*>(additional_color_attachments.front())->GetVkFormat();
-  bool discard_additional_attachments = !additional_color_attachments.empty();
-  for (const AbstractTexture* attachment : additional_color_attachments)
-    discard_additional_attachments &= attachment->GetConfig().IsDiscardedAttachment();
 
   // EFB foveation: when FramebufferManager latched foveation on, every framebuffer of
   // the EFB family (main, convert, coverage — they share the depth texture) gets the
@@ -1276,15 +1273,15 @@ CreateFramebufferInternal(VKTexture* color_attachment, VKTexture* depth_attachme
   VkRenderPass load_render_pass = g_object_cache->GetRenderPass(
       vk_color_format, vk_depth_format, samples, VK_ATTACHMENT_LOAD_OP_LOAD,
       static_cast<u8>(additional_color_attachments.size()), use_multiview,
-      additional_color_format, use_fdm, discard_additional_attachments);
+      additional_color_format, use_fdm);
   VkRenderPass discard_render_pass = g_object_cache->GetRenderPass(
       vk_color_format, vk_depth_format, samples, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
       static_cast<u8>(additional_color_attachments.size()), use_multiview,
-      additional_color_format, use_fdm, discard_additional_attachments);
+      additional_color_format, use_fdm);
   VkRenderPass clear_render_pass = g_object_cache->GetRenderPass(
       vk_color_format, vk_depth_format, samples, VK_ATTACHMENT_LOAD_OP_CLEAR,
       static_cast<u8>(additional_color_attachments.size()), use_multiview,
-      additional_color_format, use_fdm, discard_additional_attachments);
+      additional_color_format, use_fdm);
   if (load_render_pass == VK_NULL_HANDLE || discard_render_pass == VK_NULL_HANDLE ||
       clear_render_pass == VK_NULL_HANDLE)
   {

@@ -24,7 +24,6 @@ enum class OpenXRReferenceSpaceMode : int;
 enum class OpenXRTrackingMode : int;
 enum class VRMenuToggleButton : int;
 enum class VRPassthroughCoverageMode : int;
-enum class VRScreenRecordingDiagnostic : int;
 
 namespace Config
 {
@@ -106,10 +105,6 @@ extern const Info<bool> GFX_BACKEND_MULTITHREADING;
 // Vulkan only: record state binds and draws on a helper thread (see VKRecordingWorker.h).
 // Read when the backend starts; changing it needs a backend restart.
 extern const Info<bool> GFX_VULKAN_RECORDING_WORKER;
-// Vulkan on Adreno only: use the regular 32-bit float EFB depth buffer instead of the D24S8 that
-// Dolphin's old "D32F clears have no effect" workaround picks on every Qualcomm GPU. Opt-in test
-// for recent Adrenos; read when the backend starts.
-extern const Info<bool> GFX_VULKAN_ADRENO_D32F_DEPTH;
 // Vulkan only: ubershaders read triangle vertices through vertex attributes instead of
 // loading and decoding them from a storage buffer in the vertex shader (the dynamic vertex
 // loader). Costs one ubershader pipeline per vertex format. Read when the backend starts.
@@ -232,9 +227,9 @@ extern const Info<bool> GFX_VR_HEAD_CPU_CULL;
 // from the last completed readback instead of waiting for the GPU when the newest one is still
 // in flight (at most about a frame old). See FramebufferManager::PeekEFBColor/Depth.
 extern const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS;
-// Vulkan VR: give the EFB render pass an extra attachment that is never loaded, stored or read.
-// Avoids the Quest GPU driver fault that freezes the image while Meta's recorder or casting
-// runs. Passthrough already provides the attachment.
+// Vulkan: drop the secondary (dual-source) fragment output from shaders whose blend state doesn't
+// read it. Avoids the Quest GPU driver fault that freezes the image while Meta's recorder or
+// casting runs. Not applied while real passthrough is on.
 extern const Info<bool> GFX_VR_SCREEN_RECORDING_COMPATIBILITY;
 extern const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW;
 extern const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE;
@@ -288,9 +283,6 @@ static constexpr int GFX_VR_CLEAR_EFB_MIN = 0;
 static constexpr int GFX_VR_CLEAR_EFB_MAX = 640;
 static constexpr int GFX_VR_CLEAR_EFB_STEP = 10;
 extern const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW;
-// Diagnostic Vulkan swapchain format override; restart emulation after changing it.
-extern const Info<bool> GFX_VR_OPENXR_FORCE_UNORM_FORMAT;
-extern const Info<VRScreenRecordingDiagnostic> GFX_VR_OPENXR_RECORDING_DIAGNOSTIC;
 extern const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD;
 extern const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT;
 extern const Info<float> GFX_VR_RESOLUTION_SCALE;

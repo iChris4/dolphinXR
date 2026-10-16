@@ -13,6 +13,7 @@
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/Constants.h"
+#include "VideoCommon/FramebufferManager.h"
 
 namespace Vulkan
 {
@@ -387,11 +388,22 @@ void StateTracker::InvalidateCachedState()
     m_dirty_flags |= DIRTY_FLAG_INDEX_BUFFER;
 }
 
+// VKPERF: EFB render passes are the ones sharing the EFB depth texture (main, convert,
+// with-coverage and coverage framebuffers).
+static void CountRenderPass(const VKFramebuffer* framebuffer, std::atomic<u32>& efb_counter)
+{
+  auto& perf = g_vulkan_context->GetPerfCounters();
+  const bool efb = g_framebuffer_manager &&
+                   framebuffer->GetDepthAttachment() == g_framebuffer_manager->GetEFBDepthTexture();
+  (efb ? efb_counter : perf.other_passes).fetch_add(1, std::memory_order_relaxed);
+}
+
 void StateTracker::BeginRenderPass()
 {
   if (InRenderPass())
     return;
 
+  CountRenderPass(m_framebuffer, g_vulkan_context->GetPerfCounters().efb_load_passes);
   m_current_render_pass = m_framebuffer->GetLoadRenderPass();
   m_framebuffer_render_area = m_framebuffer->GetRect();
   m_framebuffer->PrepareForRenderPass();
@@ -413,6 +425,7 @@ void StateTracker::BeginDiscardRenderPass()
   if (InRenderPass())
     return;
 
+  CountRenderPass(m_framebuffer, g_vulkan_context->GetPerfCounters().efb_discard_passes);
   m_current_render_pass = m_framebuffer->GetDiscardRenderPass();
   m_framebuffer_render_area = m_framebuffer->GetRect();
 
@@ -442,6 +455,7 @@ void StateTracker::BeginClearRenderPass(const VkRect2D& area, const VkClearValue
 {
   ASSERT(!InRenderPass());
 
+  CountRenderPass(m_framebuffer, g_vulkan_context->GetPerfCounters().efb_clear_passes);
   m_current_render_pass = m_framebuffer->GetClearRenderPass();
   m_framebuffer_render_area = area;
   m_framebuffer->PrepareForRenderPass();

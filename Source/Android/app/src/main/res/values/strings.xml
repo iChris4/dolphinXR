@@ -953,7 +953,7 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_head_cpu_culling_description">Skips draw calls outside the view cone that follows your head before they reach the GPU. Reduces CPU load in open areas.</string>
     <string name="quest_nonblocking_efb_access">Non-Blocking EFB Reads</string>
     <string name="quest_screen_recording_compatibility">Quest Screen Recording Compatibility</string>
-    <string name="quest_screen_recording_compatibility_description">Gives the frame buffer\'s render pass an extra attachment that is never loaded, stored or read. This avoids the GPU driver fault that freezes the image while Meta\'s screen recorder or casting is running. Costs almost nothing. No effect with OpenGL or while Passthrough is on. If unsure, leave this checked.</string>
+    <string name="quest_screen_recording_compatibility_description">Avoids the GPU driver fault that freezes the image while Meta\'s screen recorder or casting is running. Vulkan only. No effect while Passthrough is on. If unsure, leave this checked.</string>
     <string name="quest_nonblocking_efb_access_description">When a game reads the frame buffer from the CPU, answers from the last readback the GPU has completed instead of waiting for the newest one (up to about a frame old). Fixes Super Mario Galaxy\'s frame rate in VR. Turn off if an effect driven by such reads misbehaves in a game.</string>
     <string name="quest_load_custom_shaders">Load Custom Shaders</string>
     <string name="quest_load_custom_shaders_description">Loads custom shader replacements from the game\'s shader override directory.</string>

@@ -255,12 +255,6 @@ void VideoConfig::Refresh()
   vr_metroid_d3d_thermal_palette_fix =
       Config::Get(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX);
   vr_passthrough = Config::Get(Config::GFX_VR_PASSTHROUGH);
-  vr_screen_recording_diagnostic = Config::Get(Config::GFX_VR_OPENXR_RECORDING_DIAGNOSTIC);
-  if (vr_screen_recording_diagnostic < VRScreenRecordingDiagnostic::Disabled ||
-      vr_screen_recording_diagnostic > VRScreenRecordingDiagnostic::DiscardedAttachment)
-  {
-    vr_screen_recording_diagnostic = VRScreenRecordingDiagnostic::Disabled;
-  }
   vr_passthrough_remove_black_bg = Config::Get(Config::GFX_VR_PASSTHROUGH_REMOVE_BLACK_BG);
   vr_passthrough_remove_black_clears =
       Config::Get(Config::GFX_VR_PASSTHROUGH_REMOVE_BLACK_CLEARS);
@@ -424,8 +418,7 @@ void CheckForConfigChanges()
   const float old_vr_screen_size = g_ActiveConfig.vr_screen_size;
   const float old_vr_head_locked_curvature = g_ActiveConfig.vr_head_locked_curvature;
   const bool old_vr_passthrough_enabled = g_ActiveConfig.VRPassthroughEnabled();
-  const bool old_vr_coverage_attachment_needed = g_ActiveConfig.VRNeedsCoverageAttachment();
-  const bool old_vr_coverage_attachment_discarded = g_ActiveConfig.VRDiscardsCoverageAttachment();
+  const bool old_prune_dual_source = g_ActiveConfig.PruneUnusedDualSourceOutputs();
   const bool old_vr_reveal_unrendered = g_ActiveConfig.vr_passthrough_remove_black_bg;
   const auto old_vr_passthrough_coverage_mode =
       g_ActiveConfig.vr_passthrough_coverage_mode;
@@ -491,11 +484,11 @@ void CheckForConfigChanges()
     changed_bits |= CONFIG_CHANGE_BIT_HDR;
   const bool vr_passthrough_resources_changed =
       old_vr_passthrough_enabled != g_ActiveConfig.VRPassthroughEnabled() ||
-      old_vr_coverage_attachment_needed != g_ActiveConfig.VRNeedsCoverageAttachment() ||
-      old_vr_coverage_attachment_discarded != g_ActiveConfig.VRDiscardsCoverageAttachment() ||
       old_vr_reveal_unrendered != g_ActiveConfig.vr_passthrough_remove_black_bg;
+  // The dual-source pruning only changes pipelines, which this bit's shader reload rebuilds.
   if (vr_passthrough_resources_changed ||
-      old_vr_passthrough_coverage_mode != g_ActiveConfig.vr_passthrough_coverage_mode)
+      old_vr_passthrough_coverage_mode != g_ActiveConfig.vr_passthrough_coverage_mode ||
+      old_prune_dual_source != g_ActiveConfig.PruneUnusedDualSourceOutputs())
   {
     changed_bits |= CONFIG_CHANGE_BIT_VR_PASSTHROUGH;
   }

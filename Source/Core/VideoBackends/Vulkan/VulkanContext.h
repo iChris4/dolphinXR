@@ -164,6 +164,11 @@ public:
     std::atomic<u32> pipelines_created{0};
     std::atomic<u32> sampler_cache_hits{0};
     std::atomic<u32> sampler_cache_misses{0};
+    // Render passes begun on the EFB (load = the tiler reloads the whole EFB), and on others.
+    std::atomic<u32> efb_load_passes{0};
+    std::atomic<u32> efb_clear_passes{0};
+    std::atomic<u32> efb_discard_passes{0};
+    std::atomic<u32> other_passes{0};
     // Set once per presented frame from [VR] PerfCounters. Counts are always accumulated;
     // the per-draw timer reads only happen while this is true.
     std::atomic<bool> timing_enabled{false};

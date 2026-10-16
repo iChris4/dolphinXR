@@ -50,7 +50,8 @@ void ClearUnusedPixelShaderUidBits(APIType api_type, const ShaderHostConfig& hos
   if (host_config.backend_shader_framebuffer_fetch || !host_config.backend_dual_source_blend)
     uid_data->no_dual_src = 1;
   // Dual source is always enabled in the shader if this bug is not present
-  else if (!DriverDetails::HasBug(DriverDetails::BUG_BROKEN_DUAL_SOURCE_BLENDING))
+  else if (!DriverDetails::HasBug(DriverDetails::BUG_BROKEN_DUAL_SOURCE_BLENDING) &&
+           !g_ActiveConfig.PruneUnusedDualSourceOutputs())
     uid_data->no_dual_src = 0;
 
   // The MRT coverage output cannot coexist with a dual-source (Index 1) output when

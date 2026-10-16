@@ -2858,8 +2858,6 @@ bool OpenXRManager::SupportsPassthrough() const
 
 XrEnvironmentBlendMode OpenXRManager::GetActiveBlendMode() const
 {
-  if (g_ActiveConfig.GetVRScreenRecordingDiagnostic() == VRScreenRecordingDiagnostic::Coverage)
-    return XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
   // XR_FB_passthrough composites its own layer behind an OPAQUE projection layer, so
   // ALPHA_BLEND is only the fallback for runtimes without the extension.
   if (g_ActiveConfig.VRPassthroughEnabled() && !IsFBPassthroughUsable() && SupportsAlphaBlend())
@@ -2869,16 +2867,9 @@ XrEnvironmentBlendMode OpenXRManager::GetActiveBlendMode() const
 
 XrCompositionLayerFlags OpenXRManager::GetProjectionLayerExtraFlags() const
 {
-  const auto diagnostic = g_ActiveConfig.GetVRScreenRecordingDiagnostic();
-  if (diagnostic == VRScreenRecordingDiagnostic::Coverage)
-    return 0;
-
   // Per-pixel alpha lets the compositor reveal whatever sits behind the projection layer
   // (the FB passthrough layer, or the real world in an ALPHA_BLEND environment).
-  // Without passthrough, the normal XFB copy writes alpha=1. The diagnostic changes
-  // composition flags without enabling coverage attachments or a camera layer.
-  if (diagnostic == VRScreenRecordingDiagnostic::AlphaBlend ||
-      (g_ActiveConfig.VRPassthroughEnabled() && SupportsPassthrough()))
+  if (g_ActiveConfig.VRPassthroughEnabled() && SupportsPassthrough())
   {
     return XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
            XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
@@ -3004,12 +2995,7 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
 {
   // Keep the FB passthrough feed in sync with the Passthrough setting. Gated on a
   // registered swapchain so the controller-binding utility session never starts it.
-  const auto recording_diagnostic = g_ActiveConfig.GetVRScreenRecordingDiagnostic();
-  const bool enable_passthrough_layer =
-      recording_diagnostic != VRScreenRecordingDiagnostic::Coverage &&
-      (g_ActiveConfig.VRPassthroughEnabled() ||
-       recording_diagnostic == VRScreenRecordingDiagnostic::PassthroughLayer);
-  UpdateFBPassthrough(enable_passthrough_layer && m_swapchain != nullptr);
+  UpdateFBPassthrough(g_ActiveConfig.VRPassthroughEnabled() && m_swapchain != nullptr);
 
   // The passthrough layer composites first (behind the projection layer), replacing the
   // black void with the camera feed wherever the projection layer's alpha is 0.

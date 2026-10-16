@@ -568,10 +568,13 @@ void VKGfx::OnConfigChanged(u32 bits)
   AbstractGfx::OnConfigChanged(bits);
 
   if (bits & CONFIG_CHANGE_BIT_HOST_CONFIG)
-  {
     g_object_cache->ReloadPipelineCache();
-    // The shader cache rebuilds its pipelines on host-config changes, so the base-pipeline
-    // pointers keying the forced-PS cache would dangle.
+
+  if (bits & (CONFIG_CHANGE_BIT_HOST_CONFIG | CONFIG_CHANGE_BIT_MULTISAMPLES |
+              CONFIG_CHANGE_BIT_VR_PASSTHROUGH))
+  {
+    // Each of these reloads the shaders, replacing the base pipelines that key the forced-PS
+    // cache; passthrough also changes the EFB render pass. Rebuild the clones.
     ClearForcedPipelines();
   }
 

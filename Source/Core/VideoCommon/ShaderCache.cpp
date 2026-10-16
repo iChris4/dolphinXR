@@ -817,7 +817,8 @@ static GXUberPipelineUid ApplyDriverBugs(const GXUberPipelineUid& in)
     out.ps_uid.GetUidData()->no_dual_src = true;
   }
   else if (!g_backend_info.bSupportsDualSourceBlend ||
-           (DriverDetails::HasBug(DriverDetails::BUG_BROKEN_DUAL_SOURCE_BLENDING) &&
+           ((DriverDetails::HasBug(DriverDetails::BUG_BROKEN_DUAL_SOURCE_BLENDING) ||
+             g_ActiveConfig.PruneUnusedDualSourceOutputs()) &&
             !out.blending_state.RequiresDualSrc()))
   {
     out.blending_state.use_dual_src = false;

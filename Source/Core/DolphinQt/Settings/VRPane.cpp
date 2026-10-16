@@ -729,11 +729,9 @@ void VRPane::AddDescriptions()
       "misbehaves in a game."
       "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
   static constexpr char TR_SCREEN_RECORDING_COMPATIBILITY_DESCRIPTION[] = QT_TR_NOOP(
-      "Gives the frame buffer's render pass an extra attachment that is never loaded, stored or "
-      "read. On a standalone Quest, this avoids the GPU driver fault that freezes the image "
+      "On a standalone Quest, this avoids the GPU driver fault that freezes the image "
       "while Meta's screen recorder or casting is running."
-      "<br><br>Costs almost nothing. Vulkan only. Passthrough already adds this attachment, so "
-      "the option has no effect while Passthrough is on."
+      "<br><br>Vulkan only. The option has no effect while Passthrough is on."
       "<br><br><dolphin_emphasis>If unsure, leave this unchecked on PC.</dolphin_emphasis>");
   static constexpr char TR_MIRROR_VIEW_DESCRIPTION[] = QT_TR_NOOP(
       "Selects what the desktop render window shows while OpenXR is active."

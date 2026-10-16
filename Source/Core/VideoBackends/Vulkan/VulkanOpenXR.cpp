@@ -205,40 +205,20 @@ static bool SelectSwapchainFormat(XrSession session, int64_t* out_format)
                  VkFormatToString(format));
   }
 
-  // Isolate the sRGB/UNORM view alias in Quest recorder failures. With an actual UNORM
-  // swapchain, both creation paths below use the image's own format and omit MUTABLE_FORMAT
-  // and the view-format list. This deliberately leaves the gamma-encoded XFB unchanged:
-  // brightness can differ, so this is a diagnostic, not a color-correct presentation mode.
-  if (Config::Get(Config::GFX_VR_OPENXR_FORCE_UNORM_FORMAT))
-  {
-    for (const VkFormat format : {VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8A8_UNORM})
-    {
-      if (std::find(runtime_formats.begin(), runtime_formats.end(), static_cast<int64_t>(format)) !=
-          runtime_formats.end())
-      {
-        *out_format = static_cast<int64_t>(format);
-        WARN_LOG_FMT(VIDEO,
-                     "OpenXR: OpenXRForceUnormFormat active: {} ({}), no mutable-format alias. "
-                     "Diagnostic only: brightness may differ; restart emulation to change modes.",
-                     static_cast<long long>(*out_format), VkFormatToString(*out_format));
-        return true;
-      }
-    }
-
-    // Do not silently fall back to the aliased path and invalidate the A/B test.
-    ERROR_LOG_FMT(VIDEO, "OpenXR: OpenXRForceUnormFormat requested, but the runtime exposes no "
-                         "RGBA8/BGRA8 UNORM swapchain format. Disable the override to continue.");
-    OSD::AddMessage("OpenXR UNORM test unavailable: disable OpenXRForceUnormFormat in GFX.ini.",
-                    OSD::Duration::VERY_LONG);
-    return false;
-  }
-
-  // Prefer sRGB so the compositor decodes Dolphin's gamma-encoded XFB correctly. Render
-  // through a UNORM view alias below to avoid a second gamma encode.
+#if defined(ANDROID)
+  // Quest's compositor expects sRGB swapchains for Dolphin's gamma-encoded XFB. We render through
+  // a UNORM view alias below to avoid a double gamma encode.
   static constexpr std::array<VkFormat, 6> preferred_formats = {
       VK_FORMAT_R8G8B8A8_SRGB,            VK_FORMAT_B8G8R8A8_SRGB,
       VK_FORMAT_R8G8B8A8_UNORM,           VK_FORMAT_B8G8R8A8_UNORM,
       VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_FORMAT_R16G16B16A16_SFLOAT};
+#else
+  // Prefer sRGB on PC so the OpenXR compositor decodes Dolphin's gamma-encoded XFB correctly.
+  static constexpr std::array<VkFormat, 6> preferred_formats = {
+      VK_FORMAT_R8G8B8A8_SRGB,            VK_FORMAT_B8G8R8A8_SRGB,
+      VK_FORMAT_R8G8B8A8_UNORM,           VK_FORMAT_B8G8R8A8_UNORM,
+      VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_FORMAT_R16G16B16A16_SFLOAT};
+#endif
 
   for (const VkFormat preferred : preferred_formats)
   {
@@ -901,13 +881,6 @@ bool VulkanOpenXR::PrepareFoveationImages(
 bool VulkanOpenXR::CreateSwapchains()
 {
   ASSERT(VR::g_openxr != nullptr);
-
-  INFO_LOG_FMT(VIDEO,
-               "OpenXR: recording diagnostic={} (0=off, 1=alpha blend, 2=camera under opaque "
-               "scene, 3=coverage without camera, 4=attachment only, 5=discarded attachment), "
-               "passthrough_setting={} coverage_enabled={}.",
-               static_cast<int>(g_ActiveConfig.GetVRScreenRecordingDiagnostic()),
-               g_ActiveConfig.vr_passthrough, g_ActiveConfig.VRPassthroughEnabled());
 
   int64_t swapchain_format = 0;
   if (!SelectSwapchainFormat(VR::g_openxr->GetSession(), &swapchain_format))

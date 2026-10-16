@@ -631,7 +631,8 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
                    "vtx_commit={:.2f}ms/f draw_bind={:.2f}ms/f draws={:.0f}/f "
                    "pipelines_created={} sampler_cache_hit={:.0f}/f sampler_cache_miss={:.0f}/f "
                    "worker: cmds={:.0f}/f drains={:.1f}/f drain_wait={:.2f}ms/f busy={:.2f}ms/f "
-                   "full_waits={} max_depth={} owner_violations={}",
+                   "full_waits={} max_depth={} owner_violations={} "
+                   "efb_passes: load={:.1f}/f clear={:.1f}/f discard={:.1f}/f other_passes={:.1f}/f",
                    s_perf_window_frames, elapsed_us / 1000.0 / frames,
                    perf.submit_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.submit_count.exchange(0, std::memory_order_relaxed) / frames,
@@ -651,7 +652,11 @@ bool CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
                    perf.worker_busy_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.worker_full_waits.exchange(0, std::memory_order_relaxed),
                    perf.worker_max_depth.exchange(0, std::memory_order_relaxed),
-                   perf.worker_owner_violations.load(std::memory_order_relaxed));
+                   perf.worker_owner_violations.load(std::memory_order_relaxed),
+                   perf.efb_load_passes.exchange(0, std::memory_order_relaxed) / frames,
+                   perf.efb_clear_passes.exchange(0, std::memory_order_relaxed) / frames,
+                   perf.efb_discard_passes.exchange(0, std::memory_order_relaxed) / frames,
+                   perf.other_passes.exchange(0, std::memory_order_relaxed) / frames);
       s_perf_window_frames = 0;
       s_perf_window_start_us = now_us;
     }

@@ -114,9 +114,8 @@ private:
     {
       MenuWidgets::Checkbox(
           "Quest Screen Recording Compatibility",
-          "Gives the frame buffer's render pass an extra attachment that is never loaded, stored "
-          "or read. On Quest, this avoids the GPU driver fault that freezes the image while "
-          "Meta's screen recorder or casting is running. Costs almost nothing; no effect while "
+          "On Quest, this avoids the GPU driver fault that freezes the image while "
+          "Meta's screen recorder or casting is running. No effect while "
           "Passthrough is on.",
           Config::GFX_VR_SCREEN_RECORDING_COMPATIBILITY, touched);
     }

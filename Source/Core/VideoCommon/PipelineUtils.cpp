@@ -65,7 +65,8 @@ GXPipelineUid ApplyDriverBugs(const GXPipelineUid& in)
 
   const bool benefits_from_ps_dual_source_off =
       (!g_backend_info.bSupportsDualSourceBlend && g_backend_info.bSupportsFramebufferFetch) ||
-      DriverDetails::HasBug(DriverDetails::BUG_BROKEN_DUAL_SOURCE_BLENDING);
+      DriverDetails::HasBug(DriverDetails::BUG_BROKEN_DUAL_SOURCE_BLENDING) ||
+      g_ActiveConfig.PruneUnusedDualSourceOutputs();
   if (benefits_from_ps_dual_source_off && !blend.RequiresDualSrc())
   {
     // Only use dual-source blending when required on drivers that don't support it very well.
