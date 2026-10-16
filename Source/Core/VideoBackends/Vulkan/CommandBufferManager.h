@@ -75,6 +75,23 @@ public:
     m_command_buffers[m_current_cmd_buffer].semaphore_used = true;
   }
 
+  // A second swapchain presented by the submit of the current command buffer, after the regular
+  // one (VR video recording into an encoder surface). Acquire its image signaling
+  // GetCurrentSecondaryAcquireSemaphore(); the submit then waits on that, signals
+  // present_semaphore and presents the image with it. Owns no semaphore for the regular present.
+  VkSemaphore GetCurrentSecondaryAcquireSemaphore() const
+  {
+    return m_command_buffers[m_current_cmd_buffer].secondary_semaphore;
+  }
+  void SetCurrentSecondaryPresent(VkSwapchainKHR swap_chain, u32 image_index,
+                                  VkSemaphore present_semaphore);
+  // Result of the latest secondary present (VK_ERROR_OUT_OF_DATE_KHR etc. once its surface is
+  // gone).
+  VkResult GetLastSecondaryPresentResult() const
+  {
+    return m_last_secondary_present_result.load(std::memory_order_acquire);
+  }
+
   // Ensure that the worker thread has submitted any previous command buffers and is idle.
   void WaitForWorkerThreadIdle();
 
@@ -150,6 +167,11 @@ private:
     std::array<VkCommandBuffer, 2> command_buffers = {};
     VkFence fence = VK_NULL_HANDLE;
     VkSemaphore semaphore = VK_NULL_HANDLE;
+    // See SetCurrentSecondaryPresent.
+    VkSemaphore secondary_semaphore = VK_NULL_HANDLE;
+    VkSwapchainKHR secondary_swap_chain = VK_NULL_HANDLE;
+    u32 secondary_image_index = 0;
+    VkSemaphore secondary_present_semaphore = VK_NULL_HANDLE;
     u64 fence_counter = 0;
     bool init_command_buffer_used = false;
     bool semaphore_used = false;
@@ -200,6 +222,7 @@ private:
   std::vector<VkSemaphore> m_present_semaphores = {};
   Common::Flag m_last_present_failed;
   VkResult m_last_present_result = VK_SUCCESS;
+  std::atomic<VkResult> m_last_secondary_present_result{VK_SUCCESS};
   std::atomic<bool> m_device_lost{false};
   bool m_use_threaded_submission = false;
   u32 m_descriptor_set_count = DESCRIPTOR_SETS_PER_POOL;

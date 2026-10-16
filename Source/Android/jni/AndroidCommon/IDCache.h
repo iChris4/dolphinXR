@@ -21,6 +21,10 @@ jmethodID GetFinishEmulationActivity();
 jclass GetAnalyticsClass();
 jmethodID GetAnalyticsValue();
 
+jclass GetVideoRecordingStoreClass();
+jmethodID GetVideoRecordingStoreCreate();
+jmethodID GetVideoRecordingStoreFinish();
+
 jclass GetGameFileClass();
 jfieldID GetGameFilePointer();
 jmethodID GetGameFileConstructor();

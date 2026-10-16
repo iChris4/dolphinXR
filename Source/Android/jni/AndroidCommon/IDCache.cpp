@@ -54,6 +54,10 @@ static jmethodID s_netplay_player_constructor;
 static jclass s_analytics_class;
 static jmethodID s_get_analytics_value;
 
+static jclass s_video_recording_store_class;
+static jmethodID s_video_recording_store_create;
+static jmethodID s_video_recording_store_finish;
+
 static jclass s_pair_class;
 static jmethodID s_pair_constructor;
 
@@ -219,6 +223,21 @@ jclass GetAnalyticsClass()
 jmethodID GetAnalyticsValue()
 {
   return s_get_analytics_value;
+}
+
+jclass GetVideoRecordingStoreClass()
+{
+  return s_video_recording_store_class;
+}
+
+jmethodID GetVideoRecordingStoreCreate()
+{
+  return s_video_recording_store_create;
+}
+
+jmethodID GetVideoRecordingStoreFinish()
+{
+  return s_video_recording_store_finish;
 }
 
 jclass GetGameFileClass()
@@ -820,6 +839,16 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved)
                                                  "(Ljava/lang/String;)Ljava/lang/String;");
   env->DeleteLocalRef(analytics_class);
 
+  const jclass video_recording_store_class =
+      env->FindClass("org/dolphinemu/dolphinemu/utils/VideoRecordingStore");
+  s_video_recording_store_class =
+      reinterpret_cast<jclass>(env->NewGlobalRef(video_recording_store_class));
+  s_video_recording_store_create = env->GetStaticMethodID(s_video_recording_store_class,
+                                                          "create", "(Ljava/lang/String;)I");
+  s_video_recording_store_finish =
+      env->GetStaticMethodID(s_video_recording_store_class, "finish", "(Z)V");
+  env->DeleteLocalRef(video_recording_store_class);
+
   const jclass pair_class = env->FindClass("androidx/core/util/Pair");
   s_pair_class = reinterpret_cast<jclass>(env->NewGlobalRef(pair_class));
   s_pair_constructor =
@@ -1030,6 +1059,7 @@ JNIEXPORT void JNI_OnUnload(JavaVM* vm, void* reserved)
   env->DeleteGlobalRef(s_netplay_session_class);
   env->DeleteGlobalRef(s_netplay_player_class);
   env->DeleteGlobalRef(s_analytics_class);
+  env->DeleteGlobalRef(s_video_recording_store_class);
   env->DeleteGlobalRef(s_pair_class);
   env->DeleteGlobalRef(s_hash_map_class);
   env->DeleteGlobalRef(s_compress_cb_class);

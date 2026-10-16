@@ -32,9 +32,11 @@
 #include "DiscIO/Volume.h"
 #include "DiscIO/VolumeDisc.h"
 
+#include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/VRMenuActions.h"
 #include "VideoCommon/VR/VRMenuTabs.h"
 #include "VideoCommon/VR/VRMenuWidgets.h"
+#include "VideoCommon/VR/VRVideoRecorder.h"
 
 namespace VR
 {
@@ -163,6 +165,8 @@ public:
       });
     }
 
+    DrawRecordButton(context);
+
     if (BigButton("Change Disc"))
     {
       m_show_discs = !m_show_discs;
@@ -207,6 +211,58 @@ private:
     bool done = false;
     std::vector<Disc> discs;
   };
+
+  // Records the left eye with the hardware encoder into Movies/DolphinXR (Android, Vulkan).
+  static void DrawRecordButton(VRMenuContext& context)
+  {
+    if (!VideoRecorder::IsSupported())
+      return;
+    VideoRecorder& recorder = VideoRecorder::Get();
+    if (std::optional<std::string> message = recorder.TakeFinishedMessage())
+      context.actions.SetStatus(std::move(*message));
+
+    switch (recorder.GetState())
+    {
+    case VideoRecorder::State::Idle:
+    {
+      const IOpenXRSwapchain* swapchain = g_openxr ? g_openxr->GetSwapchain() : nullptr;
+      const bool can_record =
+          !context.flat_screen && swapchain && swapchain->SupportsVideoCapture();
+      ImGui::BeginDisabled(!can_record);
+      if (BigButton("Record"))
+      {
+        context.actions.Run("Starting the recording...",
+                            [game_id = context.game_id](Core::System&) {
+                              return VideoRecorder::Get().Start(game_id);
+                            });
+      }
+      ImGui::EndDisabled();
+      if (!can_record && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Recording needs the Vulkan backend in stereo VR.");
+      break;
+    }
+    case VideoRecorder::State::Recording:
+    {
+      const int seconds = static_cast<int>(recorder.GetElapsedSeconds());
+      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.75f, 0.2f, 0.15f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.2f, 1.0f));
+      const std::string label =
+          fmt::format("Stop Recording  {:02}:{:02}###record", seconds / 60, seconds % 60);
+      if (BigButton(label.c_str()))
+      {
+        recorder.RequestStop();
+        context.actions.SetStatus("Finishing the recording...");
+      }
+      ImGui::PopStyleColor(2);
+      break;
+    }
+    case VideoRecorder::State::Stopping:
+      ImGui::BeginDisabled();
+      BigButton("Finishing the recording...###record");
+      ImGui::EndDisabled();
+      break;
+    }
+  }
 
   static float BigButtonWidth()
   {

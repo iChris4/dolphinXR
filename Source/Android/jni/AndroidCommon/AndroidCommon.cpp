@@ -131,6 +131,23 @@ int OpenAndroidContent(std::string_view uri, std::string_view mode)
   return result;
 }
 
+int CreateVideoRecordingFile(std::string_view display_name)
+{
+  JNIEnv* env = IDCache::GetEnvForThread();
+  jstring j_name = ToJString(env, display_name);
+  const jint fd = env->CallStaticIntMethod(IDCache::GetVideoRecordingStoreClass(),
+                                           IDCache::GetVideoRecordingStoreCreate(), j_name);
+  env->DeleteLocalRef(j_name);
+  return fd;
+}
+
+void FinishVideoRecordingFile(bool keep)
+{
+  JNIEnv* env = IDCache::GetEnvForThread();
+  env->CallStaticVoidMethod(IDCache::GetVideoRecordingStoreClass(),
+                            IDCache::GetVideoRecordingStoreFinish(), static_cast<jboolean>(keep));
+}
+
 bool DeleteAndroidContent(std::string_view uri)
 {
   JNIEnv* env = IDCache::GetEnvForThread();

@@ -23,6 +23,7 @@
 #include <jni.h>
 #endif
 
+#include "Common/MathUtil.h"
 #include "Common/Matrix.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "VideoCommon/AbstractFramebuffer.h"
@@ -100,6 +101,25 @@ public:
   // Submit the menu draws and release the image to the runtime. Returns true once the
   // runtime has a fully rendered image it may composite.
   virtual bool ReleaseMenuTexture() { return false; }
+
+  // ---- Video recording (VR::VideoRecorder), video thread only ----
+  // Presents a copy of part of the left eye into an encoder's input surface (an ANativeWindow on
+  // Android) every frame, without a CPU readback.
+  virtual bool SupportsVideoCapture() const { return false; }
+  virtual bool StartVideoCapture(void* native_window, uint32_t width, uint32_t height)
+  {
+    return false;
+  }
+  // Scales src_rect of layer 0 of the eye texture into the encoder surface. The eye image must
+  // still be acquired from the runtime (call before releasing it); a frame the encoder has no
+  // free image for is skipped. Returns false once the surface failed.
+  virtual bool CaptureVideoFrame(AbstractTexture* eye_texture,
+                                 const MathUtil::Rectangle<int>& src_rect)
+  {
+    return false;
+  }
+  // Waits until the GPU is done with the encoder surface and destroys it.
+  virtual void StopVideoCapture() {}
 
   // ---- Live eye resolution change (OpenXRManager::ChangeEyeResolutionScale) ----
   // Replaces the eye swapchains with new ones at the current GetViewConfigViews() size. The old

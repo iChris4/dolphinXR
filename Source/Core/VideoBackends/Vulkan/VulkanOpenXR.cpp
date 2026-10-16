@@ -33,6 +33,7 @@
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/TextureConfig.h"
 #include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRVideoRecorder.h"
 #include "VideoCommon/VideoConfig.h"
 
 #ifdef _WIN32
@@ -652,6 +653,12 @@ bool VulkanOpenXR::Initialize()
 void VulkanOpenXR::Shutdown()
 {
   WaitForPendingFrameFinalization("during shutdown");
+
+  // A recording in progress is finished (its file stays playable) before the device goes away.
+  VR::VideoRecorder::Get().StopForShutdown();
+#if defined(ANDROID)
+  StopVideoCapture();
+#endif
 
   // Clear swapchain pointer before destroying swapchains so no dangling use occurs.
   if (VR::g_openxr)
@@ -1981,6 +1988,203 @@ bool VulkanOpenXR::SubmitFlatFrame()
   return VR::g_openxr->SubmitFlatQuadFrame(m_eye_swapchains[0].swapchain,
                                            m_eye_swapchains[0].width, m_eye_swapchains[0].height);
 }
+
+#if defined(ANDROID)
+bool VulkanOpenXR::StartVideoCapture(void* native_window, uint32_t width, uint32_t height)
+{
+  StopVideoCapture();
+  VideoCaptureSurface& capture = m_video_capture;
+  const VkDevice device = g_vulkan_context->GetDevice();
+  const VkPhysicalDevice physical_device = g_vulkan_context->GetPhysicalDevice();
+  Common::ScopeGuard cleanup([this] { StopVideoCapture(); });
+
+  const VkAndroidSurfaceCreateInfoKHR surface_info = {
+      VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR, nullptr, 0,
+      static_cast<ANativeWindow*>(native_window)};
+  VkResult res = vkCreateAndroidSurfaceKHR(g_vulkan_context->GetVulkanInstance(), &surface_info,
+                                           nullptr, &capture.surface);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "Video capture: vkCreateAndroidSurfaceKHR failed: ");
+    return false;
+  }
+
+  // The eye images hold gamma-encoded colors behind UNORM views; a UNORM surface passes them to
+  // the encoder unchanged, which is what video expects.
+  u32 format_count = 0;
+  vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, capture.surface, &format_count, nullptr);
+  std::vector<VkSurfaceFormatKHR> formats(format_count);
+  vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, capture.surface, &format_count,
+                                       formats.data());
+  const auto format_it = std::ranges::find_if(formats, [](const VkSurfaceFormatKHR& format) {
+    return format.format == VK_FORMAT_R8G8B8A8_UNORM;
+  });
+  if (format_it == formats.end())
+  {
+    ERROR_LOG_FMT(VIDEO, "Video capture: the encoder surface offers no RGBA8 format.");
+    return false;
+  }
+
+  VkSurfaceCapabilitiesKHR caps;
+  res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, capture.surface, &caps);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "Video capture: vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed: ");
+    return false;
+  }
+  u32 image_count = std::max(caps.minImageCount + 1, 3u);
+  if (caps.maxImageCount != 0)
+    image_count = std::min(image_count, caps.maxImageCount);
+  VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  if (!(caps.supportedCompositeAlpha & composite_alpha))
+    composite_alpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+
+  const VkSwapchainCreateInfoKHR swapchain_info = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+                                                   nullptr,
+                                                   0,
+                                                   capture.surface,
+                                                   image_count,
+                                                   format_it->format,
+                                                   format_it->colorSpace,
+                                                   {width, height},
+                                                   1,
+                                                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                                                   VK_SHARING_MODE_EXCLUSIVE,
+                                                   0,
+                                                   nullptr,
+                                                   VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+                                                   composite_alpha,
+                                                   VK_PRESENT_MODE_FIFO_KHR,
+                                                   VK_TRUE,
+                                                   VK_NULL_HANDLE};
+  res = vkCreateSwapchainKHR(device, &swapchain_info, nullptr, &capture.swapchain);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "Video capture: vkCreateSwapchainKHR failed: ");
+    return false;
+  }
+
+  vkGetSwapchainImagesKHR(device, capture.swapchain, &image_count, nullptr);
+  std::vector<VkImage> images(image_count);
+  vkGetSwapchainImagesKHR(device, capture.swapchain, &image_count, images.data());
+  const TextureConfig config(width, height, 1, 1, 1, AbstractTextureFormat::RGBA8,
+                             AbstractTextureFlag_RenderTarget, AbstractTextureType::Texture_2DArray);
+  const VkSemaphoreCreateInfo semaphore_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, nullptr,
+                                                0};
+  for (VkImage image : images)
+  {
+    auto texture = VKTexture::CreateAdopted(config, image, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                            VK_IMAGE_LAYOUT_UNDEFINED);
+    auto framebuffer = texture ? VKFramebuffer::Create(texture.get(), nullptr, {}) : nullptr;
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    if (!framebuffer ||
+        vkCreateSemaphore(device, &semaphore_info, nullptr, &semaphore) != VK_SUCCESS)
+    {
+      ERROR_LOG_FMT(VIDEO, "Video capture: could not wrap the encoder surface images.");
+      return false;
+    }
+    capture.textures.push_back(std::move(texture));
+    capture.framebuffers.push_back(std::move(framebuffer));
+    capture.present_semaphores.push_back(semaphore);
+  }
+
+  cleanup.Dismiss();
+  INFO_LOG_FMT(VIDEO, "Video capture: encoder surface {}x{}, {} images.", width, height,
+               image_count);
+  return true;
+}
+
+bool VulkanOpenXR::CaptureVideoFrame(AbstractTexture* eye_texture,
+                                     const MathUtil::Rectangle<int>& src_rect)
+{
+  VideoCaptureSurface& capture = m_video_capture;
+  if (capture.swapchain == VK_NULL_HANDLE || capture.failed || !eye_texture)
+    return !capture.failed;
+  // The copy shader samples a texture array; the per-eye swapchains use plain 2D views.
+  if (eye_texture->GetConfig().type != AbstractTextureType::Texture_2DArray)
+    return true;
+
+  DrainRecordingWorkerForDirectAccess();
+  // One secondary present per command buffer: a second capture before this one is submitted
+  // (a re-present) is skipped.
+  if (g_command_buffer_mgr->GetCurrentFenceCounter() == capture.last_capture_fence_counter)
+    return true;
+  const VkResult present_result = g_command_buffer_mgr->GetLastSecondaryPresentResult();
+  if (present_result != VK_SUCCESS && present_result != VK_SUBOPTIMAL_KHR)
+  {
+    LOG_VULKAN_ERROR(present_result, "Video capture: presenting to the encoder failed: ");
+    capture.failed = true;
+    return false;
+  }
+
+  // Never wait for the encoder: without a free image this frame is not recorded.
+  u32 image_index = 0;
+  const VkResult res = vkAcquireNextImageKHR(
+      g_vulkan_context->GetDevice(), capture.swapchain, 0,
+      g_command_buffer_mgr->GetCurrentSecondaryAcquireSemaphore(), VK_NULL_HANDLE, &image_index);
+  if (res == VK_NOT_READY || res == VK_TIMEOUT)
+    return true;
+  if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
+  {
+    LOG_VULKAN_ERROR(res, "Video capture: vkAcquireNextImageKHR failed: ");
+    capture.failed = true;
+    return false;
+  }
+
+  VKTexture* const target = capture.textures[image_index].get();
+  target->OverrideImageLayout(VK_IMAGE_LAYOUT_UNDEFINED);
+  VKFramebuffer* const framebuffer = capture.framebuffers[image_index].get();
+  StateTracker::GetInstance()->EndRenderPass();
+  const MathUtil::Rectangle<int> target_rect(0, 0, static_cast<int>(framebuffer->GetWidth()),
+                                             static_cast<int>(framebuffer->GetHeight()));
+  g_gfx->ScaleTexture(framebuffer, target_rect, eye_texture, src_rect);
+
+  DrainRecordingWorkerForDirectAccess();
+  StateTracker::GetInstance()->EndRenderPass();
+  const VkCommandBuffer command_buffer = g_command_buffer_mgr->GetCurrentCommandBuffer();
+  target->TransitionToLayout(command_buffer, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+  // The runtime gets the eye image back in the layout it handed it over in.
+  static_cast<VKTexture*>(eye_texture)
+      ->TransitionToLayout(command_buffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  g_command_buffer_mgr->SetCurrentSecondaryPresent(capture.swapchain, image_index,
+                                                   capture.present_semaphores[image_index]);
+  capture.last_capture_fence_counter = g_command_buffer_mgr->GetCurrentFenceCounter();
+  return true;
+}
+
+void VulkanOpenXR::StopVideoCapture()
+{
+  VideoCaptureSurface& capture = m_video_capture;
+  if (capture.surface == VK_NULL_HANDLE && capture.swapchain == VK_NULL_HANDLE)
+    return;
+
+  const VkDevice device = g_vulkan_context->GetDevice();
+  if (capture.swapchain != VK_NULL_HANDLE && g_command_buffer_mgr &&
+      !g_command_buffer_mgr->IsDeviceLost())
+  {
+    // Submit a present still recorded in the current command buffer, then wait until the GPU
+    // and the presentation engine are done with the images.
+    DrainRecordingWorkerForDirectAccess();
+    StateTracker::GetInstance()->EndRenderPass();
+    g_command_buffer_mgr->SubmitCommandBuffer(false, true);
+    StateTracker::GetInstance()->InvalidateCachedState();
+    auto queue_lock = AcquireGraphicsQueueLock();
+    vkQueueWaitIdle(g_vulkan_context->GetPresentQueue());
+  }
+
+  capture.framebuffers.clear();
+  capture.textures.clear();
+  for (VkSemaphore semaphore : capture.present_semaphores)
+    vkDestroySemaphore(device, semaphore, nullptr);
+  capture.present_semaphores.clear();
+  if (capture.swapchain != VK_NULL_HANDLE)
+    vkDestroySwapchainKHR(device, capture.swapchain, nullptr);
+  if (capture.surface != VK_NULL_HANDLE)
+    vkDestroySurfaceKHR(g_vulkan_context->GetVulkanInstance(), capture.surface, nullptr);
+  capture = {};
+  INFO_LOG_FMT(VIDEO, "Video capture: encoder surface released.");
+}
+#endif
 
 }  // namespace Vulkan
 

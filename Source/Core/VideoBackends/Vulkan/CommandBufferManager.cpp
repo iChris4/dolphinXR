@@ -149,6 +149,14 @@ bool CommandBufferManager::CreateCommandBuffers(size_t swapchain_image_count)
       LOG_VULKAN_ERROR(res, "vkCreateSemaphore failed: ");
       return false;
     }
+
+    res = vkCreateSemaphore(device, &semaphore_create_info, nullptr,
+                            &resources.secondary_semaphore);
+    if (res != VK_SUCCESS)
+    {
+      LOG_VULKAN_ERROR(res, "vkCreateSemaphore failed: ");
+      return false;
+    }
   }
 
   m_present_semaphores.reserve(swapchain_image_count);
@@ -190,6 +198,8 @@ void CommandBufferManager::DestroyCommandBuffers()
 
     if (resources.semaphore != VK_NULL_HANDLE)
       vkDestroySemaphore(device, resources.semaphore, nullptr);
+    if (resources.secondary_semaphore != VK_NULL_HANDLE)
+      vkDestroySemaphore(device, resources.secondary_semaphore, nullptr);
 
     if (resources.fence != VK_NULL_HANDLE)
       vkDestroyFence(device, resources.fence, nullptr);
@@ -746,16 +756,37 @@ VkResult CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
     submit_info.pCommandBuffers = &resources.command_buffers[1];
   }
 
+  const bool has_secondary = resources.secondary_swap_chain != VK_NULL_HANDLE;
+  std::array<VkSemaphore, 2> wait_semaphores;
+  std::array<VkPipelineStageFlags, 2> wait_stages;
+  u32 wait_count = 0;
   if (resources.semaphore_used)
   {
-    submit_info.pWaitSemaphores = &resources.semaphore;
-    submit_info.waitSemaphoreCount = 1;
+    wait_semaphores[wait_count] = resources.semaphore;
+    wait_stages[wait_count++] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  }
+  if (has_secondary)
+  {
+    wait_semaphores[wait_count] = resources.secondary_semaphore;
+    wait_stages[wait_count++] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  }
+  if (wait_count > 0)
+  {
+    submit_info.pWaitSemaphores = wait_semaphores.data();
+    submit_info.pWaitDstStageMask = wait_stages.data();
+    submit_info.waitSemaphoreCount = wait_count;
   }
 
+  std::array<VkSemaphore, 2> signal_semaphores;
+  u32 signal_count = 0;
   if (present_swap_chain != VK_NULL_HANDLE)
+    signal_semaphores[signal_count++] = m_present_semaphores[present_image_index];
+  if (has_secondary)
+    signal_semaphores[signal_count++] = resources.secondary_present_semaphore;
+  if (signal_count > 0)
   {
-    submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = &m_present_semaphores[present_image_index];
+    submit_info.signalSemaphoreCount = signal_count;
+    submit_info.pSignalSemaphores = signal_semaphores.data();
   }
 
   {
@@ -814,12 +845,38 @@ VkResult CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
 #endif
       }
     }
+
+    if (has_secondary)
+    {
+      const VkPresentInfoKHR present_info = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+                                             nullptr,
+                                             1,
+                                             &resources.secondary_present_semaphore,
+                                             1,
+                                             &resources.secondary_swap_chain,
+                                             &resources.secondary_image_index,
+                                             nullptr};
+      const VkResult result =
+          vkQueuePresentKHR(g_vulkan_context->GetPresentQueue(), &present_info);
+      m_last_secondary_present_result.store(result, std::memory_order_release);
+      if (result == VK_ERROR_DEVICE_LOST)
+        HandleDeviceLost("vkQueuePresentKHR (secondary)");
+    }
   }
 
   auto& perf = g_vulkan_context->GetPerfCounters();
   perf.submit_us.fetch_add(Common::Timer::NowUs() - perf_start_us, std::memory_order_relaxed);
   perf.submit_count.fetch_add(1, std::memory_order_relaxed);
   return IsDeviceLost() ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
+}
+
+void CommandBufferManager::SetCurrentSecondaryPresent(VkSwapchainKHR swap_chain, u32 image_index,
+                                                      VkSemaphore present_semaphore)
+{
+  CmdBufferResources& resources = m_command_buffers[m_current_cmd_buffer];
+  resources.secondary_swap_chain = swap_chain;
+  resources.secondary_image_index = image_index;
+  resources.secondary_present_semaphore = present_semaphore;
 }
 
 void CommandBufferManager::BeginCommandBuffer()
@@ -865,6 +922,8 @@ void CommandBufferManager::BeginCommandBuffer()
   // Reset upload command buffer state
   resources.init_command_buffer_used = false;
   resources.semaphore_used = false;
+  resources.secondary_swap_chain = VK_NULL_HANDLE;
+  resources.secondary_present_semaphore = VK_NULL_HANDLE;
   resources.fence_counter = m_next_fence_counter++;
   resources.frame_index = m_current_frame;
   m_current_cmd_buffer = next_buffer_index;

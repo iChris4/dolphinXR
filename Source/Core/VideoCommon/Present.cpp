@@ -31,6 +31,7 @@
 #include "Common/Timer.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/VRMenu.h"
+#include "VideoCommon/VR/VRVideoRecorder.h"
 #endif
 
 std::unique_ptr<VideoCommon::Presenter> g_presenter;
@@ -1085,6 +1086,8 @@ void Presenter::BlitCurrentSourceToOpenXREyes(const AbstractTexture* source_text
       g_gfx->SetAndClearFramebuffer(layered_fb, {0.f, 0.f, 0.f, clear_alpha});
       if (m_post_processor->BlitFromTextureLayered(eye_rect, source_rc, source_texture))
       {
+        // Layer 0 is the left eye; the image is still ours until the release below.
+        VR::VideoRecorder::Get().OnEyeRendered(*sc, layered_fb->GetColorAttachment(), eye_rect);
         sc->ReleaseLayeredTexture();
         restore_post_process_state();
         return;
@@ -1112,6 +1115,8 @@ void Presenter::BlitCurrentSourceToOpenXREyes(const AbstractTexture* source_text
     // leak stale swapchain contents from an older frame.
     g_gfx->SetAndClearFramebuffer(eye_fb, {0.f, 0.f, 0.f, clear_alpha});
     m_post_processor->BlitFromTexture(eye_rect, source_rc, source_texture, static_cast<int>(eye));
+    if (eye == 0)
+      VR::VideoRecorder::Get().OnEyeRendered(*sc, eye_fb->GetColorAttachment(), eye_rect);
     sc->ReleaseEyeTexture(eye);
   }
 

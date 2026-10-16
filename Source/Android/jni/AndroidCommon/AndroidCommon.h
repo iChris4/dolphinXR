@@ -54,6 +54,12 @@ bool DeleteAndroidContent(std::string_view uri);
 // Returns -1 if not found, -2 if directory, file size otherwise.
 jlong GetAndroidContentSizeAndIsDirectory(std::string_view uri);
 
+// Creates a pending video named display_name in Movies/DolphinXR through MediaStore and returns a
+// writable file descriptor the caller closes, or -1. Publish it with FinishVideoRecordingFile.
+int CreateVideoRecordingFile(std::string_view display_name);
+// Publishes the file from CreateVideoRecordingFile, or deletes it when keep is false.
+void FinishVideoRecordingFile(bool keep);
+
 // An unmangled URI (one which the C++ code has not appended anything to) can't be relied on
 // to contain a file name at all. If a file name is desired, this function is the most reliable
 // way to get it, but the display name is not guaranteed to always actually be like a file name.

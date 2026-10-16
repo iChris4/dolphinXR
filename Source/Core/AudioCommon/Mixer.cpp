@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <span>
+#include <utility>
 
 #include "AudioCommon/Enums.h"
 #include "Common/ChunkFile.h"
@@ -182,7 +183,21 @@ std::size_t Mixer::Mix(s16* samples, std::size_t num_samples)
       m_gba_mixers[i].Mix(samples, num_samples);
   }
 
+  if (m_capture_enabled.load(std::memory_order_acquire))
+  {
+    std::lock_guard lock(m_capture_mutex);
+    if (m_capture_callback)
+      m_capture_callback(samples, num_samples, m_output_sample_rate);
+  }
+
   return num_samples;
+}
+
+void Mixer::SetCaptureCallback(CaptureCallback callback)
+{
+  std::lock_guard lock(m_capture_mutex);
+  m_capture_callback = std::move(callback);
+  m_capture_enabled.store(static_cast<bool>(m_capture_callback), std::memory_order_release);
 }
 
 std::size_t Mixer::MixSurround(float* samples, std::size_t num_samples)

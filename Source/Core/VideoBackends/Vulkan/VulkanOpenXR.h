@@ -159,6 +159,15 @@ public:
   bool RecreateEyeSwapchains(u64 retiring_generation) override;
   void CollectRetiredSwapchains(bool force) override;
 
+#if defined(ANDROID)
+  // Video recording into a MediaCodec input surface (see IOpenXRSwapchain).
+  bool SupportsVideoCapture() const override { return true; }
+  bool StartVideoCapture(void* native_window, uint32_t width, uint32_t height) override;
+  bool CaptureVideoFrame(AbstractTexture* eye_texture,
+                         const MathUtil::Rectangle<int>& src_rect) override;
+  void StopVideoCapture() override;
+#endif
+
 private:
   struct PendingXRFrame
   {
@@ -243,6 +252,23 @@ private:
 
   std::atomic<bool> m_async_frame_finalization_in_flight{false};
   std::atomic<bool> m_async_frame_finalization_failed{false};
+
+#if defined(ANDROID)
+  // Swapchain on the video encoder's input surface. Its present rides on the frame's command
+  // buffer submit (CommandBufferManager::SetCurrentSecondaryPresent).
+  struct VideoCaptureSurface
+  {
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+    std::vector<std::unique_ptr<VKTexture>> textures;
+    std::vector<std::unique_ptr<VKFramebuffer>> framebuffers;
+    std::vector<VkSemaphore> present_semaphores;
+    // Fence counter of the command buffer carrying the last present: one per command buffer.
+    u64 last_capture_fence_counter = 0;
+    bool failed = false;
+  };
+  VideoCaptureSurface m_video_capture;
+#endif
 };
 
 // Global Vulkan OpenXR instance — valid between VideoBackend::Initialize() and Shutdown().

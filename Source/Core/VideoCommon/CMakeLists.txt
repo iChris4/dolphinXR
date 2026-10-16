@@ -334,9 +334,17 @@ if(ENABLE_VR)
     VR/VRPanelMath.h
     VR/VRTextInput.cpp
     VR/VRTextInput.h
+    VR/VRVideoRecorder.cpp
+    VR/VRVideoRecorder.h
   )
   # Expose the OpenXR headers to all targets that depend on videocommon.
   target_include_directories(videocommon PUBLIC "${CMAKE_SOURCE_DIR}/Externals/OpenXR/include")
+endif()
+
+if(ENABLE_VR AND ANDROID)
+  # The VR menu's recorder: MediaCodec/MediaMuxer, and its MediaStore output through
+  # androidcommon.
+  target_link_libraries(videocommon PRIVATE androidcommon mediandk)
 endif()
 
 if(ENABLE_VR AND WIN32)

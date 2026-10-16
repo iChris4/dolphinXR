@@ -6,6 +6,8 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <functional>
+#include <mutex>
 
 #include "AudioCommon/SurroundDecoder.h"
 #include "AudioCommon/WaveFile.h"
@@ -26,6 +28,12 @@ public:
 
   // Called from audio threads
   std::size_t Mix(s16* samples, std::size_t numSamples);
+
+  // Receives a copy of every mixed block (interleaved stereo s16) with the output sample rate,
+  // on the audio thread, for recording. Keep it quick. An empty function removes it.
+  using CaptureCallback =
+      std::function<void(const s16* samples, std::size_t num_frames, u32 sample_rate)>;
+  void SetCaptureCallback(CaptureCallback callback);
   std::size_t MixSurround(float* samples, std::size_t num_samples);
 
   // Called from main thread
@@ -192,6 +200,10 @@ private:
 
   WaveFileWriter m_wave_writer_dtk;
   WaveFileWriter m_wave_writer_dsp;
+
+  std::atomic<bool> m_capture_enabled{false};
+  std::mutex m_capture_mutex;
+  CaptureCallback m_capture_callback;
 
   bool m_log_dtk_audio = false;
   bool m_log_dsp_audio = false;
