@@ -1,7 +1,9 @@
 // Copyright 2026 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <array>
+#include <cfloat>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -13,6 +15,7 @@
 
 #include "Common/Config/Config.h"
 #include "Common/StringUtil.h"
+#include "Common/Timer.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Core.h"
 #include "Core/System.h"
@@ -32,6 +35,9 @@ namespace
 {
 using HandlingType = ShaderHunter::HandlingType;
 using MenuWidgets::FloatRange;
+
+// A delete icon needs a second press within this time.
+constexpr u64 CONFIRM_TIMEOUT_US = 4'000'000;
 
 constexpr std::array<std::pair<ShaderHunter::HuntingOption, const char*>, 2> HUNTING_OPTIONS{{
     {ShaderHunter::HuntingOption::Skip, "Skip (hide it)"},
@@ -134,11 +140,10 @@ std::string HideObjectDetail(const HideObjectEngine::HideObject& entry)
                                      fmt::format("{} patterns", entry.entries.size());
 }
 
-// One collapsible list of checkboxes, in the order of the game's ini. Returns the index of the
-// entry toggled this frame.
-template <typename Entry, typename Detail>
-std::optional<size_t> DrawList(const char* title, std::vector<Entry>& entries,
-                               bool Entry::*enabled, Detail detail)
+// The header of a collapsible list, with how many entries are on. Returns true while it is open
+// and has entries.
+template <typename Entry>
+bool ListHeader(const char* title, const std::vector<Entry>& entries, bool Entry::*enabled)
 {
   size_t enabled_count = 0;
   for (const Entry& entry : entries)
@@ -148,31 +153,49 @@ std::optional<size_t> DrawList(const char* title, std::vector<Entry>& entries,
   const std::string header =
       fmt::format("{}  ({} of {} on)###{}", title, enabled_count, entries.size(), title);
   if (!ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
-    return std::nullopt;
+    return false;
 
   if (entries.empty())
   {
     ImGui::Indent();
     ImGui::TextDisabled("None for this game");
     ImGui::Unindent();
-    return std::nullopt;
+    return false;
   }
+  return true;
+}
+
+// An entry's checkbox, then (greyed) what it does. Returns true when it was toggled.
+template <typename Entry, typename Detail>
+bool EntryCheckbox(Entry& entry, bool Entry::*enabled, Detail detail)
+{
+  const bool toggled = ImGui::Checkbox(entry.name.c_str(), &(entry.*enabled));
+  const std::string text = detail(entry);
+  if (!text.empty())
+  {
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", text.c_str());
+  }
+  return toggled;
+}
+
+// One collapsible list of checkboxes, in the order of the game's ini. Returns the index of the
+// entry toggled this frame.
+template <typename Entry, typename Detail>
+std::optional<size_t> DrawList(const char* title, std::vector<Entry>& entries,
+                               bool Entry::*enabled, Detail detail)
+{
+  if (!ListHeader(title, entries, enabled))
+    return std::nullopt;
 
   std::optional<size_t> toggled;
   ImGui::PushID(title);
   ImGui::Indent();
   for (size_t i = 0; i < entries.size(); ++i)
   {
-    Entry& entry = entries[i];
     ImGui::PushID(static_cast<int>(i));
-    if (ImGui::Checkbox(entry.name.c_str(), &(entry.*enabled)))
+    if (EntryCheckbox(entries[i], enabled, detail))
       toggled = i;
-    const std::string text = detail(entry);
-    if (!text.empty())
-    {
-      ImGui::SameLine();
-      ImGui::TextDisabled("%s", text.c_str());
-    }
     ImGui::PopID();
   }
   ImGui::Unindent();
@@ -202,7 +225,12 @@ public:
   const char* GetName() const override { return "Overrides"; }
 
   // Re-read on every open: the lists may have been edited on the desktop meanwhile.
-  void OnOpen(VRMenuContext& context) override { m_loaded = false; }
+  void OnOpen(VRMenuContext& context) override
+  {
+    m_loaded = false;
+    EndRename();
+    m_delete_armed.clear();
+  }
 
   void Draw(VRMenuContext& context) override
   {
@@ -223,14 +251,7 @@ public:
     ImGui::Spacing();
 
     DrawShaderHunting(context);
-
-    if (const auto i = DrawList("Shader Overrides", m_shaders,
-                                &ShaderHunter::ShaderOverride::enabled, ShaderDetail))
-    {
-      ShaderHunter::SaveOverridesToINI(game_id, m_shaders);
-      ShaderHunter::GetInstance().LoadOverrides(game_id);
-      ReportToggle(context, m_shaders[*i].name, m_shaders[*i].enabled);
-    }
+    DrawShaderList(context);
 
     if (const auto i = DrawList("Elements Group Overrides", m_elements,
                                 &ElementsGroupManager::ElementGroupOverride::enabled,
@@ -260,6 +281,196 @@ public:
   }
 
 private:
+  enum class ShaderListAction
+  {
+    None,
+    Toggle,
+    Rename,
+    Delete,
+    ApplyRename,
+    CancelRename,
+  };
+
+  // The Shader Overrides list. Overrides made by the user also get rename (system keyboard only)
+  // and delete icons; the ones that ship with Dolphin come back from Sys on every load, so they
+  // only turn on and off.
+  void DrawShaderList(VRMenuContext& context)
+  {
+    using MenuWidgets::Icon;
+
+    const u64 now_us = Common::Timer::NowUs();
+    if (!m_delete_armed.empty() && now_us > m_delete_armed_until_us)
+      m_delete_armed.clear();
+
+    ShaderListAction action = ShaderListAction::None;
+    size_t action_index = 0;
+    if (const std::optional<TextInput::Edit> edit = TextInput::TakeEdit(m_rename_request))
+    {
+      m_rename_text = edit->text;
+      if (edit->done)
+        action = ShaderListAction::ApplyRename;
+    }
+
+    if (ListHeader("Shader Overrides", m_shaders, &ShaderHunter::ShaderOverride::enabled))
+    {
+      const bool can_rename = TextInput::IsAvailable();
+      const float icon_size = ImGui::GetFrameHeight();
+      const float actions_width =
+          can_rename ? icon_size * 2.0f + ImGui::GetStyle().ItemSpacing.x : icon_size;
+      constexpr const char* SHIPPED =
+          "Comes with Dolphin and returns on every load: turn it off instead.";
+
+      ImGui::PushID("Shader Overrides");
+      ImGui::Indent();
+      // A table clips each column, so a long name can never cover the icons.
+      if (ImGui::BeginTable("##rows", 2))
+      {
+        ImGui::TableSetupColumn("entry", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("actions", ImGuiTableColumnFlags_WidthFixed, actions_width);
+        for (size_t i = 0; i < m_shaders.size(); ++i)
+        {
+          ShaderHunter::ShaderOverride& entry = m_shaders[i];
+          const bool renaming = !m_rename_name.empty() && entry.name == m_rename_name;
+          ImGui::PushID(static_cast<int>(i));
+          ImGui::TableNextRow();
+
+          ImGui::TableSetColumnIndex(0);
+          if (renaming)
+          {
+            // The typed name, read-only like the hunting Name field; a click reopens the keyboard.
+            std::array<char, 256> buffer{};
+            m_rename_text.copy(buffer.data(), buffer.size() - 1);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputTextWithHint("##rename", entry.name.c_str(), buffer.data(), buffer.size(),
+                                     ImGuiInputTextFlags_ReadOnly);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+              m_rename_request = TextInput::Request(m_rename_text);
+          }
+          else if (EntryCheckbox(entry, &ShaderHunter::ShaderOverride::enabled, ShaderDetail))
+          {
+            action = ShaderListAction::Toggle;
+            action_index = i;
+          }
+
+          ImGui::TableSetColumnIndex(1);
+          if (renaming)
+          {
+            if (MenuWidgets::IconButton("##apply", Icon::Check, "Rename"))
+              action = ShaderListAction::ApplyRename;
+            ImGui::SameLine();
+            if (MenuWidgets::IconButton("##cancel", Icon::Cross, "Keep the old name"))
+              action = ShaderListAction::CancelRename;
+          }
+          else
+          {
+            ImGui::BeginDisabled(!entry.user_defined);
+            if (can_rename)
+            {
+              if (MenuWidgets::IconButton("##rename", Icon::Pencil,
+                                          entry.user_defined ? "Rename" : SHIPPED))
+              {
+                action = ShaderListAction::Rename;
+                action_index = i;
+              }
+              ImGui::SameLine();
+            }
+            const bool armed = m_delete_armed == entry.name;
+            const char* delete_tooltip = !entry.user_defined ? SHIPPED :
+                                         armed               ? "Press again to delete" :
+                                                               "Delete";
+            if (MenuWidgets::IconButton("##delete", Icon::Trash, delete_tooltip, armed))
+            {
+              action = ShaderListAction::Delete;
+              action_index = i;
+            }
+            ImGui::EndDisabled();
+          }
+          ImGui::PopID();
+        }
+        ImGui::EndTable();
+      }
+      ImGui::Unindent();
+      ImGui::PopID();
+    }
+
+    // Applied after the rows, which hold references into the list.
+    switch (action)
+    {
+    case ShaderListAction::None:
+      break;
+    case ShaderListAction::Toggle:
+      SaveShaders(context.game_id);
+      ReportToggle(context, m_shaders[action_index].name, m_shaders[action_index].enabled);
+      break;
+    case ShaderListAction::Rename:
+      m_delete_armed.clear();
+      m_rename_name = m_shaders[action_index].name;
+      m_rename_text = m_rename_name;
+      m_rename_request = TextInput::Request(m_rename_text);
+      context.actions.SetStatus("Type the new name on the keyboard, then press Enter");
+      break;
+    case ShaderListAction::Delete:
+    {
+      const std::string name = m_shaders[action_index].name;
+      if (m_delete_armed != name)
+      {
+        m_delete_armed = name;
+        m_delete_armed_until_us = now_us + CONFIRM_TIMEOUT_US;
+        context.actions.SetStatus(fmt::format("Press the trash icon again to delete \"{}\"", name));
+        break;
+      }
+      m_delete_armed.clear();
+      m_shaders.erase(m_shaders.begin() + action_index);
+      SaveShaders(context.game_id);
+      context.actions.SetStatus(fmt::format("Deleted \"{}\"", name));
+      break;
+    }
+    case ShaderListAction::ApplyRename:
+      ApplyRename(context);
+      break;
+    case ShaderListAction::CancelRename:
+      EndRename();
+      break;
+    }
+  }
+
+  void ApplyRename(VRMenuContext& context)
+  {
+    const auto entry =
+        std::ranges::find(m_shaders, m_rename_name, &ShaderHunter::ShaderOverride::name);
+    const std::string new_name(StripWhitespace(m_rename_text));
+    if (entry == m_shaders.end() || new_name.empty() || new_name == m_rename_name)
+    {
+      EndRename();
+      return;
+    }
+    // Overrides are matched by name when the ini loads: two with one name would merge.
+    if (std::ranges::find(m_shaders, new_name, &ShaderHunter::ShaderOverride::name) !=
+        m_shaders.end())
+    {
+      context.actions.SetStatus(
+          fmt::format("Another shader override is already named \"{}\"", new_name));
+      return;
+    }
+    entry->name = new_name;
+    SaveShaders(context.game_id);
+    context.actions.SetStatus(fmt::format("Renamed \"{}\" to \"{}\"", m_rename_name, new_name));
+    EndRename();
+  }
+
+  void EndRename()
+  {
+    m_rename_name.clear();
+    m_rename_text.clear();
+    m_rename_request = 0;
+  }
+
+  void SaveShaders(const std::string& game_id)
+  {
+    ShaderHunter::SaveOverridesToINI(game_id, m_shaders);
+    ShaderHunter::GetInstance().LoadOverrides(game_id);
+  }
+
   // The desktop Shader Hunter: cycle through the shaders of the last frame while the selected
   // one is hidden or painted pink, then save it as a shader override. Hunting keeps running
   // while the menu is closed, so the game can be looked at without the panel in front of it.
@@ -376,8 +587,8 @@ private:
   // opens the keyboard, and the text follows each key press.
   void DrawNameField(VRMenuContext& context, u32 hash)
   {
-    if (std::optional<std::string> text = TextInput::TakeText(m_name_request))
-      m_save_name = std::move(*text);
+    if (std::optional<TextInput::Edit> edit = TextInput::TakeEdit(m_name_request))
+      m_save_name = std::move(edit->text);
 
     MenuWidgets::BeginRow("Name",
                           "Name of the saved override. Empty uses \"Shader <hash>\". A name "
@@ -385,9 +596,9 @@ private:
                           Config::LayerType::Base);
     const bool has_name = !m_save_name.empty();
     const ImGuiStyle& style = ImGui::GetStyle();
-    const float clear_width =
-        has_name ? ImGui::CalcTextSize("Clear").x + style.FramePadding.x * 2.0f + style.ItemSpacing.x :
-                   0.0f;
+    const float clear_width = has_name ? ImGui::CalcTextSize("Clear").x +
+                                             style.FramePadding.x * 2.0f + style.ItemSpacing.x :
+                                         0.0f;
     const std::string hint = hash != 0 ? fmt::format("Shader {:08x}", hash) : std::string();
 
     // Read-only: the text comes from the keyboard. ImGui shows the live string while it is.
@@ -479,6 +690,13 @@ private:
   std::string m_save_name;
   // TextInput request whose typed text goes to m_save_name (0 = none).
   u32 m_name_request = 0;
+  // Shader override being renamed (empty = none), the name typed so far, and its request.
+  std::string m_rename_name;
+  std::string m_rename_text;
+  u32 m_rename_request = 0;
+  // Shader override whose delete icon waits for its second press, until when.
+  std::string m_delete_armed;
+  u64 m_delete_armed_until_us = 0;
   std::vector<ShaderHunter::ShaderOverride> m_shaders;
   std::vector<ElementsGroupManager::ElementGroupOverride> m_elements;
   std::vector<TextureElementManager::TextureElementOverride> m_textures;

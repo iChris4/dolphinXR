@@ -15,6 +15,9 @@ namespace VR::MenuWidgets
 namespace
 {
 constexpr ImVec4 OVERRIDE_COLOR{0.98f, 0.74f, 0.25f, 1.0f};
+constexpr ImVec4 ARMED_COLOR{0.70f, 0.18f, 0.15f, 1.0f};
+constexpr ImVec4 ARMED_HOVERED_COLOR{0.85f, 0.25f, 0.20f, 1.0f};
+constexpr ImVec4 ARMED_ACTIVE_COLOR{0.95f, 0.32f, 0.26f, 1.0f};
 
 float LabelColumnWidth()
 {
@@ -286,6 +289,79 @@ bool Checkbox(const char* label, const char* tooltip, const Config::Info<bool>& 
   }
   ImGui::PopID();
   return changed;
+}
+
+bool IconButton(const char* id, Icon icon, const char* tooltip, bool armed)
+{
+  const float size = ImGui::GetFrameHeight();
+  const bool pressed = ImGui::InvisibleButton(id, {size, size});
+  Tooltip(tooltip);
+
+  const bool active = ImGui::IsItemActive();
+  const bool hovered = ImGui::IsItemHovered();
+  ImU32 background;
+  if (armed)
+  {
+    background = ImGui::GetColorU32(active  ? ARMED_ACTIVE_COLOR :
+                                    hovered ? ARMED_HOVERED_COLOR :
+                                              ARMED_COLOR);
+  }
+  else
+  {
+    background = ImGui::GetColorU32(active  ? ImGuiCol_ButtonActive :
+                                    hovered ? ImGuiCol_ButtonHovered :
+                                              ImGuiCol_Button);
+  }
+
+  const ImVec2 min = ImGui::GetItemRectMin();
+  const ImVec2 max = ImGui::GetItemRectMax();
+  ImDrawList* draw_list = ImGui::GetWindowDrawList();
+  draw_list->AddRectFilled(min, max, background, ImGui::GetStyle().FrameRounding);
+
+  // Icon coordinates are in units of 30% of the button, from its center.
+  const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
+  const ImVec2 center{(min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f};
+  const float unit = size * 0.3f;
+  const float thickness = std::max(2.0f, size * 0.07f);
+  const auto at = [&](float x, float y) {
+    return ImVec2{center.x + x * unit, center.y + y * unit};
+  };
+  switch (icon)
+  {
+  case Icon::Pencil:
+  {
+    // Diagonal, tip at the bottom left.
+    const auto along = [&](float t, float side) {
+      return at(0.7071f * (t + side), 0.7071f * (side - t));
+    };
+    constexpr float half_width = 0.28f;
+    draw_list->AddQuadFilled(along(-0.35f, -half_width), along(1.15f, -half_width),
+                             along(1.15f, half_width), along(-0.35f, half_width), color);
+    draw_list->AddTriangleFilled(along(-1.15f, 0.0f), along(-0.55f, -half_width),
+                                 along(-0.55f, half_width), color);
+    break;
+  }
+  case Icon::Trash:
+    draw_list->AddLine(at(-0.95f, -0.7f), at(0.95f, -0.7f), color, thickness);
+    draw_list->AddRect(at(-0.3f, -1.0f), at(0.3f, -0.7f), color, 0.0f, 0, thickness);
+    draw_list->AddQuad(at(-0.7f, -0.45f), at(0.7f, -0.45f), at(0.55f, 1.0f), at(-0.55f, 1.0f),
+                       color, thickness);
+    draw_list->AddLine(at(-0.22f, -0.15f), at(-0.18f, 0.7f), color, thickness);
+    draw_list->AddLine(at(0.22f, -0.15f), at(0.18f, 0.7f), color, thickness);
+    break;
+  case Icon::Check:
+  {
+    const std::array<ImVec2, 3> points{at(-0.85f, 0.05f), at(-0.25f, 0.65f), at(0.9f, -0.65f)};
+    draw_list->AddPolyline(points.data(), static_cast<int>(points.size()), color,
+                           ImDrawFlags_None, thickness * 1.4f);
+    break;
+  }
+  case Icon::Cross:
+    draw_list->AddLine(at(-0.7f, -0.7f), at(0.7f, 0.7f), color, thickness * 1.4f);
+    draw_list->AddLine(at(-0.7f, 0.7f), at(0.7f, -0.7f), color, thickness * 1.4f);
+    break;
+  }
+  return pressed;
 }
 
 bool Checkbox(const char* label, const char* tooltip, bool* value)

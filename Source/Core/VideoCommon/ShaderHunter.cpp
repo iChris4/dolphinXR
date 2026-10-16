@@ -1225,11 +1225,17 @@ ShaderHunter::LoadOverridesFromINI(const std::string& game_id, std::optional<u16
   for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
     MergeParsedShaderOverrideFile(&result, &index_by_name,
                                   LoadShaderOverridesFromINIFile(GetSysVRGameSettingsPath(filename)));
+  const std::map<std::string, size_t> sys_names = index_by_name;
 
   for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
     MergeParsedShaderOverrideFile(
         &result, &index_by_name,
         LoadShaderOverridesFromINIFile(File::GetUserPath(D_GAMESETTINGSVR_IDX) + filename));
+
+  // An override that ships in Sys comes back on every load, even if the user's file (which saves
+  // every override) drops or renames it.
+  for (ShaderOverride& entry : result)
+    entry.user_defined = !sys_names.contains(entry.name);
 
   return result;
 }

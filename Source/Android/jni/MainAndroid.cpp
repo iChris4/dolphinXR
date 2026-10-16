@@ -335,13 +335,15 @@ JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_DebugVRMenu(
 #endif
 }
 
-// Text of the VR menu's keyboard field after each edit (see ShowVRMenuKeyboard).
+// Text of the VR menu's keyboard field after each edit (see ShowVRMenuKeyboard); `done` when
+// the keyboard's Enter key finished it.
 JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_SetVRMenuText(JNIEnv* env,
                                                                                    jclass,
-                                                                                   jstring text)
+                                                                                   jstring text,
+                                                                                   jboolean done)
 {
 #ifdef ENABLE_VR
-  VR::TextInput::SetText(GetJString(env, text));
+  VR::TextInput::SetText(GetJString(env, text), done != JNI_FALSE);
 #endif
 }
 

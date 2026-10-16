@@ -20,12 +20,19 @@ using ShowKeyboardFunction = void (*)(const std::string& text);
 void SetShowKeyboardFunction(ShowKeyboardFunction function);
 bool IsAvailable();
 
-// Menu (video thread): shows the keyboard to edit `text`. Returns the request TakeText reads.
+// Menu (video thread): shows the keyboard to edit `text`. Returns the request TakeEdit reads.
 u32 Request(const std::string& text);
-// Frontend, any thread: the text of the field after each edit.
-void SetText(std::string text);
+// Frontend, any thread: the text of the field after each edit, with `done` when the keyboard's
+// Enter (Done) key finished it.
+void SetText(std::string text, bool done);
+
+struct Edit
+{
+  std::string text;
+  bool done = false;
+};
 // Menu: the text typed for `request` since the last call, if any.
-std::optional<std::string> TakeText(u32 request);
+std::optional<Edit> TakeEdit(u32 request);
 }  // namespace VR::TextInput
 
 #endif  // ENABLE_VR

@@ -388,7 +388,7 @@ object NativeLibrary {
     /**
      * Shows the system keyboard (the Quest keyboard overlay) to edit a text field of the in-game
      * VR menu, starting from [text]. Called from native code; each edit goes back through
-     * [SetVRMenuText].
+     * [SetVRMenuText], with done = true when the keyboard's Enter key finished it.
      */
     @JvmStatic
     @Keep
@@ -397,7 +397,7 @@ object NativeLibrary {
     }
 
     @JvmStatic
-    external fun SetVRMenuText(text: String)
+    external fun SetVRMenuText(text: String, done: Boolean)
     external fun StartOpenXRControllerMapper(activity: Activity, controllerPort: Int, targetType: Int): Boolean
     external fun GetOpenXRControllerMapperState(): Int
     external fun GetOpenXRControllerMapperFailure(): String

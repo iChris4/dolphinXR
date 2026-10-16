@@ -64,6 +64,17 @@ bool Checkbox(const char* label, const char* tooltip, const Config::Info<bool>& 
 bool CheckboxInverted(const char* label, const char* tooltip, const Config::Info<bool>& info,
                       TouchedKeys* touched);
 
+enum class Icon
+{
+  Pencil,
+  Trash,
+  Check,
+  Cross,
+};
+// A square button showing a drawn icon (the menu font has no icon glyphs). `armed` paints it red,
+// for a button that waits for its confirming second press.
+bool IconButton(const char* id, Icon icon, const char* tooltip, bool armed = false);
+
 // Rows for a plain value instead of a config key (tool state, values of an action).
 bool SliderFloat(const char* label, const char* tooltip, float* value, const FloatRange& range);
 bool Checkbox(const char* label, const char* tooltip, bool* value);

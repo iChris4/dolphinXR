@@ -487,10 +487,11 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
             isSingleLine = true
             inputType = InputType.TYPE_CLASS_TEXT
             imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            doAfterTextChanged { NativeLibrary.SetVRMenuText(it?.toString() ?: "") }
+            doAfterTextChanged { NativeLibrary.SetVRMenuText(it?.toString() ?: "", false) }
             setOnEditorActionListener { view, actionId, _ ->
                 if (actionId != EditorInfo.IME_ACTION_DONE)
                     return@setOnEditorActionListener false
+                NativeLibrary.SetVRMenuText(view.text.toString(), true)
                 val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
                 imm.hideSoftInputFromWindow(view.windowToken, 0)
                 view.clearFocus()
