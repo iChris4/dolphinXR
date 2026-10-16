@@ -55,6 +55,7 @@ private:
   ConfigBool* m_disable_bounding_box;
   ConfigBool* m_vertex_rounding;
   ConfigBool* m_vi_skip;
+  ConfigBool* m_screen_recording_compatibility;
   ConfigBool* m_save_texture_cache_state;
 
   Config::Layer* m_game_layer = nullptr;

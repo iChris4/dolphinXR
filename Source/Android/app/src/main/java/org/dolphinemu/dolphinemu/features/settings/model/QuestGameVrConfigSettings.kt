@@ -36,7 +36,6 @@ object QuestGameVrConfigSettings {
         "LoadCustomShaders",
         "HeadCPUCull",
         "NonBlockingEFBAccess",
-        "ScreenRecordingCompatibility",
         "RemoveCinematicBars",
         "FrameSizeFromXFB",
         "SmallViewportsOnScreen",

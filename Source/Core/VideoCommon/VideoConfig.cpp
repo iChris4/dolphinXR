@@ -230,7 +230,6 @@ void VideoConfig::Refresh()
   vr_load_custom_shaders = Config::Get(Config::GFX_VR_LOAD_CUSTOM_SHADERS);
   vr_head_cpu_cull = Config::Get(Config::GFX_VR_HEAD_CPU_CULL);
   vr_nonblocking_efb_access = Config::Get(Config::GFX_VR_NONBLOCKING_EFB_ACCESS);
-  vr_screen_recording_compatibility = Config::Get(Config::GFX_VR_SCREEN_RECORDING_COMPATIBILITY);
   vr_mirror_view = Config::Get(Config::GFX_VR_MIRROR_VIEW);
   vr_reference_space_mode = Config::Get(Config::GFX_VR_REFERENCE_SPACE_MODE);
   vr_tracking_mode = Config::Get(Config::GFX_VR_TRACKING_MODE);
@@ -292,6 +291,7 @@ void VideoConfig::Refresh()
   bCopyEFBScaled = Config::Get(Config::GFX_HACK_COPY_EFB_SCALED);
   bEFBEmulateFormatChanges = Config::Get(Config::GFX_HACK_EFB_EMULATE_FORMAT_CHANGES);
   bVertexRounding = Config::Get(Config::GFX_HACK_VERTEX_ROUNDING);
+  bScreenRecordingCompatibility = Config::Get(Config::GFX_HACK_SCREEN_RECORDING_COMPATIBILITY);
   iEFBAccessTileSize = Config::Get(Config::GFX_HACK_EFB_ACCESS_TILE_SIZE);
   iMissingColorValue = Config::Get(Config::GFX_HACK_MISSING_COLOR_VALUE);
   bFastTextureSampling = Config::Get(Config::GFX_HACK_FAST_TEXTURE_SAMPLING);

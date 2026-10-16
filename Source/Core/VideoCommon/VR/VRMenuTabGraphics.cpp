@@ -217,6 +217,14 @@ private:
                           "Skips VBI interrupts when the game lags, to keep audio from "
                           "stuttering.",
                           Config::GFX_HACK_VI_SKIP, touched);
+    if (g_backend_info.api_type == APIType::Vulkan)
+    {
+      MenuWidgets::Checkbox("Quest Screen Recording Compatibility",
+                            "Avoids the GPU driver fault that freezes the image while Meta's "
+                            "screen recorder or casting is running. No effect while passthrough "
+                            "is on.",
+                            Config::GFX_HACK_SCREEN_RECORDING_COMPATIBILITY, touched);
+    }
     MenuWidgets::Checkbox("Save Texture Cache to State", nullptr,
                           Config::GFX_SAVE_TEXTURE_CACHE_TO_STATE, touched);
   }

@@ -354,6 +354,7 @@ struct VideoConfig final
   bool bFastDepthCalc = false;
   bool bVertexRounding = false;
   bool bVISkip = false;
+  bool bScreenRecordingCompatibility = false;  // See PruneUnusedDualSourceOutputs()
   int iEFBAccessTileSize = 0;
   int iSaveTargetId = 0;  // TODO: Should be dropped
   u32 iMissingColorValue = 0;
@@ -404,7 +405,6 @@ struct VideoConfig final
   bool vr_load_custom_shaders = false;
   bool vr_head_cpu_cull = true;
   bool vr_nonblocking_efb_access = true;  // EFB peeks answer from the last completed readback
-  bool vr_screen_recording_compatibility = false;  // See PruneUnusedDualSourceOutputs()
   OpenXRMirrorView vr_mirror_view = OpenXRMirrorView::BothEyes;
   OpenXRReferenceSpaceMode vr_reference_space_mode = OpenXRReferenceSpaceMode::Local;
   OpenXRTrackingMode vr_tracking_mode = OpenXRTrackingMode::Full6DoF;
@@ -524,7 +524,7 @@ struct VideoConfig final
   // attachment already avoids the fault.
   bool PruneUnusedDualSourceOutputs() const
   {
-    return vr_screen_recording_compatibility && g_backend_info.api_type == APIType::Vulkan &&
+    return bScreenRecordingCompatibility && g_backend_info.api_type == APIType::Vulkan &&
            !VRPassthroughEnabled();
   }
   bool ExclusiveFullscreenEnabled() const

@@ -110,15 +110,6 @@ private:
         "(up to about a frame old). Uncheck it if an effect driven by such reads (lens flares, "
         "cursors, visibility tests) misbehaves.",
         Config::GFX_VR_NONBLOCKING_EFB_ACCESS, touched);
-    if (g_backend_info.api_type == APIType::Vulkan)
-    {
-      MenuWidgets::Checkbox(
-          "Quest Screen Recording Compatibility",
-          "On Quest, this avoids the GPU driver fault that freezes the image while "
-          "Meta's screen recorder or casting is running. No effect while "
-          "Passthrough is on.",
-          Config::GFX_VR_SCREEN_RECORDING_COMPATIBILITY, touched);
-    }
     MenuWidgets::Checkbox(
         "Remove Cinematic Bars",
         "Expands the scissor and viewport to fill the full rendering area for perspective draws, "

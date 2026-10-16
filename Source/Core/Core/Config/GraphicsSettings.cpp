@@ -232,13 +232,6 @@ const Info<bool> GFX_VR_DONT_CLEAR_SCREEN{{System::GFX, "VR", "DontClearScreen"}
 const Info<bool> GFX_VR_LOAD_CUSTOM_SHADERS{{System::GFX, "VR", "LoadCustomShaders"}, false};
 const Info<bool> GFX_VR_HEAD_CPU_CULL{{System::GFX, "VR", "HeadCPUCull"}, true};
 const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS{{System::GFX, "VR", "NonBlockingEFBAccess"}, true};
-#if defined(__ANDROID__)
-constexpr bool DEFAULT_VR_SCREEN_RECORDING_COMPATIBILITY = true;
-#else
-constexpr bool DEFAULT_VR_SCREEN_RECORDING_COMPATIBILITY = false;
-#endif
-const Info<bool> GFX_VR_SCREEN_RECORDING_COMPATIBILITY{
-    {System::GFX, "VR", "ScreenRecordingCompatibility"}, DEFAULT_VR_SCREEN_RECORDING_COMPATIBILITY};
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},
                                                 OpenXRMirrorView::BothEyes};
 const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{
@@ -343,6 +336,13 @@ const Info<bool> GFX_HACK_EFB_EMULATE_FORMAT_CHANGES{
     {System::GFX, "Hacks", "EFBEmulateFormatChanges"}, false};
 const Info<bool> GFX_HACK_VERTEX_ROUNDING{{System::GFX, "Hacks", "VertexRounding"}, false};
 const Info<bool> GFX_HACK_VI_SKIP{{System::GFX, "Hacks", "VISkip"}, false};
+#if defined(__ANDROID__)
+constexpr bool DEFAULT_SCREEN_RECORDING_COMPATIBILITY = true;
+#else
+constexpr bool DEFAULT_SCREEN_RECORDING_COMPATIBILITY = false;
+#endif
+const Info<bool> GFX_HACK_SCREEN_RECORDING_COMPATIBILITY{
+    {System::GFX, "Hacks", "ScreenRecordingCompatibility"}, DEFAULT_SCREEN_RECORDING_COMPATIBILITY};
 const Info<u32> GFX_HACK_MISSING_COLOR_VALUE{{System::GFX, "Hacks", "MissingColorValue"},
                                              0xFFFFFFFF};
 const Info<bool> GFX_HACK_FAST_TEXTURE_SAMPLING{{System::GFX, "Hacks", "FastTextureSampling"},

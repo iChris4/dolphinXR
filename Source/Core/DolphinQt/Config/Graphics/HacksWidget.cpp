@@ -110,12 +110,16 @@ void HacksWidget::CreateWidgets()
   m_save_texture_cache_state = new ConfigBool(
       tr("Save Texture Cache to State"), Config::GFX_SAVE_TEXTURE_CACHE_TO_STATE, m_game_layer);
   m_vi_skip = new ConfigBool(tr("VBI Skip"), Config::GFX_HACK_VI_SKIP, m_game_layer);
+  m_screen_recording_compatibility =
+      new ConfigBool(tr("Quest Screen Recording Compatibility"),
+                     Config::GFX_HACK_SCREEN_RECORDING_COMPATIBILITY, m_game_layer);
 
   other_layout->addWidget(m_fast_depth_calculation, 0, 0);
   other_layout->addWidget(m_disable_bounding_box, 0, 1);
   other_layout->addWidget(m_vertex_rounding, 1, 0);
   other_layout->addWidget(m_save_texture_cache_state, 1, 1);
   other_layout->addWidget(m_vi_skip, 2, 0);
+  other_layout->addWidget(m_screen_recording_compatibility, 2, 1);
 
   main_layout->addWidget(efb_box);
   main_layout->addWidget(texture_cache_box);
@@ -244,6 +248,12 @@ void HacksWidget::AddDescriptions()
   m_save_texture_cache_state->SetDescription(tr(TR_SAVE_TEXTURE_CACHE_TO_STATE_DESCRIPTION));
   m_vertex_rounding->SetDescription(tr(TR_VERTEX_ROUNDING_DESCRIPTION));
   m_vi_skip->SetDescription(tr(TR_VI_SKIP_DESCRIPTION));
+  m_screen_recording_compatibility->SetDescription(
+      tr("Removes the secondary color output from shaders whose blending doesn't use it. On a "
+         "standalone Quest, this avoids the GPU driver fault that freezes the image while Meta's "
+         "screen recorder or casting is running.<br><br>Vulkan only. No effect while VR "
+         "passthrough is on.<br><br><dolphin_emphasis>If unsure, leave this unchecked on "
+         "PC.</dolphin_emphasis>"));
 }
 
 void HacksWidget::UpdateGPUTextureDecodingEnabled(const QString& backend_name)

@@ -301,6 +301,8 @@
     <string name="vertex_rounding">Vertex Rounding</string>
     <string name="vertex_rounding_description">Rounds 2D vertices to whole pixels and rounds the viewport size to a whole number. Fixes graphical problems in some games at higher internal resolutions. This setting has no effect when native internal resolution is used. If unsure, leave this unchecked.</string>
     <string name="vi_skip">VBI Skip</string>
+    <string name="screen_recording_compatibility">Quest Screen Recording Compatibility</string>
+    <string name="screen_recording_compatibility_description">Removes the secondary color output from shaders whose blending doesn\'t use it. On Quest, this avoids the GPU driver fault that freezes the image while Meta\'s screen recorder or casting is running. Vulkan only. No effect while VR passthrough is on. If unsure, leave this checked.</string>
     <string name="vi_skip_description">Skips Vertical Blank Interrupts when lag is detected, allowing for smooth audio playback when emulation speed is not 100%. Can cause freezes and compatibility issues.</string>
     <string name="texture_cache_to_state">Save Texture Cache to State</string>
     <string name="texture_cache_to_state_description">Includes the contents of the embedded frame buffer (EFB) and upscaled EFB copies in save states. Fixes missing and/or non-upscaled textures/objects when loading states at the cost of additional save/load time.</string>
@@ -952,8 +954,6 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_head_cpu_culling">Head-Rotated CPU Culling</string>
     <string name="quest_head_cpu_culling_description">Skips draw calls outside the view cone that follows your head before they reach the GPU. Reduces CPU load in open areas.</string>
     <string name="quest_nonblocking_efb_access">Non-Blocking EFB Reads</string>
-    <string name="quest_screen_recording_compatibility">Quest Screen Recording Compatibility</string>
-    <string name="quest_screen_recording_compatibility_description">Avoids the GPU driver fault that freezes the image while Meta\'s screen recorder or casting is running. Vulkan only. No effect while Passthrough is on. If unsure, leave this checked.</string>
     <string name="quest_nonblocking_efb_access_description">When a game reads the frame buffer from the CPU, answers from the last readback the GPU has completed instead of waiting for the newest one (up to about a frame old). Fixes Super Mario Galaxy\'s frame rate in VR. Turn off if an effect driven by such reads misbehaves in a game.</string>
     <string name="quest_load_custom_shaders">Load Custom Shaders</string>
     <string name="quest_load_custom_shaders_description">Loads custom shader replacements from the game\'s shader override directory.</string>

@@ -142,9 +142,6 @@ object QuestVrSettings {
 
     fun nonBlockingEfbAccessSetting() = vrBooleanSetting("NonBlockingEFBAccess", true)
 
-    fun screenRecordingCompatibilitySetting() =
-        vrBooleanSetting("ScreenRecordingCompatibility", true)
-
     fun clearEfbCopiesSetting() = vrIntSetting("ClearEFBCopies", 0)
 
     fun loadCustomShadersSetting() = vrBooleanSetting("LoadCustomShaders", false)
@@ -306,7 +303,6 @@ object QuestVrSettings {
             dontClearScreenSetting(),
             headCpuCullSetting(),
             nonBlockingEfbAccessSetting(),
-            screenRecordingCompatibilitySetting(),
             removeBarsSetting(),
             frameSizeFromXfbSetting(),
             panesOnScreenSetting(),

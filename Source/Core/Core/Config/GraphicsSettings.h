@@ -227,10 +227,6 @@ extern const Info<bool> GFX_VR_HEAD_CPU_CULL;
 // from the last completed readback instead of waiting for the GPU when the newest one is still
 // in flight (at most about a frame old). See FramebufferManager::PeekEFBColor/Depth.
 extern const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS;
-// Vulkan: drop the secondary (dual-source) fragment output from shaders whose blend state doesn't
-// read it. Avoids the Quest GPU driver fault that freezes the image while Meta's recorder or
-// casting runs. Not applied while real passthrough is on.
-extern const Info<bool> GFX_VR_SCREEN_RECORDING_COMPATIBILITY;
 extern const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW;
 extern const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE;
 extern const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE;
@@ -372,6 +368,10 @@ extern const Info<bool> GFX_HACK_COPY_EFB_SCALED;
 extern const Info<bool> GFX_HACK_EFB_EMULATE_FORMAT_CHANGES;
 extern const Info<bool> GFX_HACK_VERTEX_ROUNDING;
 extern const Info<bool> GFX_HACK_VI_SKIP;
+// Vulkan: drop the secondary (dual-source) fragment output from shaders whose blend state doesn't
+// read it. Avoids the Quest GPU driver fault that freezes the image while Meta's recorder or
+// casting runs. Not applied while VR passthrough is on.
+extern const Info<bool> GFX_HACK_SCREEN_RECORDING_COMPATIBILITY;
 extern const Info<u32> GFX_HACK_MISSING_COLOR_VALUE;
 extern const Info<bool> GFX_HACK_FAST_TEXTURE_SAMPLING;
 #ifdef __APPLE__
