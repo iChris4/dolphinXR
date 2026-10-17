@@ -940,8 +940,8 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_foveation_level_description">Renders the edges of each eye at reduced resolution to save GPU time (XR_FB_foveation). Higher levels save more but blur the periphery. Takes effect on next launch.</string>
     <string name="quest_dynamic_foveation">Dynamic Foveation</string>
     <string name="quest_dynamic_foveation_description">Lets the runtime lower the foveation level automatically when the GPU has headroom, keeping the image sharp in light scenes.</string>
-    <string name="quest_foveate_efb">Foveate Game Render (EFB)</string>
-    <string name="quest_foveate_efb_description">Applies foveation to the game\'s own render passes, not just the final eye buffers. Each pass is timed and keeps foveation only where it measures faster, so games drawn in a few long passes gain a lot and others lose little or nothing. Takes effect on next launch.</string>
+    <string name="quest_foveate_efb">Smart Foveated EFB</string>
+    <string name="quest_foveate_efb_description">Also foveates the game\'s own render passes (the EFB), not just the final eye buffers. Each pass is tried with and without foveation and keeps it only where the frame renders faster, counting its effect on the passes after it. The results are remembered per game and re-checked as scenes change. Vulkan only. Takes effect on next launch.</string>
     <string name="quest_foveation_low">Low</string>
     <string name="quest_foveation_medium">Medium</string>
     <string name="quest_foveation_high">High</string>

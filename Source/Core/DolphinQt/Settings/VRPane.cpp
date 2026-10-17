@@ -366,12 +366,13 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   rendering_layout->addWidget(m_foveation_level, 3, 1);
   rendering_layout->addWidget(m_dynamic_foveation, 3, 2);
 
-  m_foveate_efb = new ConfigBool(tr("Foveate Game Render (EFB)"), Config::GFX_VR_EFB_FOVEATION);
+  m_foveate_efb = new ConfigBool(tr("Smart Foveated EFB"), Config::GFX_VR_EFB_FOVEATION);
   m_foveate_efb->setToolTip(
-      tr("Applies foveation to the game's own render passes, not just the eye buffers "
-         "(Vulkan). Each pass is timed and keeps foveation only where it measures faster, so "
-         "games drawn in a few long passes gain a lot and others lose little or nothing. Takes "
-         "effect on the next launch."));
+      tr("Also foveates the game's own render passes (the EFB), not just the eye buffers "
+         "(Vulkan). Each pass is tried with and without foveation and keeps it only where the "
+         "frame renders faster, counting its effect on the passes after it. The results are "
+         "remembered per game and re-checked as scenes change. Takes effect on the next "
+         "launch."));
   rendering_layout->addWidget(m_foveate_efb, 4, 1, 1, 2);
 
   // Exact Screen Depth

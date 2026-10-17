@@ -261,8 +261,14 @@ void VRConfigWidget::CreateWidgets()
   rendering_layout->addWidget(new QLabel(tr("Foveated Rendering:")), 3, 0);
   rendering_layout->addWidget(foveation_level, 3, 1);
   rendering_layout->addWidget(make_bool(tr("Dynamic"), Config::GFX_VR_FOVEATION_DYNAMIC), 3, 2);
-  rendering_layout->addWidget(
-      make_bool(tr("Foveate Game Render (EFB)"), Config::GFX_VR_EFB_FOVEATION), 4, 1, 1, 2);
+  auto* foveate_efb = make_bool(tr("Smart Foveated EFB"), Config::GFX_VR_EFB_FOVEATION);
+  foveate_efb->setToolTip(
+      tr("Also foveates the game's own render passes (the EFB), not just the eye buffers "
+         "(Vulkan). Each pass is tried with and without foveation and keeps it only where the "
+         "frame renders faster, counting its effect on the passes after it. The results are "
+         "remembered per game and re-checked as scenes change. Takes effect on the next "
+         "launch."));
+  rendering_layout->addWidget(foveate_efb, 4, 1, 1, 2);
 
   general_layout->addWidget(openxr_group);
   general_layout->addWidget(camera_group);

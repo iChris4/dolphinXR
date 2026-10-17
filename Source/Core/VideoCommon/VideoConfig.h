@@ -442,7 +442,7 @@ struct VideoConfig final
   float vr_resolution_scale = 1.0f;  // Eye swapchain size vs. HMD recommended resolution
   int vr_foveation_level = 0;   // XR_FB_foveation level: 0=off, 1=low, 2=medium, 3=high
   bool vr_foveation_dynamic = true;  // Let the runtime drop the foveation level when GPU load allows
-  bool vr_efb_foveation = false;  // Also foveate the EFB pass (hurts EFB-copy-heavy games)
+  bool vr_efb_foveation = false;  // Smart Foveated EFB: foveate EFB passes that measure faster
   // D3D only config, mostly to be merged into the above
   int iAdapter = 0;
 
