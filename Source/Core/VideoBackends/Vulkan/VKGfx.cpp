@@ -987,6 +987,30 @@ void VKGfx::RecordStagingCopyFromTexture(const RecordCommand::StagingCopyFromTex
   Record(command);
 }
 
+void VKGfx::RecordBeginQuery(VkQueryPool pool, u32 query, VkQueryControlFlags flags)
+{
+  RecordCommand command{};
+  command.type = RecordCommandType::BeginQuery;
+  command.query = {pool, query, 1, flags};
+  Record(command);
+}
+
+void VKGfx::RecordEndQuery(VkQueryPool pool, u32 query)
+{
+  RecordCommand command{};
+  command.type = RecordCommandType::EndQuery;
+  command.query = {pool, query, 1, 0};
+  Record(command);
+}
+
+void VKGfx::RecordResetQueryPool(VkQueryPool pool, u32 first, u32 count)
+{
+  RecordCommand command{};
+  command.type = RecordCommandType::ResetQueryPool;
+  command.query = {pool, first, count, 0};
+  Record(command);
+}
+
 void VKGfx::ExecuteRecordCommand(const RecordCommand& command)
 {
   StateTracker* const tracker = StateTracker::GetInstance();
@@ -1078,6 +1102,21 @@ void VKGfx::ExecuteRecordCommand(const RecordCommand& command)
   case RecordCommandType::StagingCopyFromTexture:
     command.staging_copy_from_texture.staging->CopyFromTextureDirect(
         command.staging_copy_from_texture);
+    break;
+  case RecordCommandType::BeginQuery:
+    tracker->Bind();
+    tracker->BeginRenderPass();
+    vkCmdBeginQuery(g_command_buffer_mgr->GetCurrentCommandBuffer(), command.query.pool,
+                    command.query.first, command.query.flags);
+    break;
+  case RecordCommandType::EndQuery:
+    vkCmdEndQuery(g_command_buffer_mgr->GetCurrentCommandBuffer(), command.query.pool,
+                  command.query.first);
+    break;
+  case RecordCommandType::ResetQueryPool:
+    tracker->EndRenderPass();
+    vkCmdResetQueryPool(g_command_buffer_mgr->GetCurrentCommandBuffer(), command.query.pool,
+                        command.query.first, command.query.count);
     break;
   }
 }

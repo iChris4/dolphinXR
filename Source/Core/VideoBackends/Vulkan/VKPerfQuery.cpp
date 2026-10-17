@@ -3,17 +3,18 @@
 
 #include "VideoBackends/Vulkan/VKPerfQuery.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "Common/Assert.h"
 #include "Common/MsgHandler.h"
 
 #include "VideoBackends/Vulkan/CommandBufferManager.h"
-#include "VideoBackends/Vulkan/StateTracker.h"
 #include "VideoBackends/Vulkan/VKGfx.h"
-#include "VideoBackends/Vulkan/VKRecordingWorker.h"
+#include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/FramebufferManager.h"
+#include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
 
@@ -41,21 +42,38 @@ bool PerfQuery::Initialize()
   return true;
 }
 
+u32 PerfQuery::GetEFBViewCount()
+{
+  const auto* efb = static_cast<const VKFramebuffer*>(g_framebuffer_manager->GetEFBFramebuffer());
+  return efb && efb->IsMultiview() ? g_framebuffer_manager->GetEFBLayers() : 1;
+}
+
+// The query commands are queued on the recording worker like the draw they bracket; only the
+// bookkeeping below runs here. A query is never left open across a submit: EnableQuery and
+// DisableQuery run back to back around one draw, and nothing in between submits.
 void PerfQuery::EnableQuery(PerfQueryGroup group)
 {
-  DrainRecordingWorkerForDirectAccess();
-  // Block if there are no free slots.
-  // Otherwise, try to keep half of them available.
-  const u32 query_count = m_query_count.load(std::memory_order_relaxed);
-  if (query_count > m_query_buffer.size() / 2)
-    PartialFlush(query_count == PERF_QUERY_BUFFER_SIZE);
-
-  // Ensure command buffer is ready to go before beginning the query, that way we don't submit
-  // a buffer with open queries.
-  StateTracker::GetInstance()->Bind();
+  {
+    VideoCommon::GPUWaitStats::ScopedReason wait_reason(
+        VideoCommon::GPUWaitStats::Reason::PerfQuery);
+    // Block if there are no free slots.
+    // Otherwise, try to keep half of them available.
+    const u32 query_count = m_query_count.load(std::memory_order_relaxed);
+    if (query_count > m_query_buffer.size() / 2)
+      PartialFlush(query_count == PERF_QUERY_BUFFER_SIZE);
+  }
 
   if (group == PQG_ZCOMP_ZCOMPLOC || group == PQG_ZCOMP)
   {
+    const u32 views = GetEFBViewCount();
+    if (views != m_query_views)
+    {
+      // The slot layout follows the view count, so retire every query of the old layout first.
+      if (!IsFlushed())
+        PartialFlush(true);
+      m_query_views = views;
+    }
+
     ActiveQuery& entry = m_query_buffer[m_query_next_pos];
     DEBUG_ASSERT(!entry.has_value);
     entry.has_value = true;
@@ -65,19 +83,15 @@ void PerfQuery::EnableQuery(PerfQueryGroup group)
     VkQueryControlFlags flags =
         g_vulkan_context->SupportsPreciseOcclusionQueries() ? VK_QUERY_CONTROL_PRECISE_BIT : 0;
 
-    // Ensure the query starts within a render pass.
-    StateTracker::GetInstance()->BeginRenderPass();
-    vkCmdBeginQuery(g_command_buffer_mgr->GetCurrentCommandBuffer(), m_query_pool, m_query_next_pos,
-                    flags);
+    VKGfx::GetInstance()->RecordBeginQuery(m_query_pool, m_query_next_pos * m_query_views, flags);
   }
 }
 
 void PerfQuery::DisableQuery(PerfQueryGroup group)
 {
-  DrainRecordingWorkerForDirectAccess();
   if (group == PQG_ZCOMP_ZCOMPLOC || group == PQG_ZCOMP)
   {
-    vkCmdEndQuery(g_command_buffer_mgr->GetCurrentCommandBuffer(), m_query_pool, m_query_next_pos);
+    VKGfx::GetInstance()->RecordEndQuery(m_query_pool, m_query_next_pos * m_query_views);
     ActiveQuery& entry = m_query_buffer[m_query_next_pos];
     entry.fence_counter = g_command_buffer_mgr->GetCurrentFenceCounter();
 
@@ -88,7 +102,6 @@ void PerfQuery::DisableQuery(PerfQueryGroup group)
 
 void PerfQuery::ResetQuery()
 {
-  DrainRecordingWorkerForDirectAccess();
   m_query_count.store(0, std::memory_order_relaxed);
   m_query_readback_pos = 0;
   m_query_next_pos = 0;
@@ -96,9 +109,8 @@ void PerfQuery::ResetQuery()
     m_results[i].store(0, std::memory_order_relaxed);
 
   // Reset entire query pool, ensuring all queries are ready to write to.
-  StateTracker::GetInstance()->EndRenderPass();
-  vkCmdResetQueryPool(g_command_buffer_mgr->GetCurrentCommandBuffer(), m_query_pool, 0,
-                      PERF_QUERY_BUFFER_SIZE);
+  VKGfx::GetInstance()->RecordResetQueryPool(m_query_pool, 0,
+                                             PERF_QUERY_BUFFER_SIZE * MAX_QUERY_VIEWS);
 
   std::memset(m_query_buffer.data(), 0, sizeof(ActiveQuery) * m_query_buffer.size());
 }
@@ -147,7 +159,7 @@ bool PerfQuery::CreateQueryPool()
       nullptr,                                   // const void*                      pNext
       0,                                         // VkQueryPoolCreateFlags           flags
       VK_QUERY_TYPE_OCCLUSION,                   // VkQueryType                      queryType
-      PERF_QUERY_BUFFER_SIZE,                    // uint32_t                         queryCount
+      PERF_QUERY_BUFFER_SIZE * MAX_QUERY_VIEWS,  // uint32_t                         queryCount
       0  // VkQueryPipelineStatisticFlags    pipelineStatistics;
   };
 
@@ -192,22 +204,26 @@ void PerfQuery::ReadbackQueries()
 
 void PerfQuery::ReadbackQueries(u32 query_count)
 {
-  DrainRecordingWorkerForDirectAccess();
   // Should be at maximum query_count queries pending.
   ASSERT(query_count <= m_query_count.load(std::memory_order_relaxed) &&
          (m_query_readback_pos + query_count) <= PERF_QUERY_BUFFER_SIZE);
 
-  // Read back from the GPU.
+  // Read back from the GPU. These queries belong to completed command buffers, so neither this
+  // nor queuing their reset needs the recording worker drained.
+  const u32 views = m_query_views;
   VkResult res = vkGetQueryPoolResults(
-      g_vulkan_context->GetDevice(), m_query_pool, m_query_readback_pos, query_count,
-      query_count * sizeof(PerfQueryDataType), m_query_result_buffer.data(),
-      sizeof(PerfQueryDataType), VK_QUERY_RESULT_WAIT_BIT);
+      g_vulkan_context->GetDevice(), m_query_pool, m_query_readback_pos * views,
+      query_count * views, query_count * views * sizeof(PerfQueryDataType),
+      m_query_result_buffer.data(), sizeof(PerfQueryDataType), VK_QUERY_RESULT_WAIT_BIT);
   if (res != VK_SUCCESS)
     LOG_VULKAN_ERROR(res, "vkGetQueryPoolResults failed: ");
 
-  StateTracker::GetInstance()->EndRenderPass();
-  vkCmdResetQueryPool(g_command_buffer_mgr->GetCurrentCommandBuffer(), m_query_pool,
-                      m_query_readback_pos, query_count);
+  VKGfx::GetInstance()->RecordResetQueryPool(m_query_pool, m_query_readback_pos * views,
+                                             query_count * views);
+
+  // Every EFB layer is rasterized (per view with multiview, per layer with a layered geometry
+  // shader), so the counts are divided by the layer count to stay referenced to one image.
+  const u32 layers = std::max(g_framebuffer_manager->GetEFBLayers(), 1u);
 
   // Remove pending queries.
   for (u32 i = 0; i < query_count; i++)
@@ -220,10 +236,14 @@ void PerfQuery::ReadbackQueries(u32 query_count)
     entry.fence_counter = 0;
     entry.has_value = false;
 
+    // A multiview query reports either one count per view or the total in its first slot.
+    u64 samples = 0;
+    for (u32 view = 0; view < views; view++)
+      samples += m_query_result_buffer[i * views + view];
+
     // NOTE: Reported pixel metrics should be referenced to native resolution
-    u64 native_res_result = static_cast<u64>(m_query_result_buffer[i]) * EFB_WIDTH /
-                            g_framebuffer_manager->GetEFBWidth() * EFB_HEIGHT /
-                            g_framebuffer_manager->GetEFBHeight();
+    u64 native_res_result = samples * EFB_WIDTH / g_framebuffer_manager->GetEFBWidth() *
+                            EFB_HEIGHT / g_framebuffer_manager->GetEFBHeight() / layers;
     if (g_ActiveConfig.iMultisamples > 1)
       native_res_result /= g_ActiveConfig.iMultisamples;
     m_results[entry.query_group].fetch_add(static_cast<u32>(native_res_result),

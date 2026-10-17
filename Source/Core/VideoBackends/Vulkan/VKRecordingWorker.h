@@ -52,6 +52,9 @@ enum class RecordCommandType : u8
   FinishedRendering,
   ClearAdditionalColorAttachments,
   StagingCopyFromTexture,
+  BeginQuery,
+  EndQuery,
+  ResetQueryPool,
 };
 
 enum class FramebufferBindMode : u8
@@ -190,6 +193,16 @@ struct RecordCommand
     u32 src_layer;
     u32 src_level;
   };
+  // Occlusion queries of the perf query emulation, which brackets every GX draw with them.
+  // BeginQuery binds the draw state and opens the render pass first (the query must start
+  // inside it); ResetQueryPool ends the render pass and resets [first, first + count).
+  struct QueryCmd
+  {
+    VkQueryPool pool;
+    u32 first;
+    u32 count;
+    VkQueryControlFlags flags;
+  };
 
   RecordCommandType type = RecordCommandType::Nop;
   union
@@ -214,6 +227,7 @@ struct RecordCommand
     FinishedRenderingCmd finished_rendering;
     ClearAdditionalColorAttachmentsCmd clear_additional_color_attachments;
     StagingCopyFromTextureCmd staging_copy_from_texture;
+    QueryCmd query;
   };
 };
 static_assert(sizeof(RecordCommand) <= 64);

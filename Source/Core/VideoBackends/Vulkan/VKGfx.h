@@ -114,6 +114,11 @@ public:
   // the draws that produced the source, so EFB peeks and EFB copies to RAM do not drain the
   // worker; the copy lands in the current command buffer since the worker never submits.
   void RecordStagingCopyFromTexture(const RecordCommand::StagingCopyFromTextureCmd& copy);
+  // Occlusion query commands of the perf query emulation. Games that use it (Super Mario
+  // Sunshine) bracket every draw with a query, so these must stay queued rather than drain.
+  void RecordBeginQuery(VkQueryPool pool, u32 query, VkQueryControlFlags flags);
+  void RecordEndQuery(VkQueryPool pool, u32 query);
+  void RecordResetQueryPool(VkQueryPool pool, u32 first, u32 count);
 
 private:
   void CheckForSurfaceChange();
