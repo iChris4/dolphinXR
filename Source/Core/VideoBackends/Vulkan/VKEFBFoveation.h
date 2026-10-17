@@ -4,6 +4,9 @@
 #pragma once
 
 #include <array>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "Common/CommonTypes.h"
 #include "VideoBackends/Vulkan/VulkanLoader.h"
@@ -17,6 +20,11 @@ namespace Vulkan
 // load or store at all. So every EFB render pass of a frame, identified by its position in the
 // frame, is timed on the GPU, and a pass keeps the map only while a trial showed it faster with
 // it. Runs where the render passes are recorded (the recording worker, or the video thread).
+//
+// The trial verdicts are kept per game (User/Cache/EFBFoveation/<game id>.txt), by EFB scale,
+// foveation level and pass position, so that a cold boot does not pay the lost trials again: a
+// pass that kept the map starts with it, and a pass that lost waits, as it did, to be heavier
+// before its next trial. Both are still re-evaluated as in a session that made them.
 class EFBFoveationScheduler
 {
 public:
@@ -34,8 +42,9 @@ public:
   void ContinueAfterSubmit() { m_continue = true; }
   // A render pass on another framebuffer (an EFB copy) began: the next EFB pass is a new one.
   void BreakContinuation() { m_continue = false; }
-  // The emulated frame ended (XFB copy): pass positions restart from 0.
-  void OnFrameEnd();
+  // The emulated frame ended (XFB copy): pass positions restart from 0. The EFB scale and the
+  // foveation level select the cached verdicts; when they change, the passes are measured anew.
+  void OnFrameEnd(u32 efb_scale, s32 foveation_level);
   // A command buffer kick was skipped to keep a foveated pass whole (VKGfx::Flush).
   void NoteSkippedKick() { ++m_skipped_kicks; }
 
@@ -44,6 +53,13 @@ private:
   // Timed passes whose results have not been read yet; two timestamps each.
   static constexpr u32 MAX_TIMED_PASSES = 256;
   static constexpr u32 NO_SLOT = ~0u;
+
+  enum class Verdict : u8
+  {
+    None,
+    Kept,
+    Lost,
+  };
 
   struct PassStats
   {
@@ -63,6 +79,8 @@ private:
     u32 next_trial_frame = 0;
     u32 lost_trials = 0;
     bool foveated = false;
+    // Outcome of the latest trial (or of a kept pass found slower): what the cache stores.
+    Verdict verdict = Verdict::None;
   };
 
   struct TimedPass
@@ -77,6 +95,9 @@ private:
   void FlushPendingSample();
   void UpdateDecision(PassStats& stats);
   void LogStats();
+  void SetCacheKey(u32 efb_scale, s32 foveation_level);
+  void LoadVerdicts();
+  void SaveVerdicts();
 
   VkQueryPool m_query_pool = VK_NULL_HANDLE;
   double m_ns_per_tick = 1.0;
@@ -107,5 +128,16 @@ private:
   u32 m_passes_last_frame = 0;
   u32 m_skipped_kicks = 0;
   u32 m_trials = 0;
+
+  // Verdict cache. Empty path: no game ID, or the cache is not used.
+  std::string m_cache_path;
+  u32 m_cache_scale = 0;
+  s32 m_cache_level = 0;
+  bool m_cache_dirty = false;
+  u32 m_last_save_frame = 0;
+  // Lines of the cache file for other EFB scales and levels, written back unchanged.
+  std::vector<std::string> m_other_cache_lines;
+  // Writes the file, off the recording thread; joined before the next save.
+  std::thread m_save_thread;
 };
 }  // namespace Vulkan

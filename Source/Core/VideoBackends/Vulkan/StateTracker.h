@@ -88,7 +88,7 @@ public:
 
   // Selective EFB foveation (EFBFoveationScheduler): the emulated frame ended, and whether the
   // open render pass is an EFB pass running with the density map.
-  void OnEFBFrameEnd();
+  void OnEFBFrameEnd(u32 efb_scale, s32 foveation_level);
   bool InFoveatedEFBPass() const { return InRenderPass() && m_pass_timed && m_pass_density_map; }
   void NoteSkippedKick();
   // The open render pass is about to end for a command buffer submit (VKGfx::ExecuteCommandBuffer).

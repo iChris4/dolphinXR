@@ -65,6 +65,8 @@ VKGfx::VKGfx(std::unique_ptr<SwapChain> swap_chain, float backbuffer_scale)
       return;
     RecordCommand command{};
     command.type = RecordCommandType::EFBFrameEnd;
+    command.efb_frame_end = {g_framebuffer_manager->GetEFBScale(),
+                             g_ActiveConfig.vr_foveation_level};
     Record(command);
   });
 }
@@ -1142,7 +1144,7 @@ void VKGfx::ExecuteRecordCommand(const RecordCommand& command)
                         command.query.first, command.query.count);
     break;
   case RecordCommandType::EFBFrameEnd:
-    tracker->OnEFBFrameEnd();
+    tracker->OnEFBFrameEnd(command.efb_frame_end.efb_scale, command.efb_frame_end.foveation_level);
     break;
   }
 }

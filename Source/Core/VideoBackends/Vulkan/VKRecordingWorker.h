@@ -205,6 +205,12 @@ struct RecordCommand
     u32 count;
     VkQueryControlFlags flags;
   };
+  // The settings the EFB pass timings depend on, as the video thread saw them at the frame end.
+  struct EFBFrameEndCmd
+  {
+    u32 efb_scale;
+    s32 foveation_level;
+  };
 
   RecordCommandType type = RecordCommandType::Nop;
   union
@@ -230,6 +236,7 @@ struct RecordCommand
     ClearAdditionalColorAttachmentsCmd clear_additional_color_attachments;
     StagingCopyFromTextureCmd staging_copy_from_texture;
     QueryCmd query;
+    EFBFrameEndCmd efb_frame_end;
   };
 };
 static_assert(sizeof(RecordCommand) <= 64);

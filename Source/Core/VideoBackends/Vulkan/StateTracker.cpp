@@ -504,10 +504,10 @@ void StateTracker::BeginClearRenderPass(const VkRect2D& area, const VkClearValue
   vkCmdBeginRenderPass(command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-void StateTracker::OnEFBFrameEnd()
+void StateTracker::OnEFBFrameEnd(u32 efb_scale, s32 foveation_level)
 {
   if (m_efb_foveation)
-    m_efb_foveation->OnFrameEnd();
+    m_efb_foveation->OnFrameEnd(efb_scale, foveation_level);
 }
 
 void StateTracker::NoteSkippedKick()

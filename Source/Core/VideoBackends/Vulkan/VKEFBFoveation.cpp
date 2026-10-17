@@ -4,12 +4,16 @@
 #include "VideoBackends/Vulkan/VKEFBFoveation.h"
 
 #include <algorithm>
+#include <sstream>
 #include <string>
+#include <utility>
 
 #include <fmt/format.h>
 
 #include "Common/Config/Config.h"
+#include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
+#include "Core/ConfigManager.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 
 namespace Vulkan
@@ -37,6 +41,14 @@ constexpr float AVERAGE_WEIGHT = 0.2f;
 // it, which costs overlap. A pass on trial is timed every frame.
 constexpr u32 TIMING_INTERVAL = 4;
 constexpr u32 LOG_FRAMES = 300;
+// Changed verdicts are written at most this often, and when the scheduler goes away.
+constexpr u32 SAVE_INTERVAL_FRAMES = 600;
+
+u32 RetryWaitFrames(u32 lost_trials)
+{
+  // The wait after the lost_trials-th lost trial.
+  return RETRY_WAIT_FRAMES << std::min(lost_trials - 1, MAX_RETRY_WAIT_SHIFT);
+}
 
 // Diagnostic: every EFB pass gets the map, as before selective foveation.
 const Config::Info<bool> EFB_FOVEATION_ALL_PASSES{
@@ -78,10 +90,18 @@ EFBFoveationScheduler::EFBFoveationScheduler()
 
   INFO_LOG_FMT(VIDEO, "EFB foveation: selective{}, timestamps {} ns/tick, {} valid bits.",
                m_all_passes ? " off (FoveateEFBAllPasses)" : "", m_ns_per_tick, valid_bits);
+
+  const std::string game_id = SConfig::GetInstance().GetGameID();
+  if (!m_all_passes && !game_id.empty())
+    m_cache_path = File::GetUserPath(D_CACHE_IDX) + "EFBFoveation/" + game_id + ".txt";
 }
 
 EFBFoveationScheduler::~EFBFoveationScheduler()
 {
+  if (m_cache_dirty)
+    SaveVerdicts();
+  if (m_save_thread.joinable())
+    m_save_thread.join();
   // Destroyed with the state tracker, after the GPU went idle.
   if (m_query_pool != VK_NULL_HANDLE)
     vkDestroyQueryPool(g_vulkan_context->GetDevice(), m_query_pool, nullptr);
@@ -217,22 +237,28 @@ void EFBFoveationScheduler::UpdateDecision(PassStats& stats)
       stats.foveated_ratio = stats.foveated_ms / stats.trial_plain_ms;
       stats.kept_plain_ms = stats.trial_plain_ms;
       stats.lost_trials = 0;
+      stats.verdict = Verdict::Kept;
     }
     else
     {
       // No gain: back to plain, and no new trial until the pass grew heavier and waited.
       stats.foveated = false;
       stats.retry_above_ms = stats.trial_plain_ms * RETRY_GROWTH;
-      stats.next_trial_frame =
-          m_frame + (RETRY_WAIT_FRAMES << std::min(stats.lost_trials, MAX_RETRY_WAIT_SHIFT));
       ++stats.lost_trials;
+      stats.next_trial_frame = m_frame + RetryWaitFrames(stats.lost_trials);
       stats.plain_samples = 0;
+      stats.verdict = Verdict::Lost;
     }
     stats.trial_plain_ms = 0.0f;
+    m_cache_dirty = true;
     return;
   }
 
-  // Kept: drop the map once the pass got light, judged by its estimated plain time.
+  // Kept (by a trial, or by the cache): judged once its foveated time has settled.
+  if (stats.foveated_samples < MIN_SAMPLES)
+    return;
+  // Drop the map once the pass got light, judged by its estimated plain time. The verdict stays:
+  // the pass may get heavy again (a menu before the game, a lighter scene).
   if (stats.foveated_ms / stats.foveated_ratio < TRIAL_MIN_MS * LEAVE_SHARE)
   {
     stats.foveated = false;
@@ -246,21 +272,150 @@ void EFBFoveationScheduler::UpdateDecision(PassStats& stats)
   {
     stats.foveated = false;
     stats.retry_above_ms = stats.kept_plain_ms * RETRY_GROWTH;
-    stats.next_trial_frame =
-        m_frame + (RETRY_WAIT_FRAMES << std::min(stats.lost_trials, MAX_RETRY_WAIT_SHIFT));
     ++stats.lost_trials;
+    stats.next_trial_frame = m_frame + RetryWaitFrames(stats.lost_trials);
     stats.plain_samples = 0;
+    stats.verdict = Verdict::Lost;
+    m_cache_dirty = true;
   }
 }
 
-void EFBFoveationScheduler::OnFrameEnd()
+void EFBFoveationScheduler::OnFrameEnd(u32 efb_scale, s32 foveation_level)
 {
   m_passes_last_frame = m_position;
   m_position = 0;
   m_continue = false;
   ++m_frame;
-  if (!m_all_passes && m_frame % LOG_FRAMES == 0)
+  if (m_all_passes)
+    return;
+  SetCacheKey(efb_scale, foveation_level);
+  if (m_cache_dirty && m_frame - m_last_save_frame >= SAVE_INTERVAL_FRAMES)
+    SaveVerdicts();
+  if (m_frame % LOG_FRAMES == 0)
     LogStats();
+}
+
+void EFBFoveationScheduler::SetCacheKey(u32 efb_scale, s32 foveation_level)
+{
+  foveation_level = std::clamp(foveation_level, 1, 3);
+  if (efb_scale == m_cache_scale && foveation_level == m_cache_level)
+    return;
+  const bool first = m_cache_scale == 0;
+  if (m_cache_dirty)
+    SaveVerdicts();
+  m_cache_scale = efb_scale;
+  m_cache_level = foveation_level;
+  if (!first)
+  {
+    // Another resolution or map: the times and verdicts of the old one do not apply.
+    INFO_LOG_FMT(VIDEO, "EFB foveation: EFB scale {} and level {}; EFB passes are measured anew.",
+                 efb_scale, foveation_level);
+    m_passes = {};
+    m_pending_valid = false;
+  }
+  LoadVerdicts();
+}
+
+void EFBFoveationScheduler::LoadVerdicts()
+{
+  m_other_cache_lines.clear();
+  std::string contents;
+  if (m_cache_path.empty() || !File::ReadFileToString(m_cache_path, contents))
+    return;
+
+  u32 kept = 0;
+  u32 lost = 0;
+  std::istringstream lines(contents);
+  std::string line;
+  while (std::getline(lines, line))
+  {
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    if (line.empty() || line[0] == '#')
+      continue;
+    std::istringstream fields(line);
+    u32 scale = 0;
+    s32 level = 0;
+    u32 position = 0;
+    std::string verdict;
+    float value = 0.0f;
+    float value2 = 0.0f;
+    if (!(fields >> scale >> level >> position >> verdict >> value >> value2))
+      continue;
+    if (scale != m_cache_scale || level != m_cache_level)
+    {
+      m_other_cache_lines.push_back(line);
+      continue;
+    }
+    if (position >= MAX_PASSES)
+      continue;
+    PassStats& stats = m_passes[position];
+    if (verdict == "kept" && value > 0.0f && value <= KEEP_RATIO && value2 > 0.0f)
+    {
+      // Starts with the map; the kept-pass rules judge it once its foveated time settled.
+      stats = {};
+      stats.foveated = true;
+      stats.foveated_ratio = value;
+      stats.kept_plain_ms = value2;
+      stats.verdict = Verdict::Kept;
+      ++kept;
+    }
+    else if (verdict == "lost" && value > 0.0f && value2 >= 1.0f)
+    {
+      // As after the trial it lost: tried again once heavier, and after its wait.
+      stats = {};
+      stats.retry_above_ms = value;
+      stats.lost_trials = static_cast<u32>(value2);
+      stats.next_trial_frame = m_frame + RetryWaitFrames(stats.lost_trials);
+      stats.verdict = Verdict::Lost;
+      ++lost;
+    }
+  }
+  if (kept + lost != 0)
+  {
+    INFO_LOG_FMT(VIDEO,
+                 "EFB foveation: {} cached verdicts at EFB scale {}, level {}: {} passes start "
+                 "foveated, {} wait to be heavier.",
+                 kept + lost, m_cache_scale, m_cache_level, kept, lost);
+  }
+}
+
+void EFBFoveationScheduler::SaveVerdicts()
+{
+  m_cache_dirty = false;
+  m_last_save_frame = m_frame;
+  if (m_cache_path.empty() || m_cache_scale == 0)
+    return;
+
+  std::string contents =
+      "# Selective EFB foveation verdicts (Dolphin VR, Vulkan). One line per EFB pass position:\n"
+      "# <EFB scale> <foveation level> <position> kept <foveated/plain time> <plain ms>\n"
+      "# <EFB scale> <foveation level> <position> lost <retry above plain ms> <lost trials>\n";
+  for (const std::string& line : m_other_cache_lines)
+    contents += line + '\n';
+  for (u32 i = 0; i < MAX_PASSES; ++i)
+  {
+    const PassStats& stats = m_passes[i];
+    if (stats.verdict == Verdict::Kept)
+    {
+      contents += fmt::format("{} {} {} kept {:.3f} {:.3f}\n", m_cache_scale, m_cache_level, i,
+                              stats.foveated_ratio, stats.kept_plain_ms);
+    }
+    else if (stats.verdict == Verdict::Lost)
+    {
+      contents += fmt::format("{} {} {} lost {:.3f} {}\n", m_cache_scale, m_cache_level, i,
+                              stats.retry_above_ms, stats.lost_trials);
+    }
+  }
+
+  // A small file, but on Android external storage a write can take milliseconds: not on the
+  // thread that records the frame.
+  if (m_save_thread.joinable())
+    m_save_thread.join();
+  m_save_thread = std::thread([path = m_cache_path, contents = std::move(contents)] {
+    if (!File::CreateFullPath(path) || !File::WriteStringToFile(path, contents))
+      WARN_LOG_FMT(VIDEO, "EFB foveation: could not write {}", path);
+  });
 }
 
 void EFBFoveationScheduler::LogStats()
