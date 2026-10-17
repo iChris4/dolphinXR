@@ -23,6 +23,8 @@ add_library(videovulkan
   VKRecordingQueue.h
   VKRecordingWorker.cpp
   VKRecordingWorker.h
+  VKRenderDocCapture.cpp
+  VKRenderDocCapture.h
   VKShader.cpp
   VKShader.h
   VKStreamBuffer.cpp

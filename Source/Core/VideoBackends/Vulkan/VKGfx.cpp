@@ -56,6 +56,8 @@ VKGfx::VKGfx(std::unique_ptr<SwapChain> swap_chain, float backbuffer_scale)
                            "thread.");
     }
   }
+
+  m_renderdoc_capture = std::make_unique<RenderDocFrameCapture>();
 }
 
 VKGfx::~VKGfx()

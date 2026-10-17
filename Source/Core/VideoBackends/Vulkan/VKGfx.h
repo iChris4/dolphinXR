@@ -12,6 +12,7 @@
 #include "Common/CommonTypes.h"
 #include "VideoBackends/Vulkan/Constants.h"
 #include "VideoBackends/Vulkan/VKRecordingWorker.h"
+#include "VideoBackends/Vulkan/VKRenderDocCapture.h"
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/Constants.h"
 
@@ -181,6 +182,8 @@ private:
 
   // GX uniform bindings arrive per stage but are recorded as one command per draw.
   RecordCommand::SetGXUniformBuffersCmd m_pending_gx_uniforms = {};
+
+  std::unique_ptr<RenderDocFrameCapture> m_renderdoc_capture;
 
   // Declared last so it drains and joins before any state above is destroyed.
   std::unique_ptr<RecordingWorker> m_recording_worker;
