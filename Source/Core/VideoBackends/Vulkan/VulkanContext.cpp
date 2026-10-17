@@ -898,6 +898,7 @@ bool VulkanContext::CreateDevice(VkSurfaceKHR surface, bool enable_validation_la
     ERROR_LOG_FMT(VIDEO, "Vulkan: Failed to find an acceptable graphics queue.");
     return false;
   }
+  m_graphics_queue_properties = queue_family_properties[m_graphics_queue_family_index];
   if (surface && m_present_queue_family_index == queue_family_count)
   {
     ERROR_LOG_FMT(VIDEO, "Vulkan: Failed to find an acceptable present queue.");
