@@ -406,6 +406,7 @@ struct VideoConfig final
   bool vr_head_cpu_cull = true;
   bool vr_nonblocking_efb_access = true;  // EFB peeks answer from the last completed readback
   bool vr_async_efb_copies = false;       // EFB copies to RAM land when the GPU finishes them
+  bool vr_nonblocking_perf_queries = false;  // unfinished perf queries answered from last frame
   bool vr_efb_copy_diagnostics = false;   // EFBCopyRAM: log lines
   OpenXRMirrorView vr_mirror_view = OpenXRMirrorView::BothEyes;
   OpenXRReferenceSpaceMode vr_reference_space_mode = OpenXRReferenceSpaceMode::Local;

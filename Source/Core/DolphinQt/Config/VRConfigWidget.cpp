@@ -285,6 +285,8 @@ void VRConfigWidget::CreateWidgets()
       make_bool(tr("Non-Blocking EFB Reads"), Config::GFX_VR_NONBLOCKING_EFB_ACCESS));
   hacks_group_layout->addWidget(
       make_bool(tr("Non-Blocking EFB Copies"), Config::GFX_VR_ASYNC_EFB_COPIES));
+  hacks_group_layout->addWidget(
+      make_bool(tr("Non-Blocking Perf Queries"), Config::GFX_VR_NONBLOCKING_PERF_QUERIES));
   hacks_group_layout->addWidget(make_bool(tr("Remove Cinematic Bars"), Config::GFX_VR_REMOVE_BARS));
   hacks_group_layout->addWidget(
       make_bool(tr("Frame Size from XFB Copy"), Config::GFX_VR_FRAME_SIZE_FROM_XFB));

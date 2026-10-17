@@ -7,7 +7,9 @@
 #include <cstring>
 
 #include "Common/Assert.h"
+#include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#include "Common/Timer.h"
 
 #include "VideoBackends/Vulkan/CommandBufferManager.h"
 #include "VideoBackends/Vulkan/VKGfx.h"
@@ -17,6 +19,7 @@
 #include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/VideoEvents.h"
 
 namespace Vulkan
 {
@@ -39,6 +42,8 @@ bool PerfQuery::Initialize()
   // Vulkan requires query pools to be reset after creation
   ResetQuery();
 
+  m_frame_end_event =
+      GetVideoEvents().after_frame_event.Register([this](Core::System&) { OnFrameEnd(); });
   return true;
 }
 
@@ -53,6 +58,7 @@ u32 PerfQuery::GetEFBViewCount()
 // DisableQuery run back to back around one draw, and nothing in between submits.
 void PerfQuery::EnableQuery(PerfQueryGroup group)
 {
+  UpdateResultMode();
   {
     VideoCommon::GPUWaitStats::ScopedReason wait_reason(
         VideoCommon::GPUWaitStats::Reason::PerfQuery);
@@ -69,7 +75,7 @@ void PerfQuery::EnableQuery(PerfQueryGroup group)
     if (views != m_query_views)
     {
       // The slot layout follows the view count, so retire every query of the old layout first.
-      if (!IsFlushed())
+      if (m_query_count.load(std::memory_order_relaxed) != 0)
         PartialFlush(true);
       m_query_views = views;
     }
@@ -78,6 +84,9 @@ void PerfQuery::EnableQuery(PerfQueryGroup group)
     DEBUG_ASSERT(!entry.has_value);
     entry.has_value = true;
     entry.query_group = group;
+    entry.period = m_period;
+    entry.period_seq = ++m_period_queries;
+    m_answer_valid.store(false, std::memory_order_relaxed);
 
     // Use precise queries if supported, otherwise boolean (which will be incorrect).
     VkQueryControlFlags flags =
@@ -102,6 +111,31 @@ void PerfQuery::DisableQuery(PerfQueryGroup group)
 
 void PerfQuery::ResetQuery()
 {
+  UpdateResultMode();
+  if (!m_nonblocking.load(std::memory_order_relaxed))
+  {
+    ResetAllQueries();
+    return;
+  }
+
+  // The queries of the previous period keep counting for it on the GPU; a new period starts.
+  m_period++;
+  m_period_index++;
+  m_period_queries = 0;
+  for (auto& result : m_results)
+    result.store(0, std::memory_order_relaxed);
+  m_answer_valid.store(false, std::memory_order_relaxed);
+}
+
+void PerfQuery::ResetAllQueries()
+{
+  m_period++;
+  m_period_queries = 0;
+  m_readback_period = ~u64{0};
+  m_readback_seq = 0;
+  m_readback_sums = {};
+  m_answer_valid.store(false, std::memory_order_relaxed);
+
   m_query_count.store(0, std::memory_order_relaxed);
   m_query_readback_pos = 0;
   m_query_next_pos = 0;
@@ -141,15 +175,129 @@ u32 PerfQuery::GetQueryResult(PerfQueryType type)
 
 void PerfQuery::FlushResults()
 {
-  if (!IsFlushed())
+  if (m_query_count.load(std::memory_order_relaxed) != 0)
     PartialFlush(true);
 
-  ASSERT(IsFlushed());
+  ASSERT(m_query_count.load(std::memory_order_relaxed) == 0);
 }
 
 bool PerfQuery::IsFlushed() const
 {
+  if (m_nonblocking.load(std::memory_order_relaxed))
+    return m_answer_valid.load(std::memory_order_acquire);
   return m_query_count.load(std::memory_order_relaxed) == 0;
+}
+
+bool PerfQuery::UseNonBlockingResults() const
+{
+  return m_nonblocking.load(std::memory_order_relaxed);
+}
+
+void PerfQuery::UpdateResultMode()
+{
+  const bool nonblocking =
+      g_ActiveConfig.VRSessionActive() && g_ActiveConfig.vr_nonblocking_perf_queries;
+  if (nonblocking == m_nonblocking.load(std::memory_order_relaxed))
+    return;
+
+  // Retire every query under the old rules, then start over.
+  if (m_query_count.load(std::memory_order_relaxed) != 0)
+    PartialFlush(true);
+  m_markers.clear();
+  m_recorded.clear();
+  m_nonblocking.store(nonblocking, std::memory_order_relaxed);
+  ResetAllQueries();
+}
+
+void PerfQuery::SetAnswer(const GroupSums& sums)
+{
+  for (size_t i = 0; i < m_results.size(); i++)
+    m_results[i].store(static_cast<u32>(sums[i]), std::memory_order_relaxed);
+  m_answer_valid.store(true, std::memory_order_release);
+}
+
+// Games read the pixel counters right after drawing what they measure, so a read waits for the
+// GPU to finish every earlier command. Super Mario Sunshine does it for 7 one-draw visibility
+// tests per frame when goop is on screen: about 10 ms of waits per frame on Quest. A test is
+// identified by its period's index in the frame (resets since the frame started) and its query
+// count. If its queries are done, the answer is exact; if not, the same test of the previous
+// frame answers it, and a marker records this frame's result once the GPU has it. Only the first
+// occurrence of a test waits.
+void PerfQuery::PrepareNonBlockingResult()
+{
+  // The setting was turned off since the read was queued: answer the blocking way.
+  if (!m_nonblocking.load(std::memory_order_relaxed))
+  {
+    VideoCommon::GPUWaitStats::ScopedReason wait_reason(
+        VideoCommon::GPUWaitStats::Reason::PerfQuery);
+    FlushResults();
+    return;
+  }
+
+  // Collect what the GPU has finished, without waiting.
+  ReadbackQueries();
+
+  const u32 queries = m_period_queries;
+  if (queries == 0)
+  {
+    m_nonblocking_stats.exact++;
+    SetAnswer({});
+    return;
+  }
+  if (m_readback_period == m_period && m_readback_seq >= queries)
+  {
+    m_nonblocking_stats.exact++;
+    m_recorded[m_period_index] = {queries, m_readback_sums};
+    SetAnswer(m_readback_sums);
+    return;
+  }
+
+  const auto recorded = m_recorded.find(m_period_index);
+  if (recorded != m_recorded.end() && recorded->second.queries == queries)
+  {
+    m_nonblocking_stats.previous++;
+    m_markers.push_back({m_period, queries, m_period_index});
+    SetAnswer(recorded->second.sums);
+    return;
+  }
+
+  // A test not seen before: wait for it like the blocking path.
+  {
+    VideoCommon::GPUWaitStats::ScopedReason wait_reason(
+        VideoCommon::GPUWaitStats::Reason::PerfQuery);
+    PartialFlush(true);
+  }
+  m_nonblocking_stats.waited++;
+  const GroupSums sums = m_readback_period == m_period ? m_readback_sums : GroupSums{};
+  m_recorded[m_period_index] = {queries, sums};
+  SetAnswer(sums);
+}
+
+void PerfQuery::OnFrameEnd()
+{
+  m_period_index = 0;
+  if (!m_nonblocking.load(std::memory_order_relaxed))
+    return;
+
+  // Keep the ring drained, so the markers of this frame's tests are recorded before they are read.
+  ReadbackQueries();
+
+  auto& stats = m_nonblocking_stats;
+  const u64 now_us = Common::Timer::NowUs();
+  if (stats.start_us == 0)
+    stats.start_us = now_us;
+  stats.frames++;
+  if (now_us - stats.start_us < 5'000'000)
+    return;
+  const double frames = static_cast<double>(stats.frames);
+  INFO_LOG_FMT(VIDEO,
+               "NonBlockingPerfQuery: {:.1f} f/s | reads/f exact={:.1f} previous frame={:.1f} "
+               "waited={:.1f} | tests recorded={} markers={} queries in flight={}",
+               frames * 1'000'000.0 / (now_us - stats.start_us), stats.exact / frames,
+               stats.previous / frames, stats.waited / frames, m_recorded.size(), m_markers.size(),
+               m_query_count.load(std::memory_order_relaxed));
+  stats = {};
+  stats.start_us = now_us;
 }
 
 bool PerfQuery::CreateQueryPool()
@@ -246,8 +394,34 @@ void PerfQuery::ReadbackQueries(u32 query_count)
                             EFB_HEIGHT / g_framebuffer_manager->GetEFBHeight() / layers;
     if (g_ActiveConfig.iMultisamples > 1)
       native_res_result /= g_ActiveConfig.iMultisamples;
-    m_results[entry.query_group].fetch_add(static_cast<u32>(native_res_result),
-                                           std::memory_order_relaxed);
+
+    if (!m_nonblocking.load(std::memory_order_relaxed))
+    {
+      m_results[entry.query_group].fetch_add(static_cast<u32>(native_res_result),
+                                             std::memory_order_relaxed);
+      continue;
+    }
+
+    // Non-blocking results: sum per period, and record the sums the markers wait for.
+    if (entry.period != m_readback_period)
+    {
+      m_readback_period = entry.period;
+      m_readback_sums = {};
+    }
+    m_readback_sums[entry.query_group] += native_res_result;
+    m_readback_seq = entry.period_seq;
+    while (!m_markers.empty())
+    {
+      const Marker& marker = m_markers.front();
+      if (marker.period > m_readback_period ||
+          (marker.period == m_readback_period && marker.queries > m_readback_seq))
+      {
+        break;
+      }
+      if (marker.period == m_readback_period && marker.queries == m_readback_seq)
+        m_recorded[marker.key] = {marker.queries, m_readback_sums};
+      m_markers.pop_front();
+    }
   }
 
   m_query_readback_pos = (m_query_readback_pos + query_count) % PERF_QUERY_BUFFER_SIZE;

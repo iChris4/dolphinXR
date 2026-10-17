@@ -64,6 +64,14 @@ public:
   // NOTE: Called from CPU thread
   virtual bool IsFlushed() const { return true; }
 
+  // Non-blocking results ([VR] NonBlockingPerfQueries, on backends that support it): a read of
+  // queries the GPU has not finished is answered with the same measurement of an earlier frame
+  // instead of waiting. NOTE: Called from CPU thread
+  virtual bool UseNonBlockingResults() const { return false; }
+  // Runs on the video thread for such a read; afterwards IsFlushed() is true and GetQueryResult()
+  // returns the answer.
+  virtual void PrepareNonBlockingResult() {}
+
 protected:
   std::atomic<u32> m_query_count;
   std::array<std::atomic<u32>, PQG_NUM_MEMBERS> m_results;

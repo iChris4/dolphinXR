@@ -37,6 +37,7 @@ object QuestGameVrConfigSettings {
         "HeadCPUCull",
         "NonBlockingEFBAccess",
         "AsyncEFBCopies",
+        "NonBlockingPerfQueries",
         "RemoveCinematicBars",
         "FrameSizeFromXFB",
         "SmallViewportsOnScreen",

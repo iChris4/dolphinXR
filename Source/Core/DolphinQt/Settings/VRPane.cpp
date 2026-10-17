@@ -441,6 +441,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
       new ConfigBool(tr("Non-Blocking EFB Reads"), Config::GFX_VR_NONBLOCKING_EFB_ACCESS);
   m_async_efb_copies =
       new ConfigBool(tr("Non-Blocking EFB Copies"), Config::GFX_VR_ASYNC_EFB_COPIES);
+  m_nonblocking_perf_queries =
+      new ConfigBool(tr("Non-Blocking Perf Queries"), Config::GFX_VR_NONBLOCKING_PERF_QUERIES);
   m_remove_bars = new ConfigBool(tr("Remove Cinematic Bars"), Config::GFX_VR_REMOVE_BARS);
   m_frame_size_from_xfb =
       new ConfigBool(tr("Frame Size from XFB Copy"), Config::GFX_VR_FRAME_SIZE_FROM_XFB);
@@ -481,6 +483,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hacks_group_layout->addWidget(m_head_cpu_cull);
   hacks_group_layout->addWidget(m_nonblocking_efb_access);
   hacks_group_layout->addWidget(m_async_efb_copies);
+  hacks_group_layout->addWidget(m_nonblocking_perf_queries);
   hacks_group_layout->addWidget(m_remove_bars);
   hacks_group_layout->addWidget(m_frame_size_from_xfb);
   hacks_group_layout->addWidget(m_panes_on_screen);
@@ -735,6 +738,14 @@ void VRPane::AddDescriptions()
       "speed in VR; these games turn it on in their VR game settings. Uncheck it if an effect "
       "that reads such copies (visors, goop, screen captures) misbehaves in a game."
       "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
+  static constexpr char TR_NONBLOCKING_PERF_QUERIES_DESCRIPTION[] = QT_TR_NOOP(
+      "When a game reads its pixel counters (perf queries) right after drawing what it measures, "
+      "answers a measurement the GPU has not finished with the same measurement of the previous "
+      "frame instead of waiting for the GPU. Vulkan only."
+      "<br><br>Removes the stalls that keep Super Mario Sunshine's goop levels below full speed "
+      "in VR; the game turns it on in its VR game settings. Uncheck it if a visibility effect "
+      "(glare, lens flares) flickers or lags in a game."
+      "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static constexpr char TR_MIRROR_VIEW_DESCRIPTION[] = QT_TR_NOOP(
       "Selects what the desktop render window shows while OpenXR is active."
       "<br><br>Both Eyes shows the current side-by-side mirror. Left Eye and Right Eye fill the "
@@ -863,6 +874,7 @@ void VRPane::AddDescriptions()
   m_head_cpu_cull->SetDescription(tr(TR_HEAD_CPU_CULL_DESCRIPTION));
   m_nonblocking_efb_access->SetDescription(tr(TR_NONBLOCKING_EFB_ACCESS_DESCRIPTION));
   m_async_efb_copies->SetDescription(tr(TR_ASYNC_EFB_COPIES_DESCRIPTION));
+  m_nonblocking_perf_queries->SetDescription(tr(TR_NONBLOCKING_PERF_QUERIES_DESCRIPTION));
   m_mirror_view->SetDescription(tr(TR_MIRROR_VIEW_DESCRIPTION));
   m_forced_vbi_frequency->SetDescription(tr(TR_FORCED_VBI_FREQUENCY_DESCRIPTION));
   m_clear_efb_slider->SetDescription(tr(TR_CLEAR_EFB_COPIES_DESCRIPTION));
@@ -963,6 +975,8 @@ void VRPane::ResetGeneralSettings()
                            Config::GFX_VR_NONBLOCKING_EFB_ACCESS.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_ASYNC_EFB_COPIES,
                            Config::GFX_VR_ASYNC_EFB_COPIES.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_NONBLOCKING_PERF_QUERIES,
+                           Config::GFX_VR_NONBLOCKING_PERF_QUERIES.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_REMOVE_BARS,
                            Config::GFX_VR_REMOVE_BARS.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_FRAME_SIZE_FROM_XFB,

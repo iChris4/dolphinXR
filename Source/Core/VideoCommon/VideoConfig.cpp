@@ -231,6 +231,7 @@ void VideoConfig::Refresh()
   vr_head_cpu_cull = Config::Get(Config::GFX_VR_HEAD_CPU_CULL);
   vr_nonblocking_efb_access = Config::Get(Config::GFX_VR_NONBLOCKING_EFB_ACCESS);
   vr_async_efb_copies = Config::Get(Config::GFX_VR_ASYNC_EFB_COPIES);
+  vr_nonblocking_perf_queries = Config::Get(Config::GFX_VR_NONBLOCKING_PERF_QUERIES);
   vr_efb_copy_diagnostics = Config::Get(Config::GFX_VR_EFB_COPY_DIAGNOSTICS);
   vr_mirror_view = Config::Get(Config::GFX_VR_MIRROR_VIEW);
   vr_reference_space_mode = Config::Get(Config::GFX_VR_REFERENCE_SPACE_MODE);

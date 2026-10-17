@@ -231,6 +231,9 @@ extern const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS;
 // write each one to guest RAM when its copy completes instead (see
 // TextureCacheBase::FlushEFBCopiesAtSyncPoint). The game may see a copy a little late.
 extern const Info<bool> GFX_VR_ASYNC_EFB_COPIES;
+// Perf query reads of queries the GPU has not finished get the same measurement of the previous
+// frame instead of waiting (Vulkan; see Vulkan::PerfQuery::PrepareNonBlockingResult).
+extern const Info<bool> GFX_VR_NONBLOCKING_PERF_QUERIES;
 // Logs EFBCopyRAM: lines (copies in flight at sync points, late writes, guest writes into a
 // delivered or pending copy's memory) to judge whether a game tolerates AsyncEFBCopies.
 extern const Info<bool> GFX_VR_EFB_COPY_DIAGNOSTICS;

@@ -141,7 +141,13 @@ u32 VideoBackendBase::Video_GetQueryResult(PerfQueryType type)
   auto& system = Core::System::GetInstance();
   system.GetFifo().SyncGPU(Fifo::SyncGPUReason::PerfQuery);
 
-  if (!g_perf_query->IsFlushed())
+  const bool needed_flush = !g_perf_query->IsFlushed();
+  if (needed_flush && g_perf_query->UseNonBlockingResults())
+  {
+    AsyncRequests::GetInstance()->PushBlockingEvent(
+        [] { g_perf_query->PrepareNonBlockingResult(); });
+  }
+  else if (needed_flush)
   {
     AsyncRequests::GetInstance()->PushBlockingEvent([] {
       // Runs on the video thread, where the backend records its wait for the query results.

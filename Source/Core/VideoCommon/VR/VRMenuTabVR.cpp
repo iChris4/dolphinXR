@@ -118,6 +118,13 @@ private:
         "copies (visors, goop, screen captures) misbehaves.",
         Config::GFX_VR_ASYNC_EFB_COPIES, touched);
     MenuWidgets::Checkbox(
+        "Non-Blocking Perf Queries",
+        "When a game reads its pixel counters right after drawing (Super Mario Sunshine's goop "
+        "levels), answers a measurement the GPU has not finished with the same measurement of the "
+        "previous frame instead of waiting. Uncheck it if a visibility effect (glare, flares) "
+        "flickers or lags.",
+        Config::GFX_VR_NONBLOCKING_PERF_QUERIES, touched);
+    MenuWidgets::Checkbox(
         "Remove Cinematic Bars",
         "Expands the scissor and viewport to fill the full rendering area for perspective draws, "
         "removing cinematic letterbox bars (e.g. Metroid Prime). Disable it if it causes visual "
