@@ -70,9 +70,15 @@ private:
     u32 foveated_samples = 0;
     // Plain time when the running trial began; 0 when no trial runs.
     float trial_plain_ms = 0.0f;
-    // Foveated over plain time, and the plain time, from the trial that kept the map.
+    // Foveated over plain time, and both times, from the trial (or re-check) that kept the map.
     float foveated_ratio = 1.0f;
     float kept_plain_ms = 0.0f;
+    float kept_foveated_ms = 0.0f;
+    // A kept pass is measured plain again from time to time (see UpdateDecision):
+    // next_recheck_frame is when, and rechecks how many re-checks it passed.
+    u32 next_recheck_frame = 0;
+    u32 rechecks = 0;
+    bool recheck = false;
     // After a trial without gain, the plain time must exceed this, and the frame counter reach
     // next_trial_frame, before the next trial.
     float retry_above_ms = 0.0f;
@@ -128,6 +134,7 @@ private:
   u32 m_passes_last_frame = 0;
   u32 m_skipped_kicks = 0;
   u32 m_trials = 0;
+  u32 m_rechecks = 0;
 
   // Verdict cache. Empty path: no game ID, or the cache is not used.
   std::string m_cache_path;

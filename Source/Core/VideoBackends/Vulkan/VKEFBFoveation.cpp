@@ -36,6 +36,19 @@ constexpr u32 RETRY_WAIT_FRAMES = 600;
 constexpr u32 MAX_RETRY_WAIT_SHIFT = 5;
 // A pass keeps the map until its estimated plain time falls below this share of TRIAL_MIN_MS.
 constexpr float LEAVE_SHARE = 0.7f;
+// A kept pass's plain time is not measured while it has the map, and estimating it from the
+// foveated time fails once the pass gets light: the foveated time then stays at the cost of the
+// binned load and store (about 1 ms at 3x), while the plain time falls to nearly nothing. So a
+// kept pass is measured plain again (a re-check, MIN_SAMPLES frames) when its foveated time fell
+// to RECHECK_LIGHTER of the time it was kept with, and, while its foveated time is below
+// RECHECK_MAX_FOVEATED_MS (the binned overhead may be most of it, and a re-check costs little),
+// periodically: after RECHECK_FRAMES, doubling with every re-check it passes. A re-check drops
+// the map only if the pass is faster plain: a foveated pass also makes later passes cheaper (its
+// coarse periphery compresses better), which its own time does not show.
+constexpr float RECHECK_LIGHTER = 0.5f;
+constexpr float RECHECK_MAX_FOVEATED_MS = 2.0f;
+constexpr u32 RECHECK_FRAMES = 600;
+constexpr u32 MAX_RECHECK_SHIFT = 5;
 constexpr float AVERAGE_WEIGHT = 0.2f;
 // A settled pass is timed one frame in this many: each timed pass waits for the GPU work before
 // it, which costs overlap. A pass on trial is timed every frame.
@@ -120,10 +133,11 @@ bool EFBFoveationScheduler::BeginPass(VkCommandBuffer cmd)
   // pass all run, and are timed, the same way.
   const bool foveated =
       continued ? m_last_foveated : position < MAX_PASSES && m_passes[position].foveated;
-  const bool timed =
-      continued ? m_last_timed :
-                  position < MAX_PASSES &&
-                      (m_frame % TIMING_INTERVAL == 0 || m_passes[position].trial_plain_ms > 0.0f);
+  const bool timed = continued ?
+                         m_last_timed :
+                         position < MAX_PASSES && (m_frame % TIMING_INTERVAL == 0 ||
+                                                   m_passes[position].trial_plain_ms > 0.0f ||
+                                                   m_passes[position].recheck);
   m_last_foveated = foveated;
   m_last_timed = timed;
 
@@ -212,6 +226,31 @@ void EFBFoveationScheduler::AddSample(u32 position, bool foveated, float ms)
 
 void EFBFoveationScheduler::UpdateDecision(PassStats& stats)
 {
+  if (stats.recheck)
+  {
+    if (stats.foveated || stats.plain_samples < MIN_SAMPLES)
+      return;
+    stats.recheck = false;
+    if (stats.foveated_ms <= stats.plain_ms)
+    {
+      // Still faster with the map.
+      stats.foveated = true;
+      stats.foveated_ratio = stats.foveated_ms / stats.plain_ms;
+      stats.kept_plain_ms = stats.plain_ms;
+      stats.kept_foveated_ms = stats.foveated_ms;
+      stats.next_recheck_frame =
+          m_frame + (RECHECK_FRAMES << std::min(++stats.rechecks, MAX_RECHECK_SHIFT));
+    }
+    else
+    {
+      // Faster plain now. The pass may only be light for a while (a pause menu): it is tried
+      // again as soon as it is heavier, without the wait of a lost trial, and the verdict stays.
+      stats.retry_above_ms = stats.plain_ms * RETRY_GROWTH;
+      stats.next_trial_frame = m_frame;
+    }
+    return;
+  }
+
   if (!stats.foveated)
   {
     if (stats.plain_samples < MIN_SAMPLES || stats.plain_ms < TRIAL_MIN_MS ||
@@ -236,6 +275,9 @@ void EFBFoveationScheduler::UpdateDecision(PassStats& stats)
     {
       stats.foveated_ratio = stats.foveated_ms / stats.trial_plain_ms;
       stats.kept_plain_ms = stats.trial_plain_ms;
+      stats.kept_foveated_ms = stats.foveated_ms;
+      stats.next_recheck_frame = m_frame + RECHECK_FRAMES;
+      stats.rechecks = 0;
       stats.lost_trials = 0;
       stats.verdict = Verdict::Kept;
     }
@@ -277,6 +319,24 @@ void EFBFoveationScheduler::UpdateDecision(PassStats& stats)
     stats.plain_samples = 0;
     stats.verdict = Verdict::Lost;
     m_cache_dirty = true;
+    return;
+  }
+  // A kept pass from the cache: its foveated time in this session is the reference.
+  if (stats.kept_foveated_ms == 0.0f)
+  {
+    stats.kept_foveated_ms = stats.foveated_ms;
+    stats.next_recheck_frame = m_frame + RECHECK_FRAMES;
+    return;
+  }
+  const bool lighter = stats.foveated_ms < stats.kept_foveated_ms * RECHECK_LIGHTER;
+  const bool cheap_recheck_due = stats.foveated_ms < RECHECK_MAX_FOVEATED_MS &&
+                                 static_cast<s32>(m_frame - stats.next_recheck_frame) >= 0;
+  if (lighter || cheap_recheck_due)
+  {
+    stats.foveated = false;
+    stats.recheck = true;
+    stats.plain_samples = 0;
+    ++m_rechecks;
   }
 }
 
@@ -432,10 +492,12 @@ void EFBFoveationScheduler::LogStats()
     passes += stats.foveated_samples ? fmt::format("{:.2f}", stats.foveated_ms) : "-";
   }
   INFO_LOG_FMT(VIDEO,
-               "EFBFoveation: {} EFB passes/f, {} foveated, {} trials and {} kicks skipped in "
-               "{}f | pass plain/foveated ms:{}",
-               m_passes_last_frame, foveated, m_trials, m_skipped_kicks, LOG_FRAMES, passes);
+               "EFBFoveation: {} EFB passes/f, {} foveated, {} trials, {} re-checks and {} kicks "
+               "skipped in {}f | pass plain/foveated ms:{}",
+               m_passes_last_frame, foveated, m_trials, m_rechecks, m_skipped_kicks, LOG_FRAMES,
+               passes);
   m_skipped_kicks = 0;
   m_trials = 0;
+  m_rechecks = 0;
 }
 }  // namespace Vulkan
