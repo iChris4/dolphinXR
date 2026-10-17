@@ -21,6 +21,12 @@ namespace Vulkan
 // frame, is timed on the GPU, and a pass keeps the map only while a trial showed it faster with
 // it. Runs where the render passes are recorded (the recording worker, or the video thread).
 //
+// A trial (and a re-check of a kept pass without the map) is judged by the GPU time of the frame
+// from that pass on: the pass and every later EFB pass. A foveated pass also makes later passes
+// cheaper, its coarse periphery being cheaper to load and blend, which its own time does not
+// show. One trial or re-check runs at a time, so that only that pass changes between the frames
+// compared.
+//
 // The trial verdicts are kept per game (User/Cache/EFBFoveation/<game id>.txt), by EFB scale,
 // foveation level and pass position, so that a cold boot does not pay the lost trials again: a
 // pass that kept the map starts with it, and a pass that lost waits, as it did, to be heavier
@@ -50,6 +56,9 @@ public:
 
 private:
   static constexpr u32 MAX_PASSES = 48;
+  static constexpr u32 NO_TRIAL = ~0u;
+  // Recent frames whose pass times are gathered, for the frame-level comparisons.
+  static constexpr u32 FRAME_RING = 16;
   // Timed passes whose results have not been read yet; two timestamps each.
   static constexpr u32 MAX_TIMED_PASSES = 256;
   static constexpr u32 NO_SLOT = ~0u;
@@ -68,7 +77,7 @@ private:
     float foveated_ms = 0.0f;
     u32 plain_samples = 0;
     u32 foveated_samples = 0;
-    // Plain time when the running trial began; 0 when no trial runs.
+    // Plain time when its running trial began; 0 when it is not on trial.
     float trial_plain_ms = 0.0f;
     // Foveated over plain time, and both times, from the trial (or re-check) that kept the map.
     float foveated_ratio = 1.0f;
@@ -78,7 +87,6 @@ private:
     // next_recheck_frame is when, and rechecks how many re-checks it passed.
     u32 next_recheck_frame = 0;
     u32 rechecks = 0;
-    bool recheck = false;
     // After a trial without gain, the plain time must exceed this, and the frame counter reach
     // next_trial_frame, before the next trial.
     float retry_above_ms = 0.0f;
@@ -96,10 +104,32 @@ private:
     bool foveated;
   };
 
+  // The timed passes of one frame: GPU time by position, and which ran with the map.
+  struct FrameTimes
+  {
+    u32 frame = ~0u;
+    u64 timed_mask = 0;
+    u64 foveated_mask = 0;
+    std::array<float, MAX_PASSES> ms{};
+  };
+  static_assert(MAX_PASSES <= 64);
+  struct FramePassCount
+  {
+    u32 frame = ~0u;
+    u32 passes = 0;
+  };
+
   void ReadResults();
   void AddSample(u32 position, bool foveated, float ms);
   void FlushPendingSample();
-  void UpdateDecision(PassStats& stats);
+  void UpdateDecision(u32 position);
+  void RecordFrameSample(const TimedPass& pass, float ms);
+  void CompleteFramesBefore(u32 frame);
+  void CompleteFrame(const FrameTimes& times);
+  void StartTrial(u32 position, bool recheck);
+  void FinishTrial();
+  void AbortTrial();
+  void OnModesChanged();
   void LogStats();
   void SetCacheKey(u32 efb_scale, s32 foveation_level);
   void LoadVerdicts();
@@ -135,6 +165,28 @@ private:
   u32 m_skipped_kicks = 0;
   u32 m_trials = 0;
   u32 m_rechecks = 0;
+
+  // Frame-level times. A position's tail is its pass and every later EFB pass of the frame.
+  std::array<FrameTimes, FRAME_RING> m_frame_times{};
+  std::array<FramePassCount, FRAME_RING> m_frame_pass_counts{};
+  u32 m_next_complete_frame = 0;
+  u32 m_results_frame = ~0u;
+  // Tail GPU time per position, averaged over the frames since the passes last changed mode.
+  // Only frames with m_tail_passes passes are compared (see CompleteFrame).
+  std::array<float, MAX_PASSES> m_tail_ms{};
+  std::array<u32, MAX_PASSES> m_tail_samples{};
+  u32 m_settled_from = 0;
+  u32 m_tail_passes = 0;
+  u32 m_tail_other_frames = 0;
+  // The running trial or re-check: its position, the tail before it, and the tail during it.
+  u32 m_trial_position = NO_TRIAL;
+  bool m_trial_recheck = false;
+  u32 m_trial_start_frame = 0;
+  u32 m_trial_passes = 0;
+  u32 m_trial_other_frames = 0;
+  float m_trial_base_tail_ms = 0.0f;
+  float m_trial_tail_sum_ms = 0.0f;
+  u32 m_trial_tail_samples = 0;
 
   // Verdict cache. Empty path: no game ID, or the cache is not used.
   std::string m_cache_path;
