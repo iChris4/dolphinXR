@@ -1,9 +1,14 @@
 # -TradeCpuForGpu: com.oculus.trade_cpu_for_gpu_amount for this APK (Quest 3/3S): 1 = one GPU
 # performance level more and one CPU level less, -1 the reverse, 0 neither. Default: the
 # Gradle default (-1).
+#
+# -HandsOptional: test APK that declares optional hand tracking, so adb can launch it while the
+# controllers are asleep (no "controller required" dialog). Not for playing: see
+# app/src/questHandsOptional/AndroidManifest.xml.
 param(
     [ValidateSet(-1, 0, 1)]
-    [Nullable[int]]$TradeCpuForGpu = $null
+    [Nullable[int]]$TradeCpuForGpu = $null,
+    [switch]$HandsOptional
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +51,9 @@ try {
     $gradleArgs = @("app:assembleQuestDebug")
     if ($null -ne $TradeCpuForGpu) {
         $gradleArgs += "-PquestTradeCpuForGpu=$TradeCpuForGpu"
+    }
+    if ($HandsOptional) {
+        $gradleArgs += "-PquestHandsOptional=1"
     }
     & ".\gradlew.bat" @gradleArgs
 }

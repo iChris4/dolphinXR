@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Test builds only (build-quest.ps1 -HandsOptional). Optional hand tracking makes Horizon OS
+         treat the app as "hands or controllers", so it stops blocking adb launches with the
+         "controller required" dialog while the controllers are asleep. Normal builds leave it out:
+         with hands allowed, a pinch drives the khr/simple_controller select action. -->
+    <uses-feature
+        android:name="oculus.software.handtracking"
+        android:required="false" />
+
+</manifest>

@@ -172,6 +172,17 @@ android {
     }
 }
 
+androidComponents {
+    // -PquestHandsOptional=1 (build-quest.ps1 -HandsOptional) builds a test APK that adb can launch
+    // while the controllers are asleep; see src/questHandsOptional/AndroidManifest.xml.
+    onVariants(selector().withFlavor("device" to "quest")) { variant ->
+        if (project.findProperty("questHandsOptional") == "1") {
+            variant.sources.manifests.addStaticManifestFile(
+                "src/questHandsOptional/AndroidManifest.xml")
+        }
+    }
+}
+
 dependencies {
     baselineProfile(project(":benchmark"))
     coreLibraryDesugaring(libs.desugar.jdk.libs)
