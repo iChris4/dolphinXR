@@ -155,14 +155,37 @@ public:
                 bool has_fragment_density_map = false, bool multiview = false);
   ~VKFramebuffer() override;
 
-  VkFramebuffer GetFB() const { return m_fb; }
+  // density_map false selects the plain twin of a foveated EFB framebuffer (see
+  // HasPlainVariant); every other framebuffer has only the one variant.
+  VkFramebuffer GetFB(bool density_map = true) const
+  {
+    return density_map || m_plain_fb == VK_NULL_HANDLE ? m_fb : m_plain_fb;
+  }
   // See VKTexture::ReleaseView(). The caller becomes responsible for destroying the handle.
   VkFramebuffer ReleaseHandle();
   VkRect2D GetRect() const { return VkRect2D{{0, 0}, {m_width, m_height}}; }
 
-  VkRenderPass GetLoadRenderPass() const { return m_load_render_pass; }
-  VkRenderPass GetDiscardRenderPass() const { return m_discard_render_pass; }
-  VkRenderPass GetClearRenderPass() const { return m_clear_render_pass; }
+  VkRenderPass GetLoadRenderPass(bool density_map = true) const
+  {
+    return density_map || m_plain_fb == VK_NULL_HANDLE ? m_load_render_pass :
+                                                         m_plain_load_render_pass;
+  }
+  VkRenderPass GetDiscardRenderPass(bool density_map = true) const
+  {
+    return density_map || m_plain_fb == VK_NULL_HANDLE ? m_discard_render_pass :
+                                                         m_plain_discard_render_pass;
+  }
+  VkRenderPass GetClearRenderPass(bool density_map = true) const
+  {
+    return density_map || m_plain_fb == VK_NULL_HANDLE ? m_clear_render_pass :
+                                                         m_plain_clear_render_pass;
+  }
+
+  // Foveated EFB framebuffers also have a plain twin on the same images, so that each EFB
+  // render pass can run with or without the density map (EFBFoveationScheduler).
+  bool HasPlainVariant() const { return m_plain_fb != VK_NULL_HANDLE; }
+  void SetPlainVariant(VkFramebuffer fb, VkRenderPass load_render_pass,
+                       VkRenderPass discard_render_pass, VkRenderPass clear_render_pass);
 
   // True when the render passes use VK_KHR_multiview (VR stereo EFB). The VkFramebuffer
   // was then created with layers = 1 — per-view replication comes from the view mask, and
@@ -196,6 +219,10 @@ protected:
   VkRenderPass m_load_render_pass;
   VkRenderPass m_discard_render_pass;
   VkRenderPass m_clear_render_pass;
+  VkFramebuffer m_plain_fb = VK_NULL_HANDLE;
+  VkRenderPass m_plain_load_render_pass = VK_NULL_HANDLE;
+  VkRenderPass m_plain_discard_render_pass = VK_NULL_HANDLE;
+  VkRenderPass m_plain_clear_render_pass = VK_NULL_HANDLE;
   bool m_multiview = false;
 };
 

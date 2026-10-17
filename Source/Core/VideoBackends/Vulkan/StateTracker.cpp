@@ -7,6 +7,7 @@
 
 #include "VideoBackends/Vulkan/CommandBufferManager.h"
 #include "VideoBackends/Vulkan/ObjectCache.h"
+#include "VideoBackends/Vulkan/VKEFBFoveation.h"
 #include "VideoBackends/Vulkan/VKGfx.h"
 #include "VideoBackends/Vulkan/VKPipeline.h"
 #include "VideoBackends/Vulkan/VKShader.h"
@@ -398,26 +399,48 @@ static void CountRenderPass(const VKFramebuffer* framebuffer, std::atomic<u32>& 
   (efb ? efb_counter : perf.other_passes).fetch_add(1, std::memory_order_relaxed);
 }
 
+bool StateTracker::BeginPassDensityMap(VkCommandBuffer command_buffer)
+{
+  bool density_map = m_framebuffer->HasFragmentDensityMap();
+  m_pass_timed = false;
+  if (!m_framebuffer->HasPlainVariant() && m_efb_foveation)
+    m_efb_foveation->BreakContinuation();
+  if (m_framebuffer->HasPlainVariant())
+  {
+    if (!m_efb_foveation)
+      m_efb_foveation = std::make_unique<EFBFoveationScheduler>();
+    density_map = m_efb_foveation->BeginPass(command_buffer);
+    m_pass_timed = true;
+  }
+  m_pass_density_map = density_map;
+  // The bound pipeline must be the twin built for this kind of render pass.
+  if (m_pipeline_density_map != density_map)
+    m_dirty_flags |= DIRTY_FLAG_PIPELINE;
+  return density_map;
+}
+
 void StateTracker::BeginRenderPass()
 {
   if (InRenderPass())
     return;
 
+  const VkCommandBuffer command_buffer = g_command_buffer_mgr->GetCurrentCommandBuffer();
   CountRenderPass(m_framebuffer, g_vulkan_context->GetPerfCounters().efb_load_passes);
-  m_current_render_pass = m_framebuffer->GetLoadRenderPass();
-  m_framebuffer_render_area = m_framebuffer->GetRect();
   m_framebuffer->PrepareForRenderPass();
+  const bool density_map = BeginPassDensityMap(command_buffer);
+  m_current_render_pass = m_framebuffer->GetLoadRenderPass(density_map);
+  m_framebuffer_render_area = m_framebuffer->GetRect();
+  m_in_clear_pass = false;
 
   VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
                                       nullptr,
                                       m_current_render_pass,
-                                      m_framebuffer->GetFB(),
+                                      m_framebuffer->GetFB(density_map),
                                       m_framebuffer_render_area,
                                       0,
                                       nullptr};
 
-  vkCmdBeginRenderPass(g_command_buffer_mgr->GetCurrentCommandBuffer(), &begin_info,
-                       VK_SUBPASS_CONTENTS_INLINE);
+  vkCmdBeginRenderPass(command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 void StateTracker::BeginDiscardRenderPass()
@@ -425,20 +448,22 @@ void StateTracker::BeginDiscardRenderPass()
   if (InRenderPass())
     return;
 
+  const VkCommandBuffer command_buffer = g_command_buffer_mgr->GetCurrentCommandBuffer();
   CountRenderPass(m_framebuffer, g_vulkan_context->GetPerfCounters().efb_discard_passes);
-  m_current_render_pass = m_framebuffer->GetDiscardRenderPass();
+  const bool density_map = BeginPassDensityMap(command_buffer);
+  m_current_render_pass = m_framebuffer->GetDiscardRenderPass(density_map);
   m_framebuffer_render_area = m_framebuffer->GetRect();
+  m_in_clear_pass = false;
 
   VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
                                       nullptr,
                                       m_current_render_pass,
-                                      m_framebuffer->GetFB(),
+                                      m_framebuffer->GetFB(density_map),
                                       m_framebuffer_render_area,
                                       0,
                                       nullptr};
 
-  vkCmdBeginRenderPass(g_command_buffer_mgr->GetCurrentCommandBuffer(), &begin_info,
-                       VK_SUBPASS_CONTENTS_INLINE);
+  vkCmdBeginRenderPass(command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 void StateTracker::EndRenderPass()
@@ -446,7 +471,12 @@ void StateTracker::EndRenderPass()
   if (!InRenderPass())
     return;
 
-  vkCmdEndRenderPass(g_command_buffer_mgr->GetCurrentCommandBuffer());
+  const VkCommandBuffer command_buffer = g_command_buffer_mgr->GetCurrentCommandBuffer();
+  vkCmdEndRenderPass(command_buffer);
+  if (m_pass_timed)
+    m_efb_foveation->EndPass(command_buffer);
+  m_pass_timed = false;
+  m_in_clear_pass = false;
   m_current_render_pass = VK_NULL_HANDLE;
 }
 
@@ -455,21 +485,41 @@ void StateTracker::BeginClearRenderPass(const VkRect2D& area, const VkClearValue
 {
   ASSERT(!InRenderPass());
 
+  const VkCommandBuffer command_buffer = g_command_buffer_mgr->GetCurrentCommandBuffer();
   CountRenderPass(m_framebuffer, g_vulkan_context->GetPerfCounters().efb_clear_passes);
-  m_current_render_pass = m_framebuffer->GetClearRenderPass();
-  m_framebuffer_render_area = area;
   m_framebuffer->PrepareForRenderPass();
+  const bool density_map = BeginPassDensityMap(command_buffer);
+  m_current_render_pass = m_framebuffer->GetClearRenderPass(density_map);
+  m_framebuffer_render_area = area;
+  m_in_clear_pass = true;
 
   VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
                                       nullptr,
                                       m_current_render_pass,
-                                      m_framebuffer->GetFB(),
+                                      m_framebuffer->GetFB(density_map),
                                       m_framebuffer_render_area,
                                       num_clear_values,
                                       clear_values};
 
-  vkCmdBeginRenderPass(g_command_buffer_mgr->GetCurrentCommandBuffer(), &begin_info,
-                       VK_SUBPASS_CONTENTS_INLINE);
+  vkCmdBeginRenderPass(command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
+}
+
+void StateTracker::OnEFBFrameEnd()
+{
+  if (m_efb_foveation)
+    m_efb_foveation->OnFrameEnd();
+}
+
+void StateTracker::NoteSkippedKick()
+{
+  if (m_efb_foveation)
+    m_efb_foveation->NoteSkippedKick();
+}
+
+void StateTracker::NoteSubmitSplit()
+{
+  if (InRenderPass() && m_pass_timed)
+    m_efb_foveation->ContinueAfterSubmit();
 }
 
 void StateTracker::SetViewport(const VkViewport& viewport)
@@ -497,7 +547,7 @@ bool StateTracker::Bind()
     return false;
 
   // Check the render area if we were in a clear pass.
-  if (m_current_render_pass == m_framebuffer->GetClearRenderPass() && !IsViewportWithinRenderArea())
+  if (m_in_clear_pass && !IsViewportWithinRenderArea())
     EndRenderPass();
 
   // Get a new descriptor set if any parts have changed
@@ -521,7 +571,11 @@ bool StateTracker::Bind()
     vkCmdBindIndexBuffer(command_buffer, m_index_buffer, m_index_buffer_offset, m_index_type);
 
   if (m_dirty_flags & DIRTY_FLAG_PIPELINE)
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->GetVkPipeline());
+  {
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      m_pipeline->GetVkPipeline(m_pass_density_map));
+    m_pipeline_density_map = m_pass_density_map;
+  }
 
   if (m_dirty_flags & DIRTY_FLAG_VIEWPORT)
     vkCmdSetViewport(command_buffer, 0, 1, &m_viewport);
@@ -579,7 +633,7 @@ bool StateTracker::IsViewportWithinRenderArea() const
 
 void StateTracker::EndClearRenderPass()
 {
-  if (m_current_render_pass != m_framebuffer->GetClearRenderPass())
+  if (!m_in_clear_pass)
     return;
 
   // End clear render pass. Bind() will call BeginRenderPass() which

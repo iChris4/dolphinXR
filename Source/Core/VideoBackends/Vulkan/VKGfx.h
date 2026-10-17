@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "Common/CommonTypes.h"
+#include "Common/HookableEvent.h"
 #include "VideoBackends/Vulkan/Constants.h"
 #include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VKRenderDocCapture.h"
@@ -184,6 +185,8 @@ private:
   RecordCommand::SetGXUniformBuffersCmd m_pending_gx_uniforms = {};
 
   std::unique_ptr<RenderDocFrameCapture> m_renderdoc_capture;
+  // Frame boundary for selective EFB foveation, recorded in order with the passes.
+  Common::EventHook m_efb_frame_end_event;
 
   // Declared last so it drains and joins before any state above is destroyed.
   std::unique_ptr<RecordingWorker> m_recording_worker;

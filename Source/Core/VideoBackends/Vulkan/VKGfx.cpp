@@ -28,6 +28,7 @@
 #include "VideoCommon/Present.h"
 #include "VideoCommon/RenderState.h"
 #include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/VideoEvents.h"
 
 namespace Vulkan
 {
@@ -58,6 +59,14 @@ VKGfx::VKGfx(std::unique_ptr<SwapChain> swap_chain, float backbuffer_scale)
   }
 
   m_renderdoc_capture = std::make_unique<RenderDocFrameCapture>();
+
+  m_efb_frame_end_event = GetVideoEvents().after_frame_event.Register([this](Core::System&) {
+    if (!g_framebuffer_manager || !g_framebuffer_manager->IsEFBFoveated())
+      return;
+    RecordCommand command{};
+    command.type = RecordCommandType::EFBFrameEnd;
+    Record(command);
+  });
 }
 
 VKGfx::~VKGfx()
@@ -178,8 +187,10 @@ void VKGfx::ClearForcedPipelines()
   {
     if (pipeline)
     {
-      g_command_buffer_mgr->DeferPipelineDestruction(
-          static_cast<VKPipeline*>(pipeline.get())->Release());
+      auto* const vk_pipeline = static_cast<VKPipeline*>(pipeline.get());
+      g_command_buffer_mgr->DeferPipelineDestruction(vk_pipeline->Release());
+      if (const VkPipeline plain = vk_pipeline->ReleasePlain(); plain != VK_NULL_HANDLE)
+        g_command_buffer_mgr->DeferPipelineDestruction(plain);
     }
   }
   m_forced_pipelines.clear();
@@ -370,6 +381,15 @@ void VKGfx::ClearRegionDirect(const RecordCommand::ClearRegionCmd& clear)
 
 void VKGfx::Flush()
 {
+  // These kicks only start the GPU early, for CPU readbacks. A submit ends the render pass, and a
+  // foveated EFB pass that is split stores and reloads the whole EFB, rescaled: keep it whole.
+  DrainRecordingWorker();
+  StateTracker* const tracker = StateTracker::GetInstance();
+  if (tracker->InFoveatedEFBPass())
+  {
+    tracker->NoteSkippedKick();
+    return;
+  }
   ExecuteCommandBuffer(true, false);
 }
 
@@ -514,6 +534,7 @@ bool VKGfx::IsFullscreen() const
 void VKGfx::ExecuteCommandBuffer(bool submit_off_thread, bool wait_for_completion)
 {
   DrainRecordingWorker();
+  StateTracker::GetInstance()->NoteSubmitSplit();
   StateTracker::GetInstance()->EndRenderPass();
 
   g_command_buffer_mgr->SubmitCommandBuffer(submit_off_thread, wait_for_completion);
@@ -1119,6 +1140,9 @@ void VKGfx::ExecuteRecordCommand(const RecordCommand& command)
     tracker->EndRenderPass();
     vkCmdResetQueryPool(g_command_buffer_mgr->GetCurrentCommandBuffer(), command.query.pool,
                         command.query.first, command.query.count);
+    break;
+  case RecordCommandType::EFBFrameEnd:
+    tracker->OnEFBFrameEnd();
     break;
   }
 }

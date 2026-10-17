@@ -55,6 +55,8 @@ enum class RecordCommandType : u8
   BeginQuery,
   EndQuery,
   ResetQueryPool,
+  // The emulated frame ended (XFB copy): EFB render pass positions restart.
+  EFBFrameEnd,
 };
 
 enum class FramebufferBindMode : u8

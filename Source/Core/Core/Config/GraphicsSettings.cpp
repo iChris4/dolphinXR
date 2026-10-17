@@ -311,12 +311,10 @@ const Info<float> GFX_VR_RESOLUTION_SCALE{{System::GFX, "VR", "ResolutionScale"}
 const Info<int> GFX_VR_FOVEATION_LEVEL{{System::GFX, "VR", "FoveationLevel"},
                                        DEFAULT_VR_FOVEATION_LEVEL};
 const Info<bool> GFX_VR_FOVEATION_DYNAMIC{{System::GFX, "VR", "DynamicFoveation"}, true};
-// Foveate the EFB (game render) pass too, not just the eye swapchains. Off by default:
-// attaching a fragment density map forces Adreno out of direct rendering into binned
-// mode, so games that interrupt the EFB pass with many EFB copies per frame (e.g. Mario
-// Kart Wii's bloom chain, ~20 splits/frame) pay a full GMEM load/store per interruption
-// — measured as a net GPU-time LOSS despite the fragment savings. Only worth enabling
-// per-game where the EFB pass runs long and uninterrupted.
+// Foveate the EFB (game render) passes too, not just the eye swapchains (Vulkan). A fragment
+// density map forces Adreno into binned rendering and rescales every EFB load and store, which
+// only a long pass wins back, so each EFB pass keeps the map only while it measures faster with
+// it (Vulkan::EFBFoveationScheduler). Off by default; taken at launch.
 const Info<bool> GFX_VR_EFB_FOVEATION{{System::GFX, "VR", "FoveateEFB"}, false};
 // Graphics.Hacks
 

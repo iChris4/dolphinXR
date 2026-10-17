@@ -14,6 +14,7 @@
 
 namespace Vulkan
 {
+class EFBFoveationScheduler;
 class VKFramebuffer;
 class VKShader;
 class VKPipeline;
@@ -85,6 +86,14 @@ public:
   // Returns true if the specified rectangle is inside the current render area (used for clears).
   bool IsWithinRenderArea(s32 x, s32 y, u32 width, u32 height) const;
 
+  // Selective EFB foveation (EFBFoveationScheduler): the emulated frame ended, and whether the
+  // open render pass is an EFB pass running with the density map.
+  void OnEFBFrameEnd();
+  bool InFoveatedEFBPass() const { return InRenderPass() && m_pass_timed && m_pass_density_map; }
+  void NoteSkippedKick();
+  // The open render pass is about to end for a command buffer submit (VKGfx::ExecuteCommandBuffer).
+  void NoteSubmitSplit();
+
 private:
   // Number of descriptor sets for game draws.
   enum
@@ -126,6 +135,10 @@ private:
 
   void UpdateDescriptorSet();
   void UpdateGXDescriptorSet();
+
+  // Whether the render pass about to begin on m_framebuffer uses the density map, and the
+  // selective-foveation bookkeeping that goes with it.
+  bool BeginPassDensityMap(VkCommandBuffer command_buffer);
 
   // Cached GX sampler sets come from a pool of their own, so they survive submits and frames
   // (the per-frame pools are reset whenever their frame resources come around again).
@@ -186,5 +199,13 @@ private:
   VKFramebuffer* m_framebuffer = nullptr;
   VkRenderPass m_current_render_pass = VK_NULL_HANDLE;
   VkRect2D m_framebuffer_render_area = {};
+  bool m_in_clear_pass = false;
+
+  // The open render pass uses the density map; the bound pipeline is the twin for that.
+  bool m_pass_density_map = false;
+  bool m_pipeline_density_map = false;
+  // The open render pass is a selectively foveated EFB pass, timed by m_efb_foveation.
+  bool m_pass_timed = false;
+  std::unique_ptr<EFBFoveationScheduler> m_efb_foveation;
 };
 }  // namespace Vulkan

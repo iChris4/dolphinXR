@@ -1173,6 +1173,18 @@ VKFramebuffer::~VKFramebuffer()
   DrainRecordingWorkerForDirectAccess();
   if (m_fb != VK_NULL_HANDLE)
     g_command_buffer_mgr->DeferFramebufferDestruction(m_fb);
+  if (m_plain_fb != VK_NULL_HANDLE)
+    g_command_buffer_mgr->DeferFramebufferDestruction(m_plain_fb);
+}
+
+void VKFramebuffer::SetPlainVariant(VkFramebuffer fb, VkRenderPass load_render_pass,
+                                    VkRenderPass discard_render_pass,
+                                    VkRenderPass clear_render_pass)
+{
+  m_plain_fb = fb;
+  m_plain_load_render_pass = load_render_pass;
+  m_plain_discard_render_pass = discard_render_pass;
+  m_plain_clear_render_pass = clear_render_pass;
 }
 
 VkFramebuffer VKFramebuffer::ReleaseHandle()
@@ -1257,8 +1269,9 @@ CreateFramebufferInternal(VKTexture* color_attachment, VKTexture* depth_attachme
   // density map, matching the fragment_density_map bit GX pipelines carry in their
   // framebuffer state. Explicit views (XR swapchains) take precedence.
   VkImageView fdm_view = fragment_density_map_view;
-  if (fdm_view == VK_NULL_HANDLE && is_current_efb && use_multiview &&
-      g_framebuffer_manager->IsEFBFoveated())
+  const bool efb_fdm = fdm_view == VK_NULL_HANDLE && is_current_efb && use_multiview &&
+                       g_framebuffer_manager->IsEFBFoveated();
+  if (efb_fdm)
   {
     fdm_view = g_object_cache->GetEFBFragmentDensityMapView(width, height, layers);
     if (fdm_view == VK_NULL_HANDLE)
@@ -1269,6 +1282,47 @@ CreateFramebufferInternal(VKTexture* color_attachment, VKTexture* depth_attachme
     }
   }
   const bool use_fdm = fdm_view != VK_NULL_HANDLE;
+
+  // The plain twin of a foveated EFB framebuffer (EFBFoveationScheduler) has the same
+  // attachments minus the density map.
+  VkFramebuffer plain_fb = VK_NULL_HANDLE;
+  VkRenderPass plain_load_render_pass = VK_NULL_HANDLE;
+  VkRenderPass plain_discard_render_pass = VK_NULL_HANDLE;
+  VkRenderPass plain_clear_render_pass = VK_NULL_HANDLE;
+  if (efb_fdm)
+  {
+    const u8 additional_count = static_cast<u8>(additional_color_attachments.size());
+    plain_load_render_pass = g_object_cache->GetRenderPass(
+        vk_color_format, vk_depth_format, samples, VK_ATTACHMENT_LOAD_OP_LOAD, additional_count,
+        use_multiview, additional_color_format, false);
+    plain_discard_render_pass = g_object_cache->GetRenderPass(
+        vk_color_format, vk_depth_format, samples, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        additional_count, use_multiview, additional_color_format, false);
+    plain_clear_render_pass = g_object_cache->GetRenderPass(
+        vk_color_format, vk_depth_format, samples, VK_ATTACHMENT_LOAD_OP_CLEAR, additional_count,
+        use_multiview, additional_color_format, false);
+    if (plain_load_render_pass == VK_NULL_HANDLE || plain_discard_render_pass == VK_NULL_HANDLE ||
+        plain_clear_render_pass == VK_NULL_HANDLE)
+    {
+      return nullptr;
+    }
+    const VkFramebufferCreateInfo plain_info = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+                                                nullptr,
+                                                0,
+                                                plain_load_render_pass,
+                                                static_cast<uint32_t>(attachment_views.size()),
+                                                attachment_views.data(),
+                                                width,
+                                                height,
+                                                fb_layers};
+    const VkResult plain_res =
+        vkCreateFramebuffer(g_vulkan_context->GetDevice(), &plain_info, nullptr, &plain_fb);
+    if (plain_res != VK_SUCCESS)
+    {
+      LOG_VULKAN_ERROR(plain_res, "vkCreateFramebuffer (plain EFB twin) failed: ");
+      return nullptr;
+    }
+  }
 
   // The fragment density map is always the last attachment; the render passes from
   // GetRenderPass() reference it at the same index (after color/depth/additional).
@@ -1309,13 +1363,21 @@ CreateFramebufferInternal(VKTexture* color_attachment, VKTexture* depth_attachme
   if (res != VK_SUCCESS)
   {
     LOG_VULKAN_ERROR(res, "vkCreateFramebuffer failed: ");
+    if (plain_fb != VK_NULL_HANDLE)
+      vkDestroyFramebuffer(g_vulkan_context->GetDevice(), plain_fb, nullptr);
     return nullptr;
   }
 
-  return std::make_unique<VKFramebuffer>(
+  auto framebuffer = std::make_unique<VKFramebuffer>(
       color_attachment, depth_attachment, std::move(additional_color_attachments), width, height,
       layers, samples, fb, load_render_pass, discard_render_pass, clear_render_pass, use_fdm,
       use_multiview);
+  if (plain_fb != VK_NULL_HANDLE)
+  {
+    framebuffer->SetPlainVariant(plain_fb, plain_load_render_pass, plain_discard_render_pass,
+                                 plain_clear_render_pass);
+  }
+  return framebuffer;
 }
 
 std::unique_ptr<VKFramebuffer>

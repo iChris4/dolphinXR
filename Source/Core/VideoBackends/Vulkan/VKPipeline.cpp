@@ -20,13 +20,15 @@
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VKVertexFormat.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
+#include "VideoCommon/FramebufferManager.h"
 
 namespace Vulkan
 {
 VKPipeline::VKPipeline(const AbstractPipelineConfig& config, VkPipeline pipeline,
-                       VkPipelineLayout pipeline_layout, AbstractPipelineUsage usage)
-    : AbstractPipeline(config), m_pipeline(pipeline), m_pipeline_layout(pipeline_layout),
-      m_usage(usage)
+                       VkPipeline plain_pipeline, VkPipelineLayout pipeline_layout,
+                       AbstractPipelineUsage usage)
+    : AbstractPipeline(config), m_pipeline(pipeline), m_plain_pipeline(plain_pipeline),
+      m_pipeline_layout(pipeline_layout), m_usage(usage)
 {
 }
 
@@ -35,6 +37,7 @@ VKPipeline::~VKPipeline()
   // A queued SetPipeline may still reference this object.
   DrainRecordingWorkerForDirectAccess();
   vkDestroyPipeline(g_vulkan_context->GetDevice(), m_pipeline, nullptr);
+  vkDestroyPipeline(g_vulkan_context->GetDevice(), m_plain_pipeline, nullptr);
 }
 
 static bool IsStripPrimitiveTopology(VkPrimitiveTopology topology)
@@ -498,6 +501,34 @@ std::unique_ptr<VKPipeline> VKPipeline::Create(const AbstractPipelineConfig& con
     return VK_NULL_HANDLE;
   }
 
-  return std::make_unique<VKPipeline>(config, pipeline, pipeline_layout, config.usage);
+  // Selective EFB foveation runs each EFB render pass with or without the density map, and a
+  // pipeline must match its render pass in that, so EFB pipelines get a twin for the plain one.
+  VkPipeline plain_pipeline = VK_NULL_HANDLE;
+  if (fdm_pass && g_framebuffer_manager && g_framebuffer_manager->IsEFBFoveated())
+  {
+    pipeline_info.renderPass = g_object_cache->GetRenderPass(
+        VKTexture::GetVkFormatForHostTextureFormat(config.framebuffer_state.color_texture_format),
+        VKTexture::GetVkFormatForHostTextureFormat(config.framebuffer_state.depth_texture_format),
+        config.framebuffer_state.samples, VK_ATTACHMENT_LOAD_OP_LOAD,
+        config.framebuffer_state.additional_color_attachment_count, multiview_pass,
+        config.framebuffer_state.additional_color_attachment_count == 0 ?
+            VK_FORMAT_UNDEFINED :
+            VKTexture::GetVkFormatForHostTextureFormat(additional_format),
+        false);
+    res = pipeline_info.renderPass == VK_NULL_HANDLE ?
+              VK_ERROR_INITIALIZATION_FAILED :
+              vkCreateGraphicsPipelines(g_vulkan_context->GetDevice(),
+                                        g_object_cache->GetPipelineCache(), 1, &pipeline_info,
+                                        nullptr, &plain_pipeline);
+    if (res != VK_SUCCESS)
+    {
+      LOG_VULKAN_ERROR(res, "vkCreateGraphicsPipelines (plain EFB twin) failed: ");
+      vkDestroyPipeline(g_vulkan_context->GetDevice(), pipeline, nullptr);
+      return VK_NULL_HANDLE;
+    }
+  }
+
+  return std::make_unique<VKPipeline>(config, pipeline, plain_pipeline, pipeline_layout,
+                                      config.usage);
 }
 }  // namespace Vulkan

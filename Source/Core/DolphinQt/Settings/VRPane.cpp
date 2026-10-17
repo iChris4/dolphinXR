@@ -368,10 +368,10 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
 
   m_foveate_efb = new ConfigBool(tr("Foveate Game Render (EFB)"), Config::GFX_VR_EFB_FOVEATION);
   m_foveate_efb->setToolTip(
-      tr("Applies foveation to the game's own render pass, not just the eye buffers. Helps "
-         "games with long uninterrupted render passes, but hurts games that interrupt "
-         "rendering with many EFB copies per frame (it forces tiled GPUs out of direct "
-         "rendering mode). Leave off unless a specific game benefits."));
+      tr("Applies foveation to the game's own render passes, not just the eye buffers "
+         "(Vulkan). Each pass is timed and keeps foveation only where it measures faster, so "
+         "games drawn in a few long passes gain a lot and others lose little or nothing. Takes "
+         "effect on the next launch."));
   rendering_layout->addWidget(m_foveate_efb, 4, 1, 1, 2);
 
   // Exact Screen Depth
