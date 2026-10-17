@@ -775,28 +775,73 @@ u64 TextureElementManager::GetSelectedTextureHash() const
       ->first;
 }
 
-bool TextureElementManager::SaveSelectedTextureOverride(const std::string& game_id,
-                                                        HandlingType handling)
+TextureElementManager::HuntingSelection TextureElementManager::GetHuntingSelection() const
+{
+  std::lock_guard lock(m_mutex);
+  HuntingSelection selection;
+  selection.total = static_cast<int>(m_textures_display.size());
+  const auto selected = m_textures_display.find(m_selected_texture_hash);
+  if (m_selected_texture_hash == 0 || selected == m_textures_display.end())
+    return selection;
+
+  // Prev/NextTexture walk the textures in hash order.
+  selection.position = static_cast<int>(
+      std::ranges::count_if(m_textures_display, [this](const auto& texture) {
+        return texture.first < m_selected_texture_hash;
+      }));
+  selection.hash = m_selected_texture_hash;
+  selection.name = selected->second;
+  return selection;
+}
+
+std::optional<std::string> TextureElementManager::SaveSelectedTextureOverride(
+    const std::string& game_id, HandlingType handling, float units_per_meter,
+    const std::string& name)
 {
   if (game_id.empty())
-    return false;
+    return std::nullopt;
 
   const u64 texture_hash = GetSelectedTextureHash();
   if (texture_hash == 0)
-    return false;
+    return std::nullopt;
 
   auto overrides = LoadOverridesFromINI(game_id);
+  const auto is_this_texture = [texture_hash](const TextureElementOverride& entry) {
+    return entry.texture_hashes.size() == 1 && entry.texture_hashes[0] == texture_hash;
+  };
+
   TextureElementOverride entry;
-  entry.name = fmt::format("Texture {:016x}", texture_hash);
+  const std::string base_name = name.empty() ? fmt::format("Texture {:016x}", texture_hash) : name;
+  entry.name = base_name;
+  for (int number = 2;; ++number)
+  {
+    const auto same_name = std::ranges::find(overrides, entry.name, &TextureElementOverride::name);
+    if (same_name == overrides.end() || is_this_texture(*same_name))
+      break;
+    entry.name = fmt::format("{} {}", base_name, number);
+  }
   entry.handling = handling;
   entry.texture_hashes.push_back(texture_hash);
   if (handling == HandlingType::UnitsPerMeter)
-    entry.units_per_meter = g_Config.vr_units_per_meter;
+  {
+    entry.units_per_meter =
+        units_per_meter > 0.0f ? units_per_meter : g_Config.vr_units_per_meter;
+  }
+  // A texture Flag override only does something with a flag to set.
+  if (handling == HandlingType::Flag)
+    entry.flag_group = entry.name;
 
-  overrides.push_back(std::move(entry));
+  // Saving the same texture under its name again changes its override. (A duplicate name would
+  // load as the last entry anyway.)
+  const std::string saved_name = entry.name;
+  const auto existing = std::ranges::find(overrides, entry.name, &TextureElementOverride::name);
+  if (existing != overrides.end())
+    *existing = std::move(entry);
+  else
+    overrides.push_back(std::move(entry));
   SaveOverridesToINI(game_id, overrides);
   LoadOverrides(game_id);
-  return true;
+  return saved_name;
 }
 
 void TextureElementManager::SetPreviewTextures(const std::vector<u64>& hashes)

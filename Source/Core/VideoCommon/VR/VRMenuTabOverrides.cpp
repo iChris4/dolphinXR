@@ -215,11 +215,13 @@ class OverridesTab final : public VRMenuTab
 {
 public:
   // The menu goes away when the game stops. Hunting this menu started would otherwise keep
-  // hiding a shader in the next game, with no desktop window to show it.
+  // hiding a shader or texture in the next game, with no desktop window to show it.
   ~OverridesTab() override
   {
-    if (m_hunting_started_here)
+    if (m_shader_hunting_started_here)
       ShaderHunter::GetInstance().SetEnabled(false);
+    if (m_texture_hunting_started_here)
+      TextureElementManager::GetInstance().SetHunterActive(false);
   }
 
   const char* GetName() const override { return "Overrides"; }
@@ -250,6 +252,7 @@ public:
     ImGui::PopStyleColor();
     ImGui::Spacing();
 
+    // Each hunting section sits right above the list it saves into.
     DrawShaderHunting(context);
     DrawShaderList(context);
 
@@ -262,6 +265,7 @@ public:
       ReportToggle(context, m_elements[*i].name, m_elements[*i].enabled);
     }
 
+    DrawTextureHunting(context);
     if (const auto i = DrawList("Texture Element Overrides", m_textures,
                                 &TextureElementManager::TextureElementOverride::enabled,
                                 TextureDetail))
@@ -471,6 +475,28 @@ private:
     ShaderHunter::GetInstance().LoadOverrides(game_id);
   }
 
+  // How the hunting sections word what they hunt.
+  struct HuntedKind
+  {
+    const char* noun;
+    const char* plural;
+    // Start of the automatic override name, "Shader <hash>".
+    const char* name_prefix;
+  };
+  static constexpr HuntedKind SHADER_KIND{"shader", "shaders", "Shader"};
+  static constexpr HuntedKind TEXTURE_KIND{"texture", "textures", "Texture"};
+
+  // What a hunting section's Save Override saves.
+  struct SaveOptions
+  {
+    HandlingType handling = HandlingType::Skip;
+    // <= 0 until shown: then starts at the current world scale.
+    float units_per_meter = -1.0f;
+    std::string name;
+    // TextInput request whose typed text goes to `name` (0 = none).
+    u32 name_request = 0;
+  };
+
   // The desktop Shader Hunter: cycle through the shaders of the last frame while the selected
   // one is hidden or painted pink, then save it as a shader override. Hunting keeps running
   // while the menu is closed, so the game can be looked at without the panel in front of it.
@@ -483,6 +509,9 @@ private:
         enabled ? "Shader Hunting  (on)###Shader Hunting" : "Shader Hunting###Shader Hunting";
     if (!ImGui::CollapsingHeader(header))
       return;
+    // Both hunting sections draw rows with the same labels: each gets its own ID scope, or ImGui
+    // reports an ID conflict and only one of a pair of widgets reacts.
+    ImGui::PushID("Shader Hunting");
 
     if (MenuWidgets::Checkbox("Enable Shader Hunting",
                               "Lists the shaders drawn each frame and hides (or paints pink) the "
@@ -490,7 +519,7 @@ private:
                               &enabled))
     {
       hunter.SetEnabled(enabled);
-      m_hunting_started_here = enabled;
+      m_shader_hunting_started_here = enabled;
     }
 
     ImGui::BeginDisabled(!enabled);
@@ -520,90 +549,166 @@ private:
     const u64 hash = hunter.GetSelectedHash();
     const bool selected = enabled && position >= 0 && hash != ~0ULL;
 
-    MenuWidgets::BeginRow("Shader", nullptr, Config::LayerType::Base);
-    const float button_width = ImGui::GetFontSize() * 6.0f;
-    if (ImGui::Button("<< Previous", {button_width, 0.0f}))
+    const int step = CycleRow("Shader", selected ? position : -1, total);
+    if (step < 0)
       hunter.PrevShader();
-    ImGui::SameLine();
-    if (ImGui::Button("Next >>", {button_width, 0.0f}))
+    else if (step > 0)
       hunter.NextShader();
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    if (selected)
-      ImGui::Text("%d / %d", position + 1, total);
-    else
-      ImGui::TextDisabled("- / %d", total);
 
     MenuWidgets::ValueRow("Selected",
                           selected ? fmt::format("{} {:08x}", ShaderTypeName(type),
                                                  static_cast<u32>(hash)) :
                                      std::string("None"));
     if (selected)
-      MenuWidgets::ValueRow("Existing Override", ExistingOverride(hunter, type, hash));
+      MenuWidgets::ValueRow("Existing Override", ExistingShaderOverride(hunter, type, hash));
 
-    if (TextInput::IsAvailable())
-      DrawNameField(context, selected ? static_cast<u32>(hash) : 0);
-    MenuWidgets::Combo<HandlingType>(
-        "Save As",
-        "Handling of the saved override. Saving the same shader again under its name replaces "
-        "its override.",
-        &m_save_handling, SAVE_HANDLINGS);
-    if (m_save_handling == HandlingType::UnitsPerMeter)
-    {
-      if (m_save_units_per_meter <= 0.0f)
-        m_save_units_per_meter = Config::Get(Config::GFX_VR_UNITS_PER_METER);
-      MenuWidgets::SliderFloat("Units per Meter",
-                               "World scale while this shader is drawn. Lower makes the world "
-                               "look bigger.",
-                               &m_save_units_per_meter,
-                               {.min = Config::GFX_VR_UNITS_PER_METER_MIN,
-                                .max = Config::GFX_VR_UNITS_PER_METER_MAX,
-                                .step = Config::GFX_VR_UNITS_PER_METER_STEP,
-                                .step_ratio = 1.1f,
-                                .format = "%.1f",
-                                .logarithmic = true});
-    }
-
-    MenuWidgets::BeginRow("", nullptr, Config::LayerType::Base);
-    ImGui::BeginDisabled(!selected);
-    if (ImGui::Button("Save Override"))
+    DrawSaveOptions(context, m_shader_save, SHADER_KIND,
+                    selected ? fmt::format("Shader {:08x}", static_cast<u32>(hash)) :
+                               std::string());
+    if (SaveButton(selected))
       SaveHuntedShader(context, hunter, match_mode);
     ImGui::EndDisabled();
+
+    DrawHuntingHints(context, enabled, total, SHADER_KIND);
+    ImGui::PopID();
+  }
+
+  // The desktop Texture Hunter, one texture at a time: cycle through the textures of the last
+  // frame while every draw that uses the selected one is hidden or painted pink, then save it as
+  // a Texture Element override. Like Shader Hunting, it keeps running while the menu is closed.
+  void DrawTextureHunting(VRMenuContext& context)
+  {
+    TextureElementManager& hunter = TextureElementManager::GetInstance();
+    bool enabled = hunter.IsHunterActive();
+    const char* header =
+        enabled ? "Texture Hunting  (on)###Texture Hunting" : "Texture Hunting###Texture Hunting";
+    if (!ImGui::CollapsingHeader(header))
+      return;
+    ImGui::PushID("Texture Hunting");
+
+    if (MenuWidgets::Checkbox("Enable Texture Hunting",
+                              "Lists the textures drawn each frame and hides (or paints pink) "
+                              "every draw that uses the selected one, so you can see where it "
+                              "is used.",
+                              &enabled))
+    {
+      hunter.SetHunterActive(enabled);
+      m_texture_hunting_started_here = enabled;
+    }
+
+    ImGui::BeginDisabled(!enabled);
+    ShaderHunter::HuntingOption option = hunter.IsPreviewPink() ?
+                                             ShaderHunter::HuntingOption::Pink :
+                                             ShaderHunter::HuntingOption::Skip;
+    if (MenuWidgets::Combo<ShaderHunter::HuntingOption>(
+            "Hunting Option", "What happens to the draws that use the selected texture.",
+            &option, HUNTING_OPTIONS))
+    {
+      hunter.SetPreviewPink(option == ShaderHunter::HuntingOption::Pink);
+    }
+
+    const TextureElementManager::HuntingSelection selection = hunter.GetHuntingSelection();
+    const bool selected = enabled && selection.position >= 0;
+
+    const int step = CycleRow("Texture", selection.position, selection.total);
+    if (step < 0)
+      hunter.PrevTexture();
+    else if (step > 0)
+      hunter.NextTexture();
+
+    // The dump name: size, hash and format, e.g. tex1_128x64_<hash>_14.
+    std::string selected_text = "None";
+    if (selected)
+    {
+      selected_text = !selection.name.empty() ? selection.name :
+                                                fmt::format("{:016x}", selection.hash);
+    }
+    MenuWidgets::ValueRow("Selected", selected_text);
+    if (selected)
+      MenuWidgets::ValueRow("Existing Override", ExistingTextureOverride(selection.hash));
+
+    DrawSaveOptions(context, m_texture_save, TEXTURE_KIND,
+                    selected ? fmt::format("Texture {:016x}", selection.hash) : std::string());
+    if (SaveButton(selected))
+      SaveHuntedTexture(context, hunter);
     ImGui::EndDisabled();
 
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    if (enabled && Core::GetState(Core::System::GetInstance()) == Core::State::Paused)
-      ImGui::TextWrapped("The game is paused: resume it to see the selected shader change.");
-    else if (enabled && total == 0)
-      ImGui::TextWrapped("The shaders of the next frame will be listed here.");
-    else if (enabled)
-      ImGui::TextWrapped("Hunting keeps running while the menu is closed. It turns off when the "
-                         "game stops.");
-    ImGui::PopStyleColor();
-    ImGui::Spacing();
+    DrawHuntingHints(context, enabled, selection.total, TEXTURE_KIND);
+    ImGui::PopID();
+  }
+
+  // "<< Previous", "Next >>" and "position / total" (position -1: nothing selected). Returns -1
+  // or 1 when a button was pressed.
+  static int CycleRow(const char* label, int position, int total)
+  {
+    MenuWidgets::BeginRow(label, nullptr, Config::LayerType::Base);
+    // Both buttons as wide as the longer label, with some room to spare for the laser pointer.
+    const float button_width = ImGui::CalcTextSize("<< Previous").x +
+                               ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::GetFontSize();
+    int step = 0;
+    if (ImGui::Button("<< Previous", {button_width, 0.0f}))
+      step = -1;
+    ImGui::SameLine();
+    if (ImGui::Button("Next >>", {button_width, 0.0f}))
+      step = 1;
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    if (position >= 0)
+      ImGui::Text("%d / %d", position + 1, total);
+    else
+      ImGui::TextDisabled("- / %d", total);
+    return step;
+  }
+
+  // Name (with a system keyboard), Save As and, for Units per Meter, the scale.
+  static void DrawSaveOptions(VRMenuContext& context, SaveOptions& options, const HuntedKind& kind,
+                              const std::string& name_hint)
+  {
+    if (TextInput::IsAvailable())
+      DrawNameField(context, options, kind, name_hint);
+    const std::string handling_tooltip =
+        fmt::format("Handling of the saved override. Saving the same {} again under its name "
+                    "replaces its override.",
+                    kind.noun);
+    MenuWidgets::Combo<HandlingType>("Save As", handling_tooltip.c_str(), &options.handling,
+                                     SAVE_HANDLINGS);
+    if (options.handling != HandlingType::UnitsPerMeter)
+      return;
+    if (options.units_per_meter <= 0.0f)
+      options.units_per_meter = Config::Get(Config::GFX_VR_UNITS_PER_METER);
+    const std::string scale_tooltip = fmt::format(
+        "World scale while this {} is drawn. Lower makes the world look bigger.", kind.noun);
+    MenuWidgets::SliderFloat("Units per Meter", scale_tooltip.c_str(), &options.units_per_meter,
+                             {.min = Config::GFX_VR_UNITS_PER_METER_MIN,
+                              .max = Config::GFX_VR_UNITS_PER_METER_MAX,
+                              .step = Config::GFX_VR_UNITS_PER_METER_STEP,
+                              .step_ratio = 1.1f,
+                              .format = "%.1f",
+                              .logarithmic = true});
   }
 
   // Name of the override to save, typed on the system keyboard. Looks like a text field; a click
   // opens the keyboard, and the text follows each key press.
-  void DrawNameField(VRMenuContext& context, u32 hash)
+  static void DrawNameField(VRMenuContext& context, SaveOptions& options, const HuntedKind& kind,
+                            const std::string& hint)
   {
-    if (std::optional<TextInput::Edit> edit = TextInput::TakeEdit(m_name_request))
-      m_save_name = std::move(edit->text);
+    if (std::optional<TextInput::Edit> edit = TextInput::TakeEdit(options.name_request))
+      options.name = std::move(edit->text);
 
-    MenuWidgets::BeginRow("Name",
-                          "Name of the saved override. Empty uses \"Shader <hash>\". A name "
-                          "another shader already has gets a number.",
-                          Config::LayerType::Base);
-    const bool has_name = !m_save_name.empty();
+    const std::string tooltip =
+        fmt::format("Name of the saved override. Empty uses \"{} <hash>\". A name another "
+                    "override already has gets a number.",
+                    kind.name_prefix);
+    MenuWidgets::BeginRow("Name", tooltip.c_str(), Config::LayerType::Base);
+    const bool has_name = !options.name.empty();
     const ImGuiStyle& style = ImGui::GetStyle();
     const float clear_width = has_name ? ImGui::CalcTextSize("Clear").x +
                                              style.FramePadding.x * 2.0f + style.ItemSpacing.x :
                                          0.0f;
-    const std::string hint = hash != 0 ? fmt::format("Shader {:08x}", hash) : std::string();
 
     // Read-only: the text comes from the keyboard. ImGui shows the live string while it is.
     std::array<char, 256> buffer{};
-    m_save_name.copy(buffer.data(), buffer.size() - 1);
+    options.name.copy(buffer.data(), buffer.size() - 1);
     ImGui::SetNextItemWidth(MenuWidgets::ControlWidth() - clear_width);
     ImGui::InputTextWithHint("##name", hint.c_str(), buffer.data(), buffer.size(),
                              ImGuiInputTextFlags_ReadOnly);
@@ -611,20 +716,62 @@ private:
     // must open the keyboard again.
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
     {
-      m_name_request = TextInput::Request(m_save_name);
+      options.name_request = TextInput::Request(options.name);
       context.actions.SetStatus("Type the name on the keyboard, then press Enter");
     }
     if (has_name)
     {
       ImGui::SameLine();
       if (ImGui::Button("Clear"))
-        m_save_name.clear();
+        options.name.clear();
     }
   }
 
+  static bool SaveButton(bool enabled)
+  {
+    MenuWidgets::BeginRow("", nullptr, Config::LayerType::Base);
+    ImGui::BeginDisabled(!enabled);
+    const bool pressed = ImGui::Button("Save Override");
+    ImGui::EndDisabled();
+    return pressed;
+  }
+
+  static void DrawHuntingHints(VRMenuContext& context, bool enabled, int total,
+                               const HuntedKind& kind)
+  {
+    if (!enabled)
+    {
+      ImGui::Spacing();
+      return;
+    }
+    std::string hint;
+    if (context.flat_screen)
+    {
+      hint = "Flat screen mode draws the game without overrides, so hunting shows nothing until "
+             "the game is back in stereo VR.";
+    }
+    else if (Core::GetState(Core::System::GetInstance()) == Core::State::Paused)
+    {
+      hint = fmt::format("The game is paused: resume it to see the selected {} change.",
+                         kind.noun);
+    }
+    else if (total == 0)
+    {
+      hint = fmt::format("The {} of the next frame will be listed here.", kind.plural);
+    }
+    else
+    {
+      hint = "Hunting keeps running while the menu is closed. It turns off when the game stops.";
+    }
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("%s", hint.c_str());
+    ImGui::PopStyleColor();
+    ImGui::Spacing();
+  }
+
   // The listed override that matches the selected shader, as the draw path would match it.
-  std::string ExistingOverride(const ShaderHunter& hunter, ShaderHunter::ShaderType type,
-                               u64 hash) const
+  std::string ExistingShaderOverride(const ShaderHunter& hunter, ShaderHunter::ShaderType type,
+                                     u64 hash) const
   {
     const std::optional<u64> family = hunter.GetShaderFamilySignature(type, hash);
     for (const ShaderHunter::ShaderOverride& entry : m_shaders)
@@ -641,12 +788,25 @@ private:
     return "None";
   }
 
+  // The first listed Texture Element override whose textures include `hash`.
+  std::string ExistingTextureOverride(u64 hash) const
+  {
+    for (const TextureElementManager::TextureElementOverride& entry : m_textures)
+    {
+      if (std::ranges::find(entry.texture_hashes, hash) == entry.texture_hashes.end())
+        continue;
+      return fmt::format("{} ({}{})", entry.name, HandlingName(entry.handling),
+                         entry.enabled ? "" : ", off");
+    }
+    return "None";
+  }
+
   void SaveHuntedShader(VRMenuContext& context, ShaderHunter& hunter,
                         ShaderHunter::MatchMode match_mode)
   {
-    const std::optional<std::string> name =
-        hunter.SaveSelectedShaderOverride(context.game_id, m_save_handling, m_save_units_per_meter,
-                                          std::string(StripWhitespace(m_save_name)));
+    const std::optional<std::string> name = hunter.SaveSelectedShaderOverride(
+        context.game_id, m_shader_save.handling, m_shader_save.units_per_meter,
+        std::string(StripWhitespace(m_shader_save.name)));
     if (!name)
     {
       context.actions.SetStatus(
@@ -655,13 +815,31 @@ private:
               "Not saved: no shader is selected");
       return;
     }
-    // Show the new override in the list below. The next shader starts unnamed again, like the
-    // desktop Shader Hunter's name field.
+    OnHuntedSaved(context, m_shader_save, *name);
+  }
+
+  void SaveHuntedTexture(VRMenuContext& context, TextureElementManager& hunter)
+  {
+    const std::optional<std::string> name = hunter.SaveSelectedTextureOverride(
+        context.game_id, m_texture_save.handling, m_texture_save.units_per_meter,
+        std::string(StripWhitespace(m_texture_save.name)));
+    if (!name)
+    {
+      context.actions.SetStatus("Not saved: no texture is selected");
+      return;
+    }
+    OnHuntedSaved(context, m_texture_save, *name);
+  }
+
+  void OnHuntedSaved(VRMenuContext& context, SaveOptions& options, const std::string& name)
+  {
+    // Show the new override in its list. The next one starts unnamed again, like the desktop
+    // Shader Hunter's name field.
     m_loaded = false;
-    m_save_name.clear();
-    m_name_request = 0;
+    options.name.clear();
+    options.name_request = 0;
     context.actions.SetStatus(
-        fmt::format("Saved \"{}\" ({})", *name, HandlingName(m_save_handling)));
+        fmt::format("Saved \"{}\" ({})", name, HandlingName(options.handling)));
   }
 
   // Same files and layering as the runtime managers load (no revision-specific ini), so the
@@ -683,13 +861,10 @@ private:
 
   bool m_loaded = false;
   std::string m_game_id;
-  bool m_hunting_started_here = false;
-  HandlingType m_save_handling = HandlingType::Skip;
-  // <= 0 until shown: then starts at the current world scale.
-  float m_save_units_per_meter = -1.0f;
-  std::string m_save_name;
-  // TextInput request whose typed text goes to m_save_name (0 = none).
-  u32 m_name_request = 0;
+  bool m_shader_hunting_started_here = false;
+  bool m_texture_hunting_started_here = false;
+  SaveOptions m_shader_save;
+  SaveOptions m_texture_save;
   // Shader override being renamed (empty = none), the name typed so far, and its request.
   std::string m_rename_name;
   std::string m_rename_text;

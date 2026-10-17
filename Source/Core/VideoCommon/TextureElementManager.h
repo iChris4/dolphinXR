@@ -117,7 +117,27 @@ public:
   void PrevTexture();
   void NextTexture();
   u64 GetSelectedTextureHash() const;
-  bool SaveSelectedTextureOverride(const std::string& game_id, HandlingType handling);
+
+  // The texture Prev/NextTexture picked (and the live preview hides or highlights), as long as the
+  // last frame drew it.
+  struct HuntingSelection
+  {
+    int position = -1;  // In GetCurrentTextures() order; -1 = none, or not drawn last frame.
+    int total = 0;      // Textures drawn last frame.
+    u64 hash = 0;
+    std::string name;
+  };
+  HuntingSelection GetHuntingSelection() const;
+
+  // Saves the selected texture as an override named `name` ("Texture <hash>" when empty) and
+  // reloads the overrides. An override of that name for just this texture is replaced; when
+  // another override has the name, a number is appended. `units_per_meter` is the scale for
+  // UnitsPerMeter handling; <= 0 uses the current global value. Returns the override's name, or
+  // nothing when no texture is selected.
+  std::optional<std::string> SaveSelectedTextureOverride(const std::string& game_id,
+                                                         HandlingType handling,
+                                                         float units_per_meter = -1.0f,
+                                                         const std::string& name = {});
 
   // --- Live preview (Texture Hunter browser open) ---
   // Draws binding a preview texture are skipped or pink-highlighted in-game without being saved,
