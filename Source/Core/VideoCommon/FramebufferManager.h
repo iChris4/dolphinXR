@@ -123,7 +123,13 @@ public:
   // Reinterpret pixel format of EFB color texture.
   // Assumes no render pass is currently in progress.
   // Swaps EFB framebuffers, so re-bind afterwards.
+  // In a VR session the conversion is queued instead and runs when the EFB is next used (see
+  // FlushDeferredEFBOps); a full clear before that use makes it unnecessary.
   bool ReinterpretPixelData(EFBReinterpretType convtype);
+
+  // Runs the EFB operations held back (game clears behind a pending VR clear, queued format
+  // conversions), in order. Called before anything draws to, reads, pokes or saves the EFB.
+  void FlushDeferredEFBOps();
   PixelFormat GetPrevPixelFormat() const { return m_prev_efb_format; }
   void StorePixelFormat(PixelFormat new_format) { m_prev_efb_format = new_format; }
 
@@ -328,12 +334,23 @@ protected:
     PixelFormat pixel_format;
   };
   void ClearEFBNow(const DeferredEFBClear& clear);
-  // Runs the game clears ClearEFB held back behind a pending VR clear. Called before anything
-  // reads, pokes, reinterprets or saves the EFB.
-  void FlushDeferredEFBClears();
-  // Game clears issued while the VR clear is pending: it overwrites the whole EFB at the next
-  // draw, so they only run if the EFB is used before that draw.
-  std::vector<DeferredEFBClear> m_deferred_efb_clears;
+  bool ReinterpretPixelDataNow(EFBReinterpretType convtype);
+  // A held-back EFB operation: a game clear issued while the VR clear is pending (that clear
+  // overwrites the whole EFB at the next draw), or a queued pixel format conversion.
+  struct DeferredEFBOp
+  {
+    bool reinterpret;
+    DeferredEFBClear clear;
+    EFBReinterpretType convtype;
+  };
+  std::vector<DeferredEFBOp> m_deferred_efb_ops;
+  // EFBReinterpret: log counters (format changes, and what became of their conversions).
+  u32 m_reinterprets_requested = 0;
+  std::array<u32, NUM_EFB_REINTERPRET_TYPES> m_reinterprets_run{};
+  u32 m_reinterprets_unchanged = 0;
+  u32 m_reinterprets_dropped = 0;
+  u32 m_reinterprets_cancelled = 0;
+  u32 m_reinterpret_log_frames = 0;
 
   Common::EventHook m_end_of_frame_event;
   Common::EventHook m_before_frame_event;

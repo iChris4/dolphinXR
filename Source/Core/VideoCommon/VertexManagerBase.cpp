@@ -951,6 +951,8 @@ void VertexManagerBase::Flush()
     // This is more or less the start of the Frame
     GetVideoEvents().before_frame_event.Trigger();
   }
+  // EFB operations held back until the EFB is used (VR clears, format conversions) run now.
+  g_framebuffer_manager->FlushDeferredEFBOps();
 
   if (xfmem.numTexGen.numTexGens != bpmem.genMode.numtexgens ||
       xfmem.numChan.numColorChans != bpmem.genMode.numcolchans)

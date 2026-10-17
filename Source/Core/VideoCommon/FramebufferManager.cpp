@@ -7,6 +7,7 @@
 #include <cstring>
 #include <fmt/format.h>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "Common/ChunkFile.h"
@@ -112,12 +113,14 @@ void FramebufferManager::FlushPendingVRClearEFB()
   m_vr_efb_clear_pending = false;
   if (!WillRunVRClearEFB())
   {
-    FlushDeferredEFBClears();
+    FlushDeferredEFBOps();
     return;
   }
-  // The VR clear below overwrites every EFB attachment, so the game clears held back since the
-  // XFB copy would only be overwritten.
-  m_deferred_efb_clears.clear();
+  // The VR clear below overwrites every EFB attachment, so the game clears and format conversions
+  // held back since the XFB copy would only be overwritten.
+  for (const DeferredEFBOp& op : m_deferred_efb_ops)
+    m_reinterprets_dropped += op.reinterpret ? 1 : 0;
+  m_deferred_efb_ops.clear();
   ClearEFBForOpenXR();
 }
 
@@ -127,18 +130,24 @@ bool FramebufferManager::WillRunVRClearEFB() const
   return g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !g_ActiveConfig.vr_dont_clear_screen;
 }
 
-void FramebufferManager::FlushDeferredEFBClears()
+void FramebufferManager::FlushDeferredEFBOps()
 {
-  if (m_deferred_efb_clears.empty())
+  if (m_deferred_efb_ops.empty())
     return;
-  for (const DeferredEFBClear& clear : m_deferred_efb_clears)
-    ClearEFBNow(clear);
-  m_deferred_efb_clears.clear();
+  std::vector<DeferredEFBOp> ops;
+  ops.swap(m_deferred_efb_ops);
+  for (const DeferredEFBOp& op : ops)
+  {
+    if (op.reinterpret)
+      ReinterpretPixelDataNow(op.convtype);
+    else
+      ClearEFBNow(op.clear);
+  }
 }
 
 void FramebufferManager::RecreateEFBFramebuffer(int efb_scale)
 {
-  FlushDeferredEFBClears();
+  FlushDeferredEFBOps();
   FlushEFBPokes();
   InvalidatePeekCache(true);
 
@@ -512,7 +521,7 @@ void FramebufferManager::ClearEFBForOpenXR()
 
 AbstractTexture* FramebufferManager::ResolveEFBColorTexture(const MathUtil::Rectangle<int>& region)
 {
-  FlushDeferredEFBClears();
+  FlushDeferredEFBOps();
 
   // Return the normal EFB texture if multisampling is off.
   if (!IsEFBMultisampled())
@@ -551,7 +560,7 @@ AbstractTexture* FramebufferManager::ResolveEFBColorTexture(const MathUtil::Rect
 AbstractTexture*
 FramebufferManager::ResolveEFBCoverageTexture(const MathUtil::Rectangle<int>& region)
 {
-  FlushDeferredEFBClears();
+  FlushDeferredEFBOps();
   if (!HasEFBCoverage())
     return nullptr;
   if (!IsEFBMultisampled())
@@ -571,7 +580,7 @@ FramebufferManager::ResolveEFBCoverageTexture(const MathUtil::Rectangle<int>& re
 AbstractTexture* FramebufferManager::ResolveEFBDepthTexture(const MathUtil::Rectangle<int>& region,
                                                             bool force_r32f)
 {
-  FlushDeferredEFBClears();
+  FlushDeferredEFBOps();
   if (!IsEFBMultisampled() &&
       (!force_r32f || m_efb_depth_texture->GetFormat() == AbstractTextureFormat::D32F))
   {
@@ -597,11 +606,64 @@ AbstractTexture* FramebufferManager::ResolveEFBDepthTexture(const MathUtil::Rect
   return m_efb_depth_resolve_texture.get();
 }
 
+static bool AreInverseReinterprets(EFBReinterpretType a, EFBReinterpretType b)
+{
+  // RGB8 and RGBA6 are both 24 bits a pixel and the conversions between them are exact inverses
+  // (6-bit values survive the RGBA8 storage), so converting there and back changes nothing.
+  return (a == EFBReinterpretType::RGB8ToRGBA6 && b == EFBReinterpretType::RGBA6ToRGB8) ||
+         (a == EFBReinterpretType::RGBA6ToRGB8 && b == EFBReinterpretType::RGB8ToRGBA6);
+}
+
+static bool IsCopyReinterpret(EFBReinterpretType convtype)
+{
+  return convtype == EFBReinterpretType::RGB8ToRGB565 ||
+         convtype == EFBReinterpretType::RGBA6ToRGB565 ||
+         convtype == EFBReinterpretType::RGB565ToRGB8 ||
+         convtype == EFBReinterpretType::RGB565ToRGBA6;
+}
+
 bool FramebufferManager::ReinterpretPixelData(EFBReinterpretType convtype)
 {
-  FlushDeferredEFBClears();
   if (!m_format_conversion_pipelines[static_cast<u32>(convtype)])
     return false;
+  ++m_reinterprets_requested;
+
+  // The conversions to and from RGB565 copy the RGBA8 values as they are. Unless the copy
+  // averages the samples of a multisampled EFB, converting would change nothing.
+  if (IsCopyReinterpret(convtype) && (!IsEFBMultisampled() || g_ActiveConfig.bSSAA))
+  {
+    ++m_reinterprets_unchanged;
+    return true;
+  }
+
+  if (!g_ActiveConfig.VRSessionActive())
+  {
+    FlushDeferredEFBOps();
+    return ReinterpretPixelDataNow(convtype);
+  }
+
+  // VR: each conversion is a full-screen pass over the stereo EFB at the internal resolution, and
+  // games often change the format just before clearing the EFB, or change it back before
+  // drawing. Queue it; FlushDeferredEFBOps runs it when the EFB is next used.
+  if (!m_deferred_efb_ops.empty() && m_deferred_efb_ops.back().reinterpret &&
+      AreInverseReinterprets(m_deferred_efb_ops.back().convtype, convtype))
+  {
+    m_deferred_efb_ops.pop_back();
+    m_reinterprets_cancelled += 2;
+    return true;
+  }
+  // Pokes issued before the format change are converted with the rest of the EFB.
+  FlushEFBPokes();
+  // As the conversion would: values read back before it would be in the old format.
+  InvalidatePeekCache(true);
+  ClearEFBCacheSnapshot(m_efb_color_cache);
+  m_deferred_efb_ops.push_back({true, {}, convtype});
+  return true;
+}
+
+bool FramebufferManager::ReinterpretPixelDataNow(EFBReinterpretType convtype)
+{
+  ++m_reinterprets_run[static_cast<u32>(convtype)];
 
   // Draw to the secondary framebuffer.
   // We don't discard here because discarding the framebuffer also throws away the depth
@@ -887,6 +949,33 @@ void FramebufferManager::FlagPeekCacheAsOutOfDate()
 
 void FramebufferManager::EndOfFrame()
 {
+  // EFBReinterpret: what became of the format conversions, while a game changes formats.
+  if (++m_reinterpret_log_frames >= 300)
+  {
+    if (m_reinterprets_requested != 0)
+    {
+      static constexpr std::array<const char*, NUM_EFB_REINTERPRET_TYPES> names = {
+          "RGB8>RGB565", "RGB8>RGBA6", "RGBA6>RGB8", "RGBA6>RGB565", "RGB565>RGB8", "RGB565>RGBA6"};
+      std::string run;
+      for (u32 i = 0; i < NUM_EFB_REINTERPRET_TYPES; ++i)
+      {
+        if (m_reinterprets_run[i] != 0)
+          run += fmt::format(" {} {}", names[i], m_reinterprets_run[i]);
+      }
+      INFO_LOG_FMT(VIDEO,
+                   "EFBReinterpret: {} format changes in {} frames | unchanged data {}, dropped by "
+                   "a clear {}, cancelled by the reverse change {} | run:{}",
+                   m_reinterprets_requested, m_reinterpret_log_frames, m_reinterprets_unchanged,
+                   m_reinterprets_dropped, m_reinterprets_cancelled, run.empty() ? " none" : run);
+    }
+    m_reinterprets_requested = 0;
+    m_reinterprets_run = {};
+    m_reinterprets_unchanged = 0;
+    m_reinterprets_dropped = 0;
+    m_reinterprets_cancelled = 0;
+    m_reinterpret_log_frames = 0;
+  }
+
   for (u32 i = 0; i < m_efb_color_cache.tiles.size(); i++)
   {
     m_efb_color_cache.tiles[i].frame_access_mask <<= 1;
@@ -1404,15 +1493,32 @@ void FramebufferManager::ClearEFB(const MathUtil::Rectangle<int>& rc, bool color
   // Between an XFB copy and the next frame's first draw a VR clear is pending, and it overwrites
   // every EFB attachment. A game clear issued there (typically the XFB copy's own clear, a
   // full-screen masked draw at high IR) is only observable if the EFB is used before that draw,
-  // so hold it back; FlushDeferredEFBClears runs it on the paths that do use the EFB.
+  // so hold it back; FlushDeferredEFBOps runs it on the paths that do use the EFB.
   if (m_vr_efb_clear_pending && WillRunVRClearEFB())
   {
     // Pokes issued before the clear still land before it.
     FlushEFBPokes();
     FlagPeekCacheAsOutOfDate();
-    m_deferred_efb_clears.push_back(clear);
+    m_deferred_efb_ops.push_back({false, clear, {}});
     return;
   }
+
+  // Queued format conversions run before the clear, unless it overwrites every colour value they
+  // would produce: colour and alpha (forced on in formats without alpha) over the whole EFB.
+  const bool alpha_written = alpha_enable || pixel_format == PixelFormat::RGB565_Z16 ||
+                             pixel_format == PixelFormat::RGB8_Z24 ||
+                             pixel_format == PixelFormat::Z24;
+  const bool overwrites_color = color_enable && alpha_written && rc.left <= 0 && rc.top <= 0 &&
+                                rc.right >= static_cast<int>(EFB_WIDTH) &&
+                                rc.bottom >= static_cast<int>(EFB_HEIGHT);
+  const bool only_reinterprets = std::ranges::all_of(
+      m_deferred_efb_ops, [](const DeferredEFBOp& op) { return op.reinterpret; });
+  if (overwrites_color && only_reinterprets)
+  {
+    m_reinterprets_dropped += static_cast<u32>(m_deferred_efb_ops.size());
+    m_deferred_efb_ops.clear();
+  }
+  FlushDeferredEFBOps();
   ClearEFBNow(clear);
 }
 
@@ -1559,8 +1665,8 @@ AbstractPipeline* FramebufferManager::GetClearPipeline(bool colorEnable, bool al
 
 void FramebufferManager::PokeEFBColor(u32 x, u32 y, u32 color)
 {
-  // A poke lands after every clear issued before it.
-  FlushDeferredEFBClears();
+  // A poke lands after every clear and format conversion issued before it.
+  FlushDeferredEFBOps();
 
   // Flush if we exceeded the number of vertices per batch.
   if ((m_color_poke_vertices.size() + 6) > MAX_POKE_VERTICES)
@@ -1588,7 +1694,7 @@ void FramebufferManager::PokeEFBColor(u32 x, u32 y, u32 color)
 
 void FramebufferManager::PokeEFBDepth(u32 x, u32 y, float depth)
 {
-  FlushDeferredEFBClears();
+  FlushDeferredEFBOps();
 
   // Flush if we exceeded the number of vertices per batch.
   if ((m_depth_poke_vertices.size() + 6) > MAX_POKE_VERTICES)
@@ -1767,7 +1873,7 @@ void FramebufferManager::DestroyPokePipelines()
 
 void FramebufferManager::DoState(PointerWrap& p)
 {
-  FlushDeferredEFBClears();
+  FlushDeferredEFBOps();
   FlushEFBPokes();
   // A loaded state is another moment of the game: never answer a read with data from before it.
   if (p.IsReadMode())
