@@ -314,7 +314,26 @@ protected:
   std::vector<EFBPokeVertex> m_depth_poke_vertices;
 
   void FlushPendingVRClearEFB();
+  bool WillRunVRClearEFB() const;
   bool m_vr_efb_clear_pending = false;
+
+  struct DeferredEFBClear
+  {
+    MathUtil::Rectangle<int> rc;
+    bool color_enable;
+    bool alpha_enable;
+    bool z_enable;
+    u32 color;
+    u32 z;
+    PixelFormat pixel_format;
+  };
+  void ClearEFBNow(const DeferredEFBClear& clear);
+  // Runs the game clears ClearEFB held back behind a pending VR clear. Called before anything
+  // reads, pokes, reinterprets or saves the EFB.
+  void FlushDeferredEFBClears();
+  // Game clears issued while the VR clear is pending: it overwrites the whole EFB at the next
+  // draw, so they only run if the EFB is used before that draw.
+  std::vector<DeferredEFBClear> m_deferred_efb_clears;
 
   Common::EventHook m_end_of_frame_event;
   Common::EventHook m_before_frame_event;

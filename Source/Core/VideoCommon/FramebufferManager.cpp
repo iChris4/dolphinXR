@@ -110,14 +110,35 @@ void FramebufferManager::FlushPendingVRClearEFB()
   if (!m_vr_efb_clear_pending)
     return;
   m_vr_efb_clear_pending = false;
-  // Same policy gates as the old per-present call site in Presenter.
-  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || g_ActiveConfig.vr_dont_clear_screen)
+  if (!WillRunVRClearEFB())
+  {
+    FlushDeferredEFBClears();
     return;
+  }
+  // The VR clear below overwrites every EFB attachment, so the game clears held back since the
+  // XFB copy would only be overwritten.
+  m_deferred_efb_clears.clear();
   ClearEFBForOpenXR();
+}
+
+// Same policy gates as the old per-present call site in Presenter.
+bool FramebufferManager::WillRunVRClearEFB() const
+{
+  return g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !g_ActiveConfig.vr_dont_clear_screen;
+}
+
+void FramebufferManager::FlushDeferredEFBClears()
+{
+  if (m_deferred_efb_clears.empty())
+    return;
+  for (const DeferredEFBClear& clear : m_deferred_efb_clears)
+    ClearEFBNow(clear);
+  m_deferred_efb_clears.clear();
 }
 
 void FramebufferManager::RecreateEFBFramebuffer(int efb_scale)
 {
+  FlushDeferredEFBClears();
   FlushEFBPokes();
   InvalidatePeekCache(true);
 
@@ -491,6 +512,8 @@ void FramebufferManager::ClearEFBForOpenXR()
 
 AbstractTexture* FramebufferManager::ResolveEFBColorTexture(const MathUtil::Rectangle<int>& region)
 {
+  FlushDeferredEFBClears();
+
   // Return the normal EFB texture if multisampling is off.
   if (!IsEFBMultisampled())
     return m_efb_color_texture.get();
@@ -528,6 +551,7 @@ AbstractTexture* FramebufferManager::ResolveEFBColorTexture(const MathUtil::Rect
 AbstractTexture*
 FramebufferManager::ResolveEFBCoverageTexture(const MathUtil::Rectangle<int>& region)
 {
+  FlushDeferredEFBClears();
   if (!HasEFBCoverage())
     return nullptr;
   if (!IsEFBMultisampled())
@@ -547,6 +571,7 @@ FramebufferManager::ResolveEFBCoverageTexture(const MathUtil::Rectangle<int>& re
 AbstractTexture* FramebufferManager::ResolveEFBDepthTexture(const MathUtil::Rectangle<int>& region,
                                                             bool force_r32f)
 {
+  FlushDeferredEFBClears();
   if (!IsEFBMultisampled() &&
       (!force_r32f || m_efb_depth_texture->GetFormat() == AbstractTextureFormat::D32F))
   {
@@ -574,6 +599,7 @@ AbstractTexture* FramebufferManager::ResolveEFBDepthTexture(const MathUtil::Rect
 
 bool FramebufferManager::ReinterpretPixelData(EFBReinterpretType convtype)
 {
+  FlushDeferredEFBClears();
   if (!m_format_conversion_pipelines[static_cast<u32>(convtype)])
     return false;
 
@@ -1374,6 +1400,32 @@ void FramebufferManager::ClearEFB(const MathUtil::Rectangle<int>& rc, bool color
                                   bool alpha_enable, bool z_enable, u32 color, u32 z,
                                   PixelFormat pixel_format)
 {
+  const DeferredEFBClear clear{rc, color_enable, alpha_enable, z_enable, color, z, pixel_format};
+  // Between an XFB copy and the next frame's first draw a VR clear is pending, and it overwrites
+  // every EFB attachment. A game clear issued there (typically the XFB copy's own clear, a
+  // full-screen masked draw at high IR) is only observable if the EFB is used before that draw,
+  // so hold it back; FlushDeferredEFBClears runs it on the paths that do use the EFB.
+  if (m_vr_efb_clear_pending && WillRunVRClearEFB())
+  {
+    // Pokes issued before the clear still land before it.
+    FlushEFBPokes();
+    FlagPeekCacheAsOutOfDate();
+    m_deferred_efb_clears.push_back(clear);
+    return;
+  }
+  ClearEFBNow(clear);
+}
+
+void FramebufferManager::ClearEFBNow(const DeferredEFBClear& clear)
+{
+  const MathUtil::Rectangle<int>& rc = clear.rc;
+  bool color_enable = clear.color_enable;
+  bool alpha_enable = clear.alpha_enable;
+  const bool z_enable = clear.z_enable;
+  u32 color = clear.color;
+  const u32 z = clear.z;
+  const PixelFormat pixel_format = clear.pixel_format;
+
   FlushEFBPokes();
   FlagPeekCacheAsOutOfDate();
 
@@ -1507,6 +1559,9 @@ AbstractPipeline* FramebufferManager::GetClearPipeline(bool colorEnable, bool al
 
 void FramebufferManager::PokeEFBColor(u32 x, u32 y, u32 color)
 {
+  // A poke lands after every clear issued before it.
+  FlushDeferredEFBClears();
+
   // Flush if we exceeded the number of vertices per batch.
   if ((m_color_poke_vertices.size() + 6) > MAX_POKE_VERTICES)
     FlushEFBPokes();
@@ -1533,6 +1588,8 @@ void FramebufferManager::PokeEFBColor(u32 x, u32 y, u32 color)
 
 void FramebufferManager::PokeEFBDepth(u32 x, u32 y, float depth)
 {
+  FlushDeferredEFBClears();
+
   // Flush if we exceeded the number of vertices per batch.
   if ((m_depth_poke_vertices.size() + 6) > MAX_POKE_VERTICES)
     FlushEFBPokes();
@@ -1710,6 +1767,7 @@ void FramebufferManager::DestroyPokePipelines()
 
 void FramebufferManager::DoState(PointerWrap& p)
 {
+  FlushDeferredEFBClears();
   FlushEFBPokes();
   // A loaded state is another moment of the game: never answer a read with data from before it.
   if (p.IsReadMode())
