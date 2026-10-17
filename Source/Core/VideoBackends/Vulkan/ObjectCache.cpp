@@ -18,8 +18,16 @@
 #include "VideoBackends/Vulkan/VKStreamBuffer.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
+#include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/Constants.h"
 #include "VideoCommon/VideoCommon.h"
+#include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/VideoEvents.h"
+
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRFrameRegion.h"
+#endif
 
 namespace Vulkan
 {
@@ -563,45 +571,103 @@ void ObjectCache::DestroyRenderPassCache()
 
 namespace
 {
-// Radially symmetric density falloff for fixed foveated rendering. R8G8_UNORM texels
-// hold (x, y) shading density: 255 = full rate, 128 = half rate per axis, and so on.
-// The GPU quantizes to the rates it supports (Adreno: 1, 1/2, 1/4 per axis).
-void FillFoveationDensityLayer(u8* dst, u32 width, u32 height, int level)
-{
-  struct LevelParams
-  {
-    float inner_radius;  // full-density region, in normalized [-1,1] coordinates
-    float min_density;
-    float falloff_exponent;
-  };
-  static constexpr LevelParams kLevels[] = {
-      {0.70f, 0.50f, 2.0f},  // Low
-      {0.50f, 0.25f, 2.0f},  // Medium
-      {0.35f, 0.25f, 1.0f},  // High: linear falloff reaches quarter rate sooner
-  };
-  const LevelParams& p = kLevels[std::clamp(level, 1, 3) - 1];
+// Fixed foveated rendering of the EFB, after Wiicompiled_VR (aurora gfx/foveation.hpp). Each
+// R8G8_UNORM texel holds the (x, y) shading density of the pixels it covers. A fragment covers
+// 1/density pixels per axis, rounded down to a size the GPU supports (Adreno: 1, 2, 4), so a
+// half is written just below 128 or it rounds back to a single pixel.
+constexpr u8 FULL_DENSITY = 255;
+constexpr u8 HALF_DENSITY = 127;
+constexpr u8 QUARTER_DENSITY = 63;
 
-  for (u32 y = 0; y < height; ++y)
+// Frame ends a changed map must hold before it is uploaded. Every upload waits for the GPU, so
+// a frame region that changes from one frame to the next must not trigger one per frame.
+constexpr u32 EFB_FDM_STABLE_FRAMES = 30;
+
+// Angles from the eye's forward direction, in degrees, below which a level shades at full and
+// then at half density; beyond the second, a quarter. Low never drops below half.
+struct FoveationRings
+{
+  float full;
+  float half;
+};
+constexpr std::array<FoveationRings, 3> FOVEATION_RINGS = {{
+    {30.0f, 90.0f},  // Low
+    {25.0f, 40.0f},  // Medium
+    {18.0f, 34.0f},  // High
+}};
+
+// The map of one eye. The game's 3D view spans the displayed frame region with the eye's whole
+// asymmetric field of view (OpenXRManager::GetEyeProjectionRows), so a pixel's tangents follow
+// from its position in that region, and the eye's forward direction lies off the region centre,
+// towards the nose. Pixels outside the region take the density of its nearest edge.
+void FillFoveationDensityLayer(u8* dst, u32 map_width, u32 map_height, u32 texel_width,
+                               u32 texel_height, float efb_scale_x, float efb_scale_y,
+                               const std::array<float, 4>& tangents,
+                               const std::array<int, 4>& region, int level)
+{
+  const FoveationRings& rings = FOVEATION_RINGS[std::clamp(level, 1, 3) - 1];
+  const float tan_left = tangents[0];
+  const float tan_right = tangents[1];
+  const float tan_up = tangents[2];
+  const float tan_down = tangents[3];
+  const float region_left = region[0] * efb_scale_x;
+  const float region_top = region[1] * efb_scale_y;
+  const float region_width = std::max(region[2] * efb_scale_x, 1.0f);
+  const float region_height = std::max(region[3] * efb_scale_y, 1.0f);
+
+  for (u32 y = 0; y < map_height; ++y)
   {
-    const float ny = ((y + 0.5f) / height) * 2.0f - 1.0f;
-    for (u32 x = 0; x < width; ++x)
+    const float v =
+        std::clamp(((y + 0.5f) * texel_height - region_top) / region_height, 0.0f, 1.0f);
+    const float tan_y = tan_up + (tan_down - tan_up) * v;
+    for (u32 x = 0; x < map_width; ++x)
     {
-      const float nx = ((x + 0.5f) / width) * 2.0f - 1.0f;
-      const float r = std::sqrt(nx * nx + ny * ny);
-      float density = 1.0f;
-      if (r > p.inner_radius)
-      {
-        const float t = std::min((r - p.inner_radius) / (1.05f - p.inner_radius), 1.0f);
-        density = 1.0f - (1.0f - p.min_density) * std::pow(t, p.falloff_exponent);
-      }
-      const u8 value = static_cast<u8>(
-          std::lround(std::clamp(density, p.min_density, 1.0f) * 255.0f));
-      dst[(y * width + x) * 2 + 0] = value;
-      dst[(y * width + x) * 2 + 1] = value;
+      const float u =
+          std::clamp(((x + 0.5f) * texel_width - region_left) / region_width, 0.0f, 1.0f);
+      const float tan_x = tan_left + (tan_right - tan_left) * u;
+      const float eccentricity =
+          std::atan(std::sqrt(tan_x * tan_x + tan_y * tan_y)) * (180.0f / 3.14159265f);
+      const u8 value = eccentricity < rings.full ? FULL_DENSITY :
+                       eccentricity < rings.half ? HALF_DENSITY :
+                                                   QUARTER_DENSITY;
+      dst[(y * map_width + x) * 2 + 0] = value;
+      dst[(y * map_width + x) * 2 + 1] = value;
     }
   }
 }
 }  // namespace
+
+ObjectCache::EFBFoveationKey ObjectCache::GetCurrentEFBFoveationKey()
+{
+  EFBFoveationKey key;
+  key.level = std::clamp(g_ActiveConfig.vr_foveation_level, 1, 3);
+  // Until the runtime has located the views: a symmetric 90 degree field of view.
+  for (auto& eye : key.eye_tangents)
+    eye = {-1.0f, 1.0f, 1.0f, -1.0f};
+  key.region = {0, 0, static_cast<int>(EFB_WIDTH), 480};
+#ifdef ENABLE_VR
+  if (VR::g_openxr)
+  {
+    const auto& views = VR::g_openxr->GetEyeViews();
+    for (u32 eye = 0; eye < 2; ++eye)
+    {
+      const XrFovf& fov = views[eye].fov;
+      if (fov.angleRight - fov.angleLeft <= 0.0f || fov.angleUp - fov.angleDown <= 0.0f)
+        continue;
+      // Rounded, so that noise in the reported fields of view does not rebuild the map.
+      const auto round_tan = [](float angle) {
+        return std::round(std::tan(angle) * 100.0f) / 100.0f;
+      };
+      key.eye_tangents[eye] = {round_tan(fov.angleLeft), round_tan(fov.angleRight),
+                               round_tan(fov.angleUp), round_tan(fov.angleDown)};
+    }
+  }
+  const VR::VRFrameRegion frame_region = VR::GetVRFrameRegion();
+  if (frame_region.valid && frame_region.width > 0 && frame_region.height > 0)
+    key.region = {frame_region.left, frame_region.top, frame_region.width, frame_region.height};
+#endif
+  return key;
+}
 
 VkImageView ObjectCache::GetEFBFragmentDensityMapView(u32 fb_width, u32 fb_height, u32 layers)
 {
@@ -611,10 +677,8 @@ VkImageView ObjectCache::GetEFBFragmentDensityMapView(u32 fb_width, u32 fb_heigh
     return VK_NULL_HANDLE;
   }
 
-  const int level = std::clamp(g_ActiveConfig.vr_foveation_level, 1, 3);
   if (m_efb_fdm_view != VK_NULL_HANDLE && m_efb_fdm_fb_width == fb_width &&
-      m_efb_fdm_fb_height == fb_height && m_efb_fdm_layers == layers &&
-      m_efb_fdm_level == level)
+      m_efb_fdm_fb_height == fb_height && m_efb_fdm_layers == layers)
   {
     return m_efb_fdm_view;
   }
@@ -622,7 +686,7 @@ VkImageView ObjectCache::GetEFBFragmentDensityMapView(u32 fb_width, u32 fb_heigh
   DestroyEFBFragmentDensityMap();
 
   // Coarsest granularity the device allows, capped at 32x32 so the map keeps enough
-  // texels to shape the falloff. One density texel covers texel_w x texel_h pixels.
+  // texels to shape the rings. One density texel covers texel_w x texel_h pixels.
   const auto& info = g_vulkan_context->GetDeviceInfo();
   const u32 texel_w = std::clamp<u32>(32, std::max(1u, info.minFragmentDensityTexelSize.width),
                                       std::max(1u, info.maxFragmentDensityTexelSize.width));
@@ -662,76 +726,19 @@ VkImageView ObjectCache::GetEFBFragmentDensityMapView(u32 fb_width, u32 fb_heigh
     return VK_NULL_HANDLE;
   }
 
-  // Upload the density values through a transient staging buffer.
-  const VkDeviceSize layer_size = static_cast<VkDeviceSize>(fdm_width) * fdm_height * 2;
-  const VkDeviceSize upload_size = layer_size * layers;
-  const VkBufferCreateInfo buffer_info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                                          nullptr,
-                                          0,
-                                          upload_size,
-                                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                          VK_SHARING_MODE_EXCLUSIVE,
-                                          0,
-                                          nullptr};
-  VmaAllocationCreateInfo buffer_alloc_info = {};
-  buffer_alloc_info.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                            VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
-  buffer_alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
-
-  VkBuffer staging_buffer = VK_NULL_HANDLE;
-  VmaAllocation staging_alloc = VK_NULL_HANDLE;
-  VmaAllocationInfo staging_map_info = {};
-  res = vmaCreateBuffer(g_vulkan_context->GetMemoryAllocator(), &buffer_info, &buffer_alloc_info,
-                        &staging_buffer, &staging_alloc, &staging_map_info);
-  if (res != VK_SUCCESS || staging_map_info.pMappedData == nullptr)
+  m_efb_fdm_fb_width = fb_width;
+  m_efb_fdm_fb_height = fb_height;
+  m_efb_fdm_layers = layers;
+  m_efb_fdm_width = fdm_width;
+  m_efb_fdm_height = fdm_height;
+  m_efb_fdm_texel_width = texel_w;
+  m_efb_fdm_texel_height = texel_h;
+  m_efb_fdm_key = GetCurrentEFBFoveationKey();
+  if (!UploadEFBFragmentDensityMap(true))
   {
-    LOG_VULKAN_ERROR(res, "vmaCreateBuffer (EFB fragment density map staging) failed: ");
-    if (staging_buffer != VK_NULL_HANDLE)
-      vmaDestroyBuffer(g_vulkan_context->GetMemoryAllocator(), staging_buffer, staging_alloc);
     DestroyEFBFragmentDensityMap();
     return VK_NULL_HANDLE;
   }
-
-  u8* map = static_cast<u8*>(staging_map_info.pMappedData);
-  for (u32 layer = 0; layer < layers; ++layer)
-    FillFoveationDensityLayer(map + layer * layer_size, fdm_width, fdm_height, level);
-  vmaFlushAllocation(g_vulkan_context->GetMemoryAllocator(), staging_alloc, 0, VK_WHOLE_SIZE);
-
-  DrainRecordingWorkerForDirectAccess();
-  VkCommandBuffer cmd = g_command_buffer_mgr->GetCurrentInitCommandBuffer();
-
-  VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                                  nullptr,
-                                  0,
-                                  VK_ACCESS_TRANSFER_WRITE_BIT,
-                                  VK_IMAGE_LAYOUT_UNDEFINED,
-                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                  VK_QUEUE_FAMILY_IGNORED,
-                                  VK_QUEUE_FAMILY_IGNORED,
-                                  m_efb_fdm_image,
-                                  {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers}};
-  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-                       0, nullptr, 0, nullptr, 1, &barrier);
-
-  const VkBufferImageCopy copy = {0,
-                                  0,
-                                  0,
-                                  {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layers},
-                                  {0, 0, 0},
-                                  {fdm_width, fdm_height, 1}};
-  vkCmdCopyBufferToImage(cmd, staging_buffer, m_efb_fdm_image,
-                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-
-  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  barrier.dstAccessMask = VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT;
-  barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  barrier.newLayout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
-  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                       VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT, 0, 0, nullptr, 0,
-                       nullptr, 1, &barrier);
-
-  g_command_buffer_mgr->DeferBufferDestruction(staging_buffer, staging_alloc);
 
   const VkImageViewCreateInfo view_info = {
       VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -752,16 +759,156 @@ VkImageView ObjectCache::GetEFBFragmentDensityMapView(u32 fb_width, u32 fb_heigh
     return VK_NULL_HANDLE;
   }
 
-  m_efb_fdm_fb_width = fb_width;
-  m_efb_fdm_fb_height = fb_height;
-  m_efb_fdm_layers = layers;
-  m_efb_fdm_level = level;
+  // Without fragmentDensityMapDynamic the driver reads a density map when a render pass using
+  // it is recorded, not when the GPU runs it. Contents uploaded here therefore reach only the
+  // render passes recorded after the upload completed: the next frame end uploads them again
+  // and waits for that (UpdateEFBFragmentDensityMap).
+  m_efb_fdm_current = false;
+  if (!m_frame_end_event)
+  {
+    m_frame_end_event = GetVideoEvents().after_frame_event.Register(
+        [this](Core::System&) { UpdateEFBFragmentDensityMap(); });
+  }
 
   INFO_LOG_FMT(VIDEO,
                "Vulkan: EFB fragment density map ready: {}x{} texels ({}x{} px granularity) "
-               "x{} layers, level {}.",
-               fdm_width, fdm_height, texel_w, texel_h, layers, level);
+               "x{} layers.",
+               fdm_width, fdm_height, texel_w, texel_h, layers);
   return m_efb_fdm_view;
+}
+
+bool ObjectCache::UploadEFBFragmentDensityMap(bool initial)
+{
+  // Upload the density values through a transient staging buffer.
+  const u32 layers = m_efb_fdm_layers;
+  const VkDeviceSize layer_size = static_cast<VkDeviceSize>(m_efb_fdm_width) * m_efb_fdm_height * 2;
+  const VkDeviceSize upload_size = layer_size * layers;
+  const VkBufferCreateInfo buffer_info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                          nullptr,
+                                          0,
+                                          upload_size,
+                                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                          VK_SHARING_MODE_EXCLUSIVE,
+                                          0,
+                                          nullptr};
+  VmaAllocationCreateInfo buffer_alloc_info = {};
+  buffer_alloc_info.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                            VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+  buffer_alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+
+  VkBuffer staging_buffer = VK_NULL_HANDLE;
+  VmaAllocation staging_alloc = VK_NULL_HANDLE;
+  VmaAllocationInfo staging_map_info = {};
+  const VkResult res =
+      vmaCreateBuffer(g_vulkan_context->GetMemoryAllocator(), &buffer_info, &buffer_alloc_info,
+                      &staging_buffer, &staging_alloc, &staging_map_info);
+  if (res != VK_SUCCESS || staging_map_info.pMappedData == nullptr)
+  {
+    LOG_VULKAN_ERROR(res, "vmaCreateBuffer (EFB fragment density map staging) failed: ");
+    if (staging_buffer != VK_NULL_HANDLE)
+      vmaDestroyBuffer(g_vulkan_context->GetMemoryAllocator(), staging_buffer, staging_alloc);
+    return false;
+  }
+
+  // Layer n is the map of eye n (view n of the multiview EFB).
+  u8* map = static_cast<u8*>(staging_map_info.pMappedData);
+  const float efb_scale_x = static_cast<float>(m_efb_fdm_fb_width) / EFB_WIDTH;
+  const float efb_scale_y = static_cast<float>(m_efb_fdm_fb_height) / EFB_HEIGHT;
+  for (u32 layer = 0; layer < layers; ++layer)
+  {
+    FillFoveationDensityLayer(map + layer * layer_size, m_efb_fdm_width, m_efb_fdm_height,
+                              m_efb_fdm_texel_width, m_efb_fdm_texel_height, efb_scale_x,
+                              efb_scale_y, m_efb_fdm_key.eye_tangents[std::min(layer, 1u)],
+                              m_efb_fdm_key.region, m_efb_fdm_key.level);
+  }
+  vmaFlushAllocation(g_vulkan_context->GetMemoryAllocator(), staging_alloc, 0, VK_WHOLE_SIZE);
+
+  DrainRecordingWorkerForDirectAccess();
+  VkCommandBuffer cmd = g_command_buffer_mgr->GetCurrentInitCommandBuffer();
+
+  // A re-upload waits for the render passes already submitted to finish reading the map.
+  VkImageMemoryBarrier barrier = {
+      VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+      nullptr,
+      initial ? VkAccessFlags{0} : VkAccessFlags{VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT},
+      VK_ACCESS_TRANSFER_WRITE_BIT,
+      initial ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT,
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      VK_QUEUE_FAMILY_IGNORED,
+      VK_QUEUE_FAMILY_IGNORED,
+      m_efb_fdm_image,
+      {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers}};
+  vkCmdPipelineBarrier(cmd,
+                       initial ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT :
+                                 VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+  const VkBufferImageCopy copy = {0,         0,
+                                  0,         {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layers},
+                                  {0, 0, 0}, {m_efb_fdm_width, m_efb_fdm_height, 1}};
+  vkCmdCopyBufferToImage(cmd, staging_buffer, m_efb_fdm_image,
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT;
+  barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  barrier.newLayout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier);
+
+  g_command_buffer_mgr->DeferBufferDestruction(staging_buffer, staging_alloc);
+  return true;
+}
+
+void ObjectCache::UpdateEFBFragmentDensityMap()
+{
+  if (m_efb_fdm_image == VK_NULL_HANDLE)
+    return;
+
+  const EFBFoveationKey key = GetCurrentEFBFoveationKey();
+  if (m_efb_fdm_current)
+  {
+    if (key == m_efb_fdm_key)
+    {
+      m_efb_fdm_pending_frames = 0;
+      return;
+    }
+    if (key != m_efb_fdm_pending_key)
+    {
+      m_efb_fdm_pending_key = key;
+      m_efb_fdm_pending_frames = 0;
+    }
+    if (++m_efb_fdm_pending_frames < EFB_FDM_STABLE_FRAMES)
+      return;
+  }
+
+  m_efb_fdm_key = key;
+  m_efb_fdm_pending_frames = 0;
+  if (!UploadEFBFragmentDensityMap(false))
+    return;
+  // See GetEFBFragmentDensityMapView: render passes recorded from now on must see the new map.
+  g_gfx->WaitForGPUIdle();
+  m_efb_fdm_current = true;
+
+  std::array<u32, 3> counts{};
+  std::vector<u8> layer(static_cast<size_t>(m_efb_fdm_width) * m_efb_fdm_height * 2);
+  FillFoveationDensityLayer(layer.data(), m_efb_fdm_width, m_efb_fdm_height, m_efb_fdm_texel_width,
+                            m_efb_fdm_texel_height,
+                            static_cast<float>(m_efb_fdm_fb_width) / EFB_WIDTH,
+                            static_cast<float>(m_efb_fdm_fb_height) / EFB_HEIGHT,
+                            key.eye_tangents[0], key.region, key.level);
+  for (size_t i = 0; i < layer.size(); i += 2)
+    ++counts[layer[i] == FULL_DENSITY ? 0 : layer[i] == HALF_DENSITY ? 1 : 2];
+  const u32 total = std::max(m_efb_fdm_width * m_efb_fdm_height, 1u);
+  INFO_LOG_FMT(VIDEO,
+               "Vulkan: EFB foveation level {}: left eye tangents L{:.2f} R{:.2f} U{:.2f} "
+               "D{:.2f}, frame region {}x{} at ({},{}); map texels at full {}%, half {}%, "
+               "quarter {}%.",
+               key.level, key.eye_tangents[0][0], key.eye_tangents[0][1], key.eye_tangents[0][2],
+               key.eye_tangents[0][3], key.region[2], key.region[3], key.region[0], key.region[1],
+               counts[0] * 100 / total, counts[1] * 100 / total, counts[2] * 100 / total);
 }
 
 void ObjectCache::DestroyEFBFragmentDensityMap()
@@ -782,7 +929,7 @@ void ObjectCache::DestroyEFBFragmentDensityMap()
   m_efb_fdm_fb_width = 0;
   m_efb_fdm_fb_height = 0;
   m_efb_fdm_layers = 0;
-  m_efb_fdm_level = 0;
+  m_efb_fdm_current = false;
 }
 
 class PipelineCacheReadCallback : public Common::LinearDiskCacheReader<u32, u8>

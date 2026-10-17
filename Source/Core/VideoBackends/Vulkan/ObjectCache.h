@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "Common/CommonTypes.h"
+#include "Common/HookableEvent.h"
 #include "Common/LinearDiskCache.h"
 
 #include "VideoBackends/Vulkan/Constants.h"
@@ -67,8 +68,10 @@ public:
 
   // VR foveation: view of Dolphin's own fragment density map for the EFB render pass
   // (as opposed to the runtime-owned maps attached to the OpenXR swapchains). Lazily
-  // (re)created when the EFB size/layer count or the FoveationLevel setting changes;
-  // contents are a static elliptical falloff. Returns VK_NULL_HANDLE on failure.
+  // (re)created when the EFB size or layer count changes. Each layer is the map of one eye,
+  // centred on that eye's forward direction (see FillFoveationDensityLayer); the contents
+  // follow the eye fields of view, the displayed frame region and the FoveationLevel setting
+  // at each frame end. Returns VK_NULL_HANDLE on failure.
   VkImageView GetEFBFragmentDensityMapView(u32 fb_width, u32 fb_height, u32 layers);
 
   // Pipeline cache. Used when creating pipelines for drivers to store compiled programs.
@@ -97,6 +100,19 @@ private:
   bool ValidatePipelineCache(const u8* data, size_t data_length);
   void DestroyPipelineCache();
   void DestroyEFBFragmentDensityMap();
+  // What the EFB density map contents were computed from.
+  struct EFBFoveationKey
+  {
+    int level = 0;
+    // Tangents of each eye's field of view: left, right, up, down.
+    std::array<std::array<float, 4>, 2> eye_tangents{};
+    // Displayed frame region in native EFB pixels: left, top, width, height.
+    std::array<int, 4> region{};
+    bool operator==(const EFBFoveationKey&) const = default;
+  };
+  static EFBFoveationKey GetCurrentEFBFoveationKey();
+  bool UploadEFBFragmentDensityMap(bool initial);
+  void UpdateEFBFragmentDensityMap();
 
   std::array<VkDescriptorSetLayout, NUM_DESCRIPTOR_SET_LAYOUTS> m_descriptor_set_layouts = {};
   std::array<VkPipelineLayout, NUM_PIPELINE_LAYOUTS> m_pipeline_layouts = {};
@@ -128,7 +144,17 @@ private:
   u32 m_efb_fdm_fb_width = 0;
   u32 m_efb_fdm_fb_height = 0;
   u32 m_efb_fdm_layers = 0;
-  int m_efb_fdm_level = 0;
+  u32 m_efb_fdm_width = 0;
+  u32 m_efb_fdm_height = 0;
+  u32 m_efb_fdm_texel_width = 0;
+  u32 m_efb_fdm_texel_height = 0;
+  EFBFoveationKey m_efb_fdm_key;
+  // False until the map contents are on the GPU and every later render pass can see them.
+  bool m_efb_fdm_current = false;
+  // A changed key and how many frame ends in a row it held (see UpdateEFBFragmentDensityMap).
+  EFBFoveationKey m_efb_fdm_pending_key;
+  u32 m_efb_fdm_pending_frames = 0;
+  Common::EventHook m_frame_end_event;
 };
 
 extern std::unique_ptr<ObjectCache> g_object_cache;
