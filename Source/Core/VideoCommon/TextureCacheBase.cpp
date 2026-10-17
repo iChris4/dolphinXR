@@ -1092,12 +1092,20 @@ PartialTextureUpdateContext TextureCacheBase::BuildPartialUpdateContext(
   {
     context.needs_scale = true;
 
-    const TextureConfig config(src_width, src_height, 1, source_entry->GetNumLayers(), 1,
-                               AbstractTextureFormat::RGBA8, AbstractTextureFlag_RenderTarget,
-                               AbstractTextureType::Texture_2DArray);
-    context.source_scale_entry = AllocateCacheEntry(config);
-    if (!context.source_scale_entry)
-      return {};
+    // An EFB copy made at the current scale is already what the rescale below would produce, a
+    // full-resolution duplicate of it: copy from it directly.
+    const bool source_at_scale = source_entry->GetWidth() == src_width &&
+                                 source_entry->GetHeight() == src_height &&
+                                 source_entry->texture->GetFormat() == AbstractTextureFormat::RGBA8;
+    if (!source_at_scale)
+    {
+      const TextureConfig config(src_width, src_height, 1, source_entry->GetNumLayers(), 1,
+                                 AbstractTextureFormat::RGBA8, AbstractTextureFlag_RenderTarget,
+                                 AbstractTextureType::Texture_2DArray);
+      context.source_scale_entry = AllocateCacheEntry(config);
+      if (!context.source_scale_entry)
+        return {};
+    }
 
     if (target->GetWidth() != dst_width || target->GetHeight() != dst_height)
     {
