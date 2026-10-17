@@ -111,6 +111,13 @@ private:
         "cursors, visibility tests) misbehaves.",
         Config::GFX_VR_NONBLOCKING_EFB_ACCESS, touched);
     MenuWidgets::Checkbox(
+        "Non-Blocking EFB Copies",
+        "When a game waits for its frame buffer copies to reach memory (Metroid Prime 3, Super "
+        "Mario Sunshine), lets it go on and writes each copy as soon as the GPU has made it "
+        "(up to about a frame later) instead of stalling. Uncheck it if an effect that reads such "
+        "copies (visors, goop, screen captures) misbehaves.",
+        Config::GFX_VR_ASYNC_EFB_COPIES, touched);
+    MenuWidgets::Checkbox(
         "Remove Cinematic Bars",
         "Expands the scissor and viewport to fill the full rendering area for perspective draws, "
         "removing cinematic letterbox bars (e.g. Metroid Prime). Disable it if it causes visual "

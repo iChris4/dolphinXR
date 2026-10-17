@@ -955,6 +955,8 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_head_cpu_culling_description">Skips draw calls outside the view cone that follows your head before they reach the GPU. Reduces CPU load in open areas.</string>
     <string name="quest_nonblocking_efb_access">Non-Blocking EFB Reads</string>
     <string name="quest_nonblocking_efb_access_description">When a game reads the frame buffer from the CPU, answers from the last readback the GPU has completed instead of waiting for the newest one (up to about a frame old). Fixes Super Mario Galaxy\'s frame rate in VR. Turn off if an effect driven by such reads misbehaves in a game.</string>
+    <string name="quest_async_efb_copies">Non-Blocking EFB Copies</string>
+    <string name="quest_async_efb_copies_description">When a game waits for its frame buffer copies to reach memory, lets it go on and writes each copy as soon as the GPU has made it (up to about a frame later). Fixes Metroid Prime 3\'s and Super Mario Sunshine\'s frame rate in VR, which turn it on in their VR game settings. Turn off if an effect that reads such copies (visors, goop, screen captures) misbehaves in a game.</string>
     <string name="quest_load_custom_shaders">Load Custom Shaders</string>
     <string name="quest_load_custom_shaders_description">Loads custom shader replacements from the game\'s shader override directory.</string>
     <string name="quest_recenter_now">Recenter VR view now</string>

@@ -1146,6 +1146,11 @@ bool VKStagingTexture::TryFlush()
   return true;
 }
 
+bool VKStagingTexture::IsCopySubmitted() const
+{
+  return !m_needs_flush || g_command_buffer_mgr->GetCurrentFenceCounter() != m_flush_fence_counter;
+}
+
 VKFramebuffer::VKFramebuffer(VKTexture* color_attachment, VKTexture* depth_attachment,
                              std::vector<AbstractTexture*> additional_color_attachments, u32 width,
                              u32 height, u32 layers, u32 samples, VkFramebuffer fb,

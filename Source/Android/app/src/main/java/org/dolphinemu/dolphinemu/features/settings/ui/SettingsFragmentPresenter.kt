@@ -3024,6 +3024,12 @@ class SettingsFragmentPresenter(
             R.string.quest_nonblocking_efb_access_description
         )
         builder.boolean(
+            "AsyncEFBCopies",
+            false,
+            R.string.quest_async_efb_copies,
+            R.string.quest_async_efb_copies_description
+        )
+        builder.boolean(
             "RemoveCinematicBars",
             true,
             R.string.quest_remove_cinematic_bars,
@@ -3473,6 +3479,14 @@ class SettingsFragmentPresenter(
                 QuestVrSettings.nonBlockingEfbAccessSetting(),
                 R.string.quest_nonblocking_efb_access,
                 R.string.quest_nonblocking_efb_access_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.asyncEfbCopiesSetting(),
+                R.string.quest_async_efb_copies,
+                R.string.quest_async_efb_copies_description
             )
         )
         sl.add(

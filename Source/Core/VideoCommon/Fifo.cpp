@@ -36,6 +36,7 @@
 #include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/OpcodeDecoding.h"
 #include "VideoCommon/VertexLoaderManager.h"
+#include "VideoCommon/TextureCacheBase.h"
 #include "VideoCommon/VertexManagerBase.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/VideoBackendBase.h"
@@ -412,6 +413,8 @@ void FifoManager::RunGpuLoop()
           // Make sure VertexManager finishes drawing any primitives it has stored in it's buffer.
           g_vertex_manager->Flush();
           g_framebuffer_manager->RefreshPeekCache();
+          // Async EFB copies: deliver the ones the GPU finished while the CPU thread waits.
+          g_texture_cache->WriteCompletedEFBCopies();
         }
       },
       100);

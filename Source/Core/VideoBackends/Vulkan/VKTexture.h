@@ -122,6 +122,7 @@ public:
   void Unmap() override;
   void Flush() override;
   bool TryFlush() override;
+  bool IsCopySubmitted() const override;
 
   // Recording side of CopyFromTexture(): records the copy into the current command buffer.
   // Runs on whichever thread owns recording (VKGfx::ExecuteRecordCommand).

@@ -232,6 +232,8 @@ const Info<bool> GFX_VR_DONT_CLEAR_SCREEN{{System::GFX, "VR", "DontClearScreen"}
 const Info<bool> GFX_VR_LOAD_CUSTOM_SHADERS{{System::GFX, "VR", "LoadCustomShaders"}, false};
 const Info<bool> GFX_VR_HEAD_CPU_CULL{{System::GFX, "VR", "HeadCPUCull"}, true};
 const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS{{System::GFX, "VR", "NonBlockingEFBAccess"}, true};
+const Info<bool> GFX_VR_ASYNC_EFB_COPIES{{System::GFX, "VR", "AsyncEFBCopies"}, false};
+const Info<bool> GFX_VR_EFB_COPY_DIAGNOSTICS{{System::GFX, "VR", "EFBCopyDiagnostics"}, false};
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},
                                                 OpenXRMirrorView::BothEyes};
 const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{

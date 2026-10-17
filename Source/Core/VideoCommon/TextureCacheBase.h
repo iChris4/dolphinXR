@@ -214,6 +214,12 @@ struct TCacheEntry
   std::unique_ptr<AbstractStagingTexture> pending_efb_copy;
   u32 pending_efb_copy_width = 0;
   u32 pending_efb_copy_height = 0;
+  // Async EFB copies: a sync point (draw done, PE token) passed while the copy was still on the
+  // GPU. The guest memory hash taken then shows whether the game wrote there before the late write.
+  bool pending_efb_copy_past_sync = false;
+  u64 pending_efb_copy_sync_hash = 0;
+  u64 pending_efb_copy_sync_time_us = 0;
+  u32 pending_efb_copy_sync_frame = 0;
 
   // The texture dump name. Assign through SetTextureInfoName so the parsed dump-name hash
   // stays in sync; GetOverrideHash() is read for every bound texture of every draw.
@@ -390,6 +396,14 @@ public:
   // Flushes all pending EFB copies to emulated RAM.
   void FlushEFBCopies();
 
+  // Flushes pending EFB copies at a point where the game may read them (draw done, PE tokens).
+  // With [VR] AsyncEFBCopies, copies the GPU has not finished yet are not waited for: they stay
+  // pending and WriteCompletedEFBCopies() writes them once done.
+  void FlushEFBCopiesAtSyncPoint();
+  // Writes the pending EFB copies whose GPU copy has completed, in issue order, without waiting.
+  // Only does work with [VR] AsyncEFBCopies.
+  void WriteCompletedEFBCopies();
+
   // Flush any Bound textures that can't be reused
   void FlushStaleBinds();
 
@@ -512,6 +526,13 @@ private:
   void WriteEFBCopyToRAM(u8* dst_ptr, u32 width, u32 height, u32 stride,
                          std::unique_ptr<AbstractStagingTexture> staging_texture);
   void FlushEFBCopy(TCacheEntry* entry);
+  // FlushEFBCopy() plus the async/diagnostic bookkeeping of the write.
+  void WritePendingEFBCopy(TCacheEntry* entry);
+
+  static bool UseAsyncEFBCopies();
+  static u64 HashGuestRange(u32 address, u32 size);
+  void CheckDeliveredEFBCopies();
+  void UpdateEFBCopyStats();
 
   // Returns a staging texture of the maximum EFB copy size.
   std::unique_ptr<AbstractStagingTexture> GetEFBCopyStagingTexture();
@@ -589,6 +610,37 @@ private:
   // so that overlapping textures are written to guest RAM in the order they are issued.
   // It's valid for textures to live be in here after they've been invalidated
   std::vector<RcTcacheEntry> m_pending_efb_copies;
+
+  // EFB copy to RAM diagnostics ([VR] EFBCopyDiagnostics) and async statistics.
+  struct DeliveredEFBCopy
+  {
+    u32 address;
+    u32 size;
+    u64 hash;
+    u32 frame;
+  };
+  // Copies written to guest RAM in the last frames, re-hashed at each sync point to see whether
+  // the game writes into a copy it has received.
+  std::vector<DeliveredEFBCopy> m_delivered_efb_copies;
+  struct EFBCopyStats
+  {
+    u32 frames = 0;
+    u32 copies = 0;
+    u32 sync_points = 0;
+    u32 pending_at_sync = 0;
+    u32 in_flight_at_sync = 0;
+    u32 late_writes = 0;
+    u64 late_us_total = 0;
+    u64 late_us_max = 0;
+    u32 forced_flushes = 0;
+    u32 conflicts = 0;
+    u32 modified_after_delivery = 0;
+    u64 bytes = 0;
+    u64 start_us = 0;
+  };
+  EFBCopyStats m_efb_copy_stats;
+  u32 m_efb_copy_frame = 0;
+  u32 m_efb_copy_events_logged = 0;
 
   // Staging texture used for readbacks.
   // We store this in the class so that the same staging texture can be used for multiple

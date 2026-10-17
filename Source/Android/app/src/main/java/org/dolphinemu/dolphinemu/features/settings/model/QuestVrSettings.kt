@@ -142,6 +142,8 @@ object QuestVrSettings {
 
     fun nonBlockingEfbAccessSetting() = vrBooleanSetting("NonBlockingEFBAccess", true)
 
+    fun asyncEfbCopiesSetting() = vrBooleanSetting("AsyncEFBCopies", false)
+
     fun clearEfbCopiesSetting() = vrIntSetting("ClearEFBCopies", 0)
 
     fun loadCustomShadersSetting() = vrBooleanSetting("LoadCustomShaders", false)
@@ -303,6 +305,7 @@ object QuestVrSettings {
             dontClearScreenSetting(),
             headCpuCullSetting(),
             nonBlockingEfbAccessSetting(),
+            asyncEfbCopiesSetting(),
             removeBarsSetting(),
             frameSizeFromXfbSetting(),
             panesOnScreenSetting(),

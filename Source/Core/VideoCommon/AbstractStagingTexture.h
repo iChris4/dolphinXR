@@ -74,6 +74,11 @@ public:
   // a cheap completion query fall back to Flush() and return true.
   virtual bool TryFlush();
 
+  // False while the last CopyFromTexture() may still sit in the command buffer being recorded, so
+  // TryFlush() cannot succeed until something submits it. Backends that do not track this report
+  // false and callers submit.
+  virtual bool IsCopySubmitted() const { return false; }
+
   // Reads the specified rectangle from the staging texture to out_ptr, with the specified stride
   // (length in bytes of each row). CopyFromTexture must be called first. The contents of any
   // texels outside of the rectangle used for CopyFromTexture is undefined.

@@ -227,6 +227,13 @@ extern const Info<bool> GFX_VR_HEAD_CPU_CULL;
 // from the last completed readback instead of waiting for the GPU when the newest one is still
 // in flight (at most about a frame old). See FramebufferManager::PeekEFBColor/Depth.
 extern const Info<bool> GFX_VR_NONBLOCKING_EFB_ACCESS;
+// EFB copies to RAM: do not wait at draw done / PE tokens for copies the GPU has not finished;
+// write each one to guest RAM when its copy completes instead (see
+// TextureCacheBase::FlushEFBCopiesAtSyncPoint). The game may see a copy a little late.
+extern const Info<bool> GFX_VR_ASYNC_EFB_COPIES;
+// Logs EFBCopyRAM: lines (copies in flight at sync points, late writes, guest writes into a
+// delivered or pending copy's memory) to judge whether a game tolerates AsyncEFBCopies.
+extern const Info<bool> GFX_VR_EFB_COPY_DIAGNOSTICS;
 extern const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW;
 extern const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE;
 extern const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE;
