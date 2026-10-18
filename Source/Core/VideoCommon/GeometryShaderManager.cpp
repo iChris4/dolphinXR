@@ -3,9 +3,10 @@
 
 #include "VideoCommon/GeometryShaderManager.h"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -187,6 +188,8 @@ void GeometryShaderManager::Init()
   m_vr_pane_frame_reference_w.clear();
   vr_pane_group_override = 0;
   vr_flat_screen_pane_override = false;
+  vr_pane_reference_w_override = -1.0f;
+  vr_pane_depth_strength = 1.0f;
 
   // Init any initial constants which aren't zero when bpmem is zero.
   SetViewportChanged();
@@ -245,12 +248,18 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         constants.head_locked_params = {};
         constants.pixel_center_correction = {};
         constants.vr_pane_remap = {1.0f, 1.0f, 0.0f, 0.0f};
+        constants.vr_pane_clip = {-VR::VR_PANE_CLIP_OPEN, VR::VR_PANE_CLIP_OPEN,
+                                  -VR::VR_PANE_CLIP_OPEN, VR::VR_PANE_CLIP_OPEN};
         const bool pane_screen_override = vr_pane_screen_override;
         vr_pane_screen_override = false;  // consume
         const bool flat_screen_pane_override = vr_flat_screen_pane_override;
         vr_flat_screen_pane_override = false;  // consume
         const u64 pane_group_override = vr_pane_group_override;
         vr_pane_group_override = 0;  // consume
+        const float pane_reference_w_override = vr_pane_reference_w_override;
+        vr_pane_reference_w_override = -1.0f;  // consume
+        const float pane_depth_strength = vr_pane_depth_strength;
+        vr_pane_depth_strength = 1.0f;  // consume
         const float upm_override = vr_units_per_meter_override;
         vr_units_per_meter_override = -1.0f;  // consume
         const float headlocked_projection_scale_x = vr_headlocked_projection_scale_x;
@@ -439,9 +448,16 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
               constants.stereoparams[3] = VR_STEREO_SCREEN_PANE_3D;
               constants.vr_pane_remap =
                   VR::CalculateVRPaneRemap(xfmem.viewport, pane_x_off, pane_y_off, frame);
-              const float draw_reference_w = VR::CalculateVRPaneReferenceW(
-                  reference_view_z, xfmem.projection.rawProjection[4],
-                  xfmem.projection.rawProjection[5]);
+              constants.vr_pane_clip =
+                  VR::CalculateVRPaneClip(bpmem.scissorTL.x, bpmem.scissorTL.y, bpmem.scissorBR.x,
+                                          bpmem.scissorBR.y, pane_x_off, pane_y_off, frame);
+              constants.head_locked_params[2] = 1.0f - std::clamp(pane_depth_strength, 0.0f, 1.0f);
+              const float draw_reference_w =
+                  pane_reference_w_override > 0.0f ?
+                      pane_reference_w_override :
+                      VR::CalculateVRPaneReferenceW(reference_view_z,
+                                                    xfmem.projection.rawProjection[4],
+                                                    xfmem.projection.rawProjection[5]);
               if (pane_group_override != 0)
               {
                 const auto it =
@@ -809,7 +825,10 @@ void GeometryShaderManager::DoState(PointerWrap& p)
   p.Do(m_projection_changed);
   p.Do(m_viewport_changed);
 
-  p.Do(constants);
+  // vr_pane_clip is rebuilt for every draw. Leaving it out keeps the savestate layout, so
+  // existing savestates still load.
+  p.DoArray(reinterpret_cast<u8*>(&constants),
+            static_cast<u32>(offsetof(GeometryShaderConstants, vr_pane_clip)));
 
   if (p.IsReadMode())
   {
@@ -819,6 +838,8 @@ void GeometryShaderManager::DoState(PointerWrap& p)
     vr_pane_screen_override = false;
     vr_flat_screen_pane_override = false;
     vr_pane_group_override = 0;
+    vr_pane_reference_w_override = -1.0f;
+    vr_pane_depth_strength = 1.0f;
     m_vr_pane_frame_reference_w.clear();
   }
 }

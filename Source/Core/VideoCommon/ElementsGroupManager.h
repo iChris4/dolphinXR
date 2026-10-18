@@ -115,6 +115,12 @@ public:
     // ScreenPane handling: preserve the game's depth buffer values by default, or use the
     // physically projected VR depth of the re-anchored pane geometry with shared Z composition.
     ScreenPaneDepthMode screen_pane_depth = ScreenPaneDepthMode::Game;
+    // ScreenPane handling (Game and VR depth): the game W, in game units, that lands on the
+    // virtual screen (<= 0 = the model origin's). Needed by HUDs drawn in camera space, whose
+    // model origin is the camera. Depth strength scales the game's depth spread around it in
+    // stereo (1 = as drawn, 0 = flat on the screen plane).
+    float screen_pane_reference_depth = -1.0f;
+    float screen_pane_depth_strength = 1.0f;
     float passthrough_opacity = 0.0f;  // Passthrough handling: element opacity (0 = fully camera)
     // CameraAnchor handling: camera-space offset from the anchor element's origin (meters,
     // right/up/forward, converted with units-per-meter and mapped to view-space axes at capture
@@ -268,6 +274,8 @@ public:
     bool preserve_stereo_efb = false;
     ScreenPaneDepthMode screen_pane_depth = ScreenPaneDepthMode::Game;
     u64 screen_pane_group = 0;
+    float screen_pane_reference_depth = -1.0f;
+    float screen_pane_depth_strength = 1.0f;
     float element_depth = -1.0f;
     float units_per_meter = -1.0f;
     float passthrough_opacity = 0.0f;
@@ -305,8 +313,10 @@ private:
   bool ShouldSkipByOverrideLocked(const DrawRecord& draw) const;
   HandlingType GetOverrideHandlingLocked(const DrawRecord& draw,
                                          bool* out_preserve_stereo_efb) const;
-  ScreenPaneDepthMode GetOverrideScreenPaneDepthLocked(const DrawRecord& draw,
-                                                       u64* out_group_id) const;
+  // The first enabled ScreenPane override matching the draw, or nullptr. *out_group_id is its
+  // index + 1 (0 when none matches).
+  const ElementGroupOverride* FindScreenPaneOverrideLocked(const DrawRecord& draw,
+                                                           u64* out_group_id) const;
   float GetOverrideElementDepthLocked(const DrawRecord& draw) const;
   float GetOverrideUnitsPerMeterLocked(const DrawRecord& draw) const;
   float GetOverridePassthroughOpacityLocked(const DrawRecord& draw) const;

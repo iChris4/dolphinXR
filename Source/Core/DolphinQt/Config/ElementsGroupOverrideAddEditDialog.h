@@ -66,6 +66,10 @@ private:
   QCheckBox* m_preserve_stereo_efb_check = nullptr;
   QLabel* m_screen_pane_depth_label = nullptr;
   QComboBox* m_screen_pane_depth_combo = nullptr;
+  QLabel* m_screen_pane_reference_label = nullptr;
+  QDoubleSpinBox* m_screen_pane_reference_spin = nullptr;
+  QLabel* m_screen_pane_strength_label = nullptr;
+  QSpinBox* m_screen_pane_strength_spin = nullptr;
   QDoubleSpinBox* m_element_depth_spin = nullptr;
   QLabel* m_element_depth_label = nullptr;
   QDoubleSpinBox* m_units_per_meter_spin = nullptr;

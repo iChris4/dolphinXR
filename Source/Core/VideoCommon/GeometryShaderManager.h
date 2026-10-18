@@ -69,6 +69,13 @@ public:
   // override share one reference W for the frame, preserving their original relative Z positions.
   u64 vr_pane_group_override = 0;
 
+  // Screen Pane draw: the game W that lands on the virtual screen, in game units (<= 0 = the
+  // model origin's W), and how much of the game's depth spread around it is kept (1 = all,
+  // 0 = flat). A fixed reference is for HUDs drawn in camera space, whose model origin is the
+  // camera itself.
+  float vr_pane_reference_w_override = -1.0f;
+  float vr_pane_depth_strength = 1.0f;
+
   // Per-draw element depth override from shader overrides (-1 = use global setting).
   float vr_element_depth_override = -1.0f;
 

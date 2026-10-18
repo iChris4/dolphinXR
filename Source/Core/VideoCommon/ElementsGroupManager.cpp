@@ -765,6 +765,10 @@ LoadElementGroupOverridesFromINIFile(const std::string& path)
                                   value == "flat" ?
                                       ElementsGroupManager::ScreenPaneDepthMode::Flat :
                                       ElementsGroupManager::ScreenPaneDepthMode::Game;
+    else if (key == "screen_pane_reference_depth")
+      current.screen_pane_reference_depth = std::stof(value);
+    else if (key == "screen_pane_depth_strength")
+      current.screen_pane_depth_strength = std::clamp(std::stof(value), 0.0f, 1.0f);
     else if (key == "passthrough_opacity")
       current.passthrough_opacity = std::clamp(std::stof(value), 0.0f, 1.0f);
     else if (key == "anchor_right")
@@ -958,11 +962,17 @@ void ElementsGroupManager::SaveOverridesToINI(const std::string& game_id,
       out << "element_depth=" << entry.element_depth << "\n";
     if (entry.units_per_meter > 0.0f)
       out << "units_per_meter=" << entry.units_per_meter << "\n";
-    if (entry.handling == HandlingType::ScreenPane &&
-        entry.screen_pane_depth != ScreenPaneDepthMode::Game)
+    if (entry.handling == HandlingType::ScreenPane)
     {
-      out << "screen_pane_depth="
-          << (entry.screen_pane_depth == ScreenPaneDepthMode::VR ? "vr" : "flat") << "\n";
+      if (entry.screen_pane_depth != ScreenPaneDepthMode::Game)
+      {
+        out << "screen_pane_depth="
+            << (entry.screen_pane_depth == ScreenPaneDepthMode::VR ? "vr" : "flat") << "\n";
+      }
+      if (entry.screen_pane_reference_depth > 0.0f)
+        out << "screen_pane_reference_depth=" << entry.screen_pane_reference_depth << "\n";
+      if (entry.screen_pane_depth_strength < 1.0f)
+        out << "screen_pane_depth_strength=" << entry.screen_pane_depth_strength << "\n";
     }
     if (entry.handling == HandlingType::Passthrough)
       out << "passthrough_opacity=" << entry.passthrough_opacity << "\n";
@@ -1961,12 +1971,12 @@ ElementsGroupManager::ScreenPaneDepthMode
 ElementsGroupManager::GetOverrideScreenPaneDepth(const DrawRecord& draw, u64* out_group_id) const
 {
   std::lock_guard lock(m_mutex);
-  return GetOverrideScreenPaneDepthLocked(draw, out_group_id);
+  const ElementGroupOverride* entry = FindScreenPaneOverrideLocked(draw, out_group_id);
+  return entry ? entry->screen_pane_depth : ScreenPaneDepthMode::Game;
 }
 
-ElementsGroupManager::ScreenPaneDepthMode
-ElementsGroupManager::GetOverrideScreenPaneDepthLocked(const DrawRecord& draw,
-                                                       u64* out_group_id) const
+const ElementsGroupManager::ElementGroupOverride*
+ElementsGroupManager::FindScreenPaneOverrideLocked(const DrawRecord& draw, u64* out_group_id) const
 {
   for (size_t index = 0; index < m_overrides.size(); ++index)
   {
@@ -1977,12 +1987,12 @@ ElementsGroupManager::GetOverrideScreenPaneDepthLocked(const DrawRecord& draw,
     {
       if (out_group_id)
         *out_group_id = static_cast<u64>(index) + 1;
-      return entry.screen_pane_depth;
+      return &entry;
     }
   }
   if (out_group_id)
     *out_group_id = 0;
-  return ScreenPaneDepthMode::Game;
+  return nullptr;
 }
 
 float ElementsGroupManager::GetOverrideElementDepth(const DrawRecord& draw) const
@@ -2149,7 +2159,13 @@ ElementsGroupManager::DrawResolution ElementsGroupManager::ResolveOverrides(cons
     switch (result.handling)
     {
     case HandlingType::ScreenPane:
-      result.screen_pane_depth = GetOverrideScreenPaneDepthLocked(draw, &result.screen_pane_group);
+      if (const ElementGroupOverride* entry =
+              FindScreenPaneOverrideLocked(draw, &result.screen_pane_group))
+      {
+        result.screen_pane_depth = entry->screen_pane_depth;
+        result.screen_pane_reference_depth = entry->screen_pane_reference_depth;
+        result.screen_pane_depth_strength = entry->screen_pane_depth_strength;
+      }
       break;
     case HandlingType::Screen:
     case HandlingType::HeadLocked:

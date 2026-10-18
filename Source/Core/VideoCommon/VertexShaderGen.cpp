@@ -14,7 +14,7 @@
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
 
-static constexpr u32 VERTEX_SHADER_CODE_VERSION = 21;
+static constexpr u32 VERTEX_SHADER_CODE_VERSION = 22;
 
 VertexShaderUid GetVertexShaderUid()
 {
@@ -381,6 +381,9 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
                                      std::string_view view_space_pos)
 {
   out.Write("\tbool vr_pos_replaced = false;\n");
+  // Screen Pane clip rectangle (cvr_pane_clip) as clip distances {left, right, bottom, top}.
+  // Positive (no clipping) unless a Screen Pane branch below sets them.
+  out.Write("\tfloat4 vr_pane_clip_dist = float4(1.0, 1.0, 1.0, 1.0);\n");
   out.Write("\t{{\n");
   out.Write("\tuint eye = gl_ViewIndex;\n");
   out.Write("\tbool right_eye = eye != 0u;\n");
@@ -396,10 +399,19 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
             ".w - pane_console_ndc_z * " I_PIXELCENTERCORRECTION ".z, -1.0, 1.0);\n");
   out.Write("\t\tfloat pane_reference_w = max(" I_HEAD_PARAMS ".w, 1.0e-4);\n");
   out.Write("\t\tfloat pane_depth_scale = max(pane_game_w / pane_reference_w, 0.001);\n");
+  // Depth strength: cvr_head_params.z = 1 - strength flattens the depth spread around the
+  // reference W (1 = the whole pane on the screen plane).
+  out.Write("\t\tif (" I_HEAD_PARAMS ".z > 0.0)\n");
+  out.Write("\t\t\tpane_depth_scale = pow(pane_depth_scale, 1.0 - " I_HEAD_PARAMS ".z);\n");
   out.Write("\t\tfloat ndc_x = o.pos.x / pane_game_w;\n");
   out.Write("\t\tfloat ndc_y = o.pos.y / pane_game_w;\n");
   out.Write("\t\tndc_x = ndc_x * " I_VR_PANE_REMAP ".x + " I_VR_PANE_REMAP ".z;\n");
   out.Write("\t\tndc_y = ndc_y * " I_VR_PANE_REMAP ".y + " I_VR_PANE_REMAP ".w;\n");
+  // Scaled by the depth scale, the distances are linear in panePos, so the clip stays exact
+  // along every edge whatever depth each vertex gets.
+  out.Write("\t\tvr_pane_clip_dist = float4(ndc_x - " I_VR_PANE_CLIP ".x, " I_VR_PANE_CLIP
+            ".y - ndc_x, ndc_y - " I_VR_PANE_CLIP ".z, " I_VR_PANE_CLIP
+            ".w - ndc_y) * pane_depth_scale;\n");
   out.Write("\t\tfloat4 panePos = float4(\n");
   out.Write("\t\t\tndc_x * " I_VR_SCREEN ".x * pane_depth_scale,\n");
   out.Write("\t\t\tndc_y * " I_VR_SCREEN ".y * pane_depth_scale,\n");
@@ -568,6 +580,9 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
   // {1,1,0,0} for normal fullscreen draws. Mirrors the GS Screen branch.
   out.Write("\t\tndc_x = ndc_x * " I_VR_PANE_REMAP ".x + " I_VR_PANE_REMAP ".z;\n");
   out.Write("\t\tndc_y = ndc_y * " I_VR_PANE_REMAP ".y + " I_VR_PANE_REMAP ".w;\n");
+  // Flat Screen Pane clip (wide open for other draws). X/Y are affine in screenPos, so exact.
+  out.Write("\t\tvr_pane_clip_dist = float4(ndc_x - " I_VR_PANE_CLIP ".x, " I_VR_PANE_CLIP
+            ".y - ndc_x, ndc_y - " I_VR_PANE_CLIP ".z, " I_VR_PANE_CLIP ".w - ndc_y);\n");
   out.Write("\t\tfloat ndc_z_clamped = clamp(ndc_z, -1.0, 1.0);\n");
   out.Write("\t\tfloat4 screenPos = float4(\n");
   out.Write("\t\t\tndc_x * " I_VR_SCREEN ".x,\n");
@@ -1062,10 +1077,22 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
     // replaced o.pos. This is what the working GS path does on Vulkan.
     if (UseVRMultiviewVSProjection(api_type, host_config))
     {
-      out.Write("if (vr_pos_replaced) {{\n"
-                "  clipDist0 = 1.0;\n"
-                "  clipDist1 = 1.0;\n"
-                "}}\n");
+      // On Vulkan the first two distances carry the Screen Pane clip's left/right edges
+      // (1.0 for other VR draws) and gl_ClipDistance[2..3] its bottom/top edges.
+      if (api_type == APIType::Vulkan)
+      {
+        out.Write("if (vr_pos_replaced) {{\n"
+                  "  clipDist0 = vr_pane_clip_dist.x;\n"
+                  "  clipDist1 = vr_pane_clip_dist.y;\n"
+                  "}}\n");
+      }
+      else
+      {
+        out.Write("if (vr_pos_replaced) {{\n"
+                  "  clipDist0 = 1.0;\n"
+                  "  clipDist1 = 1.0;\n"
+                  "}}\n");
+      }
     }
 
     // NOTE: under multiview the GS is gone for triangles — the VS itself writes
@@ -1187,6 +1214,11 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
   {
     out.Write("gl_ClipDistance[0] = clipDist0;\n"
               "gl_ClipDistance[1] = clipDist1;\n");
+    if (api_type == APIType::Vulkan && UseVRMultiviewVSProjection(api_type, host_config))
+    {
+      out.Write("gl_ClipDistance[2] = vr_pane_clip_dist.z;\n"
+                "gl_ClipDistance[3] = vr_pane_clip_dist.w;\n");
+    }
   }
 
   // Vulkan NDC space has Y pointing down (right-handed NDC space).

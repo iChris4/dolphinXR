@@ -154,7 +154,10 @@ struct alignas(16) GeometryShaderConstants
   std::array<float4, 4> head_projection{};
   // Head-locked virtual screen tuning params (cvr_head_params in shaders).
   // x = curvature amount (0 = flat)
-  // yzw = reserved.
+  // yz = perspective HUD scale (headlocked perspective HUD route)
+  // Screen Pane route: z = depth flattening (1 - depth strength: 0 = the game's depth spread,
+  // 1 = every vertex on the screen plane), w = reference W (the game depth that lands on the
+  // virtual screen).
   float4 head_locked_params{};
   // Copy of the VS viewport-sign and pixel-center correction for GS-built VR positions.
   float4 pixel_center_correction{};
@@ -162,4 +165,8 @@ struct alignas(16) GeometryShaderConstants
   // (cvr_pane_remap in shaders): ndc_frame = ndc_pane * xy + zw.
   // Identity {1,1,0,0} for every draw whose NDC already spans the full screen.
   float4 vr_pane_remap{1.0f, 1.0f, 0.0f, 0.0f};
+  // Screen Pane clip rectangle in frame NDC (cvr_pane_clip in shaders): {left, right, bottom,
+  // top}, the game's scissor (VR::CalculateVRPaneClip). Wide open for every other draw.
+  // Rebuilt for every draw, so GeometryShaderManager::DoState leaves it out.
+  float4 vr_pane_clip{-1.0e6f, 1.0e6f, -1.0e6f, 1.0e6f};
 };

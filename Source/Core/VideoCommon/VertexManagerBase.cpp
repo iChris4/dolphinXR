@@ -1179,6 +1179,8 @@ void VertexManagerBase::Flush()
       bool manual_screen_pane = false;
       auto screen_pane_depth = ElementsGroupManager::ScreenPaneDepthMode::Game;
       u64 screen_pane_group = 0;
+      float screen_pane_reference_depth = -1.0f;
+      float screen_pane_depth_strength = 1.0f;
       if (m_current_pipeline_object)
       {
         // Shader Hunter: register shader hashes and check for skip.
@@ -1435,6 +1437,8 @@ void VertexManagerBase::Flush()
               {
                 screen_pane_depth = element_overrides.screen_pane_depth;
                 screen_pane_group = element_overrides.screen_pane_group;
+                screen_pane_reference_depth = element_overrides.screen_pane_reference_depth;
+                screen_pane_depth_strength = element_overrides.screen_pane_depth_strength;
               }
               element_depth = element_overrides.element_depth;
               units_per_meter = element_overrides.units_per_meter;
@@ -1532,6 +1536,8 @@ void VertexManagerBase::Flush()
                     screen_pane_depth == ElementsGroupManager::ScreenPaneDepthMode::VR ?
                         screen_pane_group :
                         0;
+                geometry_shader_manager.vr_pane_reference_w_override = screen_pane_reference_depth;
+                geometry_shader_manager.vr_pane_depth_strength = screen_pane_depth_strength;
               }
             }
             else if (handling == ShaderHunter::HandlingType::Fullscreen)

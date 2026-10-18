@@ -326,6 +326,37 @@ std::array<float, 4> CalculateVRPaneRemap(const Viewport& viewport, int x_off, i
           -(viewport_center_y - frame_center_y) / frame_half_height};
 }
 
+std::array<float, 4> CalculateVRPaneClip(int scissor_left, int scissor_top, int scissor_right,
+                                         int scissor_bottom, int x_off, int y_off,
+                                         const VRFrameRegion& frame)
+{
+  std::array<float, 4> clip{-VR_PANE_CLIP_OPEN, VR_PANE_CLIP_OPEN, -VR_PANE_CLIP_OPEN,
+                            VR_PANE_CLIP_OPEN};
+  if (!frame.valid || frame.width <= 0 || frame.height <= 0)
+    return clip;
+
+  const float frame_half_width = static_cast<float>(frame.width) * 0.5f;
+  const float frame_half_height = static_cast<float>(frame.height) * 0.5f;
+  const float frame_center_x = static_cast<float>(frame.left) + frame_half_width;
+  const float frame_center_y = static_cast<float>(frame.top) + frame_half_height;
+
+  // Pixel edges in EFB coordinates.
+  const int left = scissor_left - x_off;
+  const int top = scissor_top - y_off;
+  const int right = scissor_right - x_off + 1;
+  const int bottom = scissor_bottom - y_off + 1;
+
+  if (left > frame.left)
+    clip[0] = (static_cast<float>(left) - frame_center_x) / frame_half_width;
+  if (right < frame.left + frame.width)
+    clip[1] = (static_cast<float>(right) - frame_center_x) / frame_half_width;
+  if (bottom < frame.top + frame.height)
+    clip[2] = -(static_cast<float>(bottom) - frame_center_y) / frame_half_height;
+  if (top > frame.top)
+    clip[3] = -(static_cast<float>(top) - frame_center_y) / frame_half_height;
+  return clip;
+}
+
 float CalculateVRPaneReferenceW(float model_origin_view_z, float projection_z,
                                 float projection_w)
 {

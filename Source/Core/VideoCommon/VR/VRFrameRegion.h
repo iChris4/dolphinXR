@@ -75,6 +75,18 @@ bool ConsumeVRPresentationSourceRegion(const VRFrameRegion& xfb_source,
 std::array<float, 4> CalculateVRPaneRemap(const Viewport& viewport, int x_off, int y_off,
                                           const VRFrameRegion& frame);
 
+// Value of an open edge in CalculateVRPaneClip's rectangle.
+constexpr float VR_PANE_CLIP_OPEN = 1.0e6f;
+
+// The game's scissor as a clip rectangle {left, right, bottom, top} in frame NDC (Y up, same
+// space as CalculateVRPaneRemap's output). Screen Pane opens the raster scissor to the whole
+// frame, so the VR shaders clip the pane with this instead. The scissor is in raw bpmem
+// coordinates (offset by x_off/y_off, bottom-right inclusive). Edges at or beyond the frame's
+// edges are left open (+-VR_PANE_CLIP_OPEN).
+std::array<float, 4> CalculateVRPaneClip(int scissor_left, int scissor_top, int scissor_right,
+                                         int scissor_bottom, int x_off, int y_off,
+                                         const VRFrameRegion& frame);
+
 // Reference clip W for the perspective Screen Pane 3D transform. Most draws expose their model
 // origin through the current position matrix. Skinned/per-vertex-matrix draws do not, so use the
 // geometric centre of the projection's near/far range as a stable positive fallback.

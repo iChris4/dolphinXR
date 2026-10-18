@@ -313,6 +313,7 @@ void WriteSwitch(ShaderCode& out, APIType ApiType, std::string_view variable,
 #define I_HEAD_PARAMS "cvr_head_params"
 #define I_VR_PIXELCENTER "cvr_pixelcenter"
 #define I_VR_PANE_REMAP "cvr_pane_remap"
+#define I_VR_PANE_CLIP "cvr_pane_clip"
 
 static const char s_shader_uniforms[] = "\tuint    components;\n"
                                         "\tuint    xfmem_dualTexInfo;\n"
@@ -368,4 +369,5 @@ static const char s_geometry_shader_uniforms[] = "\tfloat4 " I_STEREOPARAMS ";\n
                                                  "\tfloat4 " I_HEAD_PROJ "[4];\n"
                                                  "\tfloat4 " I_HEAD_PARAMS ";\n"
                                                  "\tfloat4 " I_VR_PIXELCENTER ";\n"
-                                                 "\tfloat4 " I_VR_PANE_REMAP ";\n";
+                                                 "\tfloat4 " I_VR_PANE_REMAP ";\n"
+                                                 "\tfloat4 " I_VR_PANE_CLIP ";\n";

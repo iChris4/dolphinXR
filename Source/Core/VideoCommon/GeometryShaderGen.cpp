@@ -48,7 +48,7 @@ GeometryShaderUid GetGeometryShaderUid(PrimitiveType primitive_type)
   GeometryShaderUid out;
 
   geometry_shader_uid_data* const uid_data = out.GetUidData();
-  uid_data->code_version = 37;
+  uid_data->code_version = 38;
   uid_data->primitive_type = static_cast<u32>(primitive_type);
   uid_data->numTexGens = xfmem.numTexGen.numTexGens;
 
@@ -270,6 +270,11 @@ ShaderCode GenerateGeometryShaderCode(APIType api_type, const ShaderHostConfig& 
       out.Write("\t\tfloat pane_game_ndc_z = clamp(f.pos.z / pane_game_w, -1.0, 1.0);\n");
       out.Write("\t\tfloat pane_reference_w = max(" I_HEAD_PARAMS ".w, 1.0e-4);\n");
       out.Write("\t\tfloat pane_depth_scale = max(pane_game_w / pane_reference_w, 0.001);\n");
+      // Depth strength: cvr_head_params.z = 1 - strength flattens the depth spread around the
+      // reference W (1 = the whole pane on the screen plane). The game's scissor clip
+      // (cvr_pane_clip) is only applied by the multiview VS path.
+      out.Write("\t\tif (" I_HEAD_PARAMS ".z > 0.0)\n");
+      out.Write("\t\t\tpane_depth_scale = pow(pane_depth_scale, 1.0 - " I_HEAD_PARAMS ".z);\n");
       out.Write("\t\tfloat ndc_x = f.pos.x / pane_game_w;\n");
       out.Write("\t\tfloat ndc_y = f.pos.y / pane_game_w;\n");
       out.Write("\t\tndc_x = ndc_x * " I_VR_PANE_REMAP ".x + " I_VR_PANE_REMAP ".z;\n");

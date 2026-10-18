@@ -4,6 +4,7 @@
 #include "DolphinQt/Config/ElementsGroupOverrideWidget.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string_view>
 
 #include <QCursor>
@@ -134,6 +135,16 @@ void ElementsGroupOverrideWidget::UpdateList()
                entry.screen_pane_depth == ElementsGroupManager::ScreenPaneDepthMode::Flat ?
                    QStringLiteral(" depth:flat") :
                    QStringLiteral(" depth:game");
+      if (entry.screen_pane_depth != ElementsGroupManager::ScreenPaneDepthMode::Flat)
+      {
+        if (entry.screen_pane_reference_depth > 0.0f)
+          label += QStringLiteral(" ref:%1").arg(entry.screen_pane_reference_depth, 0, 'g', 4);
+        if (entry.screen_pane_depth_strength < 1.0f)
+        {
+          label += QStringLiteral(" strength:%1%")
+                       .arg(std::lround(entry.screen_pane_depth_strength * 100.0f));
+        }
+      }
     }
     if (entry.match_kind == ElementsGroupManager::MatchKind::ProfileLayer)
     {

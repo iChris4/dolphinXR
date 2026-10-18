@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <string_view>
 #include <unordered_map>
 
@@ -266,6 +267,30 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
          "Flat uses the world-fixed 2D screen plane at the pane's original X/Y position, with\n"
          "zero visual thickness while retaining game depth for stable ordering."));
 
+  m_screen_pane_reference_label = new QLabel(tr("Reference Depth:"));
+  m_screen_pane_reference_spin = new QDoubleSpinBox;
+  m_screen_pane_reference_spin->setRange(0.0, 100000.0);
+  m_screen_pane_reference_spin->setDecimals(3);
+  m_screen_pane_reference_spin->setSingleStep(0.1);
+  m_screen_pane_reference_spin->setSpecialValueText(tr("Automatic"));
+  m_screen_pane_reference_spin->setValue(0.0);
+  m_screen_pane_reference_spin->setToolTip(
+      tr("The game depth (clip W, in game units) that lands on the virtual screen. Nearer parts\n"
+         "of the element come out in front of the screen, farther parts go behind it.\n"
+         "Automatic uses the depth of the element's model origin. Set a value for HUDs drawn in\n"
+         "camera space (their model origin is the camera itself), otherwise they end up a few\n"
+         "centimeters from your eyes and swing with every head movement."));
+
+  m_screen_pane_strength_label = new QLabel(tr("Depth Strength:"));
+  m_screen_pane_strength_spin = new QSpinBox;
+  m_screen_pane_strength_spin->setRange(0, 100);
+  m_screen_pane_strength_spin->setSuffix(QStringLiteral("%"));
+  m_screen_pane_strength_spin->setValue(100);
+  m_screen_pane_strength_spin->setToolTip(
+      tr("How much of the element's depth around the reference depth is kept in stereo.\n"
+         "100% keeps the depth the game drew; 0% puts the whole element flat on the virtual\n"
+         "screen. Lower it when the parts of an element come apart in stereo."));
+
   m_element_depth_label = new QLabel(tr("Element Depth:"));
   m_element_depth_spin = new QDoubleSpinBox;
   m_element_depth_spin->setRange(-1.0, 1000.0);
@@ -493,6 +518,8 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
   form->addRow(tr("Handling:"), m_handling_combo);
   form->addRow(QString(), m_preserve_stereo_efb_check);
   form->addRow(m_screen_pane_depth_label, m_screen_pane_depth_combo);
+  form->addRow(m_screen_pane_reference_label, m_screen_pane_reference_spin);
+  form->addRow(m_screen_pane_strength_label, m_screen_pane_strength_spin);
   form->addRow(m_element_depth_label, m_element_depth_spin);
   form->addRow(m_units_per_meter_label, m_units_per_meter_spin);
   form->addRow(m_passthrough_opacity_label, m_passthrough_opacity_spin);
@@ -554,6 +581,8 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
           &ElementsGroupOverrideAddEditDialog::RefreshClearEFBUi);
   connect(m_handling_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
           &ElementsGroupOverrideAddEditDialog::RefreshHandlingUi);
+  connect(m_screen_pane_depth_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+          &ElementsGroupOverrideAddEditDialog::RefreshHandlingUi);
   connect(m_capture_seed_button, &QPushButton::clicked, this,
           &ElementsGroupOverrideAddEditDialog::CaptureCurrentSeed);
   connect(m_view_textures_button, &QPushButton::clicked, this,
@@ -612,6 +641,10 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
       if (depth_idx >= 0)
         m_screen_pane_depth_combo->setCurrentIndex(depth_idx);
     }
+    m_screen_pane_reference_spin->setValue(
+        std::max(edit_override->screen_pane_reference_depth, 0.0f));
+    m_screen_pane_strength_spin->setValue(
+        static_cast<int>(std::lround(edit_override->screen_pane_depth_strength * 100.0f)));
     m_element_depth_spin->setValue(edit_override->element_depth);
     if (edit_override->units_per_meter > 0.0f)
       m_units_per_meter_spin->setValue(edit_override->units_per_meter);
@@ -706,6 +739,11 @@ ElementsGroupManager::ElementGroupOverride ElementsGroupOverrideAddEditDialog::G
       m_preserve_stereo_efb_check->isChecked();
   result.screen_pane_depth = static_cast<ElementsGroupManager::ScreenPaneDepthMode>(
       m_screen_pane_depth_combo->currentData().toInt());
+  result.screen_pane_reference_depth =
+      m_screen_pane_reference_spin->value() > 0.0 ?
+          static_cast<float>(m_screen_pane_reference_spin->value()) :
+          -1.0f;
+  result.screen_pane_depth_strength = m_screen_pane_strength_spin->value() / 100.0f;
   result.runtime_element = m_runtime_element;
   result.profile_id = static_cast<MetroidElementProfile>(m_profile_combo->currentData().toInt());
   result.profile_layers = CollectProfileLayers();
@@ -921,6 +959,15 @@ void ElementsGroupOverrideAddEditDialog::RefreshHandlingUi()
   m_element_depth_spin->setVisible(show_element_depth);
   m_screen_pane_depth_label->setVisible(show_screen_pane_depth);
   m_screen_pane_depth_combo->setVisible(show_screen_pane_depth);
+  // Reference depth and strength shape the 3D pane; Flat has no depth to shape.
+  const bool show_screen_pane_3d =
+      show_screen_pane_depth && static_cast<ElementsGroupManager::ScreenPaneDepthMode>(
+                                    m_screen_pane_depth_combo->currentData().toInt()) !=
+                                    ElementsGroupManager::ScreenPaneDepthMode::Flat;
+  m_screen_pane_reference_label->setVisible(show_screen_pane_3d);
+  m_screen_pane_reference_spin->setVisible(show_screen_pane_3d);
+  m_screen_pane_strength_label->setVisible(show_screen_pane_3d);
+  m_screen_pane_strength_spin->setVisible(show_screen_pane_3d);
   m_preserve_stereo_efb_check->setVisible(show_preserve_stereo_efb);
   m_units_per_meter_label->setVisible(show_units_per_meter);
   m_units_per_meter_spin->setVisible(show_units_per_meter);

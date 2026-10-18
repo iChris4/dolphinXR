@@ -164,6 +164,43 @@ TEST(VRFrameRegion, OffCenterScreenPanesKeepTheirViewportOffsets)
   EXPECT_NEAR(inventory_remap[3], 45.0f / 240.0f, 0.0001f);
 }
 
+TEST(VRFrameRegion, ScreenPaneClipIsTheScissorInFrameNDC)
+{
+  const VR::VRFrameRegion frame{0, 0, 640, 480, true};
+
+  // A 127x127 minimap window at (100,50), with GX's 342-pixel scissor offset. The bottom-right
+  // scissor corner is inclusive.
+  const auto clip =
+      VR::CalculateVRPaneClip(342 + 100, 342 + 50, 342 + 226, 342 + 176, 342, 342, frame);
+  EXPECT_FLOAT_EQ(clip[0], (100.0f - 320.0f) / 320.0f);
+  EXPECT_FLOAT_EQ(clip[1], (227.0f - 320.0f) / 320.0f);
+  EXPECT_FLOAT_EQ(clip[2], -(177.0f - 240.0f) / 240.0f);
+  EXPECT_FLOAT_EQ(clip[3], -(50.0f - 240.0f) / 240.0f);
+}
+
+TEST(VRFrameRegion, ScreenPaneClipLeavesEdgesAtOrBeyondTheFrameOpen)
+{
+  const VR::VRFrameRegion frame{0, 16, 640, 448, true};
+
+  const auto full = VR::CalculateVRPaneClip(342, 342 + 16, 342 + 639, 342 + 463, 342, 342, frame);
+  EXPECT_FLOAT_EQ(full[0], -VR::VR_PANE_CLIP_OPEN);
+  EXPECT_FLOAT_EQ(full[1], VR::VR_PANE_CLIP_OPEN);
+  EXPECT_FLOAT_EQ(full[2], -VR::VR_PANE_CLIP_OPEN);
+  EXPECT_FLOAT_EQ(full[3], VR::VR_PANE_CLIP_OPEN);
+
+  // Only the right edge is inside the frame.
+  const auto right_only = VR::CalculateVRPaneClip(0, 0, 342 + 319, 1023, 342, 342, frame);
+  EXPECT_FLOAT_EQ(right_only[0], -VR::VR_PANE_CLIP_OPEN);
+  EXPECT_FLOAT_EQ(right_only[1], 0.0f);
+  EXPECT_FLOAT_EQ(right_only[2], -VR::VR_PANE_CLIP_OPEN);
+  EXPECT_FLOAT_EQ(right_only[3], VR::VR_PANE_CLIP_OPEN);
+
+  const auto no_frame = VR::CalculateVRPaneClip(342 + 100, 342 + 50, 342 + 226, 342 + 176, 342, 342,
+                                                VR::VRFrameRegion{});
+  EXPECT_FLOAT_EQ(no_frame[0], -VR::VR_PANE_CLIP_OPEN);
+  EXPECT_FLOAT_EQ(no_frame[1], VR::VR_PANE_CLIP_OPEN);
+}
+
 TEST(VRFrameRegion, ScreenPaneReferenceUsesProjectionForPerVertexMatrixDraws)
 {
   EXPECT_FLOAT_EQ(VR::CalculateVRPaneReferenceW(-25.0f, 0.5f, 10.0f), 25.0f);
