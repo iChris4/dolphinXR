@@ -106,6 +106,12 @@ static RangeList ComputeScissorRanges(int start, int end, int offset, int efb_di
 
   return ranges;
 }
+
+VR::VRScissor ToVRScissor(const ScissorPos& top_left, const ScissorPos& bottom_right)
+{
+  return {static_cast<int>(top_left.x), static_cast<int>(top_left.y),
+          static_cast<int>(bottom_right.x), static_cast<int>(bottom_right.y)};
+}
 }  // namespace
 
 ScissorResult::ScissorResult(ScissorPos scissor_top_left, ScissorPos scissor_bottom_right,
@@ -203,7 +209,8 @@ void SetScissorAndViewport(FramebufferManager* frame_buffer_manager, ScissorPos 
     const int x_off = scissor_offset.x << 1;
     const int y_off = scissor_offset.y << 1;
     const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
-    const VR::VRViewportClass vp_class = VR::ClassifyVRViewport(viewport, x_off, y_off);
+    const VR::VRViewportClass vp_class = VR::ClassifyVRViewport(
+        viewport, ToVRScissor(scissor_top_left, scissor_bottom_right), x_off, y_off);
 
     if (g_ActiveConfig.vr_panes_on_screen && g_ActiveConfig.vr_virtual_screen && frame.valid &&
         vp_class == VR::VRViewportClass::HudElement)
@@ -333,7 +340,8 @@ void SetScissorAndViewport(FramebufferManager* frame_buffer_manager, ScissorPos 
     const bool rtt_exempt = [&] {
       if (!g_ActiveConfig.vr_detect_render_targets)
         return false;
-      const VR::VRViewportClass vp_class = VR::ClassifyVRViewport(viewport, x_off, y_off);
+      const VR::VRViewportClass vp_class = VR::ClassifyVRViewport(
+          viewport, ToVRScissor(scissor_top_left, scissor_bottom_right), x_off, y_off);
       return vp_class == VR::VRViewportClass::RenderToTexture ||
              vp_class == VR::VRViewportClass::Offscreen;
     }();

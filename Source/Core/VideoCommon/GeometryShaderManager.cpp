@@ -390,8 +390,8 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
               const int pane_x_off = bpmem.scissorOffset.x << 1;
               const int pane_y_off = bpmem.scissorOffset.y << 1;
               const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
-              const VR::VRViewportClass vp_class =
-                  VR::ClassifyVRViewport(xfmem.viewport, pane_x_off, pane_y_off);
+              const VR::VRViewportClass vp_class = VR::ClassifyVRViewport(
+                  xfmem.viewport, VR::GetVRScissor(), pane_x_off, pane_y_off);
               if (g_ActiveConfig.vr_panes_on_screen && g_ActiveConfig.vr_virtual_screen &&
                   frame.valid && vp_class == VR::VRViewportClass::HudElement)
               {
@@ -421,8 +421,8 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
             {
               const int pane_x_off = bpmem.scissorOffset.x << 1;
               const int pane_y_off = bpmem.scissorOffset.y << 1;
-              const VR::VRViewportClass vp_class =
-                  VR::ClassifyVRViewport(xfmem.viewport, pane_x_off, pane_y_off);
+              const VR::VRViewportClass vp_class = VR::ClassifyVRViewport(
+                  xfmem.viewport, VR::GetVRScissor(), pane_x_off, pane_y_off);
               if (vp_class == VR::VRViewportClass::RenderToTexture ||
                   vp_class == VR::VRViewportClass::Offscreen)
               {

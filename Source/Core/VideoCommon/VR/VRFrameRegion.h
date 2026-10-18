@@ -28,6 +28,19 @@ struct VRFrameRegion
   bool valid = false;
 };
 
+// The game's scissor rectangle in raw bpmem coordinates: offset by the scissor offset like the
+// viewport, bottom-right corner inclusive.
+struct VRScissor
+{
+  int left = 0;
+  int top = 0;
+  int right = 0;
+  int bottom = 0;
+};
+
+// The current bpmem scissor.
+VRScissor GetVRScissor();
+
 // Hydra-style viewport classification, measured against the latched frame region.
 enum class VRViewportClass
 {
@@ -37,8 +50,9 @@ enum class VRViewportClass
   HudElement,       // small / off-center sub-viewport (e.g. MKDD character select panes)
   RenderToTexture,  // square edge-anchored render target (shadow/env maps)
   Offscreen,        // outside the displayed frame region
-  DisplacedScene,   // frame-sized viewport moved off the frame by more than 10% (PSO pans the
-                    // scene aside under its menus): still the head-tracked main scene
+  DisplacedScene,   // frame-sized viewport and scissor moved off the frame together by more
+                    // than 10% (PSO pans the scene aside under its menus): still the
+                    // head-tracked main scene
 };
 
 // Called from BPStructs for every EFB->XFB copy (srcRect in native EFB coordinates,
@@ -55,16 +69,19 @@ VRFrameRegion GetVRFrameRegion();
 void ResetVRFrameRegion();
 
 // Classify a draw's viewport against the latched frame region. x_off/y_off are the
-// doubled scissor offsets (scissorOffset << 1), matching BPFunctions conventions.
+// doubled scissor offsets (scissorOffset << 1), matching BPFunctions conventions; the
+// scissor tells a scene panned with the scissor offset from a viewport moved inside it.
 // Returns MainScene when the frame region is unknown so all callers fall back to
 // current behavior.
-VRViewportClass ClassifyVRViewport(const Viewport& viewport, int x_off, int y_off);
+VRViewportClass ClassifyVRViewport(const Viewport& viewport, const VRScissor& scissor, int x_off,
+                                   int y_off);
 
 // Record a real perspective draw which can describe the composed scene's EFB extent.
 // At the XFB-copy boundary the most frequently drawn full-width region is used as the
 // presentation source. This deliberately records the game's unmodified viewport: EFB
 // effects continue to see the exact layout the game rendered.
-void ObserveVRPerspectiveViewport(const Viewport& viewport, int x_off, int y_off);
+void ObserveVRPerspectiveViewport(const Viewport& viewport, const VRScissor& scissor, int x_off,
+                                  int y_off);
 
 // Select and consume the scene extent accumulated since the previous XFB copy. Returns
 // true only when the VR presentation copy should sample a different vertical EFB region

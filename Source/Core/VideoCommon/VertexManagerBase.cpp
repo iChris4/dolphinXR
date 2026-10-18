@@ -605,7 +605,7 @@ VertexManagerBase::CpuCullPlan VertexManagerBase::GetCpuCullPlan()
   if (m_vr_cull_cone_only && xfmem.projection.type == ProjectionType::Perspective)
   {
     const VR::VRViewportClass viewport_class = VR::ClassifyVRViewport(
-        xfmem.viewport, bpmem.scissorOffset.x << 1, bpmem.scissorOffset.y << 1);
+        xfmem.viewport, VR::GetVRScissor(), bpmem.scissorOffset.x << 1, bpmem.scissorOffset.y << 1);
     if (viewport_class == VR::VRViewportClass::MainScene ||
         viewport_class == VR::VRViewportClass::Letterboxed)
     {
@@ -1161,8 +1161,8 @@ void VertexManagerBase::Flush()
                                             scissor_height >= viewport_height / 2;
       if (scissor_describes_scene)
       {
-        VR::ObserveVRPerspectiveViewport(xfmem.viewport, bpmem.scissorOffset.x << 1,
-                                         bpmem.scissorOffset.y << 1);
+        VR::ObserveVRPerspectiveViewport(xfmem.viewport, VR::GetVRScissor(),
+                                         bpmem.scissorOffset.x << 1, bpmem.scissorOffset.y << 1);
       }
     }
 
@@ -1902,9 +1902,8 @@ void VertexManagerBase::Flush()
               std::isnan(stereo_ovr) && g_ActiveConfig.vr_panes_on_screen &&
               g_ActiveConfig.vr_virtual_screen &&
               xfmem.projection.type == ProjectionType::Perspective &&
-              VR::ClassifyVRViewport(xfmem.viewport, bpmem.scissorOffset.x << 1,
-                                     bpmem.scissorOffset.y << 1) ==
-                  VR::VRViewportClass::HudElement;
+              VR::ClassifyVRViewport(xfmem.viewport, VR::GetVRScissor(), bpmem.scissorOffset.x << 1,
+                                     bpmem.scissorOffset.y << 1) == VR::VRViewportClass::HudElement;
           if (forced_screen || natural_ortho || auto_pane)
           {
             auto* const ps_uid_data = m_current_pipeline_config.ps_uid.GetUidData();

@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "Common/Logging/Log.h"
+#include "VideoCommon/BPMemory.h"
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/XFMemory.h"
 
@@ -91,6 +92,12 @@ void ResetVRFrameRegion()
   s_last_presentation_xfb = VRFrameRegion{};
 }
 
+VRScissor GetVRScissor()
+{
+  return {static_cast<int>(bpmem.scissorTL.x), static_cast<int>(bpmem.scissorTL.y),
+          static_cast<int>(bpmem.scissorBR.x), static_cast<int>(bpmem.scissorBR.y)};
+}
+
 // Port of Hydra's SetViewportType (VertexShaderManager.cpp), measured against the XFB
 // display region instead of Hydra's g_final_screen_region. Thresholds kept identical —
 // they are field-proven across Hydra's game library:
@@ -98,7 +105,8 @@ void ResetVRFrameRegion()
 //  - Full-width bands that aren't split-screen halves are LETTERBOXED (this includes
 //    Metroid Prime's morph-ball 640x358 viewport, which must stay head-tracked).
 //  - Square, edge-anchored, multiple-of-8 viewports are render-to-texture passes.
-VRViewportClass ClassifyVRViewport(const Viewport& v, int x_off, int y_off)
+VRViewportClass ClassifyVRViewport(const Viewport& v, const VRScissor& scissor, int x_off,
+                                   int y_off)
 {
   const VRFrameRegion frame = GetVRFrameRegion();
   if (!frame.valid)
@@ -134,13 +142,20 @@ VRViewportClass ClassifyVRViewport(const Viewport& v, int x_off, int y_off)
     return VRViewportClass::RenderToTexture;
 
   // A viewport the size of the frame, moved further from the frame origin than the 10%
-  // tolerance below but still overlapping the frame: the game pans the whole scene (PSO slides
-  // it aside to make room for its menus, with the scissor offset). It is still the main scene,
-  // not an offscreen pass; SetScissorAndViewport puts it back over the frame. Smaller moves
-  // (screen shake, a pixel or two between the scene and the XFB copy) stay MainScene.
+  // tolerance below but still overlapping the frame, together with a scissor covering the same
+  // rectangle: the game pans the whole scene with the scissor offset (PSO slides it aside to
+  // make room for its menus). It is still the main scene, not an offscreen pass;
+  // SetScissorAndViewport puts it back over the frame. A viewport moved inside a scissor that
+  // stays put places one element instead (Mario Golf's menu icons), and smaller moves (screen
+  // shake, a pixel or two between the scene and the XFB copy) stay MainScene.
+  const bool viewport_matches_scissor =
+      std::fabs((v.xOrig - std::fabs(v.wd)) - static_cast<float>(scissor.left)) <= 1.0f &&
+      std::fabs((v.yOrig - std::fabs(v.ht)) - static_cast<float>(scissor.top)) <= 1.0f &&
+      std::fabs((v.xOrig + std::fabs(v.wd)) - static_cast<float>(scissor.right + 1)) <= 1.0f &&
+      std::fabs((v.yOrig + std::fabs(v.ht)) - static_cast<float>(scissor.bottom + 1)) <= 1.0f;
   if (std::fabs(width - screen_width) < 1.0f && std::fabs(height - screen_height) < 1.0f &&
       (std::fabs(left) > max_left || std::fabs(top) > max_top) && left < screen_width &&
-      top < screen_height && left + width > 0.0f && top + height > 0.0f)
+      top < screen_height && left + width > 0.0f && top + height > 0.0f && viewport_matches_scissor)
   {
     return VRViewportClass::DisplacedScene;
   }
@@ -208,9 +223,9 @@ VRViewportClass ClassifyVRViewport(const Viewport& v, int x_off, int y_off)
   return VRViewportClass::HudElement;
 }
 
-void ObserveVRPerspectiveViewport(const Viewport& v, int x_off, int y_off)
+void ObserveVRPerspectiveViewport(const Viewport& v, const VRScissor& scissor, int x_off, int y_off)
 {
-  const VRViewportClass vclass = ClassifyVRViewport(v, x_off, y_off);
+  const VRViewportClass vclass = ClassifyVRViewport(v, scissor, x_off, y_off);
   if (vclass != VRViewportClass::MainScene && vclass != VRViewportClass::Letterboxed)
     return;
 

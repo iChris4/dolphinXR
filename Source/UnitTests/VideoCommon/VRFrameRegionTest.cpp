@@ -20,6 +20,12 @@ Viewport MakeViewport(int left, int top, int width, int height)
           .farZ = 0.0f};
 }
 
+// A scissor covering this rectangle (bottom-right corner inclusive, like bpmem).
+VR::VRScissor ScissorOf(int left, int top, int width, int height)
+{
+  return {left, top, left + width - 1, top + height - 1};
+}
+
 void LatchDisplayRegion(int width, int height)
 {
   VR::NotifyVRXFBCopyRegion(0, 0, width, height);
@@ -33,7 +39,7 @@ TEST(VRFrameRegion, TrilogyPresentationExpandsAfterEFBComposition)
   LatchDisplayRegion(640, 480);
 
   for (int i = 0; i < 10; ++i)
-    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 0, 640, 448), 0, 0);
+    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 0, 640, 448), ScissorOf(0, 0, 640, 448), 0, 0);
 
   const VR::VRFrameRegion xfb_source{0, 0, 640, 480};
   VR::VRFrameRegion presentation_source{};
@@ -50,7 +56,7 @@ TEST(VRFrameRegion, GolfPresentationIncludesWholeOversizedScene)
   LatchDisplayRegion(640, 448);
 
   for (int i = 0; i < 10; ++i)
-    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 0, 640, 480), 0, 0);
+    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 0, 640, 480), ScissorOf(0, 0, 640, 480), 0, 0);
 
   const VR::VRFrameRegion xfb_source{0, 0, 640, 448};
   VR::VRFrameRegion presentation_source{};
@@ -67,8 +73,8 @@ TEST(VRFrameRegion, DominantSceneWinsAndMatchingCopyNeedsNoOverride)
   LatchDisplayRegion(640, 448);
 
   for (int i = 0; i < 10; ++i)
-    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 0, 640, 448), 0, 0);
-  VR::ObserveVRPerspectiveViewport(MakeViewport(0, 0, 640, 480), 0, 0);
+    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 0, 640, 448), ScissorOf(0, 0, 640, 448), 0, 0);
+  VR::ObserveVRPerspectiveViewport(MakeViewport(0, 0, 640, 480), ScissorOf(0, 0, 640, 480), 0, 0);
 
   const VR::VRFrameRegion xfb_source{0, 0, 640, 448};
   VR::VRFrameRegion presentation_source{};
@@ -80,7 +86,8 @@ TEST(VRFrameRegion, SmallPerspectivePaneCannotDrivePresentationCopy)
   VR::ResetVRFrameRegion();
   LatchDisplayRegion(640, 448);
 
-  VR::ObserveVRPerspectiveViewport(MakeViewport(32, 32, 256, 256), 0, 0);
+  VR::ObserveVRPerspectiveViewport(MakeViewport(32, 32, 256, 256), ScissorOf(32, 32, 256, 256), 0,
+                                   0);
 
   const VR::VRFrameRegion xfb_source{0, 0, 640, 448};
   VR::VRFrameRegion presentation_source{};
@@ -93,7 +100,8 @@ TEST(VRFrameRegion, MKDDLetterboxedCharacterViewportCannotMoveComposedScreen)
   LatchDisplayRegion(608, 448);
 
   for (int i = 0; i < 10; ++i)
-    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 100, 608, 348), 0, 0);
+    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 100, 608, 348), ScissorOf(0, 100, 608, 348), 0,
+                                     0);
 
   const VR::VRFrameRegion xfb_source{0, 0, 608, 448};
   VR::VRFrameRegion presentation_source{};
@@ -106,7 +114,7 @@ TEST(VRFrameRegion, NearMatchingAnimatedViewportCannotMoveComposedScreen)
   LatchDisplayRegion(640, 448);
 
   for (int i = 0; i < 10; ++i)
-    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 1, 640, 446), 0, 0);
+    VR::ObserveVRPerspectiveViewport(MakeViewport(0, 1, 640, 446), ScissorOf(0, 1, 640, 446), 0, 0);
 
   const VR::VRFrameRegion xfb_source{0, 0, 640, 448};
   VR::VRFrameRegion presentation_source{};
@@ -119,13 +127,16 @@ TEST(VRFrameRegion, SceneMovedFarOffTheFrameIsDisplaced)
   LatchDisplayRegion(640, 480);
 
   // Phantasy Star Online pans its scene 80 px right and 112 px up under its menus.
-  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(80, -112, 640, 480), 0, 0),
-            VR::VRViewportClass::DisplacedScene);
+  EXPECT_EQ(
+      VR::ClassifyVRViewport(MakeViewport(80, -112, 640, 480), ScissorOf(80, -112, 640, 480), 0, 0),
+      VR::VRViewportClass::DisplacedScene);
   // Moved up only: it used to stay MainScene and be drawn shifted.
-  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(0, -100, 640, 480), 0, 0),
-            VR::VRViewportClass::DisplacedScene);
+  EXPECT_EQ(
+      VR::ClassifyVRViewport(MakeViewport(0, -100, 640, 480), ScissorOf(0, -100, 640, 480), 0, 0),
+      VR::VRViewportClass::DisplacedScene);
   // Also through the scissor offset alone, as PSO does.
-  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 342, 640, 480), 262, 454),
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 342, 640, 480), ScissorOf(342, 342, 640, 480),
+                                   262, 454),
             VR::VRViewportClass::DisplacedScene);
 }
 
@@ -134,13 +145,29 @@ TEST(VRFrameRegion, SceneMovedWithinTheToleranceStaysMainScene)
   VR::ResetVRFrameRegion();
   LatchDisplayRegion(640, 480);
 
-  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(0, 0, 640, 480), 0, 0),
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(0, 0, 640, 480), ScissorOf(0, 0, 640, 480), 0, 0),
             VR::VRViewportClass::MainScene);
-  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(2, 0, 640, 480), 0, 0),
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(2, 0, 640, 480), ScissorOf(2, 0, 640, 480), 0, 0),
             VR::VRViewportClass::MainScene);
-  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(-1, -2, 640, 480), 0, 0),
-            VR::VRViewportClass::MainScene);
-  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(60, 40, 640, 480), 0, 0),
+  EXPECT_EQ(
+      VR::ClassifyVRViewport(MakeViewport(-1, -2, 640, 480), ScissorOf(-1, -2, 640, 480), 0, 0),
+      VR::VRViewportClass::MainScene);
+  EXPECT_EQ(
+      VR::ClassifyVRViewport(MakeViewport(60, 40, 640, 480), ScissorOf(60, 40, 640, 480), 0, 0),
+      VR::VRViewportClass::MainScene);
+}
+
+TEST(VRFrameRegion, ViewportMovedInsideAFixedScissorIsNotDisplaced)
+{
+  VR::ResetVRFrameRegion();
+  LatchDisplayRegion(640, 448);
+
+  // Mario Golf places each main menu icon with a 640x448 viewport of its own, inside the
+  // unmoved full-frame scissor (raw values from a log, with GX's 342-pixel offsets).
+  const VR::VRScissor full_frame = ScissorOf(342, 342, 640, 480);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(484, 369, 640, 448), full_frame, 342, 342),
+            VR::VRViewportClass::Offscreen);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(177, 238, 640, 448), full_frame, 342, 342),
             VR::VRViewportClass::MainScene);
 }
 
@@ -149,8 +176,9 @@ TEST(VRFrameRegion, SceneOutsideTheFrameStaysOffscreen)
   VR::ResetVRFrameRegion();
   LatchDisplayRegion(640, 480);
 
-  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(700, 0, 640, 480), 0, 0),
-            VR::VRViewportClass::Offscreen);
+  EXPECT_EQ(
+      VR::ClassifyVRViewport(MakeViewport(700, 0, 640, 480), ScissorOf(700, 0, 640, 480), 0, 0),
+      VR::VRViewportClass::Offscreen);
 }
 
 TEST(VRFrameRegion, MKDDCharacterBandRemapsToItsOriginalScreenPosition)
