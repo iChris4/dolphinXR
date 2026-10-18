@@ -3072,6 +3072,12 @@ class SettingsFragmentPresenter(
             R.string.quest_detect_skybox_description
         )
         builder.boolean(
+            "SkipBackgroundFill",
+            false,
+            R.string.quest_skip_background_fill,
+            R.string.quest_skip_background_fill_description
+        )
+        builder.boolean(
             "MetroidThermalVisorFix",
             true,
             R.string.quest_layered_palette_conversion,
@@ -3549,6 +3555,14 @@ class SettingsFragmentPresenter(
                 QuestVrSettings.detectSkyboxSetting(),
                 R.string.quest_detect_skybox,
                 R.string.quest_detect_skybox_description
+            )
+        )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.skipBackgroundFillSetting(),
+                R.string.quest_skip_background_fill,
+                R.string.quest_skip_background_fill_description
             )
         )
         sl.add(

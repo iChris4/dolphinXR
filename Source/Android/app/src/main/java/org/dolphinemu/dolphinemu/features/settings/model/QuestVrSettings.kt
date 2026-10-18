@@ -79,6 +79,8 @@ object QuestVrSettings {
 
     fun detectSkyboxSetting() = vrBooleanSetting("DetectSkybox", false)
 
+    fun skipBackgroundFillSetting() = vrBooleanSetting("SkipBackgroundFill", false)
+
     fun passthroughSetting() = vrBooleanSetting("Passthrough", false)
 
     fun passthroughRevealUnrenderedSetting() =
@@ -315,6 +317,7 @@ object QuestVrSettings {
             detectRenderTargetsSetting(),
             orthoScissorFixSetting(),
             detectSkyboxSetting(),
+            skipBackgroundFillSetting(),
             layeredPaletteConversionSetting(),
             // Passthrough
             passthroughSetting(),

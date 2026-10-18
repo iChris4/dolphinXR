@@ -466,6 +466,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   m_ortho_scissor_fix =
       new ConfigBool(tr("Ortho Scissor Fix"), Config::GFX_VR_ORTHO_SCISSOR_FIX);
   m_detect_skybox = new ConfigBool(tr("Detect Skybox"), Config::GFX_VR_DETECT_SKYBOX);
+  m_skip_background_fill =
+      new ConfigBool(tr("Skip Background Fill"), Config::GFX_VR_SKIP_BACKGROUND_FILL);
   m_layered_palette_conversion_path =
       new ConfigBool(tr("Layered Palette Conversion Path"),
                      Config::GFX_VR_METROID_THERMAL_VISOR_FIX);
@@ -491,6 +493,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hacks_group_layout->addWidget(m_detect_render_targets);
   hacks_group_layout->addWidget(m_ortho_scissor_fix);
   hacks_group_layout->addWidget(m_detect_skybox);
+  hacks_group_layout->addWidget(m_skip_background_fill);
   hacks_group_layout->addWidget(m_layered_palette_conversion_path);
   hack_layout->addWidget(hacks_group);
   hack_layout->addWidget(framerate_group);
@@ -799,6 +802,13 @@ void VRPane::AddDescriptions()
       "rotates with your head but does not move when you lean."
       "<br><br>Disable this if it incorrectly affects non-sky geometry in a specific game."
       "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
+  static constexpr char TR_SKIP_BACKGROUND_FILL_DESCRIPTION[] = QT_TR_NOOP(
+      "Skips the opaque, untextured two-triangle quad some games draw over the whole frame, "
+      "depth-tested without writing depth, to colour the background the scene left empty."
+      "<br><br>On a TV it only shows where nothing else was drawn. In VR it lands in front of the "
+      "scene as an opaque panel, such as the white or cream square in Phantasy Star Online."
+      "<br><br>It can also skip a solid-colour shape a game means to show, so turn it on per game."
+      "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static constexpr char TR_LAYERED_PALETTE_CONVERSION_PATH_DESCRIPTION[] = QT_TR_NOOP(
       "Uses a layered palette conversion path for Metroid Prime's thermal visor EFB copy when "
       "running the Vulkan or D3D11 backend in OpenXR."
@@ -882,6 +892,7 @@ void VRPane::AddDescriptions()
   m_remove_bars->SetDescription(tr(TR_REMOVE_BARS_DESCRIPTION));
   m_ortho_scissor_fix->SetDescription(tr(TR_ORTHO_SCISSOR_FIX_DESCRIPTION));
   m_detect_skybox->SetDescription(tr(TR_DETECT_SKYBOX_DESCRIPTION));
+  m_skip_background_fill->SetDescription(tr(TR_SKIP_BACKGROUND_FILL_DESCRIPTION));
   m_layered_palette_conversion_path->SetDescription(
       tr(TR_LAYERED_PALETTE_CONVERSION_PATH_DESCRIPTION));
   m_vr_gamma->SetDescription(tr(TR_VR_GAMMA_DESCRIPTION));
@@ -990,6 +1001,8 @@ void VRPane::ResetGeneralSettings()
                            Config::GFX_VR_ORTHO_SCISSOR_FIX.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_DETECT_SKYBOX,
                            Config::GFX_VR_DETECT_SKYBOX.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_SKIP_BACKGROUND_FILL,
+                           Config::GFX_VR_SKIP_BACKGROUND_FILL.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_EAGER_HEARTBEAT,
                            Config::GFX_VR_EAGER_HEARTBEAT.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_LOAD_CUSTOM_SHADERS,

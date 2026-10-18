@@ -304,6 +304,8 @@ void VRConfigWidget::CreateWidgets()
       make_bool(tr("Ortho Scissor Fix"), Config::GFX_VR_ORTHO_SCISSOR_FIX));
   hacks_group_layout->addWidget(make_bool(tr("Detect Skybox"), Config::GFX_VR_DETECT_SKYBOX));
   hacks_group_layout->addWidget(
+      make_bool(tr("Skip Background Fill"), Config::GFX_VR_SKIP_BACKGROUND_FILL));
+  hacks_group_layout->addWidget(
       make_bool(tr("Layered Palette Conversion Path"), Config::GFX_VR_METROID_THERMAL_VISOR_FIX));
 
   auto* framerate_group = new QGroupBox(tr("Framerate"));

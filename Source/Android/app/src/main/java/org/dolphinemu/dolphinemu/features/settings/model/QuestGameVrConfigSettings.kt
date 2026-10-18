@@ -44,6 +44,7 @@ object QuestGameVrConfigSettings {
         "DetectRenderTargets",
         "OrthoScissorFix",
         "DetectSkybox",
+        "SkipBackgroundFill",
         "MetroidThermalVisorFix",
         "MetroidD3DThermalPaletteFix",
         "ForcedVBIFrequency",

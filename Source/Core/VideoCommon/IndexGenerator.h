@@ -25,10 +25,15 @@ public:
   u32 GetIndexLen() const { return static_cast<u32>(m_index_buffer_current - m_base_index_ptr); }
   u32 GetRemainingIndices(OpcodeDecoder::Primitive primitive) const;
 
+  // Triangles in the indices added since Start(), whether they were written as a list or as
+  // strips separated by primitive restart. Only meaningful for a batch of triangle primitives.
+  u32 GetTriangleCount() const;
+
 private:
   u16* m_index_buffer_current = nullptr;
   u16* m_base_index_ptr = nullptr;
   u32 m_base_index = 0;
+  bool m_primitive_restart = false;
 
   using PrimitiveFunction = u16* (*)(u16*, u32, u32);
   Common::EnumMap<PrimitiveFunction, OpcodeDecoder::Primitive::GX_DRAW_POINTS> m_primitive_table{};

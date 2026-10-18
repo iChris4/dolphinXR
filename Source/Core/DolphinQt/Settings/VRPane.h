@@ -79,6 +79,7 @@ private:
   ConfigBool* m_panes_on_screen = nullptr;
   ConfigBool* m_detect_render_targets = nullptr;
   ConfigBool* m_detect_skybox = nullptr;
+  ConfigBool* m_skip_background_fill = nullptr;
   ConfigBool* m_use_vulkan_multiview = nullptr;
   ConfigBool* m_passthrough = nullptr;
   ConfigBool* m_passthrough_remove_black_bg = nullptr;

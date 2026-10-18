@@ -158,6 +158,12 @@ private:
         "only, so the sky renders at infinity instead of a meter or two away (e.g. Metroid "
         "Prime). If unsure, leave this unchecked.",
         Config::GFX_VR_DETECT_SKYBOX, touched);
+    MenuWidgets::Checkbox(
+        "Skip Background Fill",
+        "Skips the opaque untextured quad some games draw over the frame to colour the empty "
+        "background, which lands in front of the scene in VR (Phantasy Star Online's white "
+        "square). It can also skip a solid shape a game means to show: turn it on per game.",
+        Config::GFX_VR_SKIP_BACKGROUND_FILL, touched);
     // One option on the desktop too: it drives both palette fixes.
     if (MenuWidgets::Checkbox(
             "Layered Palette Conversion Path",

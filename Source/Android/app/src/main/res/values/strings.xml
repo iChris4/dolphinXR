@@ -885,6 +885,8 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_show_perf_hud_description">Displays Dolphin frame rate statistics in the headset mirror.</string>
     <string name="quest_detect_skybox">Detect Skybox</string>
     <string name="quest_detect_skybox_description">Treats objects drawn at the camera origin as skyboxes and locks them to head rotation only, so the sky renders at infinity instead of appearing too close. Disable if it incorrectly affects non-sky geometry.</string>
+    <string name="quest_skip_background_fill">Skip Background Fill</string>
+    <string name="quest_skip_background_fill_description">Skips the opaque untextured quad some games draw over the frame to colour the empty background, which lands in front of the scene in VR (Phantasy Star Online\'s white square). It can also skip a solid shape a game means to show, so turn it on per game.</string>
     <string name="quest_passthrough">Enable passthrough</string>
     <string name="quest_passthrough_description">Shows the headset camera feed wherever the game renders nothing, using a dedicated coverage buffer that leaves game rendering untouched (XR_FB_passthrough).</string>
     <string name="quest_passthrough_reveal_unrendered">Reveal unrendered areas</string>

@@ -1842,7 +1842,9 @@ void VertexManagerBase::Flush()
             !elements_skip && !texmgr_skip && used_textures.Count() == 0 &&
             !bpmem.blendmode.blend_enable && !bpmem.blendmode.subtract && bpmem.zmode.test_enable &&
             bpmem.zmode.func != CompareMode::Always && !bpmem.zmode.update_enable &&
-            m_index_generator.GetIndexLen() == 6)
+            (m_current_primitive_type == PrimitiveType::Triangles ||
+             m_current_primitive_type == PrimitiveType::TriangleStrip) &&
+            m_index_generator.GetIndexLen() <= 8 && m_index_generator.GetTriangleCount() == 2)
         {
           hunter_skip = true;
           if (hunter_debug_logging) [[unlikely]]

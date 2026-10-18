@@ -264,6 +264,7 @@ void IndexGenerator::Init()
 {
   using OpcodeDecoder::Primitive;
 
+  m_primitive_restart = g_backend_info.bSupportsPrimitiveRestart;
   if (g_backend_info.bSupportsPrimitiveRestart)
   {
     m_primitive_table[Primitive::GX_DRAW_QUADS] = AddQuads<true>;
@@ -301,6 +302,30 @@ void IndexGenerator::Init()
     m_primitive_table[Primitive::GX_DRAW_LINE_STRIP] = AddLineStrip;
     m_primitive_table[Primitive::GX_DRAW_POINTS] = AddPoints;
   }
+}
+
+u32 IndexGenerator::GetTriangleCount() const
+{
+  if (!m_primitive_restart)
+    return GetIndexLen() / 3;
+
+  // Strips separated by restart indices: a strip of n indices holds n - 2 triangles.
+  u32 triangles = 0;
+  u32 strip_length = 0;
+  for (const u16* index = m_base_index_ptr; index != m_index_buffer_current; ++index)
+  {
+    if (*index != s_primitive_restart)
+    {
+      ++strip_length;
+      continue;
+    }
+    if (strip_length >= 3)
+      triangles += strip_length - 2;
+    strip_length = 0;
+  }
+  if (strip_length >= 3)
+    triangles += strip_length - 2;
+  return triangles;
 }
 
 void IndexGenerator::Start(u16* index_ptr)
