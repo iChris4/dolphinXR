@@ -222,6 +222,23 @@ void SetScissorAndViewport(FramebufferManager* frame_buffer_manager, ScissorPos 
       viewport.wd = frame.width * 0.5f;
       viewport.ht = -frame.height * 0.5f;
     }
+    else if (frame.valid && vp_class == VR::VRViewportClass::DisplacedScene &&
+             static_cast<int>(scissor_bottom_right.x) - static_cast<int>(scissor_top_left.x) + 1 >=
+                 frame.width * 9 / 10 &&
+             static_cast<int>(scissor_bottom_right.y) - static_cast<int>(scissor_top_left.y) + 1 >=
+                 frame.height * 9 / 10)
+    {
+      // Scene panned with the scissor offset (PSO under its menus). The eye projections already
+      // place it around the player, so undo the pan: the game's viewport and scissor are moved
+      // the same way, and both go back over the displayed frame. A small scissor means a pane
+      // recentred by the offset instead (PSO minimap), whose raster state is left alone.
+      viewport.xOrig = static_cast<float>(x_off + frame.left) + std::fabs(viewport.wd);
+      viewport.yOrig = static_cast<float>(y_off + frame.top) + std::fabs(viewport.ht);
+      scissor_top_left.x = static_cast<u32>(x_off + frame.left);
+      scissor_top_left.y = static_cast<u32>(y_off + frame.top);
+      scissor_bottom_right.x = static_cast<u32>(x_off + frame.left + frame.width - 1);
+      scissor_bottom_right.y = static_cast<u32>(y_off + frame.top + frame.height - 1);
+    }
     else if (g_ActiveConfig.vr_remove_bars && g_ActiveConfig.vr_frame_size_from_xfb)
     {
       // Preserve the game's viewport so EFB readbacks (Trilogy blur and visors) keep

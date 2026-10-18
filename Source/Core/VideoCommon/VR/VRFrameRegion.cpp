@@ -133,6 +133,16 @@ VRViewportClass ClassifyVRViewport(const Viewport& v, int x_off, int y_off)
   if (width == 457.0f && height == 341.0f && left == 0.0f && top == 0.0f)
     return VRViewportClass::RenderToTexture;
 
+  // A viewport the size of the frame, moved only by the scissor offset: the game pans the
+  // whole scene (PSO slides it aside to make room for its menus). It is still the main scene,
+  // not an offscreen pass; SetScissorAndViewport puts it back over the frame.
+  if (std::fabs(width - screen_width) < 1.0f && std::fabs(height - screen_height) < 1.0f &&
+      (std::fabs(left) >= 1.0f || std::fabs(top) >= 1.0f) && left < screen_width &&
+      top < screen_height && left + width > 0.0f && top + height > 0.0f)
+  {
+    return VRViewportClass::DisplacedScene;
+  }
+
   // Full width: fullscreen, letterboxed, or top/bottom split-screen.
   if (width >= min_screen_width)
   {
@@ -394,6 +404,8 @@ const char* GetVRViewportClassName(VRViewportClass vclass)
     return "RenderToTexture";
   case VRViewportClass::Offscreen:
     return "Offscreen";
+  case VRViewportClass::DisplacedScene:
+    return "DisplacedScene";
   }
   return "Unknown";
 }
