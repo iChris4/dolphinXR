@@ -133,11 +133,13 @@ VRViewportClass ClassifyVRViewport(const Viewport& v, int x_off, int y_off)
   if (width == 457.0f && height == 341.0f && left == 0.0f && top == 0.0f)
     return VRViewportClass::RenderToTexture;
 
-  // A viewport the size of the frame, moved only by the scissor offset: the game pans the
-  // whole scene (PSO slides it aside to make room for its menus). It is still the main scene,
-  // not an offscreen pass; SetScissorAndViewport puts it back over the frame.
+  // A viewport the size of the frame, moved further from the frame origin than the 10%
+  // tolerance below but still overlapping the frame: the game pans the whole scene (PSO slides
+  // it aside to make room for its menus, with the scissor offset). It is still the main scene,
+  // not an offscreen pass; SetScissorAndViewport puts it back over the frame. Smaller moves
+  // (screen shake, a pixel or two between the scene and the XFB copy) stay MainScene.
   if (std::fabs(width - screen_width) < 1.0f && std::fabs(height - screen_height) < 1.0f &&
-      (std::fabs(left) >= 1.0f || std::fabs(top) >= 1.0f) && left < screen_width &&
+      (std::fabs(left) > max_left || std::fabs(top) > max_top) && left < screen_width &&
       top < screen_height && left + width > 0.0f && top + height > 0.0f)
   {
     return VRViewportClass::DisplacedScene;

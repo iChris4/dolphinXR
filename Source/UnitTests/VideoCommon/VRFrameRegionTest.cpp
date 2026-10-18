@@ -113,6 +113,46 @@ TEST(VRFrameRegion, NearMatchingAnimatedViewportCannotMoveComposedScreen)
   EXPECT_FALSE(VR::ConsumeVRPresentationSourceRegion(xfb_source, &presentation_source));
 }
 
+TEST(VRFrameRegion, SceneMovedFarOffTheFrameIsDisplaced)
+{
+  VR::ResetVRFrameRegion();
+  LatchDisplayRegion(640, 480);
+
+  // Phantasy Star Online pans its scene 80 px right and 112 px up under its menus.
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(80, -112, 640, 480), 0, 0),
+            VR::VRViewportClass::DisplacedScene);
+  // Moved up only: it used to stay MainScene and be drawn shifted.
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(0, -100, 640, 480), 0, 0),
+            VR::VRViewportClass::DisplacedScene);
+  // Also through the scissor offset alone, as PSO does.
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 342, 640, 480), 262, 454),
+            VR::VRViewportClass::DisplacedScene);
+}
+
+TEST(VRFrameRegion, SceneMovedWithinTheToleranceStaysMainScene)
+{
+  VR::ResetVRFrameRegion();
+  LatchDisplayRegion(640, 480);
+
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(0, 0, 640, 480), 0, 0),
+            VR::VRViewportClass::MainScene);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(2, 0, 640, 480), 0, 0),
+            VR::VRViewportClass::MainScene);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(-1, -2, 640, 480), 0, 0),
+            VR::VRViewportClass::MainScene);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(60, 40, 640, 480), 0, 0),
+            VR::VRViewportClass::MainScene);
+}
+
+TEST(VRFrameRegion, SceneOutsideTheFrameStaysOffscreen)
+{
+  VR::ResetVRFrameRegion();
+  LatchDisplayRegion(640, 480);
+
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(700, 0, 640, 480), 0, 0),
+            VR::VRViewportClass::Offscreen);
+}
+
 TEST(VRFrameRegion, MKDDCharacterBandRemapsToItsOriginalScreenPosition)
 {
   // These are the raw values captured in the element signature. GX's 342-pixel scissor
