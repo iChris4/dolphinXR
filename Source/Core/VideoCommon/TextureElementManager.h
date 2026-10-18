@@ -73,6 +73,9 @@ public:
     std::string condition_flag;
     bool condition_inverted = false;
     bool enabled = true;
+    // False for overrides that ship in Sys: they come back on every load, so they cannot be
+    // deleted or renamed in the user's file. Not stored in the ini.
+    bool user_defined = true;
   };
 
   static TextureElementManager& GetInstance();

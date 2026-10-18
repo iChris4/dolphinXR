@@ -312,10 +312,16 @@ std::vector<HideObject> LoadFromINI(const std::string& game_id, std::optional<u1
   for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
     MergeParsedHideObjectFile(&result, &index_by_name,
                               LoadFromINIFile(GetSysVRGameSettingsPath(filename)));
+  const std::map<std::string, size_t> sys_names = index_by_name;
 
   for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
     MergeParsedHideObjectFile(&result, &index_by_name,
                               LoadFromINIFile(File::GetUserPath(D_GAMESETTINGSVR_IDX) + filename));
+
+  // A code that ships in Sys comes back on every load, even if the user's file (which saves every
+  // code) drops or renames it. Editing it under its name does stick: the user's file wins.
+  for (HideObject& code : result)
+    code.user_defined = !sys_names.contains(code.name);
 
   return result;
 }

@@ -58,6 +58,7 @@ struct HideObject
   std::string name;
   std::vector<HideObjectEntry> entries;  // Usually 1, but format allows multiple per code
   bool active = true;
+  // False for codes that ship in Sys (LoadFromINI): they cannot be deleted in the user's file.
   bool user_defined = true;
 };
 

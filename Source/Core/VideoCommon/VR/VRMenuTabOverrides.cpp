@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -140,6 +142,103 @@ std::string HideObjectDetail(const HideObjectEngine::HideObject& entry)
                                      fmt::format("{} patterns", entry.entries.size());
 }
 
+// A Hide Code Hunting line: the bytes a draw's vertex data must start with, kept as bytes so
+// sizes change and the last byte steps without carrying, like the desktop editor.
+struct HideLine
+{
+  HideObjectEngine::HideObjectType type = HideObjectEngine::HideObjectType::Bits8;
+  std::vector<u8> bytes = std::vector<u8>(1, 0);
+  // Unchecked lines are left out while testing, and not saved.
+  bool enabled = true;
+};
+
+HideLine LineFromEntry(const HideObjectEngine::HideObjectEntry& entry)
+{
+  HideLine line;
+  line.type = entry.type;
+  const int byte_count = HideObjectEngine::GetByteCount(entry.type);
+  line.bytes.resize(byte_count);
+  // Big-endian: value_upper holds the bytes beyond the low 8.
+  for (int i = 0; i < byte_count; ++i)
+  {
+    const int from_end = byte_count - 1 - i;
+    const u64 word = from_end >= 8 ? entry.value_upper : entry.value_lower;
+    line.bytes[i] = static_cast<u8>(word >> ((from_end % 8) * 8));
+  }
+  return line;
+}
+
+HideObjectEngine::HideObjectEntry EntryFromLine(const HideLine& line)
+{
+  HideObjectEngine::HideObjectEntry entry;
+  entry.type = line.type;
+  const int byte_count = static_cast<int>(line.bytes.size());
+  for (int i = 0; i < byte_count; ++i)
+  {
+    const int from_end = byte_count - 1 - i;
+    u64& word = from_end >= 8 ? entry.value_upper : entry.value_lower;
+    word |= static_cast<u64>(line.bytes[i]) << ((from_end % 8) * 8);
+  }
+  return entry;
+}
+
+std::string LineHex(const HideLine& line)
+{
+  std::string hex;
+  for (const u8 byte : line.bytes)
+    hex += fmt::format("{:02X}", byte);
+  return hex;
+}
+
+// Hex digits (an optional 0x first) for `byte_count` bytes; fewer digits are padded with leading
+// zeros, as the desktop editor reads them.
+std::optional<std::vector<u8>> ParseLineHex(std::string_view text, size_t byte_count)
+{
+  text = StripWhitespace(text);
+  if (text.starts_with("0x") || text.starts_with("0X"))
+    text.remove_prefix(2);
+  if (text.empty() || text.size() > byte_count * 2)
+    return std::nullopt;
+
+  std::string digits(byte_count * 2 - text.size(), '0');
+  digits += text;
+  std::vector<u8> bytes(byte_count);
+  for (size_t i = 0; i < byte_count; ++i)
+  {
+    u8 byte = 0;
+    for (const char c : std::string_view(digits).substr(i * 2, 2))
+    {
+      const int digit = c >= '0' && c <= '9' ? c - '0' :
+                        c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+                        c >= 'A' && c <= 'F' ? c - 'A' + 10 :
+                                               -1;
+      if (digit < 0)
+        return std::nullopt;
+      byte = static_cast<u8>(byte << 4 | digit);
+    }
+    bytes[i] = byte;
+  }
+  return bytes;
+}
+
+const std::array<std::pair<HideObjectEngine::HideObjectType, const char*>,
+                 static_cast<size_t>(HideObjectEngine::HideObjectType::Count)>&
+HideLineSizes()
+{
+  static const auto sizes = [] {
+    std::array<std::pair<HideObjectEngine::HideObjectType, const char*>,
+               static_cast<size_t>(HideObjectEngine::HideObjectType::Count)>
+        result;
+    for (size_t i = 0; i < result.size(); ++i)
+    {
+      const auto type = static_cast<HideObjectEngine::HideObjectType>(i);
+      result[i] = {type, HideObjectEngine::GetTypeName(type)};
+    }
+    return result;
+  }();
+  return sizes;
+}
+
 // The header of a collapsible list, with how many entries are on. Returns true while it is open
 // and has entries.
 template <typename Entry>
@@ -246,15 +345,19 @@ public:
       Load(game_id);
 
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrapped("Changes apply at once and are saved to this game's VR settings. Shader "
-                       "Hunting adds shader overrides; edit overrides in the game's Properties "
-                       "on the desktop.");
+    ImGui::TextWrapped("Changes apply at once and are saved to this game's VR settings. The "
+                       "hunting sections find new overrides and hide codes; the other settings "
+                       "of an override are in the game's Properties on the desktop.");
     ImGui::PopStyleColor();
     ImGui::Spacing();
 
     // Each hunting section sits right above the list it saves into.
     DrawShaderHunting(context);
-    DrawShaderList(context);
+    DrawEditableList(context, EditableList::Shaders, "Shader Overrides", "shader", m_shaders,
+                     &ShaderHunter::ShaderOverride::enabled, ShaderDetail, [&] {
+                       ShaderHunter::SaveOverridesToINI(game_id, m_shaders);
+                       ShaderHunter::GetInstance().LoadOverrides(game_id);
+                     });
 
     if (const auto i = DrawList("Elements Group Overrides", m_elements,
                                 &ElementsGroupManager::ElementGroupOverride::enabled,
@@ -266,26 +369,40 @@ public:
     }
 
     DrawTextureHunting(context);
-    if (const auto i = DrawList("Texture Element Overrides", m_textures,
-                                &TextureElementManager::TextureElementOverride::enabled,
-                                TextureDetail))
-    {
-      TextureElementManager::SaveOverridesToINI(game_id, m_textures);
-      TextureElementManager::GetInstance().LoadOverrides(game_id);
-      ReportToggle(context, m_textures[*i].name, m_textures[*i].enabled);
-    }
+    DrawEditableList(context, EditableList::Textures, "Texture Element Overrides", "texture",
+                     m_textures, &TextureElementManager::TextureElementOverride::enabled,
+                     TextureDetail, [&] {
+                       TextureElementManager::SaveOverridesToINI(game_id, m_textures);
+                       TextureElementManager::GetInstance().LoadOverrides(game_id);
+                     });
 
-    if (const auto i = DrawList("Hide Object Codes", m_hide_objects,
-                                &HideObjectEngine::HideObject::active, HideObjectDetail))
-    {
-      HideObjectEngine::SaveToINI(game_id, m_hide_objects);
-      HideObjectEngine::Engine::GetInstance().ApplyCodes(m_hide_objects);
-      ReportToggle(context, m_hide_objects[*i].name, m_hide_objects[*i].active);
-    }
+    DrawHideCodeHunting(context);
+    DrawEditableList(
+        context, EditableList::HideCodes, "Hide Object Codes", "hide code", m_hide_objects,
+        &HideObjectEngine::HideObject::active, HideObjectDetail,
+        [&] {
+          // A deleted code can no longer be the one Hide Code Hunting edits.
+          if (std::ranges::find(m_hide_objects, m_hide_hunt.editing,
+                                &HideObjectEngine::HideObject::name) == m_hide_objects.end())
+          {
+            m_hide_hunt.editing.clear();
+          }
+          HideObjectEngine::SaveToINI(game_id, m_hide_objects);
+          ApplyHideCodes();
+        },
+        "Edit in Hide Code Hunting", [&](size_t index) { EditHideCode(context, index); });
   }
 
 private:
-  enum class ShaderListAction
+  // The lists whose overrides can be edited and deleted here.
+  enum class EditableList
+  {
+    Shaders,
+    Textures,
+    HideCodes,
+  };
+
+  enum class ListAction
   {
     None,
     Toggle,
@@ -295,53 +412,67 @@ private:
     CancelRename,
   };
 
-  // The Shader Overrides list. Overrides made by the user also get rename (system keyboard only)
-  // and delete icons; the ones that ship with Dolphin come back from Sys on every load, so they
-  // only turn on and off.
-  void DrawShaderList(VRMenuContext& context)
+  // A list of overrides with a pencil and a delete icon on the ones the user made. The ones that
+  // ship with Dolphin come back from Sys on every load, so they cannot be deleted or renamed.
+  // `enabled` is the entry's on/off flag, `save` writes the list and applies it. The pencil renames
+  // the entry in place (system keyboard only), or with `on_edit` calls it with the entry's index
+  // instead (enabled for shipped entries too: an edit saved under the same name sticks).
+  template <typename Entry, typename Detail, typename Save, typename Edit = std::nullptr_t>
+  void DrawEditableList(VRMenuContext& context, EditableList list, const char* title,
+                        const char* noun, std::vector<Entry>& entries, bool Entry::*enabled,
+                        Detail detail, Save save, const char* edit_tooltip = nullptr,
+                        Edit on_edit = nullptr)
   {
     using MenuWidgets::Icon;
+    constexpr bool renames = std::is_same_v<Edit, std::nullptr_t>;
 
     const u64 now_us = Common::Timer::NowUs();
     if (!m_delete_armed.empty() && now_us > m_delete_armed_until_us)
       m_delete_armed.clear();
+    // One rename and one armed delete at a time, in whichever list they started.
+    const bool renaming_here = m_rename_list == list && !m_rename_name.empty();
+    const bool armed_here = m_delete_armed_list == list && !m_delete_armed.empty();
 
-    ShaderListAction action = ShaderListAction::None;
+    ListAction action = ListAction::None;
     size_t action_index = 0;
-    if (const std::optional<TextInput::Edit> edit = TextInput::TakeEdit(m_rename_request))
+    if (renaming_here)
     {
-      m_rename_text = edit->text;
-      if (edit->done)
-        action = ShaderListAction::ApplyRename;
+      if (const std::optional<TextInput::Edit> edit = TextInput::TakeEdit(m_rename_request))
+      {
+        m_rename_text = edit->text;
+        if (edit->done)
+          action = ListAction::ApplyRename;
+      }
     }
 
-    if (ListHeader("Shader Overrides", m_shaders, &ShaderHunter::ShaderOverride::enabled))
+    if (ListHeader(title, entries, enabled))
     {
-      const bool can_rename = TextInput::IsAvailable();
+      const bool show_pencil = !renames || TextInput::IsAvailable();
       const float icon_size = ImGui::GetFrameHeight();
       const float actions_width =
-          can_rename ? icon_size * 2.0f + ImGui::GetStyle().ItemSpacing.x : icon_size;
+          show_pencil ? icon_size * 2.0f + ImGui::GetStyle().ItemSpacing.x : icon_size;
       constexpr const char* SHIPPED =
           "Comes with Dolphin and returns on every load: turn it off instead.";
 
-      ImGui::PushID("Shader Overrides");
+      ImGui::PushID(title);
       ImGui::Indent();
       // A table clips each column, so a long name can never cover the icons.
       if (ImGui::BeginTable("##rows", 2))
       {
         ImGui::TableSetupColumn("entry", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("actions", ImGuiTableColumnFlags_WidthFixed, actions_width);
-        for (size_t i = 0; i < m_shaders.size(); ++i)
+        for (size_t i = 0; i < entries.size(); ++i)
         {
-          ShaderHunter::ShaderOverride& entry = m_shaders[i];
-          const bool renaming = !m_rename_name.empty() && entry.name == m_rename_name;
+          Entry& entry = entries[i];
+          const bool renaming = renaming_here && entry.name == m_rename_name;
           ImGui::PushID(static_cast<int>(i));
           ImGui::TableNextRow();
 
           ImGui::TableSetColumnIndex(0);
           if (renaming)
           {
-            // The typed name, read-only like the hunting Name field; a click reopens the keyboard.
+            // The typed name, read-only like the hunting Name fields; a click reopens the
+            // keyboard.
             std::array<char, 256> buffer{};
             m_rename_text.copy(buffer.data(), buffer.size() - 1);
             ImGui::SetNextItemWidth(-FLT_MIN);
@@ -350,9 +481,9 @@ private:
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
               m_rename_request = TextInput::Request(m_rename_text);
           }
-          else if (EntryCheckbox(entry, &ShaderHunter::ShaderOverride::enabled, ShaderDetail))
+          else if (EntryCheckbox(entry, enabled, detail))
           {
-            action = ShaderListAction::Toggle;
+            action = ListAction::Toggle;
             action_index = i;
           }
 
@@ -360,31 +491,36 @@ private:
           if (renaming)
           {
             if (MenuWidgets::IconButton("##apply", Icon::Check, "Rename"))
-              action = ShaderListAction::ApplyRename;
+              action = ListAction::ApplyRename;
             ImGui::SameLine();
             if (MenuWidgets::IconButton("##cancel", Icon::Cross, "Keep the old name"))
-              action = ShaderListAction::CancelRename;
+              action = ListAction::CancelRename;
           }
           else
           {
-            ImGui::BeginDisabled(!entry.user_defined);
-            if (can_rename)
+            if (show_pencil)
             {
-              if (MenuWidgets::IconButton("##rename", Icon::Pencil,
-                                          entry.user_defined ? "Rename" : SHIPPED))
+              const bool pencil_enabled = !renames || entry.user_defined;
+              const char* pencil_tooltip = !renames     ? edit_tooltip :
+                                           pencil_enabled ? "Rename" :
+                                                            SHIPPED;
+              ImGui::BeginDisabled(!pencil_enabled);
+              if (MenuWidgets::IconButton("##rename", Icon::Pencil, pencil_tooltip))
               {
-                action = ShaderListAction::Rename;
+                action = ListAction::Rename;
                 action_index = i;
               }
+              ImGui::EndDisabled();
               ImGui::SameLine();
             }
-            const bool armed = m_delete_armed == entry.name;
+            ImGui::BeginDisabled(!entry.user_defined);
+            const bool armed = armed_here && m_delete_armed == entry.name;
             const char* delete_tooltip = !entry.user_defined ? SHIPPED :
                                          armed               ? "Press again to delete" :
                                                                "Delete";
             if (MenuWidgets::IconButton("##delete", Icon::Trash, delete_tooltip, armed))
             {
-              action = ShaderListAction::Delete;
+              action = ListAction::Delete;
               action_index = i;
             }
             ImGui::EndDisabled();
@@ -400,64 +536,73 @@ private:
     // Applied after the rows, which hold references into the list.
     switch (action)
     {
-    case ShaderListAction::None:
+    case ListAction::None:
       break;
-    case ShaderListAction::Toggle:
-      SaveShaders(context.game_id);
-      ReportToggle(context, m_shaders[action_index].name, m_shaders[action_index].enabled);
+    case ListAction::Toggle:
+      save();
+      ReportToggle(context, entries[action_index].name, entries[action_index].*enabled);
       break;
-    case ShaderListAction::Rename:
+    case ListAction::Rename:
       m_delete_armed.clear();
-      m_rename_name = m_shaders[action_index].name;
-      m_rename_text = m_rename_name;
-      m_rename_request = TextInput::Request(m_rename_text);
-      context.actions.SetStatus("Type the new name on the keyboard, then press Enter");
-      break;
-    case ShaderListAction::Delete:
-    {
-      const std::string name = m_shaders[action_index].name;
-      if (m_delete_armed != name)
+      if constexpr (renames)
       {
+        m_rename_list = list;
+        m_rename_name = entries[action_index].name;
+        m_rename_text = m_rename_name;
+        m_rename_request = TextInput::Request(m_rename_text);
+        context.actions.SetStatus("Type the new name on the keyboard, then press Enter");
+      }
+      else
+      {
+        on_edit(action_index);
+      }
+      break;
+    case ListAction::Delete:
+    {
+      const std::string name = entries[action_index].name;
+      if (!armed_here || m_delete_armed != name)
+      {
+        m_delete_armed_list = list;
         m_delete_armed = name;
         m_delete_armed_until_us = now_us + CONFIRM_TIMEOUT_US;
         context.actions.SetStatus(fmt::format("Press the trash icon again to delete \"{}\"", name));
         break;
       }
       m_delete_armed.clear();
-      m_shaders.erase(m_shaders.begin() + action_index);
-      SaveShaders(context.game_id);
+      entries.erase(entries.begin() + action_index);
+      save();
       context.actions.SetStatus(fmt::format("Deleted \"{}\"", name));
       break;
     }
-    case ShaderListAction::ApplyRename:
-      ApplyRename(context);
+    case ListAction::ApplyRename:
+      ApplyRename(context, entries, noun, save);
       break;
-    case ShaderListAction::CancelRename:
+    case ListAction::CancelRename:
       EndRename();
       break;
     }
   }
 
-  void ApplyRename(VRMenuContext& context)
+  template <typename Entry, typename Save>
+  void ApplyRename(VRMenuContext& context, std::vector<Entry>& entries, const char* noun,
+                   Save save)
   {
-    const auto entry =
-        std::ranges::find(m_shaders, m_rename_name, &ShaderHunter::ShaderOverride::name);
+    const auto entry = std::ranges::find(entries, m_rename_name, &Entry::name);
     const std::string new_name(StripWhitespace(m_rename_text));
-    if (entry == m_shaders.end() || new_name.empty() || new_name == m_rename_name)
+    if (entry == entries.end() || new_name.empty() || new_name == m_rename_name)
     {
       EndRename();
       return;
     }
     // Overrides are matched by name when the ini loads: two with one name would merge.
-    if (std::ranges::find(m_shaders, new_name, &ShaderHunter::ShaderOverride::name) !=
-        m_shaders.end())
+    if (std::ranges::find(entries, new_name, &Entry::name) != entries.end())
     {
       context.actions.SetStatus(
-          fmt::format("Another shader override is already named \"{}\"", new_name));
+          fmt::format("Another {} override is already named \"{}\"", noun, new_name));
       return;
     }
     entry->name = new_name;
-    SaveShaders(context.game_id);
+    save();
     context.actions.SetStatus(fmt::format("Renamed \"{}\" to \"{}\"", m_rename_name, new_name));
     EndRename();
   }
@@ -467,12 +612,6 @@ private:
     m_rename_name.clear();
     m_rename_text.clear();
     m_rename_request = 0;
-  }
-
-  void SaveShaders(const std::string& game_id)
-  {
-    ShaderHunter::SaveOverridesToINI(game_id, m_shaders);
-    ShaderHunter::GetInstance().LoadOverrides(game_id);
   }
 
   // How the hunting sections word what they hunt.
@@ -665,7 +804,13 @@ private:
                               const std::string& name_hint)
   {
     if (TextInput::IsAvailable())
-      DrawNameField(context, options, kind, name_hint);
+    {
+      const std::string name_tooltip =
+          fmt::format("Name of the saved override. Empty uses \"{} <hash>\". A name another "
+                      "override already has gets a number.",
+                      kind.name_prefix);
+      DrawNameField(context, options.name, options.name_request, name_tooltip.c_str(), name_hint);
+    }
     const std::string handling_tooltip =
         fmt::format("Handling of the saved override. Saving the same {} again under its name "
                     "replaces its override.",
@@ -688,19 +833,15 @@ private:
   }
 
   // Name of the override to save, typed on the system keyboard. Looks like a text field; a click
-  // opens the keyboard, and the text follows each key press.
-  static void DrawNameField(VRMenuContext& context, SaveOptions& options, const HuntedKind& kind,
-                            const std::string& hint)
+  // opens the keyboard (`request` follows it), and the text follows each key press.
+  static void DrawNameField(VRMenuContext& context, std::string& name, u32& request,
+                            const char* tooltip, const std::string& hint)
   {
-    if (std::optional<TextInput::Edit> edit = TextInput::TakeEdit(options.name_request))
-      options.name = std::move(edit->text);
+    if (std::optional<TextInput::Edit> edit = TextInput::TakeEdit(request))
+      name = std::move(edit->text);
 
-    const std::string tooltip =
-        fmt::format("Name of the saved override. Empty uses \"{} <hash>\". A name another "
-                    "override already has gets a number.",
-                    kind.name_prefix);
-    MenuWidgets::BeginRow("Name", tooltip.c_str(), Config::LayerType::Base);
-    const bool has_name = !options.name.empty();
+    MenuWidgets::BeginRow("Name", tooltip, Config::LayerType::Base);
+    const bool has_name = !name.empty();
     const ImGuiStyle& style = ImGui::GetStyle();
     const float clear_width = has_name ? ImGui::CalcTextSize("Clear").x +
                                              style.FramePadding.x * 2.0f + style.ItemSpacing.x :
@@ -708,7 +849,7 @@ private:
 
     // Read-only: the text comes from the keyboard. ImGui shows the live string while it is.
     std::array<char, 256> buffer{};
-    options.name.copy(buffer.data(), buffer.size() - 1);
+    name.copy(buffer.data(), buffer.size() - 1);
     ImGui::SetNextItemWidth(MenuWidgets::ControlWidth() - clear_width);
     ImGui::InputTextWithHint("##name", hint.c_str(), buffer.data(), buffer.size(),
                              ImGuiInputTextFlags_ReadOnly);
@@ -716,14 +857,14 @@ private:
     // must open the keyboard again.
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
     {
-      options.name_request = TextInput::Request(options.name);
+      request = TextInput::Request(name);
       context.actions.SetStatus("Type the name on the keyboard, then press Enter");
     }
     if (has_name)
     {
       ImGui::SameLine();
       if (ImGui::Button("Clear"))
-        options.name.clear();
+        name.clear();
     }
   }
 
@@ -842,6 +983,410 @@ private:
         fmt::format("Saved \"{}\" ({})", name, HandlingName(options.handling)));
   }
 
+  // The code Hide Code Hunting is finding or editing.
+  struct HideCodeHunt
+  {
+    std::vector<HideLine> lines = std::vector<HideLine>(1);
+    size_t selected = 0;
+    // The saved code being edited (empty: a new code).
+    std::string editing;
+    // Applied only once changed, like the desktop editor: a new line (8 bits, 00) would hide
+    // every draw whose data starts with 00 as soon as hunting starts.
+    bool changed = false;
+    std::string name;
+    u32 name_request = 0;
+    // Keyboard request for the selected line's value.
+    u32 value_request = 0;
+  };
+
+  // The desktop Hide Object Code editor. While hunting, the code below is applied on top of the
+  // saved codes, so the object it matches disappears; Save adds it to the Hide Object Codes list
+  // (or saves the code picked there with its pencil). Like the other hunters, it keeps running
+  // while the menu is closed.
+  void DrawHideCodeHunting(VRMenuContext& context)
+  {
+    if (m_open_hide_hunting)
+    {
+      ImGui::SetNextItemOpen(true);
+      m_open_hide_hunting = false;
+    }
+    const char* header = m_hide_hunting ? "Hide Code Hunting  (on)###Hide Code Hunting" :
+                                          "Hide Code Hunting###Hide Code Hunting";
+    if (!ImGui::CollapsingHeader(header))
+      return;
+    ImGui::PushID("Hide Code Hunting");
+
+    if (MenuWidgets::Checkbox("Enable Hide Code Hunting",
+                              "Applies the code below on top of the saved hide codes, so you can "
+                              "see what it hides.",
+                              &m_hide_hunting))
+    {
+      ApplyHideCodes();
+    }
+
+    ImGui::BeginDisabled(!m_hide_hunting);
+    HideCodeHunt& hunt = m_hide_hunt;
+    if (!hunt.editing.empty())
+      MenuWidgets::ValueRow("Editing", hunt.editing);
+
+    bool changed = DrawHideLines(hunt);
+    HideLine& line = hunt.lines[hunt.selected];
+    if (DrawLineSize(line))
+    {
+      hunt.value_request = 0;
+      changed = true;
+    }
+    changed |= DrawHideValue(context, hunt, line);
+    changed |= DrawLastByte(line);
+
+    if (TextInput::IsAvailable())
+    {
+      DrawNameField(context, hunt.name, hunt.name_request,
+                    "Name of the saved code. Empty uses \"Hide Code <number>\", or the edited "
+                    "code's name. Names must be unique.",
+                    hunt.editing.empty() ? NextHideCodeName() : hunt.editing);
+    }
+
+    MenuWidgets::BeginRow("", nullptr, Config::LayerType::Base);
+    if (ImGui::Button(hunt.editing.empty() ? "Save Code" : "Save Changes"))
+      SaveHideCode(context);
+    ImGui::SameLine();
+    if (ImGui::Button("New Code"))
+    {
+      m_hide_hunt = {};
+      ApplyHideCodes();
+      context.actions.SetStatus("Started a new hide code");
+    }
+    ImGui::EndDisabled();
+
+    if (changed)
+    {
+      m_hide_hunt.changed = true;
+      ApplyHideCodes();
+    }
+
+    if (m_hide_hunting)
+    {
+      std::string hint;
+      if (Core::GetState(Core::System::GetInstance()) == Core::State::Paused)
+      {
+        hint = "The game is paused: resume it to see the code change.";
+      }
+      else
+      {
+        hint = "Look at the object to hide and step Last Byte of an 8-bit line until it "
+               "disappears. Then pick 16 bits and step again until it disappears again; repeat "
+               "until the code is long enough to hide only that object. Too short a code may hide "
+               "other objects too. The code stays applied while the menu is closed.";
+      }
+      ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+      ImGui::TextWrapped("%s", hint.c_str());
+      ImGui::PopStyleColor();
+    }
+    ImGui::Spacing();
+    ImGui::PopID();
+  }
+
+  // The code's lines: a checkbox to leave one out while testing, the line (click to pick it for
+  // the rows below) and a delete icon, then Add Line. Returns true when the applied code changed.
+  static bool DrawHideLines(HideCodeHunt& hunt)
+  {
+    bool changed = false;
+    std::optional<size_t> remove;
+    MenuWidgets::BeginRow("Code Lines",
+                          "What a draw's vertex data must start with; any line matches. "
+                          "Unchecked lines are left out while testing and are not saved.",
+                          Config::LayerType::Base);
+    ImGui::BeginGroup();
+    const float icon_size = ImGui::GetFrameHeight();
+    if (ImGui::BeginTable("##lines", 2, ImGuiTableFlags_None, {MenuWidgets::ControlWidth(), 0.0f}))
+    {
+      ImGui::TableSetupColumn("line", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn("remove", ImGuiTableColumnFlags_WidthFixed, icon_size);
+      for (size_t i = 0; i < hunt.lines.size(); ++i)
+      {
+        HideLine& line = hunt.lines[i];
+        ImGui::PushID(static_cast<int>(i));
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox("##enabled", &line.enabled))
+          changed = true;
+        ImGui::SameLine();
+        // "###" keeps the row's ID while its value changes.
+        const std::string label = fmt::format(
+            "[{}] {}###line", HideObjectEngine::GetTypeName(line.type), LineHex(line));
+        ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, {0.0f, 0.5f});
+        if (ImGui::Selectable(label.c_str(), hunt.selected == i, ImGuiSelectableFlags_None,
+                              {0.0f, icon_size}))
+        {
+          hunt.selected = i;
+          hunt.value_request = 0;
+        }
+        ImGui::PopStyleVar();
+
+        ImGui::TableSetColumnIndex(1);
+        ImGui::BeginDisabled(hunt.lines.size() == 1);
+        if (MenuWidgets::IconButton("##remove", MenuWidgets::Icon::Trash, "Remove the line"))
+          remove = i;
+        ImGui::EndDisabled();
+        ImGui::PopID();
+      }
+      ImGui::EndTable();
+    }
+    if (ImGui::Button("Add Line"))
+    {
+      hunt.lines.emplace_back();
+      hunt.selected = hunt.lines.size() - 1;
+      hunt.value_request = 0;
+    }
+    ImGui::EndGroup();
+
+    if (remove)
+    {
+      hunt.lines.erase(hunt.lines.begin() + *remove);
+      if (hunt.selected > *remove || hunt.selected >= hunt.lines.size())
+        --hunt.selected;
+      hunt.value_request = 0;
+      changed = true;
+    }
+    return changed;
+  }
+
+  // The selected line in hex. With a system keyboard a click types a new value, applied as it is
+  // typed. Returns true when the line changed.
+  static bool DrawHideValue(VRMenuContext& context, HideCodeHunt& hunt, HideLine& line)
+  {
+    bool changed = false;
+    if (const std::optional<TextInput::Edit> edit = TextInput::TakeEdit(hunt.value_request))
+    {
+      if (const auto bytes = ParseLineHex(edit->text, line.bytes.size()))
+      {
+        changed = *bytes != line.bytes;
+        line.bytes = *bytes;
+      }
+      else if (edit->done)
+      {
+        context.actions.SetStatus(
+            fmt::format("Not a hex value of up to {} digits", line.bytes.size() * 2));
+      }
+    }
+
+    const bool can_type = TextInput::IsAvailable();
+    MenuWidgets::BeginRow("Value",
+                          can_type ? "The selected line in hex. Click to type a value." :
+                                     "The selected line in hex.",
+                          Config::LayerType::Base);
+    const std::string hex = LineHex(line);
+    if (!can_type)
+    {
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(hex.c_str());
+      return changed;
+    }
+    std::array<char, 40> buffer{};
+    hex.copy(buffer.data(), buffer.size() - 1);
+    ImGui::SetNextItemWidth(MenuWidgets::ControlWidth());
+    ImGui::InputText("##value", buffer.data(), buffer.size(), ImGuiInputTextFlags_ReadOnly);
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+    {
+      hunt.value_request = TextInput::Request(hex);
+      context.actions.SetStatus("Type the value in hex on the keyboard, then press Enter");
+    }
+    return changed;
+  }
+
+  // Width of the Down/Up buttons of the Size and Last Byte rows, so the two rows line up.
+  static float HideStepButtonWidth()
+  {
+    return ImGui::CalcTextSize("Down").x + ImGui::GetStyle().FramePadding.x * 2.0f +
+           ImGui::GetFontSize() * 0.5f;
+  }
+
+  // The selected line's size: Down / the sizes / Up, one byte at a time. Growing adds a 00 byte,
+  // the next one to step; shrinking drops the last byte. Returns true when it changed.
+  static bool DrawLineSize(HideLine& line)
+  {
+    using HideObjectEngine::HideObjectType;
+    MenuWidgets::BeginRow("Size",
+                          "Length of the selected line. A longer line matches fewer objects; "
+                          "growing it adds a 00 byte, the next one to step.",
+                          Config::LayerType::Base);
+    // Its Down/Up buttons would otherwise share their IDs with the Last Byte row's.
+    ImGui::PushID("Size");
+    const int last = static_cast<int>(HideObjectType::Count) - 1;
+    int index = static_cast<int>(line.type);
+    const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+    const float button_width = HideStepButtonWidth();
+
+    ImGui::BeginDisabled(index == 0);
+    if (ImGui::Button("Down", {button_width, 0.0f}))
+      --index;
+    ImGui::EndDisabled();
+    ImGui::SameLine(0.0f, spacing);
+    HideObjectType type = line.type;
+    if (MenuWidgets::ComboControl<HideObjectType>(
+            line.type, HideLineSizes(), &type,
+            MenuWidgets::ControlWidth() - button_width - spacing))
+    {
+      index = static_cast<int>(type);
+    }
+    ImGui::SameLine(0.0f, spacing);
+    ImGui::BeginDisabled(index == last);
+    if (ImGui::Button("Up", {button_width, 0.0f}))
+      ++index;
+    ImGui::EndDisabled();
+    ImGui::PopID();
+
+    if (index == static_cast<int>(line.type))
+      return false;
+    line.type = static_cast<HideObjectType>(index);
+    line.bytes.resize(HideObjectEngine::GetByteCount(line.type), 0);
+    return true;
+  }
+
+  // The desktop Down/Up buttons and slider: the selected line's last byte, 00 to FF, stepping
+  // without carrying into the byte before it. Returns true when it changed.
+  static bool DrawLastByte(HideLine& line)
+  {
+    MenuWidgets::BeginRow("Last Byte",
+                          "Step it until the object disappears, then grow the line (Size) and "
+                          "step the new last byte.",
+                          Config::LayerType::Base);
+    u8& byte = line.bytes.back();
+    const u8 before = byte;
+    const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+    const float button_width = HideStepButtonWidth();
+    if (ImGui::Button("Down", {button_width, 0.0f}))
+      --byte;
+    ImGui::SameLine(0.0f, spacing);
+    int value = byte;
+    ImGui::SetNextItemWidth(MenuWidgets::ControlWidth() - button_width - spacing);
+    if (ImGui::SliderInt("##byte", &value, 0, 0xFF, "%02X",
+                         ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput))
+    {
+      byte = static_cast<u8>(value);
+    }
+    ImGui::SameLine(0.0f, spacing);
+    if (ImGui::Button("Up", {button_width, 0.0f}))
+      ++byte;
+    return byte != before;
+  }
+
+  std::string NextHideCodeName() const
+  {
+    for (int number = 1;; ++number)
+    {
+      std::string name = fmt::format("Hide Code {}", number);
+      if (std::ranges::find(m_hide_objects, name, &HideObjectEngine::HideObject::name) ==
+          m_hide_objects.end())
+      {
+        return name;
+      }
+    }
+  }
+
+  void SaveHideCode(VRMenuContext& context)
+  {
+    HideCodeHunt& hunt = m_hide_hunt;
+    HideObjectEngine::HideObject code;
+    size_t left_out = 0;
+    for (const HideLine& line : hunt.lines)
+    {
+      if (line.enabled)
+        code.entries.push_back(EntryFromLine(line));
+      else
+        ++left_out;
+    }
+    if (code.entries.empty())
+    {
+      context.actions.SetStatus("Not saved: check at least one line");
+      return;
+    }
+
+    code.name = StripWhitespace(hunt.name);
+    if (code.name.empty())
+      code.name = hunt.editing.empty() ? NextHideCodeName() : hunt.editing;
+    const auto edited =
+        std::ranges::find(m_hide_objects, hunt.editing, &HideObjectEngine::HideObject::name);
+    const auto same_name =
+        std::ranges::find(m_hide_objects, code.name, &HideObjectEngine::HideObject::name);
+    // Codes are matched by name when the ini loads: two with one name would merge.
+    if (same_name != m_hide_objects.end() && same_name != edited)
+    {
+      context.actions.SetStatus(
+          fmt::format("Not saved: another hide code is already named \"{}\"", code.name));
+      return;
+    }
+
+    // A shipped code saved under another name comes back from Sys anyway: keep it, and add the
+    // edit as a new code.
+    if (edited != m_hide_objects.end() && (edited->user_defined || edited->name == code.name))
+    {
+      code.user_defined = edited->user_defined || edited->name != code.name;
+      *edited = code;
+    }
+    else
+    {
+      m_hide_objects.push_back(code);
+    }
+    HideObjectEngine::SaveToINI(context.game_id, m_hide_objects);
+
+    std::string status = fmt::format("Saved \"{}\"", code.name);
+    if (left_out > 0)
+      status += fmt::format(" without its {} unchecked line{}", left_out, left_out == 1 ? "" : "s");
+    context.actions.SetStatus(status);
+    m_hide_hunt = {};
+    ApplyHideCodes();
+  }
+
+  // The pencil of the Hide Object Codes list: the code goes into Hide Code Hunting, which applies
+  // it in place of the saved one until it is saved.
+  void EditHideCode(VRMenuContext& context, size_t index)
+  {
+    const HideObjectEngine::HideObject& code = m_hide_objects[index];
+    m_hide_hunt = {};
+    m_hide_hunt.lines.clear();
+    for (const HideObjectEngine::HideObjectEntry& entry : code.entries)
+      m_hide_hunt.lines.push_back(LineFromEntry(entry));
+    if (m_hide_hunt.lines.empty())
+      m_hide_hunt.lines.emplace_back();
+    m_hide_hunt.editing = code.name;
+    m_hide_hunt.changed = true;
+    m_hide_hunting = true;
+    m_open_hide_hunting = true;
+    ApplyHideCodes();
+    context.actions.SetStatus(fmt::format("Editing \"{}\" in Hide Code Hunting", code.name));
+  }
+
+  // The saved codes and, while hunting, the hunted code on top (in place of the code it edits).
+  void ApplyHideCodes()
+  {
+    HideObjectEngine::Engine& engine = HideObjectEngine::Engine::GetInstance();
+    if (!m_hide_hunting || !m_hide_hunt.changed)
+    {
+      engine.ApplyCodes(m_hide_objects);
+      return;
+    }
+
+    std::vector<HideObjectEngine::HideObject> codes;
+    codes.reserve(m_hide_objects.size() + 1);
+    for (const HideObjectEngine::HideObject& code : m_hide_objects)
+    {
+      if (code.name != m_hide_hunt.editing)
+        codes.push_back(code);
+    }
+    HideObjectEngine::HideObject hunted;
+    hunted.name = "Hide Code Hunting";
+    for (const HideLine& line : m_hide_hunt.lines)
+    {
+      if (line.enabled)
+        hunted.entries.push_back(EntryFromLine(line));
+    }
+    if (!hunted.entries.empty())
+      codes.push_back(std::move(hunted));
+    engine.ApplyCodes(codes);
+  }
+
   // Same files and layering as the runtime managers load (no revision-specific ini), so the
   // lists show what is applied.
   void Load(const std::string& game_id)
@@ -865,11 +1410,18 @@ private:
   bool m_texture_hunting_started_here = false;
   SaveOptions m_shader_save;
   SaveOptions m_texture_save;
-  // Shader override being renamed (empty = none), the name typed so far, and its request.
+  // Hide Code Hunting: whether the hunted code is applied, the code, and whether its header opens
+  // on the next frame (a code was picked for editing in the list).
+  bool m_hide_hunting = false;
+  HideCodeHunt m_hide_hunt;
+  bool m_open_hide_hunting = false;
+  // Override being renamed (empty = none) and its list, the name typed so far, and its request.
+  EditableList m_rename_list = EditableList::Shaders;
   std::string m_rename_name;
   std::string m_rename_text;
   u32 m_rename_request = 0;
-  // Shader override whose delete icon waits for its second press, until when.
+  // Override whose delete icon waits for its second press, its list, and until when.
+  EditableList m_delete_armed_list = EditableList::Shaders;
   std::string m_delete_armed;
   u64 m_delete_armed_until_us = 0;
   std::vector<ShaderHunter::ShaderOverride> m_shaders;

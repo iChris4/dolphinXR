@@ -91,9 +91,11 @@ void BeginRow(const char* label, const char* tooltip, Config::LayerType active_l
 // Width left for the control on the current row.
 float ControlWidth();
 
-// The combo box of a Combo row. Returns true with `*result` set when another item was picked.
+// The combo box of a Combo row, `width` wide (0: the rest of the row). Returns true with `*result`
+// set when another item was picked.
 template <typename T>
-bool ComboControl(T value, std::span<const std::pair<T, const char*>> items, T* result)
+bool ComboControl(T value, std::span<const std::pair<T, const char*>> items, T* result,
+                  float width = 0.0f)
 {
   const char* preview = "?";
   for (const auto& [item_value, item_name] : items)
@@ -103,7 +105,7 @@ bool ComboControl(T value, std::span<const std::pair<T, const char*>> items, T* 
   }
 
   bool changed = false;
-  ImGui::SetNextItemWidth(ControlWidth());
+  ImGui::SetNextItemWidth(width > 0.0f ? width : ControlWidth());
   if (ImGui::BeginCombo("##combo", preview, ImGuiComboFlags_HeightLargest))
   {
     for (const auto& [item_value, item_name] : items)
