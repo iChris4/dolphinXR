@@ -1519,8 +1519,9 @@ static void WriteStage(ShaderCode& out, const pixel_shader_uid_data* uid_data, i
 
   const char* color_a = tev_c_input_table[cc.a];
   const char* color_b = tev_c_input_table[cc.b];
-  if ((cc.a == TevColorArg::Zero || cc.b == TevColorArg::Zero) &&
-      DriverDetails::HasBug(DriverDetails::BUG_BROKEN_TEV_COLOR_ZERO))
+  const char* alpha_a = tev_a_input_table[ac.a];
+  const char* alpha_b = tev_a_input_table[ac.b];
+  if (DriverDetails::HasBug(DriverDetails::BUG_BROKEN_TEV_COLOR_ZERO))
   {
     // The Adreno shader compiler incorrectly optimizes the int3(0,0,0) constant, causing incorrect
     // colors. To work around this, we trick the compiler by using konstLookup[8], which
@@ -1531,21 +1532,26 @@ static void WriteStage(ShaderCode& out, const pixel_shader_uid_data* uid_data, i
       color_a = "konstLookup[8].rgb";
     if (cc.b == TevColorArg::Zero)
       color_b = "konstLookup[8].rgb";
+    // The alpha inputs are miscompiled the same way. A wrong alpha fails the alpha test or blends
+    // to nothing, so whole objects disappear (Melee's shields, Sonic Riders: Zero Gravity's
+    // boards and rings).
+    if (ac.a == TevAlphaArg::Zero)
+      alpha_a = "konstLookup[8].a";
+    if (ac.b == TevAlphaArg::Zero)
+      alpha_b = "konstLookup[8].a";
   }
 
   if (DriverDetails::HasBug(DriverDetails::BUG_BROKEN_VECTOR_BITWISE_AND))
   {
-    out.Write("\ttevin_a = int4({} & 255, {} & 255);\n", color_a, tev_a_input_table[ac.a]);
-    out.Write("\ttevin_b = int4({} & 255, {} & 255);\n", color_b, tev_a_input_table[ac.b]);
+    out.Write("\ttevin_a = int4({} & 255, {} & 255);\n", color_a, alpha_a);
+    out.Write("\ttevin_b = int4({} & 255, {} & 255);\n", color_b, alpha_b);
     out.Write("\ttevin_c = int4({} & 255, {} & 255);\n", tev_c_input_table[cc.c],
               tev_a_input_table[ac.c]);
   }
   else
   {
-    out.Write("\ttevin_a = int4({}, {})&int4(255, 255, 255, 255);\n", color_a,
-              tev_a_input_table[ac.a]);
-    out.Write("\ttevin_b = int4({}, {})&int4(255, 255, 255, 255);\n", color_b,
-              tev_a_input_table[ac.b]);
+    out.Write("\ttevin_a = int4({}, {})&int4(255, 255, 255, 255);\n", color_a, alpha_a);
+    out.Write("\ttevin_b = int4({}, {})&int4(255, 255, 255, 255);\n", color_b, alpha_b);
     out.Write("\ttevin_c = int4({}, {})&int4(255, 255, 255, 255);\n", tev_c_input_table[cc.c],
               tev_a_input_table[ac.c]);
   }
