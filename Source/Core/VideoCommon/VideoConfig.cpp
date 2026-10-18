@@ -253,6 +253,7 @@ void VideoConfig::Refresh()
   vr_detect_render_targets = Config::Get(Config::GFX_VR_DETECT_RENDER_TARGETS);
   vr_ortho_scissor_fix = Config::Get(Config::GFX_VR_ORTHO_SCISSOR_FIX);
   vr_detect_skybox = Config::Get(Config::GFX_VR_DETECT_SKYBOX);
+  vr_skip_background_fill = Config::Get(Config::GFX_VR_SKIP_BACKGROUND_FILL);
   vr_metroid_thermal_visor_fix = Config::Get(Config::GFX_VR_METROID_THERMAL_VISOR_FIX);
   vr_metroid_d3d_thermal_palette_fix =
       Config::Get(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX);

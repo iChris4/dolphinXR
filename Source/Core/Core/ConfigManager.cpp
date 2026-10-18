@@ -193,6 +193,7 @@ static void ClearAppliedVRSettings()
   ClearAppliedVRSetting("DetectRenderTargets", Config::GFX_VR_DETECT_RENDER_TARGETS);
   ClearAppliedVRSetting("OrthoScissorFix", Config::GFX_VR_ORTHO_SCISSOR_FIX);
   ClearAppliedVRSetting("DetectSkybox", Config::GFX_VR_DETECT_SKYBOX);
+  ClearAppliedVRSetting("SkipBackgroundFill", Config::GFX_VR_SKIP_BACKGROUND_FILL);
   ClearAppliedVRSetting("MetroidThermalVisorFix", Config::GFX_VR_METROID_THERMAL_VISOR_FIX);
   ClearAppliedVRSetting("MetroidD3DThermalPaletteFix",
                         Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX);
@@ -290,6 +291,7 @@ static void ApplyGameVRConfigOverrides(std::string_view game_id, std::optional<u
   ApplyVRSetting(values, "DetectRenderTargets", Config::GFX_VR_DETECT_RENDER_TARGETS);
   ApplyVRSetting(values, "OrthoScissorFix", Config::GFX_VR_ORTHO_SCISSOR_FIX);
   ApplyVRSetting(values, "DetectSkybox", Config::GFX_VR_DETECT_SKYBOX);
+  ApplyVRSetting(values, "SkipBackgroundFill", Config::GFX_VR_SKIP_BACKGROUND_FILL);
   const bool has_d3d_thermal_palette_fix =
       values.find("MetroidD3DThermalPaletteFix") != values.end();
   ApplyVRSetting(values, "MetroidThermalVisorFix", Config::GFX_VR_METROID_THERMAL_VISOR_FIX);
