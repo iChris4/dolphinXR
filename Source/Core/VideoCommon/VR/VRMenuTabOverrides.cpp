@@ -278,28 +278,25 @@ bool EntryCheckbox(Entry& entry, bool Entry::*enabled, Detail detail)
   return toggled;
 }
 
-// One collapsible list of checkboxes, in the order of the game's ini. Returns the index of the
-// entry toggled this frame.
-template <typename Entry, typename Detail>
-std::optional<size_t> DrawList(const char* title, std::vector<Entry>& entries,
-                               bool Entry::*enabled, Detail detail)
+// `base`, or with " 2", " 3"... the first name no entry has: overrides and codes are matched by
+// name when the ini loads, so two with one name would merge.
+template <typename Entry>
+std::string UniqueName(const std::vector<Entry>& entries, const std::string& base)
 {
-  if (!ListHeader(title, entries, enabled))
-    return std::nullopt;
+  std::string name = base;
+  for (int number = 2; std::ranges::find(entries, name, &Entry::name) != entries.end(); ++number)
+    name = fmt::format("{} {}", base, number);
+  return name;
+}
 
-  std::optional<size_t> toggled;
-  ImGui::PushID(title);
-  ImGui::Indent();
-  for (size_t i = 0; i < entries.size(); ++i)
+std::string ProjectionLabel(const ShaderHunter::RuntimeElementSignature& signature)
+{
+  if (signature.perspective)
   {
-    ImGui::PushID(static_cast<int>(i));
-    if (EntryCheckbox(entries[i], enabled, detail))
-      toggled = i;
-    ImGui::PopID();
+    return fmt::format("Perspective {:.2f}x{:.2f}", signature.perspective_hfov_x100 / 100.0,
+                       signature.perspective_vfov_x100 / 100.0);
   }
-  ImGui::Unindent();
-  ImGui::PopID();
-  return toggled;
+  return fmt::format("Ortho L{}", signature.ortho_layer);
 }
 
 // Turns the running game's Shader, Elements Group and Texture Element overrides and Hide Object
@@ -314,13 +311,15 @@ class OverridesTab final : public VRMenuTab
 {
 public:
   // The menu goes away when the game stops. Hunting this menu started would otherwise keep
-  // hiding a shader or texture in the next game, with no desktop window to show it.
+  // hiding a shader, texture or element in the next game, with no desktop window to show it.
   ~OverridesTab() override
   {
     if (m_shader_hunting_started_here)
       ShaderHunter::GetInstance().SetEnabled(false);
     if (m_texture_hunting_started_here)
       TextureElementManager::GetInstance().SetHunterActive(false);
+    if (m_elements_hunt_held)
+      SetElementsHunting(false);
   }
 
   const char* GetName() const override { return "Overrides"; }
@@ -359,14 +358,13 @@ public:
                        ShaderHunter::GetInstance().LoadOverrides(game_id);
                      });
 
-    if (const auto i = DrawList("Elements Group Overrides", m_elements,
-                                &ElementsGroupManager::ElementGroupOverride::enabled,
-                                HandlingDetail<ElementsGroupManager::ElementGroupOverride>))
-    {
-      ElementsGroupManager::SaveOverridesToINI(game_id, m_elements);
-      ElementsGroupManager::GetInstance().LoadOverrides(game_id);
-      ReportToggle(context, m_elements[*i].name, m_elements[*i].enabled);
-    }
+    DrawElementsHunting(context);
+    DrawEditableList(context, EditableList::Elements, "Elements Group Overrides", "element",
+                     m_elements, &ElementsGroupManager::ElementGroupOverride::enabled,
+                     HandlingDetail<ElementsGroupManager::ElementGroupOverride>, [&] {
+                       ElementsGroupManager::SaveOverridesToINI(game_id, m_elements);
+                       ElementsGroupManager::GetInstance().LoadOverrides(game_id);
+                     });
 
     DrawTextureHunting(context);
     DrawEditableList(context, EditableList::Textures, "Texture Element Overrides", "texture",
@@ -398,6 +396,7 @@ private:
   enum class EditableList
   {
     Shaders,
+    Elements,
     Textures,
     HideCodes,
   };
@@ -619,11 +618,21 @@ private:
   {
     const char* noun;
     const char* plural;
-    // Start of the automatic override name, "Shader <hash>".
-    const char* name_prefix;
+    // The name of an override saved with an empty Name.
+    const char* automatic_name;
+    // What saving does with a name the list already has.
+    const char* name_rule;
   };
-  static constexpr HuntedKind SHADER_KIND{"shader", "shaders", "Shader"};
-  static constexpr HuntedKind TEXTURE_KIND{"texture", "textures", "Texture"};
+  static constexpr HuntedKind SHADER_KIND{
+      "shader", "shaders", "Shader <hash>",
+      "Saving the same shader again under its name replaces its override; a name another "
+      "override has gets a number."};
+  static constexpr HuntedKind TEXTURE_KIND{
+      "texture", "textures", "Texture <hash>",
+      "Saving the same texture again under its name replaces its override; a name another "
+      "override has gets a number."};
+  static constexpr HuntedKind ELEMENT_KIND{"element", "elements", "Element Draw <number>",
+                                           "A name another override already has gets a number."};
 
   // What a hunting section's Save Override saves.
   struct SaveOptions
@@ -806,15 +815,12 @@ private:
     if (TextInput::IsAvailable())
     {
       const std::string name_tooltip =
-          fmt::format("Name of the saved override. Empty uses \"{} <hash>\". A name another "
-                      "override already has gets a number.",
-                      kind.name_prefix);
+          fmt::format("Name of the saved override. Empty uses \"{}\". {}", kind.automatic_name,
+                      kind.name_rule);
       DrawNameField(context, options.name, options.name_request, name_tooltip.c_str(), name_hint);
     }
     const std::string handling_tooltip =
-        fmt::format("Handling of the saved override. Saving the same {} again under its name "
-                    "replaces its override.",
-                    kind.noun);
+        fmt::format("Handling of the saved override. {}", kind.name_rule);
     MenuWidgets::Combo<HandlingType>("Save As", handling_tooltip.c_str(), &options.handling,
                                      SAVE_HANDLINGS);
     if (options.handling != HandlingType::UnitsPerMeter)
@@ -981,6 +987,216 @@ private:
     options.name_request = 0;
     context.actions.SetStatus(
         fmt::format("Saved \"{}\" ({})", name, HandlingName(options.handling)));
+  }
+
+  // The desktop Elements Hunting window, without its match and texture filters: pick a seed among
+  // the last frame's draws, then the parts of its runtime signature (Group By) other draws must
+  // share with it. Every draw of that group is hidden or painted pink; Save Override adds an
+  // Elements Group override for the group, Save as Hide Code a hide code from its draws' vertex
+  // data. Like the other hunters, it keeps running while the menu is closed.
+  void DrawElementsHunting(VRMenuContext& context)
+  {
+    ElementsGroupManager& manager = ElementsGroupManager::GetInstance();
+    const ElementsGroupManager::Status status = manager.GetStatus();
+    bool enabled = status.popup_open && status.hunt_enabled;
+    const char* header = enabled ? "Elements Hunting  (on)###Elements Hunting" :
+                                   "Elements Hunting###Elements Hunting";
+    if (!ImGui::CollapsingHeader(header))
+      return;
+    ImGui::PushID("Elements Hunting");
+
+    if (MenuWidgets::Checkbox("Enable Elements Hunting",
+                              "Lists the draws of each frame by their runtime signature "
+                              "(projection, viewport, scissor, render state) and hides (or paints "
+                              "pink) the group of the seed you pick.",
+                              &enabled))
+    {
+      SetElementsHunting(enabled);
+    }
+
+    ImGui::BeginDisabled(!enabled);
+    ShaderHunter::HuntingOption option = status.option;
+    if (MenuWidgets::Combo<ShaderHunter::HuntingOption>(
+            "Hunting Option", "What happens to the draws of the seed's group.", &option,
+            HUNTING_OPTIONS))
+    {
+      manager.SetHuntingOption(option);
+    }
+
+    const int total = status.total_seed_candidates;
+    const int selected = status.seed_valid ? status.selected_seed_index : -1;
+    const int step = CycleRow("Seed", selected, total);
+    if (step != 0 && total > 0)
+    {
+      manager.SelectSeedCandidate(selected >= 0 ? (selected + step + total) % total :
+                                  step > 0      ? 0 :
+                                                  total - 1);
+    }
+    if (status.seed_valid && status.seed_draw)
+    {
+      const ShaderHunter::RuntimeElementSignature& seed = status.seed_draw->signature;
+      MenuWidgets::ValueRow("Seed Draw", fmt::format("{}, draw #{}", ProjectionLabel(seed),
+                                                     status.seed_draw->draw_index + 1));
+      MenuWidgets::ValueRow("Viewport",
+                            fmt::format("{},{} {}x{}, scissor {},{} {},{}", seed.viewport_x,
+                                        seed.viewport_y, seed.viewport_width, seed.viewport_height,
+                                        seed.scissor_left, seed.scissor_top, seed.scissor_right,
+                                        seed.scissor_bottom));
+    }
+    else
+    {
+      MenuWidgets::ValueRow("Seed Draw", "None");
+    }
+
+    const ShaderHunter::RuntimeElementSignature& mask = status.seed_signature;
+    DrawGroupBy(manager, mask);
+    const bool grouped = mask.use_projection || mask.use_layer || mask.use_viewport ||
+                         mask.use_scissor || mask.use_render_state;
+    const bool can_save = enabled && status.seed_valid && grouped && status.total_matches > 0;
+    std::string group_text;
+    if (!status.seed_valid)
+      group_text = "Pick a seed";
+    else if (!grouped)
+      group_text = "Check a Group By box";
+    else
+      group_text =
+          fmt::format("{} elements, {} drawn", status.total_matches, status.active_matches);
+    MenuWidgets::ValueRow("Group", group_text,
+                          "The group's elements (draws that also share their shaders and "
+                          "textures), and how many of them the last frame drew.");
+
+    DrawSaveOptions(context, m_element_save, ELEMENT_KIND,
+                    can_save ? UniqueName(m_elements, ElementDrawName(status)) : std::string());
+    MenuWidgets::BeginRow("", nullptr, Config::LayerType::Base);
+    ImGui::BeginDisabled(!can_save);
+    if (ImGui::Button("Save Override"))
+      SaveHuntedElement(context, status);
+    MenuWidgets::ItemTooltip("Adds an Elements Group override for the seed's group.");
+    ImGui::SameLine();
+    if (ImGui::Button("Save as Hide Code"))
+      SaveElementsAsHideCode(context);
+    MenuWidgets::ItemTooltip("Adds a hide code made from the vertex data of the group's draws "
+                             "of the last frame, to the Hide Object Codes list.");
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+
+    DrawHuntingHints(context, enabled, total, ELEMENT_KIND);
+    ImGui::PopID();
+  }
+
+  // The parts of the seed's signature a draw must share with it to be in its group.
+  static void DrawGroupBy(ElementsGroupManager& manager,
+                          const ShaderHunter::RuntimeElementSignature& mask)
+  {
+    MenuWidgets::BeginRow("Group By",
+                          "The parts of the seed's signature a draw must share with it to be in "
+                          "its group. Check at least one: the preview and the saved override "
+                          "cover the whole group.",
+                          Config::LayerType::Base);
+    bool projection = mask.use_projection;
+    bool layer = mask.use_layer;
+    bool viewport = mask.use_viewport;
+    bool scissor = mask.use_scissor;
+    bool render_state = mask.use_render_state;
+    bool changed = false;
+    ImGui::BeginGroup();
+    changed |= ImGui::Checkbox("Projection", &projection);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("Layer", &layer);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("Viewport", &viewport);
+    changed |= ImGui::Checkbox("Scissor", &scissor);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("Render State", &render_state);
+    ImGui::EndGroup();
+    if (changed)
+      manager.SetSeedGroupMask(projection, layer, viewport, scissor, render_state);
+  }
+
+  // The desktop's default name, after the draw the group was found with.
+  static std::string ElementDrawName(const ElementsGroupManager::Status& status)
+  {
+    const auto& draw = status.highlighted_draw ? status.highlighted_draw : status.seed_draw;
+    return fmt::format("Element Draw {}", draw && draw->draw_index >= 0 ? draw->draw_index + 1 : 0);
+  }
+
+  // Like the desktop window, which holds the hunt open while it shows, the menu holds it while
+  // hunting; the hide-code capture runs meanwhile for Save as Hide Code.
+  void SetElementsHunting(bool enabled)
+  {
+    ElementsGroupManager& manager = ElementsGroupManager::GetInstance();
+    HideObjectEngine::Engine& hide_engine = HideObjectEngine::Engine::GetInstance();
+    if (enabled)
+    {
+      if (!m_elements_hunt_held)
+      {
+        manager.SetPopupOpen(true);
+        m_elements_hunt_held = true;
+      }
+      manager.SetHuntEnabled(true);
+      hide_engine.SetCaptureEnabled(true);
+      return;
+    }
+    manager.SetHuntEnabled(false);
+    hide_engine.SetCaptureEnabled(false);
+    if (m_elements_hunt_held)
+    {
+      manager.SetPopupOpen(false);
+      m_elements_hunt_held = false;
+    }
+  }
+
+  void SaveHuntedElement(VRMenuContext& context, const ElementsGroupManager::Status& status)
+  {
+    ElementsGroupManager::ElementGroupOverride entry;
+    const std::string name(StripWhitespace(m_element_save.name));
+    entry.name = UniqueName(m_elements, name.empty() ? ElementDrawName(status) : name);
+    entry.handling = m_element_save.handling;
+    // The seed's signature with the Group By parts, as the desktop window saves it.
+    entry.runtime_element = status.seed_signature;
+    if (entry.handling == HandlingType::UnitsPerMeter)
+      entry.units_per_meter = m_element_save.units_per_meter;
+    if (entry.handling == HandlingType::Flag)
+      entry.flag_group = entry.name;
+    m_elements.push_back(entry);
+    ElementsGroupManager::SaveOverridesToINI(context.game_id, m_elements);
+    ElementsGroupManager::GetInstance().LoadOverrides(context.game_id);
+    OnHuntedSaved(context, m_element_save, entry.name);
+  }
+
+  void SaveElementsAsHideCode(VRMenuContext& context)
+  {
+    std::vector<u32> draw_sequences;
+    for (const auto& draw : ElementsGroupManager::GetInstance().GetCurrentTextureSourceDraws())
+    {
+      if (draw.draw_sequence != 0)
+        draw_sequences.push_back(draw.draw_sequence);
+    }
+    const HideObjectEngine::CapturedHideObjectEntries captured =
+        HideObjectEngine::Engine::GetInstance().GetCapturedEntriesForDrawSequences(draw_sequences);
+    if (captured.entries.empty())
+    {
+      context.actions.SetStatus("Not saved: no vertex data was captured for the group yet. Let "
+                                "it draw, then save again");
+      return;
+    }
+
+    HideObjectEngine::HideObject code;
+    const std::string name(StripWhitespace(m_element_save.name));
+    code.name = UniqueName(m_hide_objects,
+                           !name.empty() ? name :
+                                           fmt::format("Element Hide {} Draws",
+                                                       draw_sequences.size()));
+    code.entries = captured.entries;
+    m_hide_objects.push_back(code);
+    HideObjectEngine::SaveToINI(context.game_id, m_hide_objects);
+    ApplyHideCodes();
+
+    m_element_save.name.clear();
+    m_element_save.name_request = 0;
+    context.actions.SetStatus(fmt::format("Saved hide code \"{}\": {} patterns from {} draws",
+                                          code.name, captured.entries.size(),
+                                          captured.matched_draws));
   }
 
   // The code Hide Code Hunting is finding or editing.
@@ -1410,6 +1626,9 @@ private:
   bool m_texture_hunting_started_here = false;
   SaveOptions m_shader_save;
   SaveOptions m_texture_save;
+  // Elements Hunting: whether the menu holds the hunt open (SetPopupOpen), and its save rows.
+  bool m_elements_hunt_held = false;
+  SaveOptions m_element_save;
   // Hide Code Hunting: whether the hunted code is applied, the code, and whether its header opens
   // on the next frame (a code was picked for editing in the list).
   bool m_hide_hunting = false;

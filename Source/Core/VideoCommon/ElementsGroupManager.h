@@ -143,6 +143,8 @@ public:
     std::vector<SelectedSubgroupSignature> selected_match_filter;
     bool selected_match_filter_excluded = false;
     bool enabled = true;
+    // False for overrides that ship in Sys (LoadOverridesFromINI): they come back on every load,
+    // so they cannot be deleted or renamed in the user's file. Not stored in the ini.
     bool user_defined = true;
     std::string flag_group;
     std::string condition_flag;

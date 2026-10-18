@@ -85,6 +85,9 @@ bool InternalResolutionCombo(TouchedKeys* touched);
 // Text-only row.
 void ValueRow(const char* label, const std::string& value, const char* tooltip = nullptr);
 
+// The rows' wrapped tooltip, for the last item drawn (shown while it is disabled too).
+void ItemTooltip(const char* text);
+
 // Starts a row: draws the label (plus a marker when a per-game or session layer overrides the
 // key) and moves the cursor to the control column.
 void BeginRow(const char* label, const char* tooltip, Config::LayerType active_layer);

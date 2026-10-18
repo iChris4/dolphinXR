@@ -91,6 +91,11 @@ float ControlWidth()
   return std::max(ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 4.0f);
 }
 
+void ItemTooltip(const char* text)
+{
+  Tooltip(text);
+}
+
 void ValueRow(const char* label, const std::string& value, const char* tooltip)
 {
   BeginRow(label, tooltip, Config::LayerType::Base);
