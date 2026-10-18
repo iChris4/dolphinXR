@@ -71,12 +71,10 @@ public:
   }
 
 private:
-  // The "VR Hacks" group of the desktop VR settings, collapsed by default.
+  // The "VR Hacks" group of the desktop VR settings.
   static void DrawVRHacks(MenuWidgets::TouchedKeys* touched)
   {
-    ImGui::Spacing();
-    if (!ImGui::CollapsingHeader("VR Hacks"))
-      return;
+    MenuWidgets::SectionHeader("VR Hacks");
 
     if (g_backend_info.api_type == APIType::Vulkan)
     {
