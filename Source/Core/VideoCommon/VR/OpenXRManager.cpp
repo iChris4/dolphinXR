@@ -323,7 +323,7 @@ std::vector<const char*> OpenXRManager::GetAvailableControllerExtensions()
     return {};
 #endif
 
-    static const std::array<const char*, 4> s_optional = {
+  static const std::array<const char*, 4> s_optional = {
       XR_FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME,
       XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME,
       XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME,
@@ -1665,13 +1665,13 @@ bool OpenXRManager::InitializeInputActions()
       !create_action(&m_action_secondary_click, "secondary_click", "Secondary Button",
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_button_3_click, "button_3_click", "Button 3",
-           XR_ACTION_TYPE_BOOLEAN_INPUT) ||
+                     XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_button_4_click, "button_4_click", "Button 4",
-           XR_ACTION_TYPE_BOOLEAN_INPUT) ||
+                     XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_menu_click, "menu_click", "Menu Button",
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_shoulder_click, "shoulder_click", "Shoulder Button",
-           XR_ACTION_TYPE_BOOLEAN_INPUT) ||
+                     XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_thumbstick_click, "thumbstick_click", "Thumbstick Click",
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_trigger_click, "trigger_click", "Trigger Click",
@@ -1690,8 +1690,7 @@ bool OpenXRManager::InitializeInputActions()
                      XR_ACTION_TYPE_FLOAT_INPUT) ||
       !create_action(&m_action_aim_pose, "aim_pose", "Aim Pose", XR_ACTION_TYPE_POSE_INPUT) ||
       !create_action(&m_action_grip_pose, "grip_pose", "Grip Pose", XR_ACTION_TYPE_POSE_INPUT) ||
-      !create_action(&m_action_haptic, "haptic", "Haptic Output",
-                     XR_ACTION_TYPE_VIBRATION_OUTPUT))
+      !create_action(&m_action_haptic, "haptic", "Haptic Output", XR_ACTION_TYPE_VIBRATION_OUTPUT))
   {
     DestroyInputActions();
     return false;
@@ -2085,8 +2084,9 @@ bool OpenXRManager::InitializeInputActions()
                         "grip");
   }
 
-  INFO_LOG_FMT(OPENXR, "OpenXR: Input action system initialized — "
-                        "action set 'dolphin_input' with 17 actions, spaces created for both hands.");
+  INFO_LOG_FMT(OPENXR,
+               "OpenXR: Input action system initialized — "
+               "action set 'dolphin_input' with 17 actions, spaces created for both hands.");
   return true;
 }
 
