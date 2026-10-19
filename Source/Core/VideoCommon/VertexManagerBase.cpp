@@ -16,6 +16,7 @@
 #include "Common/EnumMap.h"
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
+#include "Common/ScopeGuard.h"
 #include "Common/SmallVector.h"
 
 #include "Core/DolphinAnalytics.h"
@@ -27,6 +28,7 @@
 #include "VideoCommon/BPMemory.h"
 #include "VideoCommon/BoundingBox.h"
 #include "VideoCommon/DataReader.h"
+#include "VideoCommon/DrawDepth.h"
 #include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/GeometryShaderManager.h"
@@ -1013,7 +1015,8 @@ static VR::AgentCapture::DrawRecord* BeginAgentDrawRecord(u32 index, u32 sequenc
 static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool agent_preview_skip,
                                   bool background_fill_skip, bool hunter_skip, bool elements_skip,
                                   bool texmgr_skip, bool pink,
-                                  const GeometryShaderManager& geometry_shader_manager)
+                                  const GeometryShaderManager& geometry_shader_manager,
+                                  const DrawDepthSource& draw_depth)
 {
   using VR::AgentCapture::SkipReason;
   record->skip = agent_preview_skip   ? SkipReason::AgentPreview :
@@ -1027,6 +1030,14 @@ static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool age
   record->stereo_override = geometry_shader_manager.vr_stereo_override;
   record->element_depth = geometry_shader_manager.vr_element_depth_override;
   record->units_per_meter = geometry_shader_manager.vr_units_per_meter_override;
+  // A capture is an explicit agent request: reading every captured draw's vertices back is fine.
+  const DrawDepthRange& depth = draw_depth.Get();
+  if (depth.valid)
+  {
+    record->depth_min = depth.min;
+    record->depth_max = depth.max;
+    record->depth_sampled = depth.sampled;
+  }
 }
 #endif
 
@@ -1288,6 +1299,9 @@ void VertexManagerBase::Flush()
         bool hunter_skip = false;
         bool elements_skip = false;
         bool texmgr_skip = false;
+        // The camera depth of this draw's vertices, read only when an override with min_depth /
+        // max_depth or the agent capture asks for it. Stays empty outside the override pass.
+        DrawDepthSource draw_depth;
         auto& hunter = ShaderHunter::GetInstance();
         auto& elements = ElementsGroupManager::GetInstance();
         auto& texmgr = TextureElementManager::GetInstance();
@@ -1334,6 +1348,20 @@ void VertexManagerBase::Flush()
           const u64 vs_hash = uid_crc(m_vs_override_ids, vs.GetUidDataRaw(), vs.GetUidDataSize());
           const u64 ps_hash = uid_crc(m_ps_override_ids, ps.GetUidDataRaw(), ps.GetUidDataSize());
           const u64 gs_hash = uid_crc(m_gs_override_ids, gs.GetUidDataRaw(), gs.GetUidDataSize());
+
+          // This batch's vertices are the GetNumVerts() * stride bytes before
+          // m_cur_buffer_pointer (m_base_buffer_pointer is the start of the whole stream buffer
+          // on most backends). xfmem and the matrix index are this batch's: changing them flushes.
+          if (const NativeVertexFormat* format = VertexLoaderManager::GetCurrentVertexFormat())
+          {
+            const u32 stride = format->GetVertexStride();
+            const u32 num_vertices = m_index_generator.GetNumVerts();
+            draw_depth = DrawDepthSource(m_cur_buffer_pointer - num_vertices * stride, num_vertices,
+                                         stride, &format->GetVertexDeclaration(), xfmem.posMatrices,
+                                         g_main_cp_state.matrix_index_a.PosNormalMtxIdx);
+          }
+          hunter.SetCurrentDrawDepth(&draw_depth);
+          Common::ScopeGuard clear_hunter_depth([&hunter] { hunter.SetCurrentDrawDepth(nullptr); });
 
           std::array<u64, 8> tex_hashes{};
           std::array<std::string, 8> tex_names{};
@@ -1432,7 +1460,8 @@ void VertexManagerBase::Flush()
                 .gs_family = gs_family,
                 .signature = draw_signature,
                 .textures = tex_hashes,
-                .texture_names = tex_names});
+                .texture_names = tex_names,
+                .depth = &draw_depth});
 
             if (metroid_profile_active)
             {
@@ -1503,7 +1532,7 @@ void VertexManagerBase::Flush()
           if (elements_runtime_active)
             elements.RegisterFlagsForDraw(*element_draw);
           if (texmgr_has_overrides)
-            texmgr.RegisterFlagsForTextures(tex_hashes);
+            texmgr.RegisterFlagsForTextures(tex_hashes, &draw_depth);
 
           // All Elements override decisions for this draw, under one lock. Resolved eagerly; each
           // result below is still only consumed under the conditions it always was.
@@ -1522,7 +1551,7 @@ void VertexManagerBase::Flush()
 
           // Texture Element Override skip: match purely on bound texture hash (fallback).
           if (!hunter_skip && !elements_skip && texmgr_has_overrides)
-            texmgr_skip = texmgr.ShouldSkipByTexture(tex_hashes);
+            texmgr_skip = texmgr.ShouldSkipByTexture(tex_hashes, &draw_depth);
 
           // Live preview while the Texture Hunter browser is open: skip or pink-highlight draws
           // binding a checked texture (Skip/Pink chosen in the browser's Preview mode toggle).
@@ -1627,7 +1656,7 @@ void VertexManagerBase::Flush()
             // only when neither Elements nor Shader overrides produced a handling for this draw.
             if (handling == ShaderHunter::HandlingType::Skip && texmgr_has_overrides)
             {
-              handling = texmgr.GetHandlingForTextures(tex_hashes, &element_depth,
+              handling = texmgr.GetHandlingForTextures(tex_hashes, &draw_depth, &element_depth,
                                                        &units_per_meter, &passthrough_opacity,
                                                        &anchor_params, &controller_anchor_params);
               handling_source = 3;
@@ -2096,7 +2125,7 @@ void VertexManagerBase::Flush()
         {
           FinishAgentDrawRecord(agent_record, agent_preview_skip, background_fill_skip, hunter_skip,
                                 elements_skip, texmgr_skip, shader_hunter_force_pink,
-                                geometry_shader_manager);
+                                geometry_shader_manager, draw_depth);
         }
 #endif
 

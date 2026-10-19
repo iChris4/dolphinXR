@@ -17,6 +17,8 @@
 
 #include "Common/CommonTypes.h"
 
+class DrawDepthSource;
+
 // 3DMigoto-lite shader hunting: cycle through shaders used per frame and skip selected ones.
 // Thread-safe: video thread calls Register/ShouldSkip/OnFrameEnd, UI thread calls Next/Prev/Get*.
 class ShaderHunter
@@ -200,6 +202,9 @@ public:
   void SetCurrentDrawSignature(const RuntimeElementSignature& signature);
   void SetCurrentDrawTextures(const std::array<u64, 8>& hashes,
                               const std::array<std::string, 8>& names);
+  // The camera depth of the draw being resolved, for min_depth / max_depth (nullptr: entries
+  // with those keys do not match). Valid until the draw's Flush returns; Flush clears it.
+  void SetCurrentDrawDepth(const DrawDepthSource* depth) { m_current_draw_depth = depth; }
 
   // --- Persistent overrides (per-game INI) ---
   struct ShaderOverride
@@ -214,6 +219,11 @@ public:
     RuntimeElementSignature runtime_element;
     float element_depth = -1.0f;  // Per-override within-element depth (-1 = use global)
     float units_per_meter = -1.0f;  // Per-override UPM for UnitsPerMeter handling (-1 = global)
+    // Camera depth limits in game units (<= 0 = no limit): the entry only matches draws whose
+    // vertices are all at least min_depth and at most max_depth from the game camera (a HUD
+    // drawn in perspective just in front of it, sharing its shaders with world objects).
+    float min_depth = 0.0f;
+    float max_depth = 0.0f;
     float passthrough_opacity = 0.0f;  // Passthrough handling: element opacity (0 = fully camera)
     // CameraAnchor handling: offset from the element's origin (meters, right/up/forward),
     // whether to hide the anchor element, how much of its orientation to follow (+ a fixed yaw
@@ -421,6 +431,8 @@ private:
     std::string flag_group;
     std::vector<u64> texture_hashes;
     bool texture_hashes_excluded = false;
+    float min_depth = 0.0f;
+    float max_depth = 0.0f;
   };
   std::vector<FlagRule> m_flag_rules;  // flag activation rules
   std::unordered_set<std::string> m_flags_seen_this_frame; // flags seen in current frame
@@ -449,6 +461,8 @@ private:
     u32 family_version;               // scheme of the persisted family_signature
     std::string condition_flag;
     bool condition_inverted;
+    float min_depth;  // camera depth limits (<= 0 = none)
+    float max_depth;
   };
   std::vector<ConditionalOverride> m_conditional_overrides;
 
@@ -464,6 +478,7 @@ private:
   // Texture tracking: current draw's bound textures + per-element capture during hunting.
   std::array<u64, 8> m_current_draw_textures{};
   std::array<std::string, 8> m_current_draw_texture_names{};
+  const DrawDepthSource* m_current_draw_depth = nullptr;
   RuntimeElementSignature m_current_draw_signature{};
   RuntimeElementSignature m_selected_draw_signature{};
   std::array<std::unordered_map<u64, u64>, TYPE_COUNT> m_shader_family_signatures{};

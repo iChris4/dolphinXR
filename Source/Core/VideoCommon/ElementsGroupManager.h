@@ -14,6 +14,8 @@
 #include "VideoCommon/MetroidElementClassifier.h"
 #include "VideoCommon/ShaderHunter.h"
 
+class DrawDepthSource;
+
 class ElementsGroupManager
 {
 public:
@@ -60,6 +62,9 @@ public:
     std::string profile_layer_name;
     std::array<u64, 8> textures{};
     std::array<std::string, 8> texture_names{};
+    // The camera depth of the draw's vertices, for min_depth / max_depth. Set by
+    // VertexManagerBase::Flush and valid during that call only: stored copies carry nullptr.
+    const DrawDepthSource* depth = nullptr;
 
     u64 GetHash(ShaderType type) const;
     u64 GetFamily(ShaderType type) const;
@@ -112,6 +117,11 @@ public:
     std::vector<MetroidElementLayer> profile_layers;
     float element_depth = -1.0f;
     float units_per_meter = -1.0f;
+    // Camera depth limits in game units (<= 0 = no limit): the entry only matches draws whose
+    // vertices are all at least min_depth and at most max_depth from the game camera (a HUD
+    // drawn in perspective just in front of it). Not element_depth, the push into the screen.
+    float min_depth = 0.0f;
+    float max_depth = 0.0f;
     // ScreenPane handling: preserve the game's depth buffer values by default, or use the
     // physically projected VR depth of the re-anchored pane geometry with shared Z composition.
     ScreenPaneDepthMode screen_pane_depth = ScreenPaneDepthMode::Game;

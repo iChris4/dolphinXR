@@ -522,6 +522,7 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
   form->addRow(m_screen_pane_strength_label, m_screen_pane_strength_spin);
   form->addRow(m_element_depth_label, m_element_depth_spin);
   form->addRow(m_units_per_meter_label, m_units_per_meter_spin);
+  m_depth_limits.AddRows(form);
   form->addRow(m_passthrough_opacity_label, m_passthrough_opacity_spin);
   form->addRow(m_anchor_right_label, m_anchor_right_spin);
   form->addRow(m_anchor_up_label, m_anchor_up_spin);
@@ -648,6 +649,7 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
     m_element_depth_spin->setValue(edit_override->element_depth);
     if (edit_override->units_per_meter > 0.0f)
       m_units_per_meter_spin->setValue(edit_override->units_per_meter);
+    m_depth_limits.SetValues(edit_override->min_depth, edit_override->max_depth);
     m_passthrough_opacity_spin->setValue(edit_override->passthrough_opacity);
     m_anchor_right_spin->setValue(edit_override->anchor_right);
     m_anchor_up_spin->setValue(edit_override->anchor_up);
@@ -750,6 +752,8 @@ ElementsGroupManager::ElementGroupOverride ElementsGroupOverrideAddEditDialog::G
   result.element_depth = m_element_depth_spin->value();
   result.units_per_meter = m_units_per_meter_spin->value() > 0.0 ? m_units_per_meter_spin->value() :
                                                                   -1.0f;
+  result.min_depth = m_depth_limits.GetMinDepth();
+  result.max_depth = m_depth_limits.GetMaxDepth();
   result.passthrough_opacity =
       result.handling == ElementsGroupManager::HandlingType::Passthrough ?
           static_cast<float>(m_passthrough_opacity_spin->value()) :
@@ -1161,6 +1165,11 @@ void ElementsGroupOverrideAddEditDialog::OnAccept()
   if (result.name.empty())
   {
     QMessageBox::warning(this, tr("Elements Group Override"), tr("Name cannot be empty."));
+    return;
+  }
+  if (const QString depth_error = m_depth_limits.Validate(); !depth_error.isEmpty())
+  {
+    QMessageBox::warning(this, tr("Elements Group Override"), depth_error);
     return;
   }
   if (result.match_kind == ElementsGroupManager::MatchKind::ProfileLayer)

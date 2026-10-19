@@ -55,6 +55,8 @@ add_library(videocommon
   CPUCull.cpp
   CPUCull.h
   CPUCullImpl.h
+  DrawDepth.cpp
+  DrawDepth.h
   DriverDetails.cpp
   DriverDetails.h
   EFBInterface.cpp

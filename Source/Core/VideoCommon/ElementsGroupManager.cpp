@@ -18,6 +18,7 @@
 #include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
 #include "Core/ConfigLoaders/GameConfigLoader.h"
+#include "VideoCommon/DrawDepth.h"
 #include "VideoCommon/RuntimeElementMatcher.h"
 
 namespace
@@ -757,6 +758,10 @@ LoadElementGroupOverridesFromINIFile(const std::string& path)
     // supported key — it is part of the element signature, not the depth layering.)
     else if (key == "element_depth")
       current.element_depth = std::stof(value);
+    else if (key == "min_depth")
+      current.min_depth = std::stof(value);
+    else if (key == "max_depth")
+      current.max_depth = std::stof(value);
     else if (key == "units_per_meter" || key == "upm")
       current.units_per_meter = std::stof(value);
     else if (key == "screen_pane_depth")
@@ -985,6 +990,10 @@ void ElementsGroupManager::SaveOverridesToINI(const std::string& game_id,
       out << "element_depth=" << entry.element_depth << "\n";
     if (entry.units_per_meter > 0.0f)
       out << "units_per_meter=" << entry.units_per_meter << "\n";
+    if (entry.min_depth > 0.0f)
+      out << "min_depth=" << entry.min_depth << "\n";
+    if (entry.max_depth > 0.0f)
+      out << "max_depth=" << entry.max_depth << "\n";
     if (entry.handling == HandlingType::ScreenPane)
     {
       if (entry.screen_pane_depth != ScreenPaneDepthMode::Game)
@@ -1612,6 +1621,7 @@ ElementsGroupManager::PreviewAction ElementsGroupManager::RegisterDraw(const Dra
   if (m_popup_open_count > 0 && m_hunt_enabled)
   {
     DrawRecord recorded = draw;
+    recorded.depth = nullptr;
     recorded.draw_index = static_cast<int>(m_collecting_draws.size());
     m_collecting_draws.push_back(recorded);
 
@@ -1880,6 +1890,10 @@ bool ElementsGroupManager::DoesEntryBaseMatch(const ElementGroupOverride& entry,
     return false;
 
   if (!DoesTextureFilterPass(draw, entry))
+    return false;
+
+  // Last: it may read the draw's vertices back.
+  if (!DrawPassesDepthConstraints(draw.depth, entry.min_depth, entry.max_depth))
     return false;
 
   return true;

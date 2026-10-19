@@ -5,6 +5,7 @@
 
 #include <QDialog>
 
+#include "DolphinQt/Config/CameraDepthLimitWidgets.h"
 #include "VideoCommon/ShaderHunter.h"
 
 class QCheckBox;
@@ -55,6 +56,7 @@ private:
   QLabel* m_element_depth_label;
   QDoubleSpinBox* m_units_per_meter_spin;
   QLabel* m_units_per_meter_label;
+  CameraDepthLimitWidgets m_depth_limits;
   QDoubleSpinBox* m_passthrough_opacity_spin;
   QLabel* m_passthrough_opacity_label;
   QLabel* m_anchor_right_label;

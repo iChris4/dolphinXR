@@ -286,6 +286,18 @@ TEST(AgentCapture, FormatsRows)
   const std::string details = FormatDrawDetails(draw);
   EXPECT_NE(details.find("orthographic"), std::string::npos) << details;
   EXPECT_NE(details.find("Texture 1: 0000000000abcdef"), std::string::npos) << details;
+  // The camera depth: unknown until the capture reads it.
+  EXPECT_NE(row.find("| z - |"), std::string::npos) << row;
+  EXPECT_NE(details.find("Camera depth: unknown"), std::string::npos) << details;
+  DrawRecord near = draw;
+  near.depth_min = 2.5f;
+  near.depth_max = 3.0f;
+  EXPECT_NE(FormatDrawRow(near).find("| z 2.5..3 |"), std::string::npos) << FormatDrawRow(near);
+  EXPECT_NE(FormatDrawDetails(near).find("Camera depth: 2.5 to 3 game units\n"), std::string::npos)
+      << FormatDrawDetails(near);
+  near.depth_sampled = true;
+  EXPECT_NE(FormatDrawRow(near).find("| z 2.5..3~ |"), std::string::npos) << FormatDrawRow(near);
+  EXPECT_NE(FormatDrawDetails(near).find("(some vertices of this big draw)"), std::string::npos);
 
   // Ranges without "-0", and the depth/blend column without stray spaces.
   draw.projection = {-0.0f, 608, 72, -0.0f, 0, 1};

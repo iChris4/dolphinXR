@@ -16,6 +16,8 @@
 #include "Common/CommonTypes.h"
 #include "VideoCommon/ShaderHunter.h"
 
+class DrawDepthSource;
+
 // Texture Element Override: reclassify VR draws (Skip / Screen / Fullscreen / Head Locked / Units
 // per Meter), or set a shared Flag, based purely on the bound texture hash, regardless of which
 // shader draws it.
@@ -49,6 +51,11 @@ public:
     HandlingType handling = HandlingType::Skip;
     float element_depth = -1.0f;    // Per-override within-element depth (-1 = global)
     float units_per_meter = -1.0f;  // Per-override UPM for UnitsPerMeter handling (-1 = global)
+    // Camera depth limits in game units (<= 0 = no limit): the entry only matches draws whose
+    // vertices are all at least min_depth and at most max_depth from the game camera (a HUD
+    // drawn in perspective just in front of it, sharing its textures with world objects).
+    float min_depth = 0.0f;
+    float max_depth = 0.0f;
     float passthrough_opacity = 0.0f;  // Passthrough handling: element opacity (0 = fully camera)
     // CameraAnchor handling: offset from the element's origin (meters, right/up/forward),
     // whether to hide the anchor element, how much of its orientation to follow (+ a fixed yaw
@@ -105,16 +112,19 @@ public:
   bool NeedsTextureHashes() const;
 
   // --- Video-thread match path (bound = 8 currently-bound texture hashes) ---
+  // `depth` is the draw's camera depth for entries with min_depth / max_depth (nullptr: those
+  // entries do not match).
   // Register every flag whose texture group matches this draw. This is independent of handling
   // precedence so texture flags remain available to Shader and Elements Group conditions.
-  void RegisterFlagsForTextures(const std::array<u64, 8>& bound) const;
+  void RegisterFlagsForTextures(const std::array<u64, 8>& bound,
+                                const DrawDepthSource* depth) const;
   // True if any bound texture maps to a Skip override.
-  bool ShouldSkipByTexture(const std::array<u64, 8>& bound) const;
+  bool ShouldSkipByTexture(const std::array<u64, 8>& bound, const DrawDepthSource* depth) const;
   // Handling for the first bound texture with a non-Skip override (Skip if none). Out-params are
   // filled for Screen/HeadLocked (element_depth), UnitsPerMeter (units_per_meter),
   // Passthrough (passthrough_opacity), CameraAnchor (anchor) and ControllerAnchor
   // (controller_anchor).
-  HandlingType GetHandlingForTextures(const std::array<u64, 8>& bound,
+  HandlingType GetHandlingForTextures(const std::array<u64, 8>& bound, const DrawDepthSource* depth,
                                       float* element_depth, float* units_per_meter,
                                       float* passthrough_opacity, CameraAnchorParams* anchor,
                                       ControllerAnchorParams* controller_anchor) const;
@@ -175,6 +185,8 @@ private:
     ControllerAnchorParams controller_anchor;
     std::string condition_flag;
     bool condition_inverted = false;
+    float min_depth = 0.0f;
+    float max_depth = 0.0f;
   };
 
   struct FlagRule
@@ -183,10 +195,13 @@ private:
     std::string condition_flag;
     bool condition_inverted = false;
     std::vector<u64> texture_hashes;
+    float min_depth = 0.0f;
+    float max_depth = 0.0f;
   };
 
-  bool IsConditionMatch(const ResolvedHandling& resolved) const;
-  const ResolvedHandling* FindFirstMatchingHandling(u64 texture_hash) const;
+  bool IsConditionMatch(const ResolvedHandling& resolved, const DrawDepthSource* depth) const;
+  const ResolvedHandling* FindFirstMatchingHandling(u64 texture_hash,
+                                                    const DrawDepthSource* depth) const;
 
   mutable std::mutex m_mutex;
 

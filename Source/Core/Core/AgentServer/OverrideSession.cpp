@@ -70,6 +70,16 @@ std::string DescribeTextures(const std::vector<u64>& textures)
   return text + (textures.size() > 3 ? " ..." : "");
 }
 
+std::string DescribeDepthLimits(float min_depth, float max_depth)
+{
+  std::string text;
+  if (min_depth > 0.0f)
+    text += fmt::format(", camera depth >= {}", min_depth);
+  if (max_depth > 0.0f)
+    text += fmt::format(", camera depth <= {}", max_depth);
+  return text;
+}
+
 // Per-kind access to the override managers.
 template <typename T>
 struct KindOps;
@@ -108,6 +118,7 @@ struct KindOps<ShaderHunter::ShaderOverride>
       text += fmt::format(", element depth {}", o.element_depth);
     if (o.units_per_meter > 0.0f)
       text += fmt::format(", units per meter {}", o.units_per_meter);
+    text += DescribeDepthLimits(o.min_depth, o.max_depth);
     if (!o.flag_group.empty())
       text += fmt::format(", sets flag {}", o.flag_group);
     if (!o.condition_flag.empty())
@@ -151,6 +162,7 @@ struct KindOps<ElementsGroupManager::ElementGroupOverride>
       text += fmt::format(", element depth {}", o.element_depth);
     if (o.units_per_meter > 0.0f)
       text += fmt::format(", units per meter {}", o.units_per_meter);
+    text += DescribeDepthLimits(o.min_depth, o.max_depth);
     if (!o.selected_match_filter.empty())
       text += fmt::format(", {} shader/texture filter(s)", o.selected_match_filter.size());
     if (o.clear_efb)
@@ -187,6 +199,7 @@ struct KindOps<TextureElementManager::TextureElementOverride>
     text += DescribeTextures(o.texture_hashes).substr(1);
     if (o.element_depth >= 0.0f)
       text += fmt::format(", element depth {}", o.element_depth);
+    text += DescribeDepthLimits(o.min_depth, o.max_depth);
     if (!o.flag_group.empty())
       text += fmt::format(", sets flag {}", o.flag_group);
     return text;

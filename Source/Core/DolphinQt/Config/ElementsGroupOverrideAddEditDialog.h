@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "DolphinQt/Config/CameraDepthLimitWidgets.h"
 #include "VideoCommon/ElementsGroupManager.h"
 
 class QCheckBox;
@@ -74,6 +75,7 @@ private:
   QLabel* m_element_depth_label = nullptr;
   QDoubleSpinBox* m_units_per_meter_spin = nullptr;
   QLabel* m_units_per_meter_label = nullptr;
+  CameraDepthLimitWidgets m_depth_limits;
   QDoubleSpinBox* m_passthrough_opacity_spin = nullptr;
   QLabel* m_passthrough_opacity_label = nullptr;
   QLabel* m_anchor_right_label = nullptr;

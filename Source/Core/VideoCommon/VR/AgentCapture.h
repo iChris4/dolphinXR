@@ -147,6 +147,11 @@ struct DrawRecord
   float stereo_override = std::numeric_limits<float>::quiet_NaN();
   float element_depth = -1.0f;
   float units_per_meter = -1.0f;
+  // Camera depth of the vertices in game units (what min_depth / max_depth overrides compare),
+  // NaN when unknown. depth_sampled: only some vertices of a big draw were read.
+  float depth_min = std::numeric_limits<float>::quiet_NaN();
+  float depth_max = std::numeric_limits<float>::quiet_NaN();
+  bool depth_sampled = false;
 };
 
 // One EFB copy of a captured frame: a render to texture, or the frame's copy to the XFB.

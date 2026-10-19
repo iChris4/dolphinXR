@@ -448,14 +448,25 @@ std::string DescribeRoute(const DrawRecord& draw)
 }
 
 // -0 prints as "-0"; the projection math produces it for zero edges.
+static float WithoutNegativeZero(float value)
+{
+  return value == 0.0f ? 0.0f : value;
+}
+
 static std::array<float, 6> WithoutNegativeZero(std::array<float, 6> values)
 {
   for (float& value : values)
-  {
-    if (value == 0.0f)
-      value = 0.0f;
-  }
+    value = WithoutNegativeZero(value);
   return values;
+}
+
+// "a..b" camera depth range of the list rows, "~" when only some vertices were read.
+static std::string FormatDepthRange(const DrawRecord& draw)
+{
+  if (std::isnan(draw.depth_max))
+    return "-";
+  return fmt::format("{:.3g}..{:.3g}{}", WithoutNegativeZero(draw.depth_min),
+                     WithoutNegativeZero(draw.depth_max), draw.depth_sampled ? "~" : "");
 }
 
 std::string FormatDrawRow(const DrawRecord& draw)
@@ -491,14 +502,14 @@ std::string FormatDrawRow(const DrawRecord& draw)
     depth_blend = "-";
 
   return fmt::format(
-      "#{} {} | vp {:.0f},{:.0f} {:.0f}x{:.0f} {} | vs {:08x} ps {:08x} | idx {} | tex {} | "
+      "#{} {} | vp {:.0f},{:.0f} {:.0f}x{:.0f} {} | vs {:08x} ps {:08x} | idx {} | z {} | tex {} | "
       "{} | handling {} | {}{}",
       draw.index, projection, draw.viewport_x - std::abs(draw.viewport_wd),
       draw.viewport_y - std::abs(draw.viewport_ht), std::abs(draw.viewport_wd) * 2,
       std::abs(draw.viewport_ht) * 2,
       GetVRViewportClassName(static_cast<VRViewportClass>(draw.viewport_class)), draw.vs, draw.ps,
-      draw.index_count, textures.empty() ? "-" : textures, depth_blend, handling,
-      DescribeRoute(draw),
+      draw.index_count, FormatDepthRange(draw), textures.empty() ? "-" : textures, depth_blend,
+      handling, DescribeRoute(draw),
       draw.skip != SkipReason::None ? fmt::format(" (skip: {})", GetSkipReasonName(draw.skip)) :
                                       std::string(draw.pink ? " (pink)" : ""));
 }
@@ -536,6 +547,16 @@ std::string FormatDrawDetails(const DrawRecord& draw)
   text +=
       fmt::format("Geometry: {} indices, {}\n", draw.index_count,
                   draw.primitive < primitive_names.size() ? primitive_names[draw.primitive] : "?");
+  if (std::isnan(draw.depth_max))
+  {
+    text += "Camera depth: unknown\n";
+  }
+  else
+  {
+    text += fmt::format("Camera depth: {:.4g} to {:.4g} game units{}\n",
+                        WithoutNegativeZero(draw.depth_min), WithoutNegativeZero(draw.depth_max),
+                        draw.depth_sampled ? " (some vertices of this big draw)" : "");
+  }
   text += fmt::format("Render state: color write {}, alpha write {}, z test {} (func {}), z write "
                       "{}, blend {}, alpha test {:08x}\n",
                       draw.color_update, draw.alpha_update, draw.ztest, draw.zfunc, draw.zupdate,

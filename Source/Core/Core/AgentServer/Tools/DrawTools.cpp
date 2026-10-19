@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <map>
 
 #include <fmt/format.h>
@@ -339,7 +340,8 @@ ToolResult ListDraws(const ToolArgs& args)
   std::string text = fmt::format(
       "{} {}: {} of {} draws match; page {}/{} (draws {}-{}). Columns: {}#index projection | "
       "viewport x,y wxh (GX units: the EFB origin is usually 342,342) class | vs ps | index count "
-      "| textures | z test/write, blend | handling (source) | VR route.\n",
+      "| z: camera depth of the vertices in game units (~ = sampled) | textures | z test/write, "
+      "blend | handling (source) | VR route.\n",
       multi_frame ? "Capture" : "Frame", capture->id, matches.size(), capture->draws.size(), page,
       pages, first + 1, last, multi_frame ? "frame " : "");
   for (size_t i = first; i < last; ++i)
@@ -441,6 +443,39 @@ ToolResult GetDraw(const ToolArgs& args)
             "portrait), give it handling=screen. Prefer the Elements override below (with "
             "sig_use_projection=1 and sig_use_render_state=1) to a Texture override: an EFB copy's "
             "hash can change with its size or address, e.g. from one level to the next.\n";
+  }
+
+  // A HUD drawn in perspective just in front of the camera can share everything with world
+  // objects but its depth: show the depth of the other draws using its textures.
+  if (draw.perspective && !std::isnan(draw.depth_max))
+  {
+    float others_min = std::numeric_limits<float>::infinity();
+    float others_max = -std::numeric_limits<float>::infinity();
+    size_t others = 0;
+    for (const DrawRecord& other : capture->draws)
+    {
+      if (&other == &draw || std::isnan(other.depth_max))
+        continue;
+      const bool shares_texture = std::ranges::any_of(draw.textures, [&other](u64 texture) {
+        return texture != 0 && std::ranges::find(other.textures, texture) != other.textures.end();
+      });
+      if (!shares_texture)
+        continue;
+      others_min = std::min(others_min, other.depth_min);
+      others_max = std::max(others_max, other.depth_max);
+      ++others;
+    }
+    if (others > 0)
+    {
+      text += fmt::format(
+          "{} other draw(s) of this capture bind one of its textures, at camera depth {:.4g} to "
+          "{:.4g}. If this draw is a HUD drawn in perspective in front of the camera and they are "
+          "world objects (or the reverse), add max_depth=<a value between them> (or min_depth) "
+          "to the override so it only matches the near (or far) ones. For a HUD, add "
+          "min_depth=<half the near plane> too: a world object that crosses the camera also has "
+          "a small max depth.\n",
+          others, others_min, others_max);
+    }
   }
 
   text += "\nStarting points (edit the handling and name, then set_override):\n";

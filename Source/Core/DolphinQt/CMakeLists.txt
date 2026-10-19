@@ -57,6 +57,8 @@ add_executable(dolphin-emu
   Achievements/AchievementsWindow.h
   Config/ARCodeWidget.cpp
   Config/ARCodeWidget.h
+  Config/CameraDepthLimitWidgets.cpp
+  Config/CameraDepthLimitWidgets.h
   Config/CheatCodeEditor.cpp
   Config/CheatCodeEditor.h
   Config/CheatWarningWidget.cpp

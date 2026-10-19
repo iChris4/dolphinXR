@@ -15,13 +15,14 @@
 #include "Common/Hash.h"
 #include "Common/Logging/Log.h"
 #include "Core/ConfigLoaders/GameConfigLoader.h"
+#include "VideoCommon/ConstantManager.h"
+#include "VideoCommon/DrawDepth.h"
 #include "VideoCommon/GeometryShaderGen.h"
 #include "VideoCommon/PixelShaderGen.h"
-#include "VideoCommon/ConstantManager.h"
 #include "VideoCommon/ShaderGenCommon.h"
 #include "VideoCommon/VertexShaderGen.h"
-#include "VideoCommon/XFMemory.h"
 #include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/XFMemory.h"
 
 namespace
 {
@@ -1040,6 +1041,14 @@ LoadShaderOverridesFromINIFile(const std::string& path)
       {
         current.element_depth = std::stof(value);
       }
+      else if (key == "min_depth")
+      {
+        current.min_depth = std::stof(value);
+      }
+      else if (key == "max_depth")
+      {
+        current.max_depth = std::stof(value);
+      }
       else if (key == "units_per_meter" || key == "upm")
       {
         current.units_per_meter = std::stof(value);
@@ -1313,6 +1322,10 @@ void ShaderHunter::SaveOverridesToINI(const std::string& game_id,
     out << "handling=" << handling_str << "\n";
     if (ovr.element_depth >= 0.0f)
       out << "element_depth=" << ovr.element_depth << "\n";
+    if (ovr.min_depth > 0.0f)
+      out << "min_depth=" << ovr.min_depth << "\n";
+    if (ovr.max_depth > 0.0f)
+      out << "max_depth=" << ovr.max_depth << "\n";
     if (ovr.handling == HandlingType::UnitsPerMeter && ovr.units_per_meter > 0.0f)
       out << "units_per_meter=" << ovr.units_per_meter << "\n";
     if (ovr.handling == HandlingType::Passthrough)
@@ -1447,7 +1460,7 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
     if (!ovr.flag_group.empty())
       m_flag_rules.push_back({ovr.type, ovr.hash, ovr.hash_family_match, ovr.family_signature,
                               ovr.family_version, ovr.flag_group, ovr.texture_hashes,
-                              ovr.texture_hashes_excluded});
+                              ovr.texture_hashes_excluded, ovr.min_depth, ovr.max_depth});
 
     // Flag-only overrides: just set the flag, render normally (no handling change)
     if (ovr.handling == HandlingType::Flag)
@@ -1456,8 +1469,9 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
       continue;
     }
 
-    // Conditional or texture-conditioned overrides: store separately
-    if (!ovr.condition_flag.empty() || !ovr.texture_hashes.empty() || ovr.hash_family_match)
+    // Conditional, texture- or depth-conditioned overrides: store separately
+    if (!ovr.condition_flag.empty() || !ovr.texture_hashes.empty() || ovr.hash_family_match ||
+        ovr.min_depth > 0.0f || ovr.max_depth > 0.0f)
     {
       if (!ovr.texture_hashes.empty())
         m_has_texture_overrides = true;
@@ -1465,7 +1479,8 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
           {ovr.hash, ovr.handling, ovr.type, ovr.element_depth, ovr.units_per_meter,
            ovr.passthrough_opacity, MakeCameraAnchorParams(ovr), MakeControllerAnchorParams(ovr),
            ovr.texture_hashes, ovr.texture_hashes_excluded, ovr.hash_family_match,
-           ovr.family_signature, ovr.family_version, ovr.condition_flag, ovr.condition_inverted});
+           ovr.family_signature, ovr.family_version, ovr.condition_flag, ovr.condition_inverted,
+           ovr.min_depth, ovr.max_depth});
       m_overrides.push_back(std::move(ovr));
       continue;
     }
@@ -1674,6 +1689,8 @@ void ShaderHunter::RegisterFlags(u64 vs_hash, u64 ps_hash, u64 gs_hash)
     {
       continue;
     }
+    if (!DrawPassesDepthConstraints(m_current_draw_depth, rule.min_depth, rule.max_depth))
+      continue;
     m_flags_seen_this_frame.insert(rule.flag_group);
   }
 }
@@ -1927,6 +1944,8 @@ bool ShaderHunter::ShouldSkipByOverride(u64 vs_hash, u64 ps_hash, u64 gs_hash) c
     if (!DoesTextureFilterPass(m_current_draw_textures, cond.texture_hashes,
                                cond.texture_hashes_excluded))
       continue;
+    if (!DrawPassesDepthConstraints(m_current_draw_depth, cond.min_depth, cond.max_depth))
+      continue;
     if (m_debug_logging)
     {
       const u64 combo = vs_hash ^ (ps_hash * 0x9e3779b97f4a7c15ULL);
@@ -2015,6 +2034,8 @@ ShaderHunter::HandlingType ShaderHunter::GetOverrideHandling(u64 vs_hash, u64 ps
       if (!DoesTextureFilterPass(m_current_draw_textures, cond.texture_hashes,
                                  cond.texture_hashes_excluded))
         continue;
+      if (!DrawPassesDepthConstraints(m_current_draw_depth, cond.min_depth, cond.max_depth))
+        continue;
       result = cond.handling;
       handling_name = cond.handling == HandlingType::Screen      ? "Screen(conditional)" :
                       cond.handling == HandlingType::Fullscreen ||
@@ -2073,6 +2094,8 @@ float ShaderHunter::GetOverrideElementDepth(u64 vs_hash, u64 ps_hash, u64 gs_has
     if (!DoesTextureFilterPass(m_current_draw_textures, cond.texture_hashes,
                                cond.texture_hashes_excluded))
       continue;
+    if (!DrawPassesDepthConstraints(m_current_draw_depth, cond.min_depth, cond.max_depth))
+      continue;
     return cond.element_depth;
   }
   return -1.0f;  // use global
@@ -2102,6 +2125,8 @@ float ShaderHunter::GetOverrideUnitsPerMeter(u64 vs_hash, u64 ps_hash, u64 gs_ha
       continue;
     if (!DoesTextureFilterPass(m_current_draw_textures, cond.texture_hashes,
                                cond.texture_hashes_excluded))
+      continue;
+    if (!DrawPassesDepthConstraints(m_current_draw_depth, cond.min_depth, cond.max_depth))
       continue;
     return cond.units_per_meter;
   }
@@ -2133,6 +2158,8 @@ float ShaderHunter::GetOverridePassthroughOpacity(u64 vs_hash, u64 ps_hash, u64 
       continue;
     if (!DoesTextureFilterPass(m_current_draw_textures, cond.texture_hashes,
                                cond.texture_hashes_excluded))
+      continue;
+    if (!DrawPassesDepthConstraints(m_current_draw_depth, cond.min_depth, cond.max_depth))
       continue;
     return std::clamp(cond.passthrough_opacity, 0.0f, 1.0f);
   }
@@ -2169,6 +2196,8 @@ bool ShaderHunter::GetOverrideControllerAnchor(u64 vs_hash, u64 ps_hash, u64 gs_
     if (!DoesTextureFilterPass(m_current_draw_textures, cond.texture_hashes,
                                cond.texture_hashes_excluded))
       continue;
+    if (!DrawPassesDepthConstraints(m_current_draw_depth, cond.min_depth, cond.max_depth))
+      continue;
     *out_params = cond.controller_anchor;
     return true;
   }
@@ -2204,6 +2233,8 @@ bool ShaderHunter::GetOverrideCameraAnchor(u64 vs_hash, u64 ps_hash, u64 gs_hash
       continue;
     if (!DoesTextureFilterPass(m_current_draw_textures, cond.texture_hashes,
                                cond.texture_hashes_excluded))
+      continue;
+    if (!DrawPassesDepthConstraints(m_current_draw_depth, cond.min_depth, cond.max_depth))
       continue;
     *out_params = cond.anchor;
     return true;
@@ -2558,9 +2589,16 @@ std::optional<std::string> ShaderHunter::SaveSelectedShaderOverride(const std::s
   // load as the last entry anyway.)
   const auto existing = std::ranges::find(all, entry.name, &ShaderOverride::name);
   if (existing != all.end())
+  {
+    // The hunter cannot capture a depth limit: keep the one the entry had.
+    entry.min_depth = existing->min_depth;
+    entry.max_depth = existing->max_depth;
     *existing = entry;
+  }
   else
+  {
     all.push_back(entry);
+  }
   SaveOverridesToINI(game_id, all);
   LoadOverrides(game_id);
   return entry.name;

@@ -153,7 +153,11 @@ constexpr std::string_view HANDLINGS_DOC =
     "element_depth=<0..1> pushes a screen/headlocked element into the screen. Common to Shader, "
     "Elements and Texture overrides: flag=<name>, condition=<flag> with "
     "condition_mode=activate|deactivate, texture=<16 hex> (repeatable) with "
-    "texture_mode=include|exclude.";
+    "texture_mode=include|exclude, min_depth=<game units> / max_depth=<game units>: the entry "
+    "only matches draws whose vertices are all at least / at most that far from the game camera "
+    "(a HUD drawn in perspective just in front of the camera that shares its textures or state "
+    "with world objects; get_draw and list_draws print a draw's camera depth; a draw whose depth "
+    "cannot be read does not match).";
 
 std::string FormatDoc(OverrideKind kind)
 {

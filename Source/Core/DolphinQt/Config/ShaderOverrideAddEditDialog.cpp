@@ -346,6 +346,7 @@ ShaderOverrideAddEditDialog::ShaderOverrideAddEditDialog(
     m_element_depth_spin->setValue(edit_override->element_depth);
     if (edit_override->units_per_meter > 0.0f)
       m_units_per_meter_spin->setValue(edit_override->units_per_meter);
+    m_depth_limits.SetValues(edit_override->min_depth, edit_override->max_depth);
     m_passthrough_opacity_spin->setValue(edit_override->passthrough_opacity);
     m_anchor_right_spin->setValue(edit_override->anchor_right);
     m_anchor_up_spin->setValue(edit_override->anchor_up);
@@ -421,6 +422,7 @@ ShaderOverrideAddEditDialog::ShaderOverrideAddEditDialog(
   form->addRow(tr("Handling:"), m_handling_combo);
   form->addRow(m_element_depth_label, m_element_depth_spin);
   form->addRow(m_units_per_meter_label, m_units_per_meter_spin);
+  m_depth_limits.AddRows(form);
   form->addRow(m_passthrough_opacity_label, m_passthrough_opacity_spin);
   form->addRow(m_anchor_right_label, m_anchor_right_spin);
   form->addRow(m_anchor_up_label, m_anchor_up_spin);
@@ -506,6 +508,8 @@ ShaderHunter::ShaderOverride ShaderOverrideAddEditDialog::GetResult() const
   result.units_per_meter = result.handling == ShaderHunter::HandlingType::UnitsPerMeter ?
                                static_cast<float>(m_units_per_meter_spin->value()) :
                                -1.0f;
+  result.min_depth = m_depth_limits.GetMinDepth();
+  result.max_depth = m_depth_limits.GetMaxDepth();
   result.passthrough_opacity = result.handling == ShaderHunter::HandlingType::Passthrough ?
                                    static_cast<float>(m_passthrough_opacity_spin->value()) :
                                    0.0f;
@@ -570,6 +574,11 @@ void ShaderOverrideAddEditDialog::OnAccept()
   if (name.empty())
   {
     QMessageBox::warning(this, tr("Validation Error"), tr("Name cannot be empty."));
+    return;
+  }
+  if (const QString depth_error = m_depth_limits.Validate(); !depth_error.isEmpty())
+  {
+    QMessageBox::warning(this, tr("Validation Error"), depth_error);
     return;
   }
 
