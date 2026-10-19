@@ -69,6 +69,8 @@ void ApplyCPUThreadConfig();
 u32 ResolveCodeAddress(const ToolArgs& args);
 // "0x80123456 (FunctionName+0x10)".
 std::string DescribeAddress(u32 address);
+// "_Main.plf (REL 1)" when the address is inside a REL module the game loaded, else "".
+std::string ModuleOfAddress(u32 address);
 // The symbol's name without what the signature database appends after a tab (library and object
 // file names).
 std::string_view SymbolName(const Common::Symbol& symbol);

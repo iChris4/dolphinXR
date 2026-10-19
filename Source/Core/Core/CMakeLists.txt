@@ -690,6 +690,8 @@ if(ENABLE_VR)
     AgentServer/AgentInput.h
     AgentServer/AgentServer.cpp
     AgentServer/AgentServer.h
+    AgentServer/CodeAnalysis.cpp
+    AgentServer/CodeAnalysis.h
     AgentServer/FrameCounters.cpp
     AgentServer/FrameCounters.h
     AgentServer/HttpServer.cpp

@@ -18,6 +18,7 @@
 #include "Common/StringUtil.h"
 #include "Core/AchievementManager.h"
 #include "Core/AgentServer/AgentServer.h"
+#include "Core/AgentServer/CodeAnalysis.h"
 #include "Core/AgentServer/ToolHelpers.h"
 #include "Core/AgentServer/Tools/Tools.h"
 #include "Core/CPUThreadConfigCallback.h"
@@ -177,6 +178,50 @@ ToolResult GetSymbol(const ToolArgs& args)
   return ToolResult::Text(std::move(text));
 }
 
+std::vector<LoadedModule> ReadModules(const Core::CPUThreadGuard& guard)
+{
+  return ReadLoadedModules([&guard](u32 address) -> std::optional<u32> {
+    const auto word = PowerPC::MMU::HostTryRead<u32>(guard, address);
+    if (!word)
+      return std::nullopt;
+    return word->value;
+  });
+}
+
+ToolResult ListModules(const ToolArgs&)
+{
+  RequireGame();
+  std::vector<LoadedModule> modules;
+  {
+    Core::CPUThreadGuard guard(GetSystem());
+    modules = ReadModules(guard);
+  }
+  if (modules.empty())
+  {
+    return ToolResult::Text("No REL module is loaded: the game's code is in its main executable "
+                            "(DOL), at fixed addresses.");
+  }
+  std::string text = fmt::format(
+      "{} REL module(s) loaded by the game, in load order. Code in a module exists only while "
+      "the game keeps the module loaded, and another part of the game may load it at another "
+      "address: check here before saving a patch for it.\n",
+      modules.size());
+  for (const LoadedModule& module : modules)
+  {
+    text += fmt::format("REL {} {} (header {:08X}):", module.id, module.name, module.header);
+    for (size_t i = 0; i < module.sections.size(); ++i)
+    {
+      const ModuleSection& section = module.sections[i];
+      if (section.size == 0)
+        continue;
+      text += fmt::format(" [{}] {:08X}-{:08X} {}", i, section.address,
+                          section.address + section.size, section.executable ? "code" : "data");
+    }
+    text += "\n";
+  }
+  return ToolResult::Text(std::move(text));
+}
+
 ToolResult Disassemble(const ToolArgs& args)
 {
   RequireGame();
@@ -190,9 +235,18 @@ ToolResult Disassemble(const ToolArgs& args)
     count = std::clamp<u32>(symbol->size / 4, 1, 512);
   }
 
-  std::string text = symbol ? fmt::format("{} ({:08X}, {} bytes)\n", SymbolName(*symbol),
-                                          symbol->address, symbol->size) :
-                              std::string();
+  const std::string module = ModuleOfAddress(address);
+  const std::string in_module = module.empty() ? "" : ", in module " + module;
+  std::string text;
+  if (symbol)
+  {
+    text = fmt::format("{} ({:08X}, {} bytes{})\n", SymbolName(*symbol), symbol->address,
+                       symbol->size, in_module);
+  }
+  else if (!module.empty())
+  {
+    text = fmt::format("{:08X}{}\n", address, in_module);
+  }
   Core::CPUThreadGuard guard(GetSystem());
   for (u32 i = 0; i < count; ++i)
     text += FormatInstructionLine(guard, address + i * 4) + "\n";
@@ -554,6 +608,22 @@ std::string_view SymbolName(const Common::Symbol& symbol)
   return name;
 }
 
+std::string ModuleOfAddress(u32 address)
+{
+  std::vector<LoadedModule> modules;
+  {
+    Core::CPUThreadGuard guard(GetSystem());
+    modules = ReadModules(guard);
+  }
+  const std::optional<ModuleLocation> location = FindModuleLocation(modules, address);
+  if (!location)
+    return "";
+  const LoadedModule& module = modules[location->module];
+  if (module.name.empty())
+    return fmt::format("REL {} at {:08X}", module.id, module.header);
+  return fmt::format("{} (REL {})", module.name, module.id);
+}
+
 std::string DescribeAddress(u32 address)
 {
   const Common::Symbol* symbol = GetSystem().GetPPCSymbolDB().GetSymbolFromAddr(address);
@@ -656,6 +726,17 @@ void RegisterMemoryTools(ToolRegistry& registry, Server& server)
                 .read_only = true,
                 .idempotent = true,
                 .handler = Disassemble});
+
+  registry.Add({.name = "list_modules",
+                .title = "List REL modules",
+                .description = "The code modules (REL files) the game has loaded, with their code "
+                               "and data sections: whether an address belongs to the main "
+                               "executable or to a module that another part of the game may "
+                               "load elsewhere or not at all.",
+                .input_schema = Schema().Build(),
+                .read_only = true,
+                .idempotent = true,
+                .handler = ListModules});
 
   registry.Add(
       {.name = "read_memory",

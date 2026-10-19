@@ -27,6 +27,7 @@
 #include "Common/MsgHandler.h"
 #include "Common/StringUtil.h"
 #include "Core/AgentServer/AgentServer.h"
+#include "Core/AgentServer/CodeAnalysis.h"
 #include "Core/AgentServer/PatchTemplates.h"
 #include "Core/AgentServer/ToolHelpers.h"
 #include "Core/AgentServer/Tools/Tools.h"
@@ -396,30 +397,33 @@ ToolResult SavePatchAsARCode(const ToolArgs& args)
   text += "\n";
   for (const std::string& line : lines)
     text += line + "\n";
+  const std::string module = ModuleOfAddress(patch.address);
+  if (!module.empty())
+  {
+    text += fmt::format("The patch is in module {}: another part of the game may load it at "
+                        "another address, or not at all (list_modules). Ask the user to check "
+                        "there too.\n",
+                        module);
+  }
   text += "Ask the user to check it in the headset (look around, play a bit); on Quest, measure "
           "the GPU cost: removing culling draws more.";
   return ToolResult::Text(std::move(text));
 }
 
-// Counts the instructions of a function: float compares (frustum tests) and returns.
-void CountInstructions(const Core::CPUThreadGuard& guard, const Common::Symbol& symbol, u32* fcmp,
-                       u32* returns)
+// The instruction words of a function, for CountInstructions.
+std::vector<u32> ReadFunctionWords(const Core::CPUThreadGuard& guard, const Common::Symbol& symbol)
 {
-  *fcmp = 0;
-  *returns = 0;
+  std::vector<u32> words;
   const u32 count = std::min<u32>(symbol.size / 4, 4096);
+  words.reserve(count);
   for (u32 i = 0; i < count; ++i)
   {
     const auto word = PowerPC::MMU::HostTryRead<u32>(guard, symbol.address + i * 4);
     if (!word)
       break;
-    const u32 opcode = word->value >> 26;
-    const u32 xo = (word->value >> 1) & 0x3FF;
-    if (opcode == 63 && (xo == 0 || xo == 32))
-      ++*fcmp;
-    if ((word->value & 0xFC0007FEu) == 0x4C000020u)
-      ++*returns;
+    words.push_back(word->value);
   }
+  return words;
 }
 
 // True for a branch that calls (bl, bla, bcl, bctrl, blrl): its destination is a function entry.
@@ -519,14 +523,14 @@ ToolResult ProfileFunctions(const ToolArgs& args)
     for (size_t i = 0; i < std::min(top, sorted.size()); ++i)
     {
       const Stats& stats = sorted[i];
-      u32 fcmp = 0, returns = 0;
+      InstructionCounts counts;
       const bool at_entry = stats.symbol && stats.symbol->address == stats.address;
       if (at_entry)
-        CountInstructions(guard, *stats.symbol, &fcmp, &returns);
+        counts = CountInstructions(ReadFunctionWords(guard, *stats.symbol));
       rows += fmt::format(
-          "{:08X} {:5} {:9.1f} {:5} {:4} {:3} {}\n", stats.address,
+          "{:08X} {:5} {:9.1f} {:5} {:4} {:4} {:3} {}\n", stats.address,
           at_entry ? stats.symbol->size : 0, static_cast<double>(stats.calls) / frames,
-          stats.call_sites, fcmp, returns,
+          stats.call_sites, counts.fcmp, counts.bool_results, counts.returns,
           at_entry ? std::string(SymbolName(*stats.symbol)) : DescribeAddress(stats.address));
     }
   }
@@ -535,9 +539,11 @@ ToolResult ProfileFunctions(const ToolArgs& args)
     throw ToolError("No calls were recorded: is the game running (not stuck on a frame)?");
   text += fmt::format(
       "Functions by calls per frame over {} frames (sites = distinct call sites). Culling tests "
-      "are usually small functions called once per object per frame, with float compares (fcmp) "
-      "and a bool result in r3.\n"
-      "address  size calls/frame sites fcmp ret name\n{}",
+      "are usually small functions called once per object per frame, with float compares (fcmp), "
+      "li r3,0 or li r3,1 (bool: a test sets its result in several places, so count them rather "
+      "than the returns) and few returns (ret). The GX and matrix functions at the top are not "
+      "tests.\n"
+      "address  size calls/frame sites fcmp bool ret name\n{}",
       frames, rows);
   text += "Next: disassemble or trace_function on candidates, then test_patches.";
   return ToolResult::Text(std::move(text));
