@@ -1090,6 +1090,7 @@ void Presenter::BlitCurrentSourceToOpenXREyes(const AbstractTexture* source_text
         // Layer 0 is the left eye; the image is still ours until the release below.
         VR::VideoRecorder::Get().OnEyeRendered(*sc, layered_fb->GetColorAttachment(), eye_rect);
         sc->ReleaseLayeredTexture();
+        m_openxr_eyes_rendered = true;
         restore_post_process_state();
         return;
       }
@@ -1106,6 +1107,7 @@ void Presenter::BlitCurrentSourceToOpenXREyes(const AbstractTexture* source_text
     }
   }
 
+  u32 eyes_rendered = 0;
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
     AbstractFramebuffer* eye_fb = sc->AcquireEyeFramebuffer(eye);
@@ -1119,7 +1121,9 @@ void Presenter::BlitCurrentSourceToOpenXREyes(const AbstractTexture* source_text
     if (eye == 0)
       VR::VideoRecorder::Get().OnEyeRendered(*sc, eye_fb->GetColorAttachment(), eye_rect);
     sc->ReleaseEyeTexture(eye);
+    ++eyes_rendered;
   }
+  m_openxr_eyes_rendered = eyes_rendered == 2;
 
   restore_post_process_state();
 }
@@ -1189,6 +1193,10 @@ bool Presenter::SubmitOpenXRFrameFromCurrentSource(const AbstractTexture* source
 
     if (blit_source)
       BlitCurrentSourceToOpenXREyes(source_texture, source_rc);
+    // Nothing rendered (see m_openxr_eyes_rendered): the pacing thread keeps showing the last
+    // frame. The legacy flow submits as before, since its begun frame must end here.
+    if (!m_openxr_eyes_rendered && VR::g_openxr->IsFrameThreadActive())
+      return true;
     return sc->SubmitFrame();
   }
 
@@ -1364,6 +1372,8 @@ void Presenter::Present(PresentInfo* present_info)
       }
     }
   }
+
+  m_openxr_eyes_rendered = false;
 
   // VI duplicate presents re-show an XFB the pacing thread is already heartbeating
   // with its stamped pose; re-blitting and re-publishing the identical content only

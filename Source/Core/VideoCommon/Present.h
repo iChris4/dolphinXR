@@ -159,6 +159,7 @@ private:
   // Per-game-frame VR upkeep after a present: refresh eye poses for the next game frame
   // (and, on the legacy path, pre-begin the next XR frame). Also clears the EFB.
   void PrepareNextOpenXRFrame();
+  // Sets m_openxr_eyes_rendered when both eye images were rendered and released.
   void BlitCurrentSourceToOpenXREyes(const AbstractTexture* source_texture,
                                      const MathUtil::Rectangle<int>& source_rc);
   // Flat mono panel path: blit the mono XFB into the flat swapchain image and set the quad aspect.
@@ -238,6 +239,11 @@ private:
   // Legacy synchronous flow: true when the next XR frame was already pre-begun after
   // the previous present.
   bool m_openxr_frame_prepared = false;
+  // This present rendered the eye images (BlitCurrentSourceToOpenXREyes). Without them there
+  // is nothing new to publish: no XFB, or a mono one such as the XFB a savestate rebuilds from
+  // RAM while paused. The eye swapchains of D3D12's layered path never hold a released image,
+  // so publishing them would get XR_ERROR_LAYER_INVALID at every paused present.
+  bool m_openxr_eyes_rendered = false;
   double m_last_openxr_wait_frame_ms = 0.0;
   double m_last_openxr_locate_views_ms = 0.0;
   // Rolling 5s window measuring how long the presenting (video/emu) thread spends
