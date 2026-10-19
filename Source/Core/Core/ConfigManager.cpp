@@ -153,10 +153,13 @@ static void ClearAppliedVRSetting(const char* key, const Config::Info<T>& info)
     Config::DeleteKey(Config::LayerType::CurrentRun, info);
 }
 
-static void ClearAppliedVRSettings()
+static void ClearAppliedVRSettings(bool emulation_started)
 {
-  ClearAppliedVRSetting("EnableOpenXR", Config::GFX_VR_ENABLE_OPENXR);
-  ClearAppliedVRSetting("FlatScreen", Config::GFX_VR_FLAT_SCREEN);
+  if (!emulation_started)
+  {
+    ClearAppliedVRSetting("EnableOpenXR", Config::GFX_VR_ENABLE_OPENXR);
+    ClearAppliedVRSetting("FlatScreen", Config::GFX_VR_FLAT_SCREEN);
+  }
   ClearAppliedVRSetting("UnitsPerMeter", Config::GFX_VR_UNITS_PER_METER);
   ClearAppliedVRSetting("EnableLeanBackAngle", Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE);
   ClearAppliedVRSetting("LeanBackAngle", Config::GFX_VR_LEAN_BACK_ANGLE);
@@ -232,14 +235,22 @@ static void ApplyVRSetting(const VRSettingMap& values, const char* key, const Co
     Config::DeleteKey(Config::LayerType::CurrentRun, info);
 }
 
-static void ApplyGameVRConfigOverrides(std::string_view game_id, std::optional<u16> revision)
+// EnableOpenXR and FlatScreen choose stereo or the flat panel when the video backend creates the
+// OpenXR swapchains, so once emulation has started they keep the values of the title that was
+// booted. A disc started from the Wii System Menu stays on the menu's flat panel until emulation
+// stops, instead of switching to stereo on swapchains made for the panel.
+static void ApplyGameVRConfigOverrides(std::string_view game_id, std::optional<u16> revision,
+                                       bool emulation_started)
 {
   const Config::ConfigChangeCallbackGuard guard;
-  ClearAppliedVRSettings();
+  ClearAppliedVRSettings(emulation_started);
   const VRSettingMap values = LoadVRSettingsFromINI(game_id, revision);
 
-  ApplyVRSetting(values, "EnableOpenXR", Config::GFX_VR_ENABLE_OPENXR);
-  ApplyVRSetting(values, "FlatScreen", Config::GFX_VR_FLAT_SCREEN);
+  if (!emulation_started)
+  {
+    ApplyVRSetting(values, "EnableOpenXR", Config::GFX_VR_ENABLE_OPENXR);
+    ApplyVRSetting(values, "FlatScreen", Config::GFX_VR_FLAT_SCREEN);
+  }
   ApplyVRSetting(values, "UnitsPerMeter", Config::GFX_VR_UNITS_PER_METER);
   ApplyVRSetting(values, "EnableLeanBackAngle", Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE);
   ApplyVRSetting(values, "LeanBackAngle", Config::GFX_VR_LEAN_BACK_ANGLE);
@@ -573,7 +584,8 @@ void SConfig::SetRunningGameMetadata(const std::string& game_id, const std::stri
 
   Config::AddLayer(ConfigLoaders::GenerateGlobalGameConfigLoader(game_id, revision));
   Config::AddLayer(ConfigLoaders::GenerateLocalGameConfigLoader(game_id, revision));
-  ApplyGameVRConfigOverrides(game_id, revision == 0 ? std::nullopt : std::make_optional(revision));
+  ApplyGameVRConfigOverrides(game_id, revision == 0 ? std::nullopt : std::make_optional(revision),
+                             is_running_or_starting);
 
   if (is_running_or_starting)
     DolphinAnalytics::Instance().ReportGameStart();
@@ -583,7 +595,8 @@ void SConfig::ReloadGameVRConfigOverrides()
 {
   std::lock_guard<std::recursive_mutex> lock(m_metadata_lock);
   ApplyGameVRConfigOverrides(m_game_id,
-                             m_revision == 0 ? std::nullopt : std::make_optional(m_revision));
+                             m_revision == 0 ? std::nullopt : std::make_optional(m_revision),
+                             Core::IsRunningOrStarting(Core::System::GetInstance()));
 }
 
 void SConfig::SetElfDolID(const std::string& game_id)
