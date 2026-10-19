@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <future>
+#include <mutex>
+#include <optional>
 
 #include <fmt/format.h>
 
@@ -55,6 +57,46 @@ std::string SanitizeLabel(const std::string& label)
     throw ToolError("A savestate label is 1 to 40 letters, digits, '-' or '_'.");
   return result;
 }
+
+// The savestate file the emulation was last loaded from or saved to, and the emulated clock
+// then. Loading that file again before the emulation runs leaves the clock where it was, which
+// the refused-load check of LoadStateAndWait would misread.
+struct StateFileMatch
+{
+  std::string path;
+  std::filesystem::file_time_type write_time;
+  u64 ticks = 0;
+};
+std::mutex s_state_file_match_mutex;
+std::optional<StateFileMatch> s_state_file_match;
+
+std::filesystem::file_time_type StateWriteTime(const std::string& path)
+{
+  std::error_code error;
+  const auto time = std::filesystem::last_write_time(StringToPath(path), error);
+  return error ? std::filesystem::file_time_type{} : time;
+}
+
+u64 GetEmulatedTicks()
+{
+  auto& system = GetSystem();
+  const Core::CPUThreadGuard guard(system);
+  return system.GetCoreTiming().GetTicks();
+}
+
+void RememberStateFile(const std::string& path, u64 ticks)
+{
+  std::lock_guard lock(s_state_file_match_mutex);
+  s_state_file_match = StateFileMatch{path, StateWriteTime(path), ticks};
+}
+
+bool IsStateFileUnchangedAt(const std::string& path, u64 ticks)
+{
+  std::lock_guard lock(s_state_file_match_mutex);
+  return s_state_file_match && s_state_file_match->path == path &&
+         s_state_file_match->ticks == ticks &&
+         s_state_file_match->write_time == StateWriteTime(path);
+}
 }  // namespace
 
 std::string AgentStatePath(const std::string& label)
@@ -83,11 +125,7 @@ void LoadStateAndWait(const std::string& path, std::chrono::milliseconds timeout
   // Detect it from the emulated clock: paused, it moves only when a state is loaded.
   const bool was_running = !IsPaused();
   PauseEmulation();
-  const auto ticks = [&system] {
-    const Core::CPUThreadGuard guard(system);
-    return system.GetCoreTiming().GetTicks();
-  };
-  const u64 ticks_before = ticks();
+  const u64 ticks_before = GetEmulatedTicks();
 
   // LoadAs queues the load as a CPU-thread job; jobs run in order, so the next one runs after it.
   INFO_LOG_FMT(OPENXR, "AgentServer: loading {}", path);
@@ -98,11 +136,16 @@ void LoadStateAndWait(const std::string& path, std::chrono::milliseconds timeout
   if (!WaitUntil([&] { return done.wait_for(0s) == std::future_status::ready; }, timeout, 10ms))
     throw ToolError("The savestate did not finish loading in time.");
 
-  const bool changed = ticks() != ticks_before;
-  INFO_LOG_FMT(OPENXR, "AgentServer: load done ({})", changed ? "loaded" : "refused");
+  const u64 ticks_after = GetEmulatedTicks();
+  // The clock also stays put when the emulation already is at this file's state.
+  const bool state_loaded =
+      ticks_after != ticks_before || IsStateFileUnchangedAt(path, ticks_after);
+  if (state_loaded)
+    RememberStateFile(path, ticks_after);
+  INFO_LOG_FMT(OPENXR, "AgentServer: load done ({})", state_loaded ? "loaded" : "refused");
   if (was_running)
     ResumeEmulation();
-  if (!changed)
+  if (!state_loaded)
   {
     throw ToolError("Dolphin did not load the savestate: it was probably made by another Dolphin "
                     "version or for another revision of the game (the reason is shown on screen). "
@@ -222,6 +265,7 @@ ToolResult SaveStateTool(const ToolArgs& args)
     State::SaveAs(system, path, options);
     if (!File::Exists(path))
       throw ToolError("The savestate was not written (see read_log).");
+    RememberStateFile(path, GetEmulatedTicks());
     return ToolResult::Text(
         fmt::format("Saved the agent savestate \"{}\" ({}).", args.GetString("label"), path));
   }
