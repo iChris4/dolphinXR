@@ -79,6 +79,9 @@ std::optional<HideObjectEntry> BuildEntryFromPrefix(const u8* data, size_t avail
 // --- Static INI helpers (direct file I/O, bypasses IniFile to avoid corruption) ---
 std::vector<HideObject> LoadFromINI(const std::string& game_id,
                                     std::optional<u16> revision = std::nullopt);
+// The Sys files, then the user files, merged by name (later files win).
+std::vector<HideObject> LoadFromINIFiles(const std::vector<std::string>& sys_paths,
+                                         const std::vector<std::string>& user_paths);
 void SaveToINI(const std::string& game_id, const std::vector<HideObject>& codes);
 // The codes of one INI file (no Sys/User merge), e.g. an entry the agent server wrote.
 std::vector<HideObject> LoadCodesFromINIFile(const std::string& path);

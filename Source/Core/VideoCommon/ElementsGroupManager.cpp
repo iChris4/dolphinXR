@@ -886,10 +886,16 @@ static void MergeParsedElementGroupOverrideFile(
     }
   }
 
+  // The entries of this file already follow its enable list. The list only turns on the overrides
+  // of earlier files: a user file saved before an override shipped in Sys does not list it, and
+  // must not turn it off.
   if (parsed.has_enable_section)
   {
     for (auto& entry : *result)
-      entry.enabled = parsed.enabled_names.count(entry.name) > 0;
+    {
+      if (parsed.enabled_names.contains(entry.name))
+        entry.enabled = true;
+    }
   }
 }
 
@@ -899,18 +905,35 @@ ElementsGroupManager::LoadOverridesFromINI(const std::string& game_id, std::opti
   if (game_id.empty())
     return {};
 
+  std::vector<std::string> sys_paths;
+  std::vector<std::string> user_paths;
+  for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
+  {
+    sys_paths.push_back(GetSysVRGameSettingsPath(filename));
+    user_paths.push_back(File::GetUserPath(D_GAMESETTINGSVR_IDX) + filename);
+  }
+  return LoadOverridesFromINIFiles(sys_paths, user_paths);
+}
+
+std::vector<ElementsGroupManager::ElementGroupOverride>
+ElementsGroupManager::LoadOverridesFromINIFiles(const std::vector<std::string>& sys_paths,
+                                                const std::vector<std::string>& user_paths)
+{
   std::vector<ElementGroupOverride> result;
   std::map<std::string, size_t> index_by_name;
 
-  for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
-    MergeParsedElementGroupOverrideFile(
-        &result, &index_by_name, LoadElementGroupOverridesFromINIFile(GetSysVRGameSettingsPath(filename)));
+  for (const std::string& path : sys_paths)
+  {
+    MergeParsedElementGroupOverrideFile(&result, &index_by_name,
+                                        LoadElementGroupOverridesFromINIFile(path));
+  }
   const std::map<std::string, size_t> sys_names = index_by_name;
 
-  for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
-    MergeParsedElementGroupOverrideFile(
-        &result, &index_by_name,
-        LoadElementGroupOverridesFromINIFile(File::GetUserPath(D_GAMESETTINGSVR_IDX) + filename));
+  for (const std::string& path : user_paths)
+  {
+    MergeParsedElementGroupOverrideFile(&result, &index_by_name,
+                                        LoadElementGroupOverridesFromINIFile(path));
+  }
 
   // An override that ships in Sys comes back on every load, even if the user's file (which saves
   // every override) drops or renames it.

@@ -294,10 +294,16 @@ static void MergeParsedHideObjectFile(std::vector<HideObject>* result,
     }
   }
 
+  // The codes of this file already follow its enable list. The list only turns on the codes of
+  // earlier files: a user file saved before a code shipped in Sys does not list it, and must not
+  // turn it off.
   if (parsed.has_enable_section)
   {
     for (auto& entry : *result)
-      entry.active = parsed.enabled_names.count(entry.name) > 0;
+    {
+      if (parsed.enabled_names.contains(entry.name))
+        entry.active = true;
+    }
   }
 }
 
@@ -311,17 +317,28 @@ std::vector<HideObject> LoadFromINI(const std::string& game_id, std::optional<u1
   if (game_id.empty())
     return {};
 
+  std::vector<std::string> sys_paths;
+  std::vector<std::string> user_paths;
+  for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
+  {
+    sys_paths.push_back(GetSysVRGameSettingsPath(filename));
+    user_paths.push_back(File::GetUserPath(D_GAMESETTINGSVR_IDX) + filename);
+  }
+  return LoadFromINIFiles(sys_paths, user_paths);
+}
+
+std::vector<HideObject> LoadFromINIFiles(const std::vector<std::string>& sys_paths,
+                                         const std::vector<std::string>& user_paths)
+{
   std::vector<HideObject> result;
   std::map<std::string, size_t> index_by_name;
 
-  for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
-    MergeParsedHideObjectFile(&result, &index_by_name,
-                              LoadFromINIFile(GetSysVRGameSettingsPath(filename)));
+  for (const std::string& path : sys_paths)
+    MergeParsedHideObjectFile(&result, &index_by_name, LoadFromINIFile(path));
   const std::map<std::string, size_t> sys_names = index_by_name;
 
-  for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(game_id, revision))
-    MergeParsedHideObjectFile(&result, &index_by_name,
-                              LoadFromINIFile(File::GetUserPath(D_GAMESETTINGSVR_IDX) + filename));
+  for (const std::string& path : user_paths)
+    MergeParsedHideObjectFile(&result, &index_by_name, LoadFromINIFile(path));
 
   // A code that ships in Sys comes back on every load, even if the user's file (which saves every
   // code) drops or renames it. Editing it under its name does stick: the user's file wins.

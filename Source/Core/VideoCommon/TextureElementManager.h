@@ -83,6 +83,10 @@ public:
   // Static INI helpers (used by both this manager and the Qt pane).
   static std::vector<TextureElementOverride> LoadOverridesFromINI(
       const std::string& game_id, std::optional<u16> revision = std::nullopt);
+  // The Sys files, then the user files, merged by name (later files win).
+  static std::vector<TextureElementOverride>
+  LoadOverridesFromINIFiles(const std::vector<std::string>& sys_paths,
+                            const std::vector<std::string>& user_paths);
   static void SaveOverridesToINI(const std::string& game_id,
                                  const std::vector<TextureElementOverride>& overrides);
   // The overrides of one INI file (no Sys/User merge), e.g. an entry the agent server wrote.
