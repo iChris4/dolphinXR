@@ -473,7 +473,20 @@ void TextureElementManager::SaveOverridesToINI(
   outfile << out.str();
 }
 
+std::vector<TextureElementManager::TextureElementOverride>
+TextureElementManager::LoadOverridesFromINIFile(const std::string& path)
+{
+  return LoadTextureOverridesFromINIFile(path).entries;
+}
+
 void TextureElementManager::LoadOverrides(const std::string& game_id)
+{
+  ApplyOverrideList(game_id, game_id.empty() ? std::vector<TextureElementOverride>{} :
+                                               LoadOverridesFromINI(game_id));
+}
+
+void TextureElementManager::ApplyOverrideList(const std::string& game_id,
+                                              std::vector<TextureElementOverride> all)
 {
   std::lock_guard lock(m_mutex);
 
@@ -486,7 +499,6 @@ void TextureElementManager::LoadOverrides(const std::string& game_id)
   if (game_id.empty())
     return;
 
-  auto all = LoadOverridesFromINI(game_id);
   bool has_overrides = false;
 
   for (auto& ovr : all)

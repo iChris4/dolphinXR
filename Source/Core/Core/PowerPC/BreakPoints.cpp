@@ -20,6 +20,9 @@
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PPCSymbolDB.h"
 #include "Core/System.h"
+#ifdef ENABLE_VR
+#include "Core/AgentServer/Tracepoints.h"
+#endif
 
 BreakPoints::BreakPoints(Core::System& system) : m_system(system)
 {
@@ -429,6 +432,11 @@ bool TMemCheck::Action(Core::System& system, u64 value, u32 addr, bool write, si
   if (((write && is_break_on_write) || (!write && is_break_on_read)) &&
       EvaluateCondition(system, this->condition))
   {
+#ifdef ENABLE_VR
+    // The agent server's memory traces (watch tools): record who accesses the address.
+    if (AgentServer::Tracepoints::IsActive()) [[unlikely]]
+      AgentServer::Tracepoints::OnMemoryHit(system.GetPPCState(), addr, value, write);
+#endif
     if (log_on_hit)
     {
       auto& ppc_symbol_db = system.GetPPCSymbolDB();

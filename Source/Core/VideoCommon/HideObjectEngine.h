@@ -80,6 +80,8 @@ std::optional<HideObjectEntry> BuildEntryFromPrefix(const u8* data, size_t avail
 std::vector<HideObject> LoadFromINI(const std::string& game_id,
                                     std::optional<u16> revision = std::nullopt);
 void SaveToINI(const std::string& game_id, const std::vector<HideObject>& codes);
+// The codes of one INI file (no Sys/User merge), e.g. an entry the agent server wrote.
+std::vector<HideObject> LoadCodesFromINIFile(const std::string& path);
 
 // --- Runtime singleton for hide-object matching ---
 class Engine

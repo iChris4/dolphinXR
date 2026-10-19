@@ -36,19 +36,13 @@
 #include "UICommon/DiscordPresence.h"
 
 #include "VideoCommon/AbstractGfx.h"
-#include "VideoCommon/CullingCodeFinder.h"
 #include "VideoCommon/Fifo.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/VideoConfig.h"
 
 Host::Host()
 {
-  State::SetOnAfterLoadCallback([] {
-    auto& finder = CullingCodeFinder::GetInstance();
-    finder.NotifySavestateLoaded();
-    finder.AdvanceScan(Core::System::GetInstance());
-    Host_UpdateDisasmDialog();
-  });
+  State::SetOnAfterLoadCallback([] { Host_UpdateDisasmDialog(); });
 }
 
 Host::~Host()

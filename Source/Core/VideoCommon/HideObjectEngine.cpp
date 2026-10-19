@@ -301,6 +301,11 @@ static void MergeParsedHideObjectFile(std::vector<HideObject>* result,
   }
 }
 
+std::vector<HideObject> LoadCodesFromINIFile(const std::string& path)
+{
+  return LoadFromINIFile(path).entries;
+}
+
 std::vector<HideObject> LoadFromINI(const std::string& game_id, std::optional<u16> revision)
 {
   if (game_id.empty())

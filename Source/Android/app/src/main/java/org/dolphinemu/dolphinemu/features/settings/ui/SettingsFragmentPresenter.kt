@@ -3573,6 +3573,30 @@ class SettingsFragmentPresenter(
                 R.string.quest_layered_palette_conversion_description
             )
         )
+        sl.add(
+            SwitchSetting(
+                context,
+                QuestVrSettings.agentServerSetting(),
+                R.string.quest_agent_server,
+                R.string.quest_agent_server_description
+            )
+        )
+        sl.add(
+            InputStringSetting(
+                context,
+                QuestVrSettings.agentServerPortSetting(),
+                R.string.quest_agent_server_port,
+                R.string.quest_agent_server_port_description
+            )
+        )
+        sl.add(
+            InputStringSetting(
+                context,
+                QuestVrSettings.agentServerTokenSetting(),
+                R.string.quest_agent_server_token,
+                R.string.quest_agent_server_token_description
+            )
+        )
     }
 
     private fun addQuestVrPassthroughSettings(sl: ArrayList<SettingsItem>) {

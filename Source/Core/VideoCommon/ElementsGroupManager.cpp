@@ -1068,7 +1068,20 @@ void ElementsGroupManager::SaveOverridesToINI(const std::string& game_id,
   outfile << out.str();
 }
 
+std::vector<ElementsGroupManager::ElementGroupOverride>
+ElementsGroupManager::LoadOverridesFromINIFile(const std::string& path)
+{
+  return LoadElementGroupOverridesFromINIFile(path).entries;
+}
+
 void ElementsGroupManager::LoadOverrides(const std::string& game_id)
+{
+  ApplyOverrideList(game_id, game_id.empty() ? std::vector<ElementGroupOverride>{} :
+                                               LoadOverridesFromINI(game_id));
+}
+
+void ElementsGroupManager::ApplyOverrideList(const std::string& game_id,
+                                             std::vector<ElementGroupOverride> all_overrides)
 {
   std::lock_guard lock(m_mutex);
   m_loaded_game_id = game_id;
@@ -1082,11 +1095,10 @@ void ElementsGroupManager::LoadOverrides(const std::string& game_id)
     return;
   }
 
-  const auto all_overrides = LoadOverridesFromINI(game_id);
-  for (const auto& entry : all_overrides)
+  for (auto& entry : all_overrides)
   {
     if (entry.enabled)
-      m_overrides.push_back(entry);
+      m_overrides.push_back(std::move(entry));
   }
 
   m_has_overrides.store(!m_overrides.empty());

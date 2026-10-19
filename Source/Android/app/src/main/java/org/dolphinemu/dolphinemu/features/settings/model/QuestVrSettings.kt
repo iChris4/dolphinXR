@@ -114,6 +114,14 @@ object QuestVrSettings {
     // The PC VRPane exposes one checkbox that drives both the Vulkan and the D3D palette key.
     fun layeredPaletteConversionSetting(): AbstractBooleanSetting = LayeredPaletteConversionSetting
 
+    // The agent server (Core/AgentServer): an MCP endpoint on 127.0.0.1 for AI agents, reached from
+    // a PC with adb forward. The port and token are plain [VR] keys that C++ parses.
+    fun agentServerSetting() = vrBooleanSetting("AgentServer", false)
+
+    fun agentServerPortSetting() = AdHocStringSetting(Settings.FILE_GFX, VR_SECTION, "AgentServerPort", "7311")
+
+    fun agentServerTokenSetting() = AdHocStringSetting(Settings.FILE_GFX, VR_SECTION, "AgentServerToken", "")
+
     fun useVulkanMultiviewSetting() = vrBooleanSetting("UseVulkanMultiview", true)
 
     fun androidDirectToHmdSetting() = vrBooleanSetting("AndroidDirectToHMD", true)

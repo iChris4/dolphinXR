@@ -73,6 +73,7 @@
 #include "VideoCommon/Present.h"
 #include "VideoCommon/VideoBackendBase.h"
 #ifdef ENABLE_VR
+#include "Core/AgentServer/AgentServer.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/VRTextInput.h"
 #if defined(HAS_VULKAN)
@@ -841,6 +842,12 @@ static void Run(JNIEnv* env, std::unique_ptr<BootParameters>&& boot, bool riivol
     // thread. Stopped below before Core::Shutdown so it never reads a torn-down
     // ControllerInterface.
     s_hotkey_dispatcher.Start([] { s_update_main_frame_event.Set(); });
+
+#ifdef ENABLE_VR
+    // The agent server (off unless enabled in the VR settings) runs while the game does; reach it
+    // from a PC with adb forward tcp:<port> tcp:<port>.
+    AgentServer::Server::GetInstance().ApplyConfig();
+#endif
   }
 
   s_is_booting.Clear();
@@ -856,6 +863,9 @@ static void Run(JNIEnv* env, std::unique_ptr<BootParameters>&& boot, bool riivol
   // Must stop before Core::Shutdown so the dispatcher thread doesn't poll a torn-down
   // ControllerInterface. Worst-case join latency is one poll period (~11ms).
   s_hotkey_dispatcher.Stop();
+#ifdef ENABLE_VR
+  AgentServer::Server::GetInstance().Shutdown();
+#endif
 
   s_game_metadata_is_valid = false;
   Core::Shutdown(Core::System::GetInstance());

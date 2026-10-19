@@ -3218,6 +3218,20 @@ void OpenXRManager::RequestRecenter()
   m_recenter_requested.store(true, std::memory_order_release);
 }
 
+void OpenXRManager::SetAgentLookOffset(float yaw_deg, float pitch_deg, float roll_deg)
+{
+  m_agent_look_yaw_deg.store(yaw_deg, std::memory_order_relaxed);
+  m_agent_look_pitch_deg.store(pitch_deg, std::memory_order_relaxed);
+  m_agent_look_roll_deg.store(roll_deg, std::memory_order_relaxed);
+}
+
+std::array<float, 3> OpenXRManager::GetAgentLookOffset() const
+{
+  return {m_agent_look_yaw_deg.load(std::memory_order_relaxed),
+          m_agent_look_pitch_deg.load(std::memory_order_relaxed),
+          m_agent_look_roll_deg.load(std::memory_order_relaxed)};
+}
+
 XrPosef OpenXRManager::GetFlatScreenPose() const
 {
   const float distance = g_ActiveConfig.vr_screen_distance;
@@ -3851,6 +3865,31 @@ std::array<OpenXRManager::EyeRig, 2> OpenXRManager::ComputeEyeRigs(float units_p
 
   const std::array<XREyeView, 2> eye_views = GetTrackingAdjustedEyeViews();
 
+  // Agent look offset (SetAgentLookOffset): L = Ry(-yaw) * Rx(pitch) * Rz(roll), applied like a
+  // turn of the rig around the head: it rotates the eye axes (L*R) and the head-relative eye
+  // offsets, not the fixed camera offsets, so the view pivots around the camera.
+  std::array<float, 9> look{};
+  bool look_offset = false;
+  if (apply_game_camera)
+  {
+    const float yaw = m_agent_look_yaw_deg.load(std::memory_order_relaxed) * DEG_TO_RAD;
+    const float pitch = m_agent_look_pitch_deg.load(std::memory_order_relaxed) * DEG_TO_RAD;
+    const float roll = m_agent_look_roll_deg.load(std::memory_order_relaxed) * DEG_TO_RAD;
+    look_offset = yaw != 0.0f || pitch != 0.0f || roll != 0.0f;
+    if (look_offset)
+    {
+      const float cy = std::cos(-yaw), sy = std::sin(-yaw);
+      const float cp = std::cos(pitch), sp = std::sin(pitch);
+      const float cr = std::cos(roll), sr = std::sin(roll);
+      // Ry * Rx
+      const std::array<float, 9> yx = {cy, sy * sp, sy * cp, 0.0f, cp, -sp, -sy, cy * sp, cy * cp};
+      // (Ry * Rx) * Rz
+      look = {yx[0] * cr + yx[1] * sr, -yx[0] * sr + yx[1] * cr, yx[2],
+              yx[3] * cr + yx[4] * sr, -yx[3] * sr + yx[4] * cr, yx[5],
+              yx[6] * cr + yx[7] * sr, -yx[6] * sr + yx[7] * cr, yx[8]};
+    }
+  }
+
   std::array<EyeRig, 2> rigs{};
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
@@ -3888,9 +3927,24 @@ std::array<OpenXRManager::EyeRig, 2> OpenXRManager::ComputeEyeRigs(float units_p
     // So combined_row = R * proj_col  (NOT R^T * proj_col — that would be wrong).
 
     // R matrix elements (row, col)
-    const float r00 = 1.0f - y2 - z2, r01 = xy + wz, r02 = xz - wy;
-    const float r10 = xy - wz, r11 = 1.0f - x2 - z2, r12 = yz + wx;
-    const float r20 = xz + wy, r21 = yz - wx, r22 = 1.0f - x2 - y2;
+    float r00 = 1.0f - y2 - z2, r01 = xy + wz, r02 = xz - wy;
+    float r10 = xy - wz, r11 = 1.0f - x2 - z2, r12 = yz + wx;
+    float r20 = xz + wy, r21 = yz - wx, r22 = 1.0f - x2 - y2;
+    if (look_offset)
+    {
+      const float t00 = r00, t01 = r01, t02 = r02;
+      const float t10 = r10, t11 = r11, t12 = r12;
+      const float t20 = r20, t21 = r21, t22 = r22;
+      r00 = look[0] * t00 + look[1] * t10 + look[2] * t20;
+      r01 = look[0] * t01 + look[1] * t11 + look[2] * t21;
+      r02 = look[0] * t02 + look[1] * t12 + look[2] * t22;
+      r10 = look[3] * t00 + look[4] * t10 + look[5] * t20;
+      r11 = look[3] * t01 + look[4] * t11 + look[5] * t21;
+      r12 = look[3] * t02 + look[4] * t12 + look[5] * t22;
+      r20 = look[6] * t00 + look[7] * t10 + look[8] * t20;
+      r21 = look[6] * t01 + look[7] * t11 + look[8] * t21;
+      r22 = look[6] * t02 + look[7] * t12 + look[8] * t22;
+    }
 
     // Camera anchor rotation: attach the camera rig to the anchor element's frame.
     // A's columns are the rig axes in view space, so the full eye-local -> view
@@ -3918,6 +3972,13 @@ std::array<OpenXRManager::EyeRig, 2> OpenXRManager::ComputeEyeRigs(float units_p
     float ex = (eye_pos_xr.x - m_home_position.x) * s;
     float ey = (eye_pos_xr.y - m_home_position.y) * s;
     float ez = (eye_pos_xr.z - m_home_position.z) * s;
+    if (look_offset)
+    {
+      const float rx = ex, ry = ey, rz = ez;
+      ex = look[0] * rx + look[1] * ry + look[2] * rz;
+      ey = look[3] * rx + look[4] * ry + look[5] * rz;
+      ez = look[6] * rx + look[7] * ry + look[8] * rz;
+    }
     if (camera_height_units != 0.0f)
       ey += camera_height_units;
     if (camera_forward_units != 0.0f)

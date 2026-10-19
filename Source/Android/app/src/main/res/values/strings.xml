@@ -934,6 +934,12 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_ortho_scissor_fix_description">Expands the scissor to the full active rendering area for orthographic VR draws, fixing 2D content reprojected onto the virtual screen that still uses game-side EFB scissor coordinates.</string>
     <string name="quest_layered_palette_conversion">Layered Palette Conversion Path</string>
     <string name="quest_layered_palette_conversion_description">Keeps Metroid Prime\'s thermal visor EFB copy stereo during palette conversion instead of flattening it to one eye. Only affects thermal-sized stereo EFB copies.</string>
+    <string name="quest_agent_server">Agent Server (MCP)</string>
+    <string name="quest_agent_server_description">Lets an AI agent on your PC (Claude Code or another MCP client) see the game, try VR overrides and search for codes while a game runs. Listens on the headset\'s 127.0.0.1 only: connect a USB cable and run adb forward tcp:7311 tcp:7311 on the PC.</string>
+    <string name="quest_agent_server_port">Agent Server Port</string>
+    <string name="quest_agent_server_port_description">TCP port of the agent server (1024 to 65535, default 7311).</string>
+    <string name="quest_agent_server_token">Agent Server Token</string>
+    <string name="quest_agent_server_token_description">Optional. When set, the client must send Authorization: Bearer followed by this token.</string>
     <string name="quest_use_vulkan_multiview">Vulkan Multiview (Quest perf)</string>
     <string name="quest_use_vulkan_multiview_description">Renders both eyes in a single pass via VK_KHR_multiview. Disable to fall back to the geometry-shader stereo path if the multiview path produces broken visuals.</string>
     <string name="quest_resolution_scale">VR Resolution Scale</string>

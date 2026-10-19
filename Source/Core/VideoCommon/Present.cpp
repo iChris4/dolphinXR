@@ -29,6 +29,7 @@
 #include <chrono>
 #include "Common/Logging/Log.h"
 #include "Common/Timer.h"
+#include "VideoCommon/VR/AgentVideoJobs.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/VRMenu.h"
 #include "VideoCommon/VR/VRVideoRecorder.h"
@@ -1276,6 +1277,12 @@ void Presenter::PresentWhilePaused()
 void Presenter::Present(PresentInfo* present_info)
 {
   m_present_count++;
+
+#ifdef ENABLE_VR
+  // Agent server work that needs the video thread (screenshots, override tables, draw capture).
+  // One atomic load when there is none.
+  VR::AgentVideoJobs::Drain();
+#endif
 
 #ifdef ENABLE_VR
   // See Initialize(): the Android GLES OpenXR path runs with a headless GL context, but

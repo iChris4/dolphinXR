@@ -1,4 +1,16 @@
 add_dolphin_test(MMIOTest MMIOTest.cpp)
+
+if(ENABLE_VR)
+  add_dolphin_test(AgentServerTest
+    AgentServer/HttpParserTest.cpp
+    AgentServer/McpServerTest.cpp
+    AgentServer/OverrideSessionTest.cpp
+    AgentServer/ToolRegistryTest.cpp
+  )
+  if(NOT MSVC)
+    target_compile_options(AgentServerTest PRIVATE -fexceptions)
+  endif()
+endif()
 add_dolphin_test(PageFaultTest PageFaultTest.cpp)
 add_dolphin_test(CoreTimingTest CoreTimingTest.cpp)
 add_dolphin_test(PatchAllowlistTest PatchAllowlistTest.cpp)

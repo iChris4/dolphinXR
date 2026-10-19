@@ -248,9 +248,14 @@ public:
       const std::string& game_id, std::optional<u16> revision = std::nullopt);
   static void SaveOverridesToINI(const std::string& game_id,
                                  const std::vector<ShaderOverride>& overrides);
+  // The overrides of one INI file (no Sys/User merge), e.g. an entry the agent server wrote.
+  static std::vector<ShaderOverride> LoadOverridesFromINIFile(const std::string& path);
 
   // Runtime override management
   void LoadOverrides(const std::string& game_id);
+  // Makes `overrides` the active list (what LoadOverrides does with the game's INI files). Video
+  // thread: the draw path reads the tables this rebuilds without a lock.
+  void ApplyOverrideList(const std::string& game_id, std::vector<ShaderOverride> overrides);
   void LoadOverridesIfNeeded(const std::string& game_id);
   void AddAndSaveOverride(const std::string& game_id, const std::string& name, ShaderType type,
                           u64 hash, HandlingType handling);

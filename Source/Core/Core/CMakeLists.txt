@@ -683,6 +683,49 @@ elseif(_M_ARM_64)
   )
 endif()
 
+if(ENABLE_VR)
+  # The Agent Server: an MCP endpoint for AI agents (see AgentServer/AgentServer.h).
+  set(AGENT_SERVER_SOURCES
+    AgentServer/AgentServer.cpp
+    AgentServer/AgentServer.h
+    AgentServer/FrameCounters.cpp
+    AgentServer/FrameCounters.h
+    AgentServer/HttpServer.cpp
+    AgentServer/HttpServer.h
+    AgentServer/Instructions.cpp
+    AgentServer/LogBuffer.cpp
+    AgentServer/LogBuffer.h
+    AgentServer/McpServer.cpp
+    AgentServer/McpServer.h
+    AgentServer/OverrideSession.cpp
+    AgentServer/OverrideSession.h
+    AgentServer/PatchTemplates.cpp
+    AgentServer/PatchTemplates.h
+    AgentServer/ToolHelpers.cpp
+    AgentServer/ToolHelpers.h
+    AgentServer/ToolRegistry.cpp
+    AgentServer/ToolRegistry.h
+    AgentServer/Tools/CodeTools.cpp
+    AgentServer/Tools/ConfigTools.cpp
+    AgentServer/Tools/DrawTools.cpp
+    AgentServer/Tools/EmulationTools.cpp
+    AgentServer/Tools/ExperimentTools.cpp
+    AgentServer/Tools/MemoryTools.cpp
+    AgentServer/Tools/OverrideTools.cpp
+    AgentServer/Tools/ScreenshotTools.cpp
+    AgentServer/Tools/Tools.h
+    AgentServer/Tracepoints.cpp
+    AgentServer/Tracepoints.h
+  )
+  target_sources(core PRIVATE ${AGENT_SERVER_SOURCES})
+  # Tool handlers report errors with C++ exceptions, which Dolphin is built without outside MSVC.
+  # No exception leaves agent code: every entry point that Dolphin calls catches them.
+  if(NOT MSVC)
+    list(FILTER AGENT_SERVER_SOURCES INCLUDE REGEX "[.]cpp$")
+    set_source_files_properties(${AGENT_SERVER_SOURCES} PROPERTIES COMPILE_OPTIONS -fexceptions)
+  endif()
+endif()
+
 target_link_libraries(core
 PUBLIC
   audiocommon

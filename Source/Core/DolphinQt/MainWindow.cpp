@@ -42,6 +42,9 @@
 #include "Common/WindowSystemInfo.h"
 
 #include "Core/AchievementManager.h"
+#ifdef ENABLE_VR
+#include "Core/AgentServer/AgentServer.h"
+#endif
 #include "Core/Boot/Boot.h"
 #include "Core/BootManager.h"
 #include "Core/CommonTitles.h"
@@ -277,6 +280,11 @@ MainWindow::MainWindow(Core::System& system, std::unique_ptr<BootParameters> boo
 
   NetPlayInit();
 
+#ifdef ENABLE_VR
+  // Off unless enabled in the VR settings; follows the setting from here on.
+  AgentServer::Server::GetInstance().ApplyConfig();
+#endif
+
 #ifdef USE_RETRO_ACHIEVEMENTS
   AchievementManager::GetInstance().Init(reinterpret_cast<void*>(winId()));
   if (AchievementManager::GetInstance().IsHardcoreModeActive())
@@ -351,6 +359,10 @@ MainWindow::MainWindow(Core::System& system, std::unique_ptr<BootParameters> boo
 
 MainWindow::~MainWindow()
 {
+#ifdef ENABLE_VR
+  AgentServer::Server::GetInstance().Shutdown();
+#endif
+
   // Shut down NetPlay first to avoid race condition segfault
   Settings::Instance().ResetNetPlayClient();
   Settings::Instance().ResetNetPlayServer();

@@ -33,6 +33,9 @@
 #include "VideoCommon/VertexShaderManager.h"
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/AgentCapture.h"
+#endif
 
 namespace VertexLoaderManager
 {
@@ -412,7 +415,13 @@ int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int coun
   {
     auto& hide_engine = HideObjectEngine::Engine::GetInstance();
     if (hide_engine.HasCodes() && hide_engine.ShouldHide(src))
+    {
+#ifdef ENABLE_VR
+      if (VR::AgentCapture::IsCapturing()) [[unlikely]]
+        VR::AgentCapture::CountHiddenBatch();
+#endif
       return size;
+    }
   }
 
   if constexpr (!IsPreprocess)

@@ -317,6 +317,13 @@ public:
   // Applied on the OpenXR render thread during LocateViews.
   void RequestRecenter();
 
+  // Agent server: a synthetic head rotation in degrees (positive yaw turns right, positive pitch
+  // looks up), as if the user turned their head. It applies to the game camera only (the eye
+  // projection rows and the head-cone CPU cull), not to the pose submitted to the runtime, the
+  // virtual screen or head-locked content. Any thread; used from the next rendered frame.
+  void SetAgentLookOffset(float yaw_deg, float pitch_deg, float roll_deg);
+  std::array<float, 3> GetAgentLookOffset() const;
+
   // ---- Flat mono panel (vr_flat_screen) ----
 
   // Aspect ratio (width / height) of the flat game panel. Set by the presenter each frame
@@ -881,6 +888,9 @@ private:
   mutable bool m_home_set{false};
   mutable XrVector3f m_home_position{0.f, 0.f, 0.f};
   std::atomic<bool> m_recenter_requested{false};
+  std::atomic<float> m_agent_look_yaw_deg{0.0f};
+  std::atomic<float> m_agent_look_pitch_deg{0.0f};
+  std::atomic<float> m_agent_look_roll_deg{0.0f};
 
   // Flat mono panel state. The anchor (head center + heading) is captured lazily on the video
   // thread and invalidated on recenter; the pose is rebuilt from it with the live screen

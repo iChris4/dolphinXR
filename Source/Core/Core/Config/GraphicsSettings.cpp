@@ -224,6 +224,9 @@ const Info<float> GFX_VR_CAMERA_ANCHOR_SMOOTHING{{System::GFX, "VR", "CameraAnch
                                                  0.85f};
 const Info<bool> GFX_VR_ENABLE_CONTROLLER_ANCHOR{{System::GFX, "VR", "EnableControllerAnchor"},
                                                  false};
+const Info<bool> GFX_VR_AGENT_SERVER{{System::GFX, "VR", "AgentServer"}, false};
+const Info<int> GFX_VR_AGENT_SERVER_PORT{{System::GFX, "VR", "AgentServerPort"}, 7311};
+const Info<std::string> GFX_VR_AGENT_SERVER_TOKEN{{System::GFX, "VR", "AgentServerToken"}, ""};
 const Info<bool> GFX_VR_VIRTUAL_SCREEN{{System::GFX, "VR", "VirtualScreen"}, true};
 const Info<float> GFX_VR_SCREEN_DISTANCE{{System::GFX, "VR", "ScreenDistance"}, 1.5f};
 const Info<float> GFX_VR_SCREEN_SIZE{{System::GFX, "VR", "ScreenSize"}, 1.5f};

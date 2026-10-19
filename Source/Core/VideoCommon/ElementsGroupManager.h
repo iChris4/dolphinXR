@@ -196,6 +196,8 @@ public:
       const std::string& game_id, std::optional<u16> revision = std::nullopt);
   static void SaveOverridesToINI(const std::string& game_id,
                                  const std::vector<ElementGroupOverride>& overrides);
+  // The overrides of one INI file (no Sys/User merge), e.g. an entry the agent server wrote.
+  static std::vector<ElementGroupOverride> LoadOverridesFromINIFile(const std::string& path);
   static RuntimeElementSignature MakeSelectedMatchFilterSignature(
       const RuntimeElementSignature& signature);
   static StableSubMatchSignature MakeStableSubMatchSignature(const DrawRecord& draw,
@@ -203,6 +205,8 @@ public:
   static SelectedSubgroupSignature MakeSelectedSubgroupSignature(const DrawRecord& draw);
 
   void LoadOverrides(const std::string& game_id);
+  // Makes `overrides` the active list (what LoadOverrides does with the game's INI files).
+  void ApplyOverrideList(const std::string& game_id, std::vector<ElementGroupOverride> overrides);
   void LoadOverridesIfNeeded(const std::string& game_id);
   bool HasOverrides() const;
   // True when a loaded override moves elements to a VR controller (ControllerAnchor).

@@ -29,6 +29,9 @@
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PPCSymbolDB.h"
 #include "Core/System.h"
+#ifdef ENABLE_VR
+#include "Core/AgentServer/Tracepoints.h"
+#endif
 
 namespace PowerPC
 {
@@ -640,6 +643,12 @@ bool PowerPCManager::CheckBreakPoints()
   if (!m_breakpoints.IsBreakingEnabled() || !bp || !bp->is_enabled ||
       !EvaluateCondition(m_system, bp->condition))
     return false;
+
+#ifdef ENABLE_VR
+  // The agent server's trace tools: non-breaking breakpoints that record the registers.
+  if (AgentServer::Tracepoints::IsActive()) [[unlikely]]
+    AgentServer::Tracepoints::OnCodeHit(m_ppc_state);
+#endif
 
   if (bp->log_on_hit)
   {

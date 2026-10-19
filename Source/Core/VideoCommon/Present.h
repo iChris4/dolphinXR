@@ -114,6 +114,16 @@ public:
 
   int FrameCount() const { return m_frame_count; }
 
+#ifdef ENABLE_VR
+  // Video thread: the XFB being presented (two layers in StereoMode::OpenXR) and its source
+  // rectangle, for the agent server's screenshot readback.
+  const AbstractTexture* GetCurrentXFBTexture() const
+  {
+    return m_xfb_entry ? m_xfb_entry->texture.get() : nullptr;
+  }
+  const MathUtil::Rectangle<int>& GetCurrentXFBRect() const { return m_xfb_rect; }
+#endif
+
   void DoState(PointerWrap& p);
 
   const MathUtil::Rectangle<int>& GetTargetRectangle() const { return m_target_rectangle; }

@@ -3,6 +3,7 @@
 
 #include "Common/Image.h"
 
+#include <cstdlib>
 #include <memory>
 #include <string>
 
@@ -117,6 +118,56 @@ bool SavePNG(const std::string& path, const u8* input, ImageByteFormat format, u
   INFO_LOG_FMT(FRAMEDUMP, "{} byte {} by {} image saved to {} at level {} in {} ms", image_len,
                width, height, path, level, timer.ElapsedMs());
   return true;
+}
+
+std::optional<std::vector<u8>> EncodePNG(const u8* input, ImageByteFormat format, u32 width,
+                                         u32 height, u32 stride, int level)
+{
+  const spng_color_type color_type =
+      format == ImageByteFormat::RGBA ? SPNG_COLOR_TYPE_TRUECOLOR_ALPHA : SPNG_COLOR_TYPE_TRUECOLOR;
+
+  auto ctx = make_spng_ctx(SPNG_CTX_ENCODER);
+  if (!ctx)
+    return std::nullopt;
+  if (spng_set_option(ctx.get(), SPNG_ENCODE_TO_BUFFER, 1) ||
+      spng_set_option(ctx.get(), SPNG_IMG_COMPRESSION_LEVEL, level))
+  {
+    return std::nullopt;
+  }
+
+  spng_ihdr ihdr{};
+  ihdr.width = width;
+  ihdr.height = height;
+  ihdr.color_type = color_type;
+  ihdr.bit_depth = 8;
+  if (spng_set_ihdr(ctx.get(), &ihdr))
+    return std::nullopt;
+
+  if (spng_encode_image(ctx.get(), nullptr, 0, SPNG_FMT_PNG,
+                        SPNG_ENCODE_PROGRESSIVE | SPNG_ENCODE_FINALIZE))
+  {
+    return std::nullopt;
+  }
+  for (u32 row = 0; row < height; row++)
+  {
+    const int err = spng_encode_row(ctx.get(), &input[row * stride], stride);
+    if (err == SPNG_EOI)
+      break;
+    if (err)
+      return std::nullopt;
+  }
+
+  size_t png_size = 0;
+  int error = 0;
+  void* png = spng_get_png_buffer(ctx.get(), &png_size, &error);
+  if (!png || error)
+  {
+    std::free(png);
+    return std::nullopt;
+  }
+  std::vector<u8> result(static_cast<const u8*>(png), static_cast<const u8*>(png) + png_size);
+  std::free(png);
+  return result;
 }
 
 static Common::UniqueBuffer<u8> RGBAToRGB(const u8* input, u32 width, u32 height, u32 row_stride)

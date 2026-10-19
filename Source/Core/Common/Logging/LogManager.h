@@ -35,6 +35,10 @@ public:
     FILE_LISTENER = 0,
     CONSOLE_LISTENER,
     LOG_WINDOW_LISTENER,
+#ifdef ENABLE_VR
+    // The agent server's in-memory log (Core/AgentServer/LogBuffer).
+    AGENT_LISTENER,
+#endif
 
     NUMBER_OF_LISTENERS  // Must be last
   };

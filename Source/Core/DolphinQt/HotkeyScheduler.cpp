@@ -38,7 +38,6 @@
 #include "DolphinQt/Settings.h"
 
 #include "InputCommon/ControlReference/ControlReference.h"
-#include "VideoCommon/CullingCodeFinder.h"
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 
 #include "VideoCommon/OnScreenDisplay.h"
@@ -46,6 +45,7 @@
 #include "VideoCommon/TextureElementManager.h"
 #include "VideoCommon/VideoConfig.h"
 #ifdef ENABLE_VR
+#include "Core/AgentServer/AgentServer.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #endif
 
@@ -960,15 +960,19 @@ void HotkeyScheduler::Run()
       }
 
       const bool throttle_hotkey_active = IsHotkey(HK_TOGGLE_THROTTLE, true);
-      const bool finder_forces_turbo =
-          CullingCodeFinder::GetInstance().IsTurboRuntimeOverrideActive();
-      const bool finder_forces_audio_mute =
-          CullingCodeFinder::GetInstance().IsAudioMuteRuntimeOverrideActive();
+#ifdef ENABLE_VR
+      // The agent server's experiments run unthrottled and muted (set_speed).
+      const bool agent_forces_turbo = AgentServer::IsTurboOverrideActive();
+      const bool agent_forces_audio_mute = AgentServer::IsMuteOverrideActive();
+#else
+      constexpr bool agent_forces_turbo = false;
+      constexpr bool agent_forces_audio_mute = false;
+#endif
       const bool wants_temp_audio_mute =
-          finder_forces_audio_mute ||
+          agent_forces_audio_mute ||
           (throttle_hotkey_active && Config::Get(Config::MAIN_AUDIO_MUTE_ON_DISABLED_SPEED_LIMIT));
 
-      Core::SetIsThrottlerTempDisabled(throttle_hotkey_active || finder_forces_turbo);
+      Core::SetIsThrottlerTempDisabled(throttle_hotkey_active || agent_forces_turbo);
 
       if (wants_temp_audio_mute && !Config::Get(Config::MAIN_AUDIO_MUTED))
       {

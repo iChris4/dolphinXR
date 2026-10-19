@@ -4,28 +4,36 @@
 #include "DolphinQt/Settings/VRPane.h"
 
 #include <QCheckBox>
-#include <QGroupBox>
+#include <QClipboard>
 #include <QGridLayout>
+#include <QGroupBox>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTabWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "Common/Config/Config.h"
+#ifdef ENABLE_VR
+#include "Core/AgentServer/AgentServer.h"
+#endif
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/System.h"
 
-#include "DolphinQt/Config/HideObjectAddEditDialog.h"
 #include "DolphinQt/Config/ConfigControls/ConfigBool.h"
 #include "DolphinQt/Config/ConfigControls/ConfigChoice.h"
 #include "DolphinQt/Config/ConfigControls/ConfigFloatSlider.h"
+#include "DolphinQt/Config/ConfigControls/ConfigInteger.h"
 #include "DolphinQt/Config/ConfigControls/ConfigSlider.h"
-#include "DolphinQt/Debugger/CullingCodeFinderWidget.h"
+#include "DolphinQt/Config/ConfigControls/ConfigText.h"
+#include "DolphinQt/Config/HideObjectAddEditDialog.h"
 #include "DolphinQt/Debugger/ShaderHunterWidget.h"
 #include "DolphinQt/Settings.h"
 #include "VideoCommon/HideObjectEngine.h"
@@ -584,31 +592,9 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   });
   tools_layout->addWidget(shader_hunter_btn, 1, 0);
 
-  auto* culling_finder_btn = new QPushButton(tr("Culling Code Finder"));
-  connect(culling_finder_btn, &QPushButton::clicked, this, [this] {
-    const std::string game_id = SConfig::GetInstance().GetGameID();
-    if (game_id.empty() || game_id == "00000000")
-    {
-      QMessageBox::information(this, tr("No Game Running"),
-                               tr("Start a game before searching for culling codes."));
-      return;
-    }
-
-    if (m_culling_finder_widget)
-    {
-      m_culling_finder_widget->show();
-      m_culling_finder_widget->raise();
-      m_culling_finder_widget->activateWindow();
-      return;
-    }
-
-    m_culling_finder_widget = new CullingCodeFinderWidget(this);
-    m_culling_finder_widget->setAttribute(Qt::WA_DeleteOnClose, true);
-    m_culling_finder_widget->show();
-    connect(m_culling_finder_widget, &QObject::destroyed, this,
-            [this] { m_culling_finder_widget = nullptr; });
-  });
-  tools_layout->addWidget(culling_finder_btn, 2, 0);
+#ifdef ENABLE_VR
+  auto* agent_group = CreateAgentServerGroup();
+#endif
 
   auto* debug_group = new QGroupBox(tr("Debug"));
   auto* debug_layout = new QGridLayout;
@@ -633,6 +619,9 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   general_layout->addStretch();
   hack_layout->addStretch();
   tools_tab_layout->addWidget(tools_group);
+#ifdef ENABLE_VR
+  tools_tab_layout->addWidget(agent_group);
+#endif
   tools_tab_layout->addWidget(debug_group);
   tools_tab_layout->addStretch();
 
@@ -906,6 +895,69 @@ void VRPane::AddDescriptions()
   m_passthrough_coverage_mode->SetDescription(
       tr(TR_PASSTHROUGH_COVERAGE_MODE_DESCRIPTION));
 }
+
+#ifdef ENABLE_VR
+QGroupBox* VRPane::CreateAgentServerGroup()
+{
+  auto* group = new QGroupBox(tr("Agent Server (MCP)"));
+  auto* layout = new QGridLayout;
+  group->setLayout(layout);
+
+  auto* description = new QLabel(
+      tr("Lets an AI agent (Claude Code or another MCP client) see the game, try VR overrides and "
+         "search for codes with you. Listens on 127.0.0.1 only. On Quest, forward the port with "
+         "adb forward tcp:PORT tcp:PORT."));
+  description->setWordWrap(true);
+  layout->addWidget(description, 0, 0, 1, 3);
+
+  layout->addWidget(new ConfigBool(tr("Enable Agent Server"), Config::GFX_VR_AGENT_SERVER), 1, 0, 1,
+                    3);
+  layout->addWidget(new QLabel(tr("Port:")), 2, 0);
+  layout->addWidget(new ConfigInteger(Config::GFX_VR_AGENT_SERVER_PORT_MIN,
+                                      Config::GFX_VR_AGENT_SERVER_PORT_MAX,
+                                      Config::GFX_VR_AGENT_SERVER_PORT),
+                    2, 1, 1, 2);
+  layout->addWidget(new QLabel(tr("Token (optional):")), 3, 0);
+  auto* token = new ConfigText(Config::GFX_VR_AGENT_SERVER_TOKEN);
+  token->setPlaceholderText(tr("Bearer token the client must send"));
+  layout->addWidget(token, 3, 1, 1, 2);
+
+  m_agent_server_status = new QLabel;
+  layout->addWidget(new QLabel(tr("Status:")), 4, 0);
+  layout->addWidget(m_agent_server_status, 4, 1, 1, 2);
+
+  m_agent_server_command = new QLineEdit;
+  m_agent_server_command->setReadOnly(true);
+  auto* copy = new QPushButton(tr("Copy"));
+  connect(copy, &QPushButton::clicked, this,
+          [this] { QGuiApplication::clipboard()->setText(m_agent_server_command->text()); });
+  layout->addWidget(new QLabel(tr("Claude Code:")), 5, 0);
+  layout->addWidget(m_agent_server_command, 5, 1);
+  layout->addWidget(copy, 5, 2);
+
+  // The server restarts from a host job after the setting changes: refresh a moment later.
+  connect(&Settings::Instance(), &Settings::ConfigChanged, this,
+          [this] { QTimer::singleShot(500, this, &VRPane::UpdateAgentServerStatus); });
+  UpdateAgentServerStatus();
+  return group;
+}
+
+void VRPane::UpdateAgentServerStatus()
+{
+  const int port = Config::Get(Config::GFX_VR_AGENT_SERVER_PORT);
+  const std::string token = Config::Get(Config::GFX_VR_AGENT_SERVER_TOKEN);
+  QString command =
+      QStringLiteral("claude mcp add --transport http dolphinxr http://127.0.0.1:%1/mcp").arg(port);
+  if (!token.empty())
+  {
+    command +=
+        QStringLiteral(" --header \"Authorization: Bearer %1\"").arg(QString::fromStdString(token));
+  }
+  m_agent_server_command->setText(command);
+  m_agent_server_status->setText(
+      QString::fromStdString(AgentServer::Server::GetInstance().GetStatusText()));
+}
+#endif
 
 void VRPane::OnEmulationStateChanged(Core::State state)
 {

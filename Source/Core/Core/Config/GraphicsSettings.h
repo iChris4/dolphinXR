@@ -196,6 +196,12 @@ extern const Info<float> GFX_VR_CAMERA_HEIGHT;
 extern const Info<bool> GFX_VR_ENABLE_CAMERA_ANCHOR;
 extern const Info<float> GFX_VR_CAMERA_ANCHOR_SMOOTHING;
 extern const Info<bool> GFX_VR_ENABLE_CONTROLLER_ANCHOR;
+// Agent Server: an MCP endpoint on 127.0.0.1 for AI agents (Core/AgentServer). Global only.
+extern const Info<bool> GFX_VR_AGENT_SERVER;
+extern const Info<int> GFX_VR_AGENT_SERVER_PORT;
+extern const Info<std::string> GFX_VR_AGENT_SERVER_TOKEN;
+static constexpr int GFX_VR_AGENT_SERVER_PORT_MIN = 1024;
+static constexpr int GFX_VR_AGENT_SERVER_PORT_MAX = 65535;
 
 static constexpr float GFX_VR_UNITS_PER_METER_MIN = 0.1f;
 static constexpr float GFX_VR_UNITS_PER_METER_MAX = 2000.0f;

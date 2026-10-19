@@ -10,9 +10,10 @@ class ConfigBool;
 class ConfigFloatSlider;
 class ConfigSlider;
 class QCheckBox;
+class QGroupBox;
 class QLabel;
+class QLineEdit;
 class QPushButton;
-class CullingCodeFinderWidget;
 class ShaderHunterWidget;
 template <typename T>
 class ConfigChoiceMap;
@@ -36,6 +37,10 @@ private:
   void AddDescriptions();
   void OnEmulationStateChanged(Core::State state);
   void ResetGeneralSettings();
+#ifdef ENABLE_VR
+  QGroupBox* CreateAgentServerGroup();
+  void UpdateAgentServerStatus();
+#endif
 
   ConfigBool* m_enable_openxr = nullptr;
   ConfigBool* m_flat_screen = nullptr;
@@ -102,6 +107,7 @@ private:
   QPushButton* m_reset_general_settings = nullptr;
   ConfigBool* m_load_custom_shaders = nullptr;
   QCheckBox* m_debug_log_draws = nullptr;
-  QPointer<CullingCodeFinderWidget> m_culling_finder_widget;
+  QLabel* m_agent_server_status = nullptr;
+  QLineEdit* m_agent_server_command = nullptr;
   QPointer<ShaderHunterWidget> m_shader_hunter_widget;
 };

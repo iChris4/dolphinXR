@@ -95,6 +95,11 @@ void RegisterMsgAlertHandler(MsgAlertHandler handler)
   s_msg_handler = handler;
 }
 
+MsgAlertHandler GetMsgAlertHandler()
+{
+  return s_msg_handler;
+}
+
 // Select translation function.
 void RegisterStringTranslator(StringTranslator translator)
 {

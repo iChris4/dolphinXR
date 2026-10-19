@@ -25,6 +25,8 @@ using MsgAlertHandler = bool (*)(const char* caption, const char* text, bool yes
 using StringTranslator = std::string (*)(const char* text);
 
 void RegisterMsgAlertHandler(MsgAlertHandler handler);
+// The current handler, e.g. to put it back after a temporary one.
+MsgAlertHandler GetMsgAlertHandler();
 void RegisterStringTranslator(StringTranslator translator);
 
 [[nodiscard]] std::string GetStringT(const char* string);

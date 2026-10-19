@@ -1368,7 +1368,19 @@ void ShaderHunter::SaveOverridesToINI(const std::string& game_id,
 // Runtime override management
 // ============================================================================
 
+std::vector<ShaderHunter::ShaderOverride>
+ShaderHunter::LoadOverridesFromINIFile(const std::string& path)
+{
+  return LoadShaderOverridesFromINIFile(path).entries;
+}
+
 void ShaderHunter::LoadOverrides(const std::string& game_id)
+{
+  ApplyOverrideList(game_id, game_id.empty() ? std::vector<ShaderOverride>{} :
+                                               LoadOverridesFromINI(game_id));
+}
+
+void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<ShaderOverride> all)
 {
   std::lock_guard lock(m_mutex);
 
@@ -1398,7 +1410,6 @@ void ShaderHunter::LoadOverrides(const std::string& game_id)
   if (game_id.empty())
     return;
 
-  auto all = LoadOverridesFromINI(game_id);
   bool has_overrides = false;
   bool needs_shader_family_signatures = false;
   bool needs_texture_hashes = false;

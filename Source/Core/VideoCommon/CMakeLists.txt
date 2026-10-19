@@ -180,8 +180,6 @@ add_library(videocommon
   ShaderGenCommon.h
   HideObjectEngine.cpp
   HideObjectEngine.h
-  CullingCodeFinder.cpp
-  CullingCodeFinder.h
   ShaderHunter.cpp
   ShaderHunter.h
   TextureElementManager.cpp
@@ -314,6 +312,10 @@ endif()
 
 if(ENABLE_VR)
   target_sources(videocommon PRIVATE
+    VR/AgentCapture.cpp
+    VR/AgentCapture.h
+    VR/AgentVideoJobs.cpp
+    VR/AgentVideoJobs.h
     VR/OpenXRManager.cpp
     VR/OpenXRManager.h
     VR/VRMenu.cpp
@@ -337,6 +339,10 @@ if(ENABLE_VR)
     VR/VRVideoRecorder.cpp
     VR/VRVideoRecorder.h
   )
+  # Agent jobs report errors with C++ exceptions (see Core/AgentServer in Core/CMakeLists.txt).
+  if(NOT MSVC)
+    set_source_files_properties(VR/AgentVideoJobs.cpp PROPERTIES COMPILE_OPTIONS -fexceptions)
+  endif()
   # Expose the OpenXR headers to all targets that depend on videocommon.
   target_include_directories(videocommon PUBLIC "${CMAKE_SOURCE_DIR}/Externals/OpenXR/include")
 endif()

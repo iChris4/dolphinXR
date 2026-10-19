@@ -32,6 +32,7 @@
 #include "VideoCommon/GeometryShaderManager.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
+#include "VideoCommon/HideObjectEngine.h"
 #include "VideoCommon/IndexGenerator.h"
 #include "VideoCommon/MetroidElementClassifier.h"
 #include "VideoCommon/NativeVertexFormat.h"
@@ -39,24 +40,26 @@
 #include "VideoCommon/PerfQueryBase.h"
 #include "VideoCommon/PixelShaderGen.h"
 #include "VideoCommon/PixelShaderManager.h"
+#include "VideoCommon/ShaderHunter.h"
 #include "VideoCommon/Statistics.h"
 #include "VideoCommon/TextureCacheBase.h"
+#include "VideoCommon/TextureElementManager.h"
+#include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRFrameRegion.h"
 #include "VideoCommon/VertexLoaderManager.h"
 #include "VideoCommon/VertexShaderManager.h"
 #include "VideoCommon/VideoBackendBase.h"
 #include "VideoCommon/VideoCommon.h"
-#include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VideoConfig.h"
-#include "VideoCommon/VR/VRFrameRegion.h"
 #include "VideoCommon/XFMemory.h"
-#include "VideoCommon/CullingCodeFinder.h"
-#include "VideoCommon/HideObjectEngine.h"
-#include "VideoCommon/ShaderHunter.h"
-#include "VideoCommon/TextureElementManager.h"
 #include "VideoCommon/XFStateManager.h"
 
 #include "Common/Hash.h"
 #include "Core/ConfigManager.h"
+
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/AgentCapture.h"
+#endif
 
 std::unique_ptr<VertexManagerBase> g_vertex_manager;
 
@@ -937,6 +940,92 @@ BitSet32 VertexManagerBase::UsedTextures() const
   return usedtextures;
 }
 
+#ifdef ENABLE_VR
+// Agent server draw capture (VR::AgentCapture): the draw's state as the agent lists it. The
+// projection values are those the "Debug Log Draws" VR_DRAW lines print.
+static VR::AgentCapture::DrawRecord* BeginAgentDrawRecord(u32 index, u32 sequence, u64 vs_hash,
+                                                          u64 ps_hash, u64 gs_hash, u64 vs_family,
+                                                          u64 ps_family, u64 gs_family,
+                                                          const std::array<u64, 8>& textures,
+                                                          u32 index_count, PrimitiveType primitive)
+{
+  VR::AgentCapture::DrawRecord* record = VR::AgentCapture::BeginRecord();
+  if (!record)
+    return nullptr;
+
+  record->index = index;
+  record->sequence = sequence;
+  const float* p = xfmem.projection.rawProjection.data();
+  record->perspective = xfmem.projection.type == ProjectionType::Perspective;
+  if (record->perspective)
+  {
+    // Same expressions as BuildRuntimeElementSignature, so the agent can derive an Elements
+    // override signature that matches bit for bit.
+    const float far_z = p[5] / p[4];
+    record->projection = {2.0f * std::atan(1.0f / p[0]) * 180.0f / 3.14159265f,
+                          2.0f * std::atan(1.0f / p[2]) * 180.0f / 3.14159265f,
+                          far_z * p[4] / (p[4] - 1.0f),
+                          far_z,
+                          0.0f,
+                          0.0f};
+  }
+  else
+  {
+    const float left = -(p[1] + 1.0f) / p[0];
+    const float bottom = -(p[3] + 1.0f) / p[2];
+    const float far_z = p[5] / p[4];
+    record->projection = {left,   left + 2.0f / p[0],        bottom + 2.0f / p[2],
+                          bottom, (1 + p[4] * far_z) / p[4], far_z};
+  }
+  record->viewport_x = xfmem.viewport.xOrig;
+  record->viewport_y = xfmem.viewport.yOrig;
+  record->viewport_wd = xfmem.viewport.wd;
+  record->viewport_ht = xfmem.viewport.ht;
+  record->scissor_left = bpmem.scissorTL.x;
+  record->scissor_top = bpmem.scissorTL.y;
+  record->scissor_right = bpmem.scissorBR.x;
+  record->scissor_bottom = bpmem.scissorBR.y;
+  record->viewport_class = static_cast<u8>(VR::ClassifyVRViewport(
+      xfmem.viewport, VR::GetVRScissor(), bpmem.scissorOffset.x << 1, bpmem.scissorOffset.y << 1));
+  record->primitive = static_cast<u8>(primitive);
+  record->vs = vs_hash;
+  record->ps = ps_hash;
+  record->gs = gs_hash;
+  record->vs_family = vs_family;
+  record->ps_family = ps_family;
+  record->gs_family = gs_family;
+  record->textures = textures;
+  record->index_count = index_count;
+  record->color_update = bpmem.blendmode.color_update != 0;
+  record->alpha_update = bpmem.blendmode.alpha_update != 0;
+  record->ztest = bpmem.zmode.test_enable != 0;
+  record->zupdate = bpmem.zmode.update_enable != 0;
+  record->zfunc = static_cast<u8>(bpmem.zmode.func.Value());
+  record->blend = bpmem.blendmode.blend_enable || bpmem.blendmode.subtract;
+  record->alpha_test = bpmem.alpha_test.hex;
+  return record;
+}
+
+static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool agent_preview_skip,
+                                  bool background_fill_skip, bool hunter_skip, bool elements_skip,
+                                  bool texmgr_skip, bool pink,
+                                  const GeometryShaderManager& geometry_shader_manager)
+{
+  using VR::AgentCapture::SkipReason;
+  record->skip = agent_preview_skip   ? SkipReason::AgentPreview :
+                 background_fill_skip ? SkipReason::BackgroundFill :
+                 hunter_skip          ? SkipReason::Shader :
+                 elements_skip        ? SkipReason::Elements :
+                 texmgr_skip          ? SkipReason::Texture :
+                                        SkipReason::None;
+  record->pink = pink;
+  record->stereo = g_ActiveConfig.stereo_mode == StereoMode::OpenXR;
+  record->stereo_override = geometry_shader_manager.vr_stereo_override;
+  record->element_depth = geometry_shader_manager.vr_element_depth_override;
+  record->units_per_meter = geometry_shader_manager.vr_units_per_meter_override;
+}
+#endif
+
 void VertexManagerBase::Flush()
 {
   if (m_is_flushed)
@@ -1181,6 +1270,13 @@ void VertexManagerBase::Flush()
       u64 screen_pane_group = 0;
       float screen_pane_reference_depth = -1.0f;
       float screen_pane_depth_strength = 1.0f;
+#ifdef ENABLE_VR
+      // Agent server: this draw's capture record, and why the agent's preview / the background
+      // fill rule dropped it.
+      VR::AgentCapture::DrawRecord* agent_record = nullptr;
+      bool agent_preview_skip = false;
+      bool background_fill_skip = false;
+#endif
       if (m_current_pipeline_object)
       {
         // Shader Hunter: register shader hashes and check for skip.
@@ -1205,13 +1301,21 @@ void VertexManagerBase::Flush()
         const bool texmgr_has_overrides = texmgr.HasOverrides();
         const bool texmgr_hunter_active = texmgr.IsHunterActive();
         const bool texmgr_active = texmgr_has_overrides || texmgr_hunter_active;
+#ifdef ENABLE_VR
+        const bool agent_capturing = VR::AgentCapture::IsCapturing();
+        const bool agent_preview_active = VR::AgentCapture::HasPreview();
+#else
+        constexpr bool agent_capturing = false;
+        constexpr bool agent_preview_active = false;
+#endif
         // In flat 2D "cinema" mode the game renders mono exactly like a normal flat game. The
         // Shader/Elements/Textures overrides (and the hunter) only skip or reproject draws for
         // stereo VR, so running them here would corrupt the flat image and waste work — skip the
         // whole override/hunter pass when the panel path is active.
         const bool vr_flat_mode = g_ActiveConfig.vr_flat_screen;
-        if (!vr_flat_mode && (hunter_enabled || hunter_has_overrides || hunter_debug_logging ||
-                              elements_runtime_active || texmgr_active))
+        if (!vr_flat_mode &&
+            (hunter_enabled || hunter_has_overrides || hunter_debug_logging ||
+             elements_runtime_active || texmgr_active || agent_capturing || agent_preview_active))
         {
           const auto& vs = m_current_pipeline_config.vs_uid;
           const auto& ps = m_current_pipeline_config.ps_uid;
@@ -1229,8 +1333,9 @@ void VertexManagerBase::Flush()
 
           std::array<u64, 8> tex_hashes{};
           std::array<std::string, 8> tex_names{};
-          const bool needs_texture_hashes =
-              hunter_enabled || hunter_needs_textures || elements_runtime_active || texmgr_active;
+          const bool needs_texture_hashes = hunter_enabled || hunter_needs_textures ||
+                                            elements_runtime_active || texmgr_active ||
+                                            agent_capturing || agent_preview_active;
           const bool needs_texture_names =
               hunter_enabled || elements_popup_open || texmgr_hunter_active;
           if (needs_texture_hashes || needs_texture_names)
@@ -1253,7 +1358,9 @@ void VertexManagerBase::Flush()
           u64 vs_family = 0;
           u64 ps_family = 0;
           u64 gs_family = 0;
-          if (hunter_enabled || hunter_needs_families || elements_runtime_active)
+          const bool hunter_or_elements_need_families =
+              hunter_enabled || hunter_needs_families || elements_runtime_active;
+          if (hunter_or_elements_need_families || agent_capturing || agent_preview_active)
           {
             const auto uid_family = [](CachedShaderIds& ids, ShaderHunter::ShaderType type,
                                        const u8* data, size_t size) {
@@ -1267,11 +1374,14 @@ void VertexManagerBase::Flush()
                                    ps.GetUidDataRaw(), ps.GetUidDataSize());
             gs_family = uid_family(m_gs_override_ids, ShaderHunter::ShaderType::Geometry,
                                    gs.GetUidDataRaw(), gs.GetUidDataSize());
-            hunter.RegisterDrawShaders(
-                {vs_hash, vs_family, vs.GetUidDataRaw(), vs.GetUidDataSize()},
-                {ps_hash, ps_family, ps.GetUidDataRaw(), ps.GetUidDataSize()},
-                {gs_hash, gs_family, gs.GetUidDataRaw(), gs.GetUidDataSize()});
-            hunter.SetCurrentDrawShaderFamilies(vs_family, ps_family, gs_family);
+            if (hunter_or_elements_need_families)
+            {
+              hunter.RegisterDrawShaders(
+                  {vs_hash, vs_family, vs.GetUidDataRaw(), vs.GetUidDataSize()},
+                  {ps_hash, ps_family, ps.GetUidDataRaw(), ps.GetUidDataSize()},
+                  {gs_hash, gs_family, gs.GetUidDataRaw(), gs.GetUidDataSize()});
+              hunter.SetCurrentDrawShaderFamilies(vs_family, ps_family, gs_family);
+            }
           }
 
           ShaderHunter::RuntimeElementSignature draw_signature{};
@@ -1288,6 +1398,16 @@ void VertexManagerBase::Flush()
             hunter_skip = hunter.ShouldSkipDraw(vs_hash, ps_hash, gs_hash);
             shader_hunter_force_pink = hunter.ShouldHighlightSelectedDraw();
           }
+
+#ifdef ENABLE_VR
+          if (agent_capturing) [[unlikely]]
+          {
+            agent_record = BeginAgentDrawRecord(
+                m_draw_counter, m_draw_counter + m_vr_culled_flushes + 1, vs_hash, ps_hash, gs_hash,
+                vs_family, ps_family, gs_family, tex_hashes, m_index_generator.GetIndexLen(),
+                m_current_primitive_type);
+          }
+#endif
 
           std::optional<ElementsGroupManager::DrawRecord> element_draw;
           MetroidElementLayer metroid_layer = MetroidElementLayer::Unknown;
@@ -1410,10 +1530,34 @@ void VertexManagerBase::Flush()
               texmgr_skip = true;
           }
 
+#ifdef ENABLE_VR
+          // The agent server's preview (set_preview): pink, skip or isolate draws by shader,
+          // texture or draw index, without saving anything.
+          if (agent_preview_active) [[unlikely]]
+          {
+            switch (VR::AgentCapture::MatchPreview(m_draw_counter, vs_hash, ps_hash, gs_hash,
+                                                   vs_family, ps_family, gs_family, tex_hashes))
+            {
+            case VR::AgentCapture::PreviewAction::Pink:
+              shader_hunter_force_pink = true;
+              break;
+            case VR::AgentCapture::PreviewAction::Skip:
+              agent_preview_skip = true;
+              texmgr_skip = true;
+              break;
+            case VR::AgentCapture::PreviewAction::None:
+              break;
+            }
+          }
+#endif
+
           // Check for screen/fullscreen handling overrides (VR stereo mode override)
           if (!hunter_skip && !elements_skip && !texmgr_skip)
           {
             auto handling = ShaderHunter::HandlingType::Skip;
+            // Which system chose the handling (VR::AgentCapture::HandlingSource), for the agent
+            // server's draw capture.
+            [[maybe_unused]] u8 handling_source = 0;
             bool preserve_stereo_efb = false;
             float element_depth = -1.0f;
             float units_per_meter = -1.0f;
@@ -1432,6 +1576,7 @@ void VertexManagerBase::Flush()
             }
             if (handling != ShaderHunter::HandlingType::Skip)
             {
+              handling_source = 1;
               // ResolveOverrides filled the parameter matching this handling.
               if (handling == ShaderHunter::HandlingType::ScreenPane)
               {
@@ -1449,6 +1594,7 @@ void VertexManagerBase::Flush()
             else if (hunter_has_overrides)
             {
               handling = hunter.GetOverrideHandling(vs_hash, ps_hash, gs_hash);
+              handling_source = 2;
               if (handling == ShaderHunter::HandlingType::Screen ||
                   handling == ShaderHunter::HandlingType::HeadLocked)
               {
@@ -1480,18 +1626,37 @@ void VertexManagerBase::Flush()
               handling = texmgr.GetHandlingForTextures(tex_hashes, &element_depth,
                                                        &units_per_meter, &passthrough_opacity,
                                                        &anchor_params, &controller_anchor_params);
+              handling_source = 3;
             }
             if (handling == ShaderHunter::HandlingType::Skip && metroid_profile_active)
+            {
               handling = GetMetroidLayerBehavior(metroid_layer).handling;
+              handling_source = 4;
+            }
             if (handling == ShaderHunter::HandlingType::Skip && uses_mp2_dark_copy)
             {
               handling = ShaderHunter::HandlingType::Fullscreen;
+              handling_source = 4;
             }
             if (handling == ShaderHunter::HandlingType::Skip && uses_mp2_dark_highlight_copy &&
                 !metroid_metrics.perspective)
             {
               handling = ShaderHunter::HandlingType::Fullscreen;
+              handling_source = 4;
             }
+
+#ifdef ENABLE_VR
+            if (agent_record) [[unlikely]]
+            {
+              // Skip here means no handling: skipped draws never reach this block.
+              const bool has_handling = handling != ShaderHunter::HandlingType::Skip;
+              agent_record->handling =
+                  has_handling ? static_cast<u8>(handling) : VR::AgentCapture::NO_HANDLING;
+              agent_record->handling_source =
+                  has_handling ? static_cast<VR::AgentCapture::HandlingSource>(handling_source) :
+                                 VR::AgentCapture::HandlingSource::None;
+            }
+#endif
 
             if (handling == ShaderHunter::HandlingType::Fullscreen && preserve_stereo_efb)
             {
@@ -1847,6 +2012,9 @@ void VertexManagerBase::Flush()
             m_index_generator.GetIndexLen() <= 8 && m_index_generator.GetTriangleCount() == 2)
         {
           hunter_skip = true;
+#ifdef ENABLE_VR
+          background_fill_skip = true;
+#endif
           if (hunter_debug_logging) [[unlikely]]
             INFO_LOG_FMT(VIDEO, "VR_DRAW #{}: skipped as background fill", m_draw_counter);
         }
@@ -1918,6 +2086,15 @@ void VertexManagerBase::Flush()
             }
           }
         }
+
+#ifdef ENABLE_VR
+        if (agent_record) [[unlikely]]
+        {
+          FinishAgentDrawRecord(agent_record, agent_preview_skip, background_fill_skip, hunter_skip,
+                                elements_skip, texmgr_skip, shader_hunter_force_pink,
+                                geometry_shader_manager);
+        }
+#endif
 
         if (!hunter_skip && !elements_skip && !texmgr_skip)
         {
@@ -2328,7 +2505,10 @@ void VertexManagerBase::OnEndFrame()
     HideObjectEngine::Engine::GetInstance().LoadCodesIfNeeded(game_id);
   }
   hunter.OnFrameEnd();
-  CullingCodeFinder::GetInstance().OnFrameEnd();
+#ifdef ENABLE_VR
+  // Publishes the agent server's draw capture of the frame that just ended (or starts one).
+  VR::AgentCapture::OnEndFrame(m_vr_culled_flushes, g_ActiveConfig.vr_flat_screen);
+#endif
   ElementsGroupManager::GetInstance().OnFrameEnd();
   Core::System::GetInstance().GetGeometryShaderManager().OnEndFrame();
   if (VR::g_openxr)
