@@ -53,10 +53,10 @@ std::shared_ptr<const CapturedFrame> GetCaptureOrThrow()
   return capture;
 }
 
-// Records every draw of the next frame. Paused: steps frames until the capture is complete.
-// `setup` runs on the video thread just before the capture is requested.
+// Records every draw and EFB copy of the next `frames` frames. Paused: steps frames until the
+// capture is complete. `setup` runs on the video thread just before the capture is requested.
 std::shared_ptr<const CapturedFrame> CaptureFrame(std::chrono::milliseconds timeout,
-                                                  std::function<void()> setup = {})
+                                                  std::function<void()> setup = {}, u32 frames = 1)
 {
   RequireGame();
   if (g_ActiveConfig.vr_flat_screen)
@@ -67,10 +67,10 @@ std::shared_ptr<const CapturedFrame> CaptureFrame(std::chrono::milliseconds time
 
   const u64 id = s_next_capture_id++;
   // Not waited for: outside a VR session a paused game presents nothing until the frame step.
-  VR::AgentVideoJobs::Post([id, setup = std::move(setup)] {
+  VR::AgentVideoJobs::Post([id, frames, setup = std::move(setup)] {
     if (setup)
       setup();
-    VR::AgentCapture::RequestCapture(id);
+    VR::AgentCapture::RequestCapture(id, frames);
   });
 
   const auto done = [id] {
@@ -79,14 +79,14 @@ std::shared_ptr<const CapturedFrame> CaptureFrame(std::chrono::milliseconds time
   };
   if (IsPaused())
   {
-    // The capture starts at the next EFB->XFB copy and ends at the one after.
-    for (int i = 0; i < 6 && !done(); ++i)
+    // The capture starts at the next EFB->XFB copy and ends `frames` copies later.
+    for (u32 i = 0; i < frames + 6 && !done(); ++i)
       AdvanceFrames(1);
     WaitUntil(done, 1s);
   }
   else
   {
-    WaitUntil(done, timeout);
+    WaitUntil(done, timeout + frames * 50ms);
   }
   if (!done())
     throw ToolError(
@@ -132,12 +132,64 @@ std::string SummarizeCapture(const CapturedFrame& frame)
     return text.empty() ? std::string("none") : text;
   };
 
+  const std::string what = frame.frames > 1 ?
+                               fmt::format("Capture {} ({} frames, f0 to f{})", frame.id,
+                                           frame.frames, frame.frames - 1) :
+                               fmt::format("Captured frame {}", frame.id);
   std::string text = fmt::format(
-      "Captured frame {}: {} draws ({} perspective, {} orthographic), {} skipped by overrides or "
-      "previews, {} head-culled draws, {} vertex batches hidden by Hide Object codes{}.\n",
-      frame.id, frame.draws.size(), perspective, frame.draws.size() - perspective, skipped,
+      "{}: {} draws ({} perspective, {} orthographic), {} skipped by overrides or previews, {} "
+      "head-culled draws, {} vertex batches hidden by Hide Object codes{}.\n",
+      what, frame.draws.size(), perspective, frame.draws.size() - perspective, skipped,
       frame.head_culled, frame.hidden_batches,
       frame.dropped ? fmt::format(", {} draws beyond the capture limit", frame.dropped) : "");
+
+  // Render to texture: the EFB copies other than the frame's XFB copy, per frame.
+  std::map<u32, size_t> texture_copies;
+  size_t xfb_copies = 0;
+  for (const VR::AgentCapture::CopyRecord& copy : frame.copies)
+  {
+    if (copy.xfb)
+      ++xfb_copies;
+    else
+      ++texture_copies[copy.frame];
+  }
+  text += fmt::format(
+      "EFB copies: {} to textures, {} to the XFB{}.", frame.copies.size() - xfb_copies, xfb_copies,
+      frame.dropped_copies ? fmt::format(", {} beyond the capture limit", frame.dropped_copies) :
+                             "");
+  if (frame.frames > 1 && !texture_copies.empty())
+  {
+    // Post effects copy the same way every frame; a texture made once stands out.
+    std::map<size_t, u32> frames_by_count;
+    for (u32 f = 0; f < frame.frames; ++f)
+      ++frames_by_count[texture_copies.contains(f) ? texture_copies.at(f) : 0];
+    const size_t usual =
+        std::max_element(frames_by_count.begin(), frames_by_count.end(),
+                         [](const auto& a, const auto& b) { return a.second < b.second; })
+            ->first;
+    std::string unusual;
+    size_t ranges = 0;
+    for (u32 f = 0; f < frame.frames && ranges < 20;)
+    {
+      const size_t count = texture_copies.contains(f) ? texture_copies.at(f) : 0;
+      u32 end = f;
+      while (end + 1 < frame.frames &&
+             (texture_copies.contains(end + 1) ? texture_copies.at(end + 1) : 0) == count)
+      {
+        ++end;
+      }
+      if (count != usual)
+      {
+        unusual += end == f ? fmt::format(" f{} ({})", f, count) :
+                              fmt::format(" f{}-f{} ({} each)", f, end, count);
+        ++ranges;
+      }
+      f = end + 1;
+    }
+    text += fmt::format(" Usually {} per frame{}", usual,
+                        unusual.empty() ? std::string(".") : "; other frames:" + unusual);
+  }
+  text += "\n";
   text += "Viewport classes: " + join(by_class) + "\n";
   text += "VR routes: " + join(by_route) + "\n";
   text += "Override handlings: " + join(by_handling) + "\n";
@@ -152,7 +204,10 @@ std::string SummarizeCapture(const CapturedFrame& frame)
                         top[i].second.first, top[i].second.last);
   }
   text += "\nNext: list_draws (filters: projection, viewport_class, handling, shader, texture, "
-          "index range), get_draw for one draw, set_preview to see which draws are which.";
+          "index range";
+  text += frame.frames > 1 ? ", frame)" : ")";
+  text += ", get_draw for one draw, set_preview to see which draws are which, list_copies for the "
+          "EFB copies (which draws made a texture).";
   return text;
 }
 
@@ -160,8 +215,67 @@ ToolResult CaptureFrameTool(const ToolArgs& args)
 {
   const auto timeout =
       std::chrono::milliseconds(std::clamp<s64>(args.GetInt("timeout_ms", 5000), 500, 30000));
-  const auto capture = CaptureFrame(timeout);
+  const u32 frames = static_cast<u32>(
+      std::clamp<s64>(args.GetInt("frames", 1), 1, VR::AgentCapture::MAX_CAPTURE_FRAMES));
+  const auto capture = CaptureFrame(timeout, {}, frames);
   return ToolResult::Text(SummarizeCapture(*capture));
+}
+
+// The `frame` argument of a multi-frame capture.
+std::optional<u32> GetFrameArg(const ToolArgs& args, const CapturedFrame& capture)
+{
+  if (!args.Has("frame"))
+    return std::nullopt;
+  const s64 frame = args.GetInt("frame", 0);
+  if (frame < 0 || frame >= std::max<s64>(1, capture.frames))
+  {
+    throw ToolError(
+        fmt::format("The capture has frames 0 to {}.", std::max<s64>(1, capture.frames) - 1));
+  }
+  return static_cast<u32>(frame);
+}
+
+ToolResult ListCopies(const ToolArgs& args)
+{
+  const auto capture = GetCaptureOrThrow();
+  const std::optional<u32> frame = GetFrameArg(args, *capture);
+  const std::optional<u64> texture = args.GetHex("texture");
+  const bool include_xfb = args.GetBool("include_xfb", false);
+
+  std::vector<const VR::AgentCapture::CopyRecord*> matches;
+  for (const VR::AgentCapture::CopyRecord& copy : capture->copies)
+  {
+    if (frame && copy.frame != *frame)
+      continue;
+    if (texture && copy.texture != *texture)
+      continue;
+    if (copy.xfb && !include_xfb)
+      continue;
+    matches.push_back(&copy);
+  }
+
+  const size_t page_size =
+      static_cast<size_t>(std::clamp<s64>(args.GetInt("page_size", 80), 1, 300));
+  const size_t pages = std::max<size_t>(1, (matches.size() + page_size - 1) / page_size);
+  const size_t page = static_cast<size_t>(std::clamp<s64>(args.GetInt("page", 1), 1, pages));
+  const size_t first = (page - 1) * page_size;
+  const size_t last = std::min(matches.size(), first + page_size);
+
+  std::string text = fmt::format(
+      "Capture {}: {} of {} EFB copies match; page {}/{}. Each row: frame, the last draw before "
+      "the copy, the EFB rectangle copied and the texture hash the draws sampling it bind. The "
+      "draws that made a texture are the ones before its copy: list_draws frame=<f> "
+      "index_max=<#>.\n",
+      capture->id, matches.size(), capture->copies.size(), page, pages);
+  for (size_t i = first; i < last; ++i)
+    text += VR::AgentCapture::FormatCopyRow(*matches[i]) + "\n";
+  if (matches.empty() && texture)
+  {
+    text += "No copy made this texture during the capture. A texture made once (a minimap, a "
+            "portrait) is only made when the game starts that scene: capture across that moment "
+            "with capture_frame frames=<n>.\n";
+  }
+  return ToolResult::Text(std::move(text));
 }
 
 ToolResult FrameSummary(const ToolArgs&)
@@ -174,6 +288,7 @@ ToolResult ListDraws(const ToolArgs& args)
   const auto capture = GetCaptureOrThrow();
 
   VR::AgentCapture::DrawFilter filter;
+  filter.frame = GetFrameArg(args, *capture);
   const std::string projection = args.GetString("projection", "any");
   if (projection == "perspective")
     filter.perspective = true;
@@ -220,13 +335,19 @@ ToolResult ListDraws(const ToolArgs& args)
   const size_t first = (page - 1) * page_size;
   const size_t last = std::min(matches.size(), first + page_size);
 
+  const bool multi_frame = capture->frames > 1;
   std::string text = fmt::format(
-      "Frame {}: {} of {} draws match; page {}/{} (draws {}-{}). Columns: #index projection | "
+      "{} {}: {} of {} draws match; page {}/{} (draws {}-{}). Columns: {}#index projection | "
       "viewport x,y wxh (GX units: the EFB origin is usually 342,342) class | vs ps | index count "
       "| textures | z test/write, blend | handling (source) | VR route.\n",
-      capture->id, matches.size(), capture->draws.size(), page, pages, first + 1, last);
+      multi_frame ? "Capture" : "Frame", capture->id, matches.size(), capture->draws.size(), page,
+      pages, first + 1, last, multi_frame ? "frame " : "");
   for (size_t i = first; i < last; ++i)
+  {
+    if (multi_frame)
+      text += fmt::format("f{} ", matches[i]->frame);
     text += VR::AgentCapture::FormatDrawRow(*matches[i]) + "\n";
+  }
   return ToolResult::Text(std::move(text));
 }
 
@@ -269,17 +390,58 @@ ToolResult GetDraw(const ToolArgs& args)
 {
   const auto capture = GetCaptureOrThrow();
   const s64 index = args.RequireInt("index");
-  const auto it = std::find_if(capture->draws.begin(), capture->draws.end(),
-                               [&](const DrawRecord& draw) { return draw.index == index; });
+  const u32 frame = GetFrameArg(args, *capture).value_or(0);
+  const auto it =
+      std::find_if(capture->draws.begin(), capture->draws.end(), [&](const DrawRecord& draw) {
+        return draw.frame == frame && draw.index == index;
+      });
   if (it == capture->draws.end())
-    throw ToolError(fmt::format("Frame {} has no draw #{}.", capture->id, index));
+  {
+    throw ToolError(
+        capture->frames > 1 ?
+            fmt::format("Frame f{} of capture {} has no draw #{}.", frame, capture->id, index) :
+            fmt::format("Frame {} has no draw #{}.", capture->id, index));
+  }
   const DrawRecord& draw = *it;
 
-  std::string text = VR::AgentCapture::FormatDrawDetails(draw);
+  std::string text;
+  if (capture->frames > 1)
+    text += fmt::format("Frame f{} of capture {}\n", frame, capture->id);
+  text += VR::AgentCapture::FormatDrawDetails(draw);
   size_t ps_draws = 0;
   for (const DrawRecord& other : capture->draws)
-    ps_draws += other.ps == draw.ps;
+    ps_draws += other.frame == frame && other.ps == draw.ps;
   text += fmt::format("{} draw(s) of this frame use this pixel shader.\n", ps_draws);
+
+  for (const u64 texture : draw.textures)
+  {
+    if (texture == 0)
+      continue;
+    // The last copy that made it before this draw.
+    const VR::AgentCapture::CopyRecord* made_by = nullptr;
+    for (const VR::AgentCapture::CopyRecord& copy : capture->copies)
+    {
+      const bool before = copy.frame < draw.frame ||
+                          (copy.frame == draw.frame && copy.after_index < s64{draw.index});
+      if (!before)
+        break;
+      if (!copy.xfb && copy.texture == texture)
+        made_by = &copy;
+    }
+    if (made_by)
+    {
+      text += fmt::format("Texture {:016x} is an EFB copy made in this capture: {}\n", texture,
+                          VR::AgentCapture::FormatCopyRow(*made_by));
+    }
+  }
+  if (VR::AgentCapture::DescribeRoute(draw) == "fullscreen (auto EFB effect)")
+  {
+    text += "It samples an EFB copy, so AutoNativeEfbEffects draws it fullscreen like a post "
+            "effect. If it is a HUD element drawn from a texture the game rendered (a minimap, a "
+            "portrait), give it handling=screen. Prefer the Elements override below (with "
+            "sig_use_projection=1 and sig_use_render_state=1) to a Texture override: an EFB copy's "
+            "hash can change with its size or address, e.g. from one level to the next.\n";
+  }
 
   text += "\nStarting points (edit the handling and name, then set_override):\n";
   text += fmt::format("Shader override (every draw using this pixel shader):\n$Shader {:08x}\n"
@@ -452,11 +614,20 @@ void RegisterDrawTools(ToolRegistry& registry, Server& server)
        .title = "Capture a frame's draws",
        .description =
            "Records every draw of the next frame (projection, viewport, shaders, textures, render "
-           "state, which override applied and how it is routed in VR) and returns a summary. "
-           "When paused it steps frames to do so. Then use list_draws and get_draw. This is the "
-           "structured form of the Debug Log Draws output.",
+           "state, which override applied and how it is routed in VR) and its EFB copies, and "
+           "returns a summary. When paused it steps frames to do so. Then use list_draws, "
+           "get_draw and list_copies. This is the structured form of the Debug Log Draws output. "
+           "Consecutive calls do not capture consecutive frames: to catch something drawn once "
+           "(a texture rendered when a level starts), pause just before and capture several "
+           "frames in one call.",
        .input_schema =
-           Schema().Integer("timeout_ms", "When running (default 5000).", 500, 30000).Build(),
+           Schema()
+               .Integer("frames",
+                        "Consecutive frames to record (default 1, at most 300); the draws and "
+                        "copies are numbered f0, f1...",
+                        1, VR::AgentCapture::MAX_CAPTURE_FRAMES)
+               .Integer("timeout_ms", "When running (default 5000, plus 50 per frame).", 500, 30000)
+               .Build(),
        .handler = CaptureFrameTool});
 
   registry.Add({.name = "frame_summary",
@@ -476,6 +647,7 @@ void RegisterDrawTools(ToolRegistry& registry, Server& server)
            "full-viewport draws sampling EFB copies.",
        .input_schema =
            Schema()
+               .Integer("frame", "Only this frame of a multi-frame capture (f0 = 0).", 0)
                .String("projection", "Default any.", {"any", "perspective", "orthographic"})
                .String("viewport_class", "MainScene, Letterboxed, SplitScreen, HudElement, "
                                          "RenderToTexture, Offscreen or DisplacedScene.")
@@ -497,11 +669,36 @@ void RegisterDrawTools(ToolRegistry& registry, Server& server)
                 .title = "One captured draw",
                 .description = "Everything about one draw of the last captured frame, with ready "
                                "override entries (Shader, Elements, Texture) to start from.",
-                .input_schema =
-                    Schema().Integer("index", "The draw's #index.", 0).Required({"index"}).Build(),
+                .input_schema = Schema()
+                                    .Integer("index", "The draw's #index.", 0)
+                                    .Integer("frame",
+                                             "Its frame in a multi-frame capture "
+                                             "(default f0).",
+                                             0)
+                                    .Required({"index"})
+                                    .Build(),
                 .read_only = true,
                 .idempotent = true,
                 .handler = GetDraw});
+
+  registry.Add(
+      {.name = "list_copies",
+       .title = "List captured EFB copies",
+       .description =
+           "The EFB copies of the last capture: render to texture passes (shadows, reflections, "
+           "minimaps, blur and bloom steps) and the frame's XFB copy, each placed after the draw "
+           "that preceded it, with the texture hash the draws that sample the copy bind. Finds "
+           "which draws made a texture: texture=<hash>, then list_draws up to that draw.",
+       .input_schema = Schema()
+                           .Integer("frame", "Only this frame of a multi-frame capture.", 0)
+                           .Hex("texture", "Only copies that made this texture hash.")
+                           .Boolean("include_xfb", "Also list the XFB copies (default false).")
+                           .Integer("page", "1-based page.", 1)
+                           .Integer("page_size", "Rows per page (default 80, at most 300).", 1, 300)
+                           .Build(),
+       .read_only = true,
+       .idempotent = true,
+       .handler = ListCopies});
 
   registry.Add(
       {.name = "set_preview",

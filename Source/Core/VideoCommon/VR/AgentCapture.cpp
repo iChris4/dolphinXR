@@ -16,6 +16,7 @@
 #include "VideoCommon/AbstractTexture.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/TextureConfig.h"
+#include "VideoCommon/TextureDecoder.h"
 #include "VideoCommon/VR/VRFrameRegion.h"
 
 namespace VR::AgentCapture
@@ -30,7 +31,9 @@ namespace
 {
 // Video thread.
 u64 s_pending_capture_id = 0;
+u32 s_pending_capture_frames = 1;
 std::unique_ptr<CapturedFrame> s_current;
+u32 s_current_target_frames = 1;
 PreviewSet s_preview;
 
 std::mutex s_published_mutex;
@@ -183,9 +186,10 @@ EyeCapture CaptureEyeImages(u32 max_width, bool left, bool right)
   return capture;
 }
 
-void RequestCapture(u64 id)
+void RequestCapture(u64 id, u32 frames)
 {
   s_pending_capture_id = id;
+  s_pending_capture_frames = std::clamp(frames, 1u, MAX_CAPTURE_FRAMES);
 }
 
 DrawRecord* BeginRecord()
@@ -197,7 +201,26 @@ DrawRecord* BeginRecord()
     ++s_current->dropped;
     return nullptr;
   }
-  return &s_current->draws.emplace_back();
+  DrawRecord& record = s_current->draws.emplace_back();
+  record.frame = s_current->frames;
+  return &record;
+}
+
+void RecordCopy(CopyRecord copy)
+{
+  if (!s_current)
+    return;
+  if (s_current->copies.size() >= MAX_CAPTURED_COPIES)
+  {
+    ++s_current->dropped_copies;
+    return;
+  }
+  copy.frame = s_current->frames;
+  const std::vector<DrawRecord>& draws = s_current->draws;
+  copy.after_index = !draws.empty() && draws.back().frame == copy.frame ?
+                         static_cast<s32>(draws.back().index) :
+                         -1;
+  s_current->copies.push_back(copy);
 }
 
 void CountHiddenBatch()
@@ -210,8 +233,11 @@ void OnEndFrame(u32 head_culled_draws, bool flat_mode)
 {
   if (s_current)
   {
-    s_current->head_culled = head_culled_draws;
+    s_current->head_culled += head_culled_draws;
     s_current->flat_mode = flat_mode;
+    if (++s_current->frames < s_current_target_frames)
+      return;
+
     std::shared_ptr<const CapturedFrame> done(s_current.release());
     detail::s_capturing = false;
     std::lock_guard lock(s_published_mutex);
@@ -222,7 +248,8 @@ void OnEndFrame(u32 head_culled_draws, bool flat_mode)
   {
     s_current = std::make_unique<CapturedFrame>();
     s_current->id = s_pending_capture_id;
-    s_current->draws.reserve(2048);
+    s_current_target_frames = s_pending_capture_frames;
+    s_current->draws.reserve(std::min<size_t>(2048 * s_current_target_frames, 16384));
     s_pending_capture_id = 0;
     detail::s_capturing = true;
   }
@@ -296,6 +323,8 @@ PreviewAction MatchPreview(u32 index, u64 vs, u64 ps, u64 gs, u64 vs_family, u64
 
 bool MatchesFilter(const DrawRecord& draw, const DrawFilter& filter)
 {
+  if (filter.frame && draw.frame != *filter.frame)
+    return false;
   if (draw.index < filter.index_min || draw.index > filter.index_max)
     return false;
   if (draw.index_count < filter.min_index_count)
@@ -525,5 +554,27 @@ std::string FormatDrawDetails(const DrawRecord& draw)
   if (draw.pink)
     text += "Drawn pink (preview)\n";
   return text;
+}
+
+std::string FormatCopyRow(const CopyRecord& copy)
+{
+  const std::string after =
+      copy.after_index < 0 ? "before any draw" : fmt::format("after #{}", copy.after_index);
+  const std::string source =
+      fmt::format("{},{} {}x{}", copy.src_left, copy.src_top, copy.src_right - copy.src_left,
+                  copy.src_bottom - copy.src_top);
+  if (copy.xfb)
+  {
+    return fmt::format("f{} {}: XFB copy of EFB {} ({}x{} at {:08x})", copy.frame, after, source,
+                       copy.width, copy.height, copy.address);
+  }
+  const char* destination = copy.to_texture && copy.to_ram ? "texture and RAM" :
+                            copy.to_texture                ? "texture only" :
+                                                             "RAM only";
+  return fmt::format("f{} {}: EFB {}{} -> texture {} ({}x{} {:n}, {} at {:08x})", copy.frame, after,
+                     copy.depth ? "depth " : "", source,
+                     copy.texture != 0 ? fmt::format("{:016x}", copy.texture) : std::string("-"),
+                     copy.width, copy.height, static_cast<TextureFormat>(copy.format), destination,
+                     copy.address);
 }
 }  // namespace VR::AgentCapture

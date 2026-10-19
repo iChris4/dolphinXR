@@ -88,6 +88,8 @@ constexpr u8 NO_HANDLING = 0xFF;
 // One draw of a captured frame.
 struct DrawRecord
 {
+  // The frame of the capture (0 = the first) when it spans several frames.
+  u32 frame = 0;
   // The VR_DRAW #n index (draws rendered or skipped so far in this frame).
   u32 index = 0;
   // ElementsGroupManager draw sequence (counts head-culled draws too).
@@ -147,14 +149,45 @@ struct DrawRecord
   float units_per_meter = -1.0f;
 };
 
-constexpr size_t MAX_CAPTURED_DRAWS = 16384;
+// One EFB copy of a captured frame: a render to texture, or the frame's copy to the XFB.
+struct CopyRecord
+{
+  u32 frame = 0;
+  // The #index of the last draw of that frame before the copy, -1 when it comes first.
+  s32 after_index = -1;
+  bool xfb = false;
+  bool depth = false;
+  // Kept as a texture (EFB copies to texture), written to emulated RAM, or both.
+  bool to_texture = false;
+  bool to_ram = false;
+  // Source rectangle in EFB pixels.
+  s32 src_left = 0;
+  s32 src_top = 0;
+  s32 src_right = 0;
+  s32 src_bottom = 0;
+  // Size of the copy in texels, its RAM address and TextureFormat.
+  u32 width = 0;
+  u32 height = 0;
+  u32 address = 0;
+  u32 format = 0;
+  // The hash the draws that sample the copy bind (DrawRecord::textures); 0 without a texture.
+  u64 texture = 0;
+};
+
+constexpr size_t MAX_CAPTURED_DRAWS = 65536;
+constexpr size_t MAX_CAPTURED_COPIES = 8192;
+constexpr u32 MAX_CAPTURE_FRAMES = 300;
 
 struct CapturedFrame
 {
   u64 id = 0;
+  // Consecutive frames recorded.
+  u32 frames = 0;
   std::vector<DrawRecord> draws;
-  // Draws beyond MAX_CAPTURED_DRAWS.
+  std::vector<CopyRecord> copies;
+  // Draws beyond MAX_CAPTURED_DRAWS, copies beyond MAX_CAPTURED_COPIES.
   u32 dropped = 0;
+  u32 dropped_copies = 0;
   // Primitive batches hidden by Hide Object codes (they never become draws).
   u32 hidden_batches = 0;
   // Draws removed by the head-cone CPU cull.
@@ -179,10 +212,13 @@ inline bool HasPreview()
   return detail::s_preview_active;
 }
 
-// Video thread (agent job): records every draw from the next EFB->XFB copy to the one after.
-void RequestCapture(u64 id);
-// Draw path: a new record for the current draw, or nullptr when the frame is full.
+// Video thread (agent job): records every draw and EFB copy of the `frames` frames that follow
+// the next EFB->XFB copy.
+void RequestCapture(u64 id, u32 frames = 1);
+// Draw path: a new record for the current draw, or nullptr when the capture is full.
 DrawRecord* BeginRecord();
+// TextureCacheBase, after an EFB or XFB copy (frame and after_index are filled in here).
+void RecordCopy(CopyRecord copy);
 void CountHiddenBatch();
 // VertexManagerBase::OnEndFrame, before the frame counters reset.
 void OnEndFrame(u32 head_culled_draws, bool flat_mode);
@@ -241,6 +277,7 @@ PreviewAction MatchPreview(u32 index, u64 vs, u64 ps, u64 gs, u64 vs_family, u64
 
 struct DrawFilter
 {
+  std::optional<u32> frame;
   std::optional<bool> perspective;
   std::optional<u8> viewport_class;
   // NO_HANDLING matches draws without a handling.
@@ -265,4 +302,6 @@ std::string DescribeRoute(const DrawRecord& draw);
 std::string FormatDrawRow(const DrawRecord& draw);
 // Every field, one per line.
 std::string FormatDrawDetails(const DrawRecord& draw);
+// One line per EFB copy.
+std::string FormatCopyRow(const CopyRecord& copy);
 }  // namespace VR::AgentCapture

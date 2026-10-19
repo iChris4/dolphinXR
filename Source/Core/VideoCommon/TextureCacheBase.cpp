@@ -62,6 +62,9 @@
 #include "VideoCommon/VertexManagerBase.h"
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/AgentCapture.h"
+#endif
 
 static const u64 TEXHASH_INVALID = 0;
 // Sonic the Fighters (inside Sonic Gems Collection) loops a 64 frames animation
@@ -2738,6 +2741,42 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
   }
 
   FinalizeFramebufferCopy(entry, resolved_data);
+
+#ifdef ENABLE_VR
+  // The agent server's capture lists the copies between the draws, with the texture they made.
+  if (VR::AgentCapture::IsCapturing()) [[unlikely]]
+  {
+    const FramebufferCopyRawData& source = resolved_data.source_data;
+    // Draws bind the copy under the name Load gives it when first sampled: an XXH64 of its RAM,
+    // which holds the placeholder written above when the copy is kept as a texture only. A copy
+    // the game samples in another format or size gets another name.
+    u64 texture = 0;
+    if (entry && !resolved_data.is_xfb)
+    {
+      const TextureInfo info(0, memory.GetSpanForAddress(source.dest_address), {},
+                             source.dest_address, resolved_data.memory_format, TLUTFormat::IA8,
+                             resolved_data.memory_width, resolved_data.memory_height, false, {}, {},
+                             std::nullopt);
+      texture = TextureInfo::ParseTextureHash(info.CalculateTextureName().GetFullName())
+                    .value_or(entry->GetOverrideHash());
+    }
+    VR::AgentCapture::RecordCopy({
+        .xfb = resolved_data.is_xfb,
+        .depth = source.is_depth_format,
+        .to_texture = entry != nullptr,
+        .to_ram = resolved_data.copy_to_ram,
+        .src_left = source.src_rect.left,
+        .src_top = source.src_rect.top,
+        .src_right = source.src_rect.right,
+        .src_bottom = source.src_rect.bottom,
+        .width = resolved_data.memory_width,
+        .height = resolved_data.memory_height,
+        .address = source.dest_address,
+        .format = static_cast<u32>(resolved_data.memory_format),
+        .texture = texture,
+    });
+  }
+#endif
 }
 
 void TextureCacheBase::FlushEFBCopies()

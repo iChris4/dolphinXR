@@ -147,6 +147,81 @@ TEST(AgentCapture, FiltersDraws)
   filter = {};
   filter.min_index_count = 61;
   EXPECT_FALSE(MatchesFilter(ortho, filter));
+
+  // Frames of a multi-frame capture.
+  ortho.frame = 3;
+  filter = {};
+  filter.frame = 3;
+  EXPECT_TRUE(MatchesFilter(ortho, filter));
+  filter.frame = 0;
+  EXPECT_FALSE(MatchesFilter(ortho, filter));
+}
+
+TEST(AgentCapture, CapturesConsecutiveFrames)
+{
+  ResetForShutdown();
+  RequestCapture(7, 2);
+  EXPECT_FALSE(IsCapturing());
+  // The capture starts at the next frame boundary.
+  OnEndFrame(0, false);
+  ASSERT_TRUE(IsCapturing());
+
+  RecordCopy({.texture = 0x11});
+  DrawRecord* draw = BeginRecord();
+  ASSERT_NE(draw, nullptr);
+  draw->index = 0;
+  RecordCopy({.texture = 0x22});
+  OnEndFrame(1, false);
+
+  // Still recording: the second frame.
+  ASSERT_TRUE(IsCapturing());
+  EXPECT_EQ(GetLastCapture(), nullptr);
+  draw = BeginRecord();
+  ASSERT_NE(draw, nullptr);
+  draw->index = 0;
+  RecordCopy({.xfb = true});
+  OnEndFrame(2, false);
+
+  EXPECT_FALSE(IsCapturing());
+  const auto capture = GetLastCapture();
+  ASSERT_NE(capture, nullptr);
+  EXPECT_EQ(capture->id, 7u);
+  EXPECT_EQ(capture->frames, 2u);
+  EXPECT_EQ(capture->head_culled, 3u);
+  ASSERT_EQ(capture->draws.size(), 2u);
+  EXPECT_EQ(capture->draws[0].frame, 0u);
+  EXPECT_EQ(capture->draws[1].frame, 1u);
+  ASSERT_EQ(capture->copies.size(), 3u);
+  EXPECT_EQ(capture->copies[0].after_index, -1);
+  EXPECT_EQ(capture->copies[1].after_index, 0);
+  EXPECT_EQ(capture->copies[1].frame, 0u);
+  EXPECT_EQ(capture->copies[2].frame, 1u);
+  ResetForShutdown();
+}
+
+TEST(AgentCapture, FormatsCopies)
+{
+  CopyRecord copy;
+  copy.frame = 2;
+  copy.after_index = 745;
+  copy.to_texture = true;
+  copy.src_right = 512;
+  copy.src_bottom = 512;
+  copy.width = 512;
+  copy.height = 512;
+  copy.address = 0x80d3e000;
+  copy.format = 6;  // RGBA8
+  copy.texture = 0xab73a405d61d3092;
+  const std::string row = FormatCopyRow(copy);
+  EXPECT_NE(row.find("f2 after #745: EFB 0,0 512x512 -> texture ab73a405d61d3092"),
+            std::string::npos)
+      << row;
+  EXPECT_NE(row.find("RGBA8, texture only at 80d3e000"), std::string::npos) << row;
+
+  copy.after_index = -1;
+  copy.xfb = true;
+  const std::string xfb = FormatCopyRow(copy);
+  EXPECT_NE(xfb.find("before any draw: XFB copy"), std::string::npos) << xfb;
 }
 
 TEST(AgentCapture, HandlingNamesRoundTrip)
