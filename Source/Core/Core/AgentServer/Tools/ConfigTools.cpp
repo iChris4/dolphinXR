@@ -301,18 +301,7 @@ ToolResult ReadLog(const ToolArgs& args)
   const size_t max_lines =
       static_cast<size_t>(std::clamp<s64>(args.GetInt("max_lines", 100), 1, 500));
   const std::string pattern = args.GetString("regex");
-  std::optional<std::regex> regex;
-  if (!pattern.empty())
-  {
-    try
-    {
-      regex.emplace(pattern, std::regex::ECMAScript | std::regex::icase);
-    }
-    catch (const std::regex_error& e)
-    {
-      throw ToolError(fmt::format("Invalid regex: {}", e.what()));
-    }
-  }
+  const std::optional<std::regex> regex = MakeToolRegex(pattern);
 
   const std::vector<LogBuffer::Line> lines = buffer->GetLines(since);
   std::vector<const LogBuffer::Line*> matches;

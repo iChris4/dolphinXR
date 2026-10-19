@@ -438,18 +438,7 @@ ToolResult ProfileFunctions(const ToolArgs& args)
   const size_t top = static_cast<size_t>(std::clamp<s64>(args.GetInt("top", 40), 1, 200));
   const u32 max_size = static_cast<u32>(std::max<s64>(0, args.GetInt("max_size", 0)));
   const std::string pattern = args.GetString("name_regex");
-  std::optional<std::regex> regex;
-  if (!pattern.empty())
-  {
-    try
-    {
-      regex.emplace(pattern, std::regex::ECMAScript | std::regex::icase);
-    }
-    catch (const std::regex_error& e)
-    {
-      throw ToolError(fmt::format("Invalid regex: {}", e.what()));
-    }
-  }
+  const std::optional<std::regex> regex = MakeToolRegex(pattern);
 
   std::string text = EnsureSymbols();
   if (!text.empty())

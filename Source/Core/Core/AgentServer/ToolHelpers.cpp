@@ -145,6 +145,23 @@ bool IsPaused()
   return Core::GetState(GetSystem()) == Core::State::Paused;
 }
 
+std::optional<std::regex> MakeToolRegex(std::string_view pattern)
+{
+  if (pattern.starts_with("(?i)"))
+    pattern.remove_prefix(4);
+  if (pattern.empty())
+    return std::nullopt;
+  try
+  {
+    return std::regex(pattern.begin(), pattern.end(), std::regex::ECMAScript | std::regex::icase);
+  }
+  catch (const std::regex_error& e)
+  {
+    throw ToolError(
+        fmt::format("Invalid regex (ECMAScript syntax, case is ignored): {}", e.what()));
+  }
+}
+
 void PauseEmulation()
 {
   RequireGame();

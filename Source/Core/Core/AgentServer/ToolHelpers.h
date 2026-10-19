@@ -5,7 +5,10 @@
 
 #include <chrono>
 #include <functional>
+#include <optional>
+#include <regex>
 #include <string>
+#include <string_view>
 
 #include "Common/CommonTypes.h"
 
@@ -39,6 +42,10 @@ void RunOnHostThread(std::function<void()> job, std::chrono::milliseconds timeou
 // Polls `predicate` until it is true. False on timeout or when the server stops.
 bool WaitUntil(const std::function<bool()>& predicate, std::chrono::milliseconds timeout,
                std::chrono::milliseconds poll = 5ms);
+
+// A case-insensitive ECMAScript regex from a tool argument; nullopt when the pattern is empty. A
+// leading "(?i)", which ECMAScript lacks, is accepted. Throws ToolError for a bad pattern.
+std::optional<std::regex> MakeToolRegex(std::string_view pattern);
 
 bool IsPaused();
 void PauseEmulation();

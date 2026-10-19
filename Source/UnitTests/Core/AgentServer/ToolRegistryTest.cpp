@@ -11,6 +11,7 @@
 
 #include "Core/AgentServer/AgentServer.h"
 #include "Core/AgentServer/PatchTemplates.h"
+#include "Core/AgentServer/ToolHelpers.h"
 #include "Core/AgentServer/ToolRegistry.h"
 #include "Core/State.h"
 
@@ -109,4 +110,15 @@ TEST(State, SaveOptionsDefaultsMatchExpectedCompressionBehavior)
   State::SaveOptions default_options;
   EXPECT_TRUE(default_options.compress);
   EXPECT_FALSE(default_options.wait_for_completion);
+}
+
+// Patterns from agents used to other regex flavors: "(?i)" is accepted, and case is ignored.
+TEST(AgentToolHelpers, MakesCaseInsensitiveRegex)
+{
+  const std::optional<std::regex> regex = MakeToolRegex("(?i)adapter");
+  ASSERT_TRUE(regex);
+  EXPECT_TRUE(std::regex_search("GCAdapter detected", *regex));
+  EXPECT_FALSE(MakeToolRegex(""));
+  EXPECT_FALSE(MakeToolRegex("(?i)"));
+  EXPECT_THROW(MakeToolRegex("("), ToolError);
 }
