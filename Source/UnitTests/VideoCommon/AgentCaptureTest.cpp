@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "VideoCommon/VR/AgentCapture.h"
+#include "VideoCommon/VR/VRFrameRegion.h"
 
 using namespace VR::AgentCapture;
 
@@ -176,6 +177,25 @@ TEST(AgentCapture, DescribesRoutes)
   EXPECT_EQ(DescribeRoute(draw), "screen pane");
   draw.skip = SkipReason::AgentPreview;
   EXPECT_EQ(DescribeRoute(draw), "not drawn");
+}
+
+// Draws without an override follow the VR settings, as GeometryShaderManager routes them.
+TEST(AgentCapture, DescribesDefaultRoutes)
+{
+  DrawRecord ortho = MakeDraw(0, false);
+  ortho.virtual_screen = false;
+  EXPECT_EQ(DescribeRoute(ortho), "2D per eye, head-locked (VirtualScreen is off)");
+  ortho.virtual_screen = true;
+  ortho.detect_render_targets = true;
+  ortho.viewport_class = static_cast<u8>(VR::VRViewportClass::RenderToTexture);
+  EXPECT_EQ(DescribeRoute(ortho), "native (render to texture)");
+
+  DrawRecord pane = MakeDraw(1, true);
+  pane.viewport_class = static_cast<u8>(VR::VRViewportClass::HudElement);
+  pane.frame_region_valid = true;
+  EXPECT_EQ(DescribeRoute(pane), "virtual screen (small 3D pane)");
+  pane.panes_on_screen = false;
+  EXPECT_EQ(DescribeRoute(pane), "stereo 3D");
 }
 
 TEST(AgentCapture, FormatsRows)

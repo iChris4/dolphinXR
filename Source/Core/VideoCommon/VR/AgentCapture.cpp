@@ -390,7 +390,25 @@ std::string DescribeRoute(const DrawRecord& draw)
     return "drawn (no stereo VR session)";
   const float route = draw.stereo_override;
   if (std::isnan(route))
-    return draw.perspective ? "stereo 3D" : "virtual screen";
+  {
+    // No override: the defaults of GeometryShaderManager.
+    const auto viewport_class = static_cast<VRViewportClass>(draw.viewport_class);
+    const bool render_target =
+        draw.detect_render_targets && (viewport_class == VRViewportClass::RenderToTexture ||
+                                       viewport_class == VRViewportClass::Offscreen);
+    if (draw.perspective)
+    {
+      if (draw.panes_on_screen && draw.virtual_screen && draw.frame_region_valid &&
+          viewport_class == VRViewportClass::HudElement)
+      {
+        return "virtual screen (small 3D pane)";
+      }
+      return render_target ? "native (render to texture)" : "stereo 3D";
+    }
+    if (!draw.virtual_screen)
+      return "2D per eye, head-locked (VirtualScreen is off)";
+    return render_target ? "native (render to texture)" : "virtual screen";
+  }
   if (route == -1.0f)
     return "virtual screen";
   if (route == 0.0f)

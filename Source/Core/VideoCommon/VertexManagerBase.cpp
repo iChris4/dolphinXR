@@ -987,6 +987,10 @@ static VR::AgentCapture::DrawRecord* BeginAgentDrawRecord(u32 index, u32 sequenc
   record->scissor_bottom = bpmem.scissorBR.y;
   record->viewport_class = static_cast<u8>(VR::ClassifyVRViewport(
       xfmem.viewport, VR::GetVRScissor(), bpmem.scissorOffset.x << 1, bpmem.scissorOffset.y << 1));
+  record->virtual_screen = g_ActiveConfig.vr_virtual_screen;
+  record->panes_on_screen = g_ActiveConfig.vr_panes_on_screen;
+  record->detect_render_targets = g_ActiveConfig.vr_detect_render_targets;
+  record->frame_region_valid = VR::GetVRFrameRegion().valid;
   record->primitive = static_cast<u8>(primitive);
   record->vs = vs_hash;
   record->ps = ps_hash;

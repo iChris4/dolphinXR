@@ -7,7 +7,7 @@ namespace AgentServer
 {
 std::string GetServerInstructions()
 {
-  return R"(DolphinXR is the Dolphin GameCube/Wii emulator with OpenXR VR. This server lets you help the user make a game comfortable in VR: fix visuals with VR overrides and settings, and find codes such as no-culling or 60fps.
+  return R"INSTRUCTIONS(DolphinXR is the Dolphin GameCube/Wii emulator with OpenXR VR. This server lets you help the user make a game comfortable in VR: fix visuals with VR overrides and settings, and find codes such as no-culling or 60fps.
 
 General rules
 - The user wears the headset; you see screenshots. Depth, scale and comfort are the user's call: propose, then ask them to confirm in the headset before saving.
@@ -25,6 +25,7 @@ Workflow 1: VR settings
 Workflow 2: visual fixes with overrides (HUD depth, effects in one eye, black bars, 2D at the wrong place)
 1. screenshot eyes=both, and ask the user what looks wrong in the headset.
 2. capture_frame records every draw of one frame. frame_summary gives counts; list_draws filters them (projection=orthographic finds HUD and 2D, perspective the 3D scene; handling, shader, texture, viewport_class). get_draw index=N shows one draw, the overrides that already match it, and an INI stub to start from.
+   2D draws routed "2D per eye, head-locked (VirtualScreen is off)" float in front of the user. Turning VirtualScreen on (set_vr_setting, then save_vr_settings for this game) moves all of them to the screen, but in some games it also takes elements that must stay 3D: ask the user. The alternative is a screen override per element, usually a texture override with the text font or sprite texture.
 3. Identify draws with set_preview (mode pink, skip or isolate; indices, shaders, families or textures), take a screenshot, then clear_preview. Draw indices are valid for the captured frame only; hashes stay valid.
 4. list_overrides shows the game's Sys and User overrides; describe_override_format kind=... gives the keys and a real example. Kinds: shader (by shader hash or family: broad), elements (draw signature: one element), texture (by texture hash: HUD sprites), hideobject (vertex prefix from capture_hide_object_prefixes: removes geometry everywhere it appears).
 5. Handlings: screen (draw on the virtual screen), fullscreen (native per eye, e.g. bloom and blur), fullscreen_mono, headlocked, screen_pane (keeps a sub-region at its depth on the screen), skip, camera_anchor and controller_anchor (follow an element / a controller), passthrough, units_per_meter, flag.
@@ -48,6 +49,6 @@ Workflow 4: 60fps code
 
 Debugger tools
 - set_breakpoint / wait_for_break / get_registers / get_callstack / step_instruction / remove_breakpoint, set_watchpoint / remove_watchpoint, read_memory / write_memory. Debugging mode is enabled when needed and released when no agent breakpoint remains.
-- read_log reads Dolphin's log; set_draw_debug_logging logs every draw (VR_DRAW lines), but capture_frame is usually better.)";
+- read_log reads Dolphin's log; set_draw_debug_logging logs every draw (VR_DRAW lines), but capture_frame is usually better.)INSTRUCTIONS";
 }
 }  // namespace AgentServer

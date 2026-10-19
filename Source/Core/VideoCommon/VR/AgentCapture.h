@@ -133,6 +133,12 @@ struct DrawRecord
   bool pink = false;
   // Drawn in a stereo VR session (StereoMode::OpenXR); the VR route means nothing otherwise.
   bool stereo = true;
+  // What routes a draw without an override (GeometryShaderManager): VirtualScreen,
+  // SmallViewportsOnScreen, DetectRenderTargets, and whether the displayed region is known.
+  bool virtual_screen = true;
+  bool panes_on_screen = true;
+  bool detect_render_targets = false;
+  bool frame_region_valid = false;
   // The draw's final VR routing (GeometryShaderManager::vr_stereo_override): NaN = default
   // (perspective in stereo, orthographic on the virtual screen), -1 virtual screen, 0 fullscreen
   // (native per eye), -2/-3 head-locked, 2/3 screen pane.
