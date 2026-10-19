@@ -56,6 +56,7 @@ Server::Server()
   RegisterCodeTools(m_registry, *this);
   RegisterMemoryTools(m_registry, *this);
   RegisterExperimentTools(m_registry, *this);
+  RegisterInputTools(m_registry, *this);
 }
 
 namespace

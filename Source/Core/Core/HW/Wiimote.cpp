@@ -16,6 +16,7 @@
 #include "Common/Matrix.h"
 #ifdef ENABLE_VR
 #include "Common/VR/OpenXRInputState.h"
+#include "Core/AgentServer/AgentInput.h"
 #endif
 
 #include "Core/Config/WiimoteSettings.h"
@@ -225,7 +226,8 @@ OpenXRWiimoteState BuildOpenXRState(const Common::VR::OpenXRControllerState& con
 }
 
 ControllerEmu::InputOverrideFunction CreateOpenXRInputOverrideFunction(unsigned int wiimote_index,
-                                                                       bool prefer_left_hand)
+                                                                       bool prefer_left_hand,
+                                                                       bool attachment)
 {
   OpenXRWiimoteState cached_state;
   OpenXRVelocityHistory left_velocity_history;
@@ -235,10 +237,19 @@ ControllerEmu::InputOverrideFunction CreateOpenXRInputOverrideFunction(unsigned 
   float held_ir_y = 0.0f;
   float held_ir_z = 0.0f;
 
-  return [wiimote_index, prefer_left_hand, cached_state, left_velocity_history,
+  return [wiimote_index, prefer_left_hand, attachment, cached_state, left_velocity_history,
           right_velocity_history, offscreen_snapshots, held_ir_x, held_ir_y,
           held_ir_z](std::string_view group_name, std::string_view control_name,
                      ControlState) mutable -> std::optional<ControlState> {
+    // Input the agent server holds wins; this override owns the remote, so it reads it here.
+    if (const std::optional<ControlState> agent = AgentServer::AgentInput::Lookup(
+            attachment ? AgentServer::AgentInput::Device::Attachment :
+                         AgentServer::AgentInput::Device::Wiimote,
+            wiimote_index, group_name, control_name))
+    {
+      return agent;
+    }
+
     if (s_wiimote_sources[wiimote_index].load() != WiimoteSource::OpenXR)
       return std::nullopt;
 
@@ -391,8 +402,8 @@ void UpdateOpenXRInputOverride(unsigned int index, WiimoteSource source)
   if (enable)
   {
     wiimote->SetInputOverrideFunction(
-        CreateOpenXRInputOverrideFunction(index, prefer_left_hand));
-    apply_to_attachments(CreateOpenXRInputOverrideFunction(index, !prefer_left_hand));
+        CreateOpenXRInputOverrideFunction(index, prefer_left_hand, false));
+    apply_to_attachments(CreateOpenXRInputOverrideFunction(index, !prefer_left_hand, true));
   }
   else
   {
@@ -482,6 +493,13 @@ InputConfig* GetConfig()
 {
   return &s_config;
 }
+
+#ifdef ENABLE_VR
+bool IsOpenXRInputOverrideInstalled(unsigned int index)
+{
+  return index < MAX_BBMOTES && s_openxr_overrides[index].enabled;
+}
+#endif
 
 std::optional<OpenXRWiiRemoteState> GetOpenXRWiiRemoteState(unsigned int index)
 {

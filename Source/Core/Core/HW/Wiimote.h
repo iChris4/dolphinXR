@@ -94,6 +94,11 @@ void Resume();
 void Pause();
 std::optional<OpenXRWiiRemoteState> GetOpenXRWiiRemoteState(unsigned int index);
 std::optional<OpenXRWiiRemoteState> GetOpenXRHandState(bool left_hand);
+#ifdef ENABLE_VR
+// The OpenXR source's input override is installed on this remote and its attachments (it also
+// returns the agent server's input). Hold EmulatedController::GetStateLock().
+bool IsOpenXRInputOverrideInstalled(unsigned int index);
+#endif
 
 void DoState(PointerWrap& p);
 InputConfig* GetConfig();

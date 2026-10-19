@@ -2,6 +2,7 @@ add_dolphin_test(MMIOTest MMIOTest.cpp)
 
 if(ENABLE_VR)
   add_dolphin_test(AgentServerTest
+    AgentServer/AgentInputTest.cpp
     AgentServer/HttpParserTest.cpp
     AgentServer/McpServerTest.cpp
     AgentServer/OverrideSessionTest.cpp

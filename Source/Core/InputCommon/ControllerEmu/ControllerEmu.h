@@ -226,6 +226,11 @@ public:
   void SetInputOverrideFunction(InputOverrideFunction override_func);
   void ClearInputOverrideFunction();
   bool HasInputOverrideFunction() const { return static_cast<bool>(m_input_override_function); }
+  // Lets an installer tell its own function (InputOverrideFunction::target) from another one's.
+  const InputOverrideFunction& GetInputOverrideFunction() const
+  {
+    return m_input_override_function;
+  }
 
   std::vector<std::unique_ptr<ControlGroup>> groups;
 

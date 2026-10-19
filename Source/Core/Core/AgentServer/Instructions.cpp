@@ -23,7 +23,7 @@ Workflow 1: VR settings
 - set_look_offset turns the virtual head (yaw/pitch, VR only) to look around without the headset; clear_look_offset afterwards.
 
 Workflow 2: visual fixes with overrides (HUD depth, effects in one eye, black bars, 2D at the wrong place)
-1. screenshot eyes=both, and ask the user what looks wrong in the headset.
+1. screenshot eyes=both, and ask the user what looks wrong in the headset. To check other screens, menus or text boxes, navigate there with press_input (see Controller input).
 2. capture_frame records every draw of one frame. frame_summary gives counts; list_draws filters them (projection=orthographic finds HUD and 2D, perspective the 3D scene; handling, shader, texture, viewport_class). get_draw index=N shows one draw, the overrides that already match it, and an INI stub to start from.
    2D draws routed "2D per eye, head-locked (VirtualScreen is off)" float in front of the user. Turning VirtualScreen on (set_vr_setting, then save_vr_settings for this game) moves all of them to the screen, but in some games it also takes elements that must stay 3D: ask the user. The alternative is a screen override per element, usually a texture override with the text font or sprite texture.
 3. Identify draws with set_preview (mode pink, skip or isolate; indices, shaders, families or textures), take a screenshot, then clear_preview. Draw indices are valid for the captured frame only; hashes stay valid.
@@ -46,6 +46,11 @@ Workflow 4: 60fps code
 4. test_memory_write reference=ref writes={address, type, value=1} (rewritten at every field like an AR 04 code); frames/field should go to about 1.0. Then check the game speed: timers, animations and physics must not run twice as fast (watch_memory a timer, or ask the user). Many games need more than one write.
 5. add_code type=ar with the AR lines (04xxxxxx 00000001 writes a u32 every frame), enabled, then ask the user to play-test.
 - A 60fps code doubles the GPU work: check performance on Quest.
+
+Controller input
+- press_input plays steps on an emulated controller (GameCube pad, Wii Remote or its attachment): each step holds buttons, sticks, analog triggers or the Wii pointer for some VI fields, a step with only frames waits. Hold a button 3 or 4 fields and put a wait step between two presses of the same button. It ends with a screenshot.
+- list_input_controls gives the exact names (write Group/Control when a name is ambiguous, e.g. D-Pad/Up).
+- Tell the user before you navigate: the input goes to their game. Prefer an agent savestate before going through menus that change the game (saving, deleting a file).
 
 Debugger tools
 - set_breakpoint / wait_for_break / get_registers / get_callstack / step_instruction / remove_breakpoint, set_watchpoint / remove_watchpoint, read_memory / write_memory. Debugging mode is enabled when needed and released when no agent breakpoint remains.

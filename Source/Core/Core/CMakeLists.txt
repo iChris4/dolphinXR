@@ -686,6 +686,8 @@ endif()
 if(ENABLE_VR)
   # The Agent Server: an MCP endpoint for AI agents (see AgentServer/AgentServer.h).
   set(AGENT_SERVER_SOURCES
+    AgentServer/AgentInput.cpp
+    AgentServer/AgentInput.h
     AgentServer/AgentServer.cpp
     AgentServer/AgentServer.h
     AgentServer/FrameCounters.cpp
@@ -710,6 +712,7 @@ if(ENABLE_VR)
     AgentServer/Tools/DrawTools.cpp
     AgentServer/Tools/EmulationTools.cpp
     AgentServer/Tools/ExperimentTools.cpp
+    AgentServer/Tools/InputTools.cpp
     AgentServer/Tools/MemoryTools.cpp
     AgentServer/Tools/OverrideTools.cpp
     AgentServer/Tools/ScreenshotTools.cpp
