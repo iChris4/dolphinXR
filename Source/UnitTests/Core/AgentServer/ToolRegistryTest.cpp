@@ -122,3 +122,16 @@ TEST(AgentToolHelpers, MakesCaseInsensitiveRegex)
   EXPECT_FALSE(MakeToolRegex("(?i)"));
   EXPECT_THROW(MakeToolRegex("("), ToolError);
 }
+
+// The frontend reloads its cheat code lists when a code tool writes the game's INI file.
+TEST(AgentServer, NotifiesGameCodeChanges)
+{
+  Server& server = Server::GetInstance();
+  std::vector<std::string> notified;
+  server.SetGameCodesChangedCallback(
+      [&notified](const std::string& game_id) { notified.push_back(game_id); });
+  server.NotifyGameCodesChanged("GXSE8P");
+  server.SetGameCodesChangedCallback(nullptr);
+  server.NotifyGameCodesChanged("GALE01");
+  EXPECT_EQ(notified, std::vector<std::string>{"GXSE8P"});
+}

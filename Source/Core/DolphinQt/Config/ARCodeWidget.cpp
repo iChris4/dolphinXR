@@ -100,6 +100,8 @@ void ARCodeWidget::ConnectWidgets()
 {
   connect(m_warning, &CheatWarningWidget::OpenCheatEnableSettings, this,
           &ARCodeWidget::OpenGeneralSettings);
+  connect(&Settings::Instance(), &Settings::GameCodesChanged, this,
+          &ARCodeWidget::OnGameCodesChanged);
 #ifdef USE_RETRO_ACHIEVEMENTS
   connect(m_hc_warning, &HardcoreWarningWidget::OpenAchievementSettings, this,
           &ARCodeWidget::OpenAchievementSettings);
@@ -117,6 +119,19 @@ void ARCodeWidget::ConnectWidgets()
   connect(m_code_edit, &QPushButton::clicked, this, &ARCodeWidget::OnCodeEditClicked);
   connect(m_code_remove, &QPushButton::clicked, this, &ARCodeWidget::OnCodeRemoveClicked);
   connect(m_code_toggle_all, &QPushButton::clicked, this, &ARCodeWidget::OnCodeToggleAllClicked);
+}
+
+void ARCodeWidget::OnGameCodesChanged(const QString& game_id)
+{
+  if (m_game_id.empty() || game_id.toStdString() != m_game_id)
+    return;
+
+  // The codes in the INI file changed under this list: reload them, or the next change made here
+  // would write the old list back. An open CheatCodeEditor points into the old list, so close it
+  // first, as ChangeGame does.
+  m_cheat_code_editor->reject();
+
+  LoadCodes();
 }
 
 void ARCodeWidget::OnItemChanged(QListWidgetItem* item)

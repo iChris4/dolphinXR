@@ -39,9 +39,7 @@
 #include "DolphinQt/QtUtils/NonDefaultQPushButton.h"
 #include "DolphinQt/QtUtils/QtUtils.h"
 #include "DolphinQt/QtUtils/WrapInScrollArea.h"
-#ifdef USE_RETRO_ACHIEVEMENTS
 #include "DolphinQt/Settings.h"
-#endif  // USE_RETRO_ACHIEVEMENTS
 
 GeckoCodeWidget::GeckoCodeWidget(std::string game_id, std::string gametdb_id, u16 game_revision,
                                  bool restart_required)
@@ -169,6 +167,8 @@ void GeckoCodeWidget::ConnectWidgets()
   connect(m_toggle_all_codes, &QPushButton::clicked, this, &GeckoCodeWidget::ToggleAllCodes);
   connect(m_warning, &CheatWarningWidget::OpenCheatEnableSettings, this,
           &GeckoCodeWidget::OpenGeneralSettings);
+  connect(&Settings::Instance(), &Settings::GameCodesChanged, this,
+          &GeckoCodeWidget::OnGameCodesChanged);
 #ifdef USE_RETRO_ACHIEVEMENTS
   connect(m_hc_warning, &HardcoreWarningWidget::OpenAchievementSettings, this,
           &GeckoCodeWidget::OpenAchievementSettings);
@@ -265,6 +265,23 @@ void GeckoCodeWidget::RemoveCode()
 
   UpdateList();
   SaveCodes();
+}
+
+void GeckoCodeWidget::OnGameCodesChanged(const QString& game_id)
+{
+  if (m_game_id.empty() || game_id.toStdString() != m_game_id)
+    return;
+
+  // The codes in the INI file changed under this list: reload them, or the next change made here
+  // would write the old list back. An open CheatCodeEditor points into the old list, so close it
+  // first, as ChangeGame does.
+  m_cheat_code_editor->reject();
+
+  m_name_label->clear();
+  m_creator_label->clear();
+  m_code_description->clear();
+  m_code_view->clear();
+  LoadCodes();
 }
 
 void GeckoCodeWidget::LoadCodes()

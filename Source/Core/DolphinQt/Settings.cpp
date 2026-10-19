@@ -509,6 +509,11 @@ void Settings::NotifyTextureElementOverridesChanged()
   emit TextureElementOverridesChanged();
 }
 
+void Settings::NotifyGameCodesChanged(const QString& game_id)
+{
+  emit GameCodesChanged(game_id);
+}
+
 void Settings::NotifyRefreshGameListStarted()
 {
   emit GameListRefreshStarted();

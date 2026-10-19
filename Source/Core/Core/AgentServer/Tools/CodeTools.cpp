@@ -52,6 +52,7 @@ void SaveAndApply(const std::vector<ActionReplay::ARCode>& codes)
   ini.Save(path);
   const SConfig& config = SConfig::GetInstance();
   ActionReplay::ApplyCodes(codes, config.GetGameID(), config.GetRevision());
+  Server::GetInstance().NotifyGameCodesChanged(config.GetGameID());
 }
 
 void SaveAndApply(const std::vector<Gecko::GeckoCode>& codes)
@@ -63,6 +64,7 @@ void SaveAndApply(const std::vector<Gecko::GeckoCode>& codes)
   ini.Save(path);
   const SConfig& config = SConfig::GetInstance();
   Gecko::SetActiveCodes(codes, config.GetGameID(), config.GetRevision());
+  Server::GetInstance().NotifyGameCodesChanged(config.GetGameID());
 }
 
 std::string CheatsNote()

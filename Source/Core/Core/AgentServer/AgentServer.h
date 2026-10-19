@@ -71,6 +71,13 @@ public:
   void AddEmulationStoppedCallback(std::function<void()> callback);
   void AddServerStoppedCallback(std::function<void()> callback);
 
+  // The frontend's cheat code lists keep the codes they loaded and write the whole list back on
+  // their next change, which would erase the codes a tool wrote to User/GameSettings/<GameID>.ini.
+  // The frontend sets this callback to reload them; the code tools call NotifyGameCodesChanged on
+  // the server thread after each write.
+  void SetGameCodesChangedCallback(std::function<void(const std::string& game_id)> callback);
+  void NotifyGameCodesChanged(const std::string& game_id);
+
 private:
   Server();
   ~Server();
@@ -83,6 +90,9 @@ private:
   std::mutex m_stopped_callbacks_mutex;
   std::vector<std::function<void()>> m_emulation_stopped_callbacks;
   std::vector<std::function<void()>> m_server_stopped_callbacks;
+
+  std::mutex m_game_codes_callback_mutex;
+  std::function<void(const std::string& game_id)> m_game_codes_changed_callback;
 
   ToolRegistry m_registry;
   std::unique_ptr<McpServer> m_mcp;

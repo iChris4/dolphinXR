@@ -106,6 +106,8 @@ public:
   void RefreshGameList();
   void NotifyShaderOverridesChanged();
   void NotifyTextureElementOverridesChanged();
+  // Something other than the code widgets (the VR agent server) wrote this game's cheat codes.
+  void NotifyGameCodesChanged(const QString& game_id);
   void NotifyRefreshGameListStarted();
   void NotifyRefreshGameListComplete();
   void NotifyMetadataRefreshComplete();
@@ -208,6 +210,7 @@ signals:
   void MetadataRefreshCompleted();
   void ShaderOverridesChanged();
   void TextureElementOverridesChanged();
+  void GameCodesChanged(const QString& game_id);
   void AutoRefreshToggled(bool enabled);
   void CursorVisibilityChanged();
   void LockCursorChanged();

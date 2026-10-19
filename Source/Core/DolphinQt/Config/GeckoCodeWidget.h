@@ -47,6 +47,7 @@ private:
   void OnItemChanged(QListWidgetItem* item);
   void OnListReordered();
   void OnContextMenuRequested();
+  void OnGameCodesChanged(const QString& game_id);
 
   void CreateWidgets();
   void ConnectWidgets();

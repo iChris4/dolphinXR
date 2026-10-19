@@ -283,6 +283,12 @@ MainWindow::MainWindow(Core::System& system, std::unique_ptr<BootParameters> boo
 #ifdef ENABLE_VR
   // Off unless enabled in the VR settings; follows the setting from here on.
   AgentServer::Server::GetInstance().ApplyConfig();
+  // Codes the agent writes reach the cheat code lists (called on the server thread).
+  AgentServer::Server::GetInstance().SetGameCodesChangedCallback([](const std::string& game_id) {
+    QueueOnObject(&Settings::Instance(), [game_id] {
+      Settings::Instance().NotifyGameCodesChanged(QString::fromStdString(game_id));
+    });
+  });
 #endif
 
 #ifdef USE_RETRO_ACHIEVEMENTS
@@ -360,6 +366,7 @@ MainWindow::MainWindow(Core::System& system, std::unique_ptr<BootParameters> boo
 MainWindow::~MainWindow()
 {
 #ifdef ENABLE_VR
+  AgentServer::Server::GetInstance().SetGameCodesChangedCallback(nullptr);
   AgentServer::Server::GetInstance().Shutdown();
 #endif
 

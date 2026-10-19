@@ -269,6 +269,19 @@ void Server::AddServerStoppedCallback(std::function<void()> callback)
   m_server_stopped_callbacks.push_back(std::move(callback));
 }
 
+void Server::SetGameCodesChangedCallback(std::function<void(const std::string& game_id)> callback)
+{
+  std::lock_guard lock(m_game_codes_callback_mutex);
+  m_game_codes_changed_callback = std::move(callback);
+}
+
+void Server::NotifyGameCodesChanged(const std::string& game_id)
+{
+  std::lock_guard lock(m_game_codes_callback_mutex);
+  if (m_game_codes_changed_callback)
+    m_game_codes_changed_callback(game_id);
+}
+
 bool IsTurboOverrideActive()
 {
   return Server::GetInstance().IsTurboOverrideActive();
