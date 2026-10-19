@@ -984,6 +984,10 @@ void VKStagingTexture::CopyFromTextureDirect(const RecordCommand::StagingCopyFro
     CopyFromTextureToLinearImage(src_tex, src_rect, src_layer, src_level, dst_rect);
     src_image = m_linear_image;
     image_copy.imageOffset = {0, 0, 0};
+    // The linear image has one layer and one level: the blit above already selected the source
+    // ones (reading layer src_layer of it, e.g. the right eye, returned black).
+    image_copy.imageSubresource.mipLevel = 0;
+    image_copy.imageSubresource.baseArrayLayer = 0;
   }
 
   vkCmdCopyImageToBuffer(g_command_buffer_mgr->GetCurrentCommandBuffer(), src_image,
