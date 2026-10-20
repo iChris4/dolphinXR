@@ -545,8 +545,7 @@ void CheckForConfigChanges()
     OSD::AddMessage("Video config changed, reloading shaders.", OSD::Duration::NORMAL);
     g_gfx->WaitForGPUIdle();
     g_vertex_manager->InvalidatePipelineObject();
-    g_shader_cache->SetHostConfig(new_host_config);
-    g_shader_cache->Reload();
+    g_shader_cache->Reload(new_host_config);
     g_framebuffer_manager->RecompileShaders();
   }
 

@@ -104,6 +104,13 @@ void ShaderCache::Reload()
   m_async_shader_compiler->ResizeWorkerThreads(g_ActiveConfig.GetShaderCompilerThreads());
 }
 
+void ShaderCache::Reload(const ShaderHostConfig& host_config)
+{
+  WaitForAsyncCompiler();
+  SetHostConfig(host_config);
+  Reload();
+}
+
 void ShaderCache::RetrieveAsyncShaders()
 {
   m_async_shader_compiler->RetrieveWorkItems();

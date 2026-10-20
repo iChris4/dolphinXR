@@ -58,6 +58,11 @@ public:
 
   // Reloads/recreates all shaders and pipelines.
   void Reload();
+  // Switches to a new host config and reloads. Compiles queued with the old host config finish
+  // first: run after the switch, they would generate shaders for the new config, link them with
+  // shaders of the old one (D3D12 rejects those pipelines) and append them to the old config's
+  // disk caches, where the next reload of that config would load them.
+  void Reload(const ShaderHostConfig& host_config);
 
   // Retrieves all pending shaders/pipelines from the async compiler.
   void RetrieveAsyncShaders();

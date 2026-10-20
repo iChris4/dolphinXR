@@ -1086,18 +1086,22 @@ void ObjectCache::DestroyPipelineCache()
 
 void ObjectCache::SavePipelineCache()
 {
-  size_t data_size;
-  VkResult res =
-      vkGetPipelineCacheData(g_vulkan_context->GetDevice(), m_pipeline_cache, &data_size, nullptr);
-  if (res != VK_SUCCESS)
+  // The shader compiler threads may add pipelines between the size query and the copy (a shader
+  // reload restarts them right away), which returns VK_INCOMPLETE: query the size again.
+  std::vector<u8> data;
+  VkResult res = VK_INCOMPLETE;
+  for (int attempt = 0; attempt < 4 && res == VK_INCOMPLETE; ++attempt)
   {
-    LOG_VULKAN_ERROR(res, "vkGetPipelineCacheData failed: ");
-    return;
+    size_t data_size = 0;
+    res = vkGetPipelineCacheData(g_vulkan_context->GetDevice(), m_pipeline_cache, &data_size,
+                                 nullptr);
+    if (res != VK_SUCCESS)
+      break;
+    data.resize(data_size);
+    res = vkGetPipelineCacheData(g_vulkan_context->GetDevice(), m_pipeline_cache, &data_size,
+                                 data.data());
+    data.resize(data_size);
   }
-
-  std::vector<u8> data(data_size);
-  res = vkGetPipelineCacheData(g_vulkan_context->GetDevice(), m_pipeline_cache, &data_size,
-                               data.data());
   if (res != VK_SUCCESS)
   {
     LOG_VULKAN_ERROR(res, "vkGetPipelineCacheData failed: ");
