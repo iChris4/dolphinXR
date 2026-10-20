@@ -96,9 +96,53 @@ private:
                  "OpenGL cannot switch while a game runs: change it in the settings before "
                  "starting the game." :
                  "Shows the game on a flat screen in front of you instead of all around you. "
-                 "Switches right away. The screen's 3D is in the Graphics tab, Stereoscopy.",
+                 "Switches right away; the screen's 3D settings appear below it.",
         Config::GFX_VR_FLAT_SCREEN, touched);
     ImGui::EndDisabled();
+
+    // The flat screen's 3D, under its toggle (VR stereo renders each eye itself).
+    if (Config::Get(Config::GFX_VR_FLAT_SCREEN))
+    {
+      ImGui::Indent();
+      DrawFlatScreenStereo(touched);
+      ImGui::Unindent();
+    }
+  }
+
+  // Dolphin's stereoscopy (Graphics > Enhancements > Stereoscopy) for the flat screen: one image
+  // per eye, with Dolphin's own depth and convergence.
+  static void DrawFlatScreenStereo(MenuWidgets::TouchedKeys* touched)
+  {
+    const StereoMode mode = Config::Get(Config::GFX_STEREO_MODE);
+    bool stereo = mode != StereoMode::Off && mode != StereoMode::OpenXR;
+    if (MenuWidgets::Checkbox("3D",
+                              "Stereoscopic 3D inside the flat screen. Turning it on or off "
+                              "reloads the shaders.",
+                              &stereo))
+    {
+      Config::SetBaseOrCurrent(Config::GFX_STEREO_MODE,
+                               stereo ? StereoMode::SideBySide : StereoMode::Off);
+      if (touched)
+        touched->Add(Config::GFX_STEREO_MODE.GetLocation());
+    }
+    if (!stereo)
+      return;
+
+    MenuWidgets::SliderFloat(
+        "Depth", "Distance between the two cameras: higher values give stronger depth.",
+        Config::GFX_STEREO_DEPTH,
+        {.min = 0.0f, .max = Config::GFX_STEREO_DEPTH_MAXIMUM, .step = 5.0f, .format = "%.0f"},
+        Apply::Live, touched);
+    MenuWidgets::SliderFloat("Convergence",
+                             "Distance at which objects sit on the screen's surface: higher "
+                             "values bring more of the scene out of the screen.",
+                             Config::GFX_STEREO_CONVERGENCE,
+                             {.min = 0.0f,
+                              .max = Config::GFX_STEREO_CONVERGENCE_MAXIMUM,
+                              .step = 5.0f,
+                              .format = "%.0f"},
+                             Apply::Live, touched);
+    MenuWidgets::Checkbox("Swap Eyes", nullptr, Config::GFX_STEREO_SWAP_EYES, touched);
   }
 
   // The "VR Hacks" group of the desktop VR settings.
