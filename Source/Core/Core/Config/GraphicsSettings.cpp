@@ -228,7 +228,7 @@ const Info<bool> GFX_VR_AGENT_SERVER{{System::GFX, "VR", "AgentServer"}, false};
 const Info<int> GFX_VR_AGENT_SERVER_PORT{{System::GFX, "VR", "AgentServerPort"}, 7311};
 const Info<std::string> GFX_VR_AGENT_SERVER_TOKEN{{System::GFX, "VR", "AgentServerToken"}, ""};
 const Info<bool> GFX_VR_VIRTUAL_SCREEN{{System::GFX, "VR", "VirtualScreen"}, true};
-const Info<float> GFX_VR_SCREEN_DISTANCE{{System::GFX, "VR", "ScreenDistance"}, 1.5f};
+const Info<float> GFX_VR_SCREEN_DISTANCE{{System::GFX, "VR", "ScreenDistance"}, 2.0f};
 const Info<float> GFX_VR_SCREEN_SIZE{{System::GFX, "VR", "ScreenSize"}, 1.5f};
 const Info<float> GFX_VR_HEAD_LOCKED_CURVATURE{{System::GFX, "VR", "HeadLockedCurvature"}, 0.0f};
 const Info<bool> GFX_VR_DONT_CLEAR_SCREEN{{System::GFX, "VR", "DontClearScreen"}, false};

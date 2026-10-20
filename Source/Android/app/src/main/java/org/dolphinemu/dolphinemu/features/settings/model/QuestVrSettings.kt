@@ -140,7 +140,7 @@ object QuestVrSettings {
 
     fun virtualScreenSetting() = vrBooleanSetting("VirtualScreen", false)
 
-    fun screenDistanceSetting() = vrFloatSetting("ScreenDistance", 1.5f)
+    fun screenDistanceSetting() = vrFloatSetting("ScreenDistance", 2.0f)
 
     fun screenSizeSetting() = vrFloatSetting("ScreenSize", 1.5f)
 

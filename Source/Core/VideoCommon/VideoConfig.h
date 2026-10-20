@@ -398,7 +398,7 @@ struct VideoConfig final
   // mono (StereoMode::Off), or with Dolphin's own stereoscopy, one image per eye. Used by the
   // "Launch games in VR = off" cinema path on Quest.
   bool vr_flat_screen = false;
-  float vr_screen_distance = 1.5f;
+  float vr_screen_distance = 2.0f;
   float vr_screen_size = 1.5f;
   float vr_hud_thickness = 0.0f;  // World-space depth (m) spread across a 2D layer's ortho-Z (0 = flat)
   float vr_head_locked_curvature = 0.0f;
