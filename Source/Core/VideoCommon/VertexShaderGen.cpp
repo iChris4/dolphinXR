@@ -362,10 +362,26 @@ static void WriteEmulatedVertexBodyHeader(APIType api_type, const ShaderHostConf
   out.Write("}}\n");
 }
 
+bool UseMultiviewVS(APIType api_type, const ShaderHostConfig& host_config)
+{
+  return host_config.vk_multiview && (api_type == APIType::OpenGL || api_type == APIType::Vulkan);
+}
+
 bool UseVRMultiviewVSProjection(APIType api_type, const ShaderHostConfig& host_config)
 {
-  return host_config.vr_stereo && host_config.vk_multiview &&
-         (api_type == APIType::OpenGL || api_type == APIType::Vulkan);
+  return host_config.vr_stereo && UseMultiviewVS(api_type, host_config);
+}
+
+void GenerateMultiviewStereoOffset(ShaderCode& out)
+{
+  // Same formula and same place in the pipeline as the stereo GS: the offset scales with the
+  // vertex depth (w) around the convergence distance. GeometryShaderManager gives orthographic
+  // draws zero offsets, so 2D content stays on the screen plane.
+  out.Write("{{\n"
+            "\tfloat hoffset = (int(gl_ViewIndex) == 0) ? " I_STEREOPARAMS ".x : " I_STEREOPARAMS
+            ".y;\n"
+            "\to.pos.x += hoffset * (o.pos.w - " I_STEREOPARAMS ".z);\n"
+            "}}\n");
 }
 
 // Multiview VR path: replace the projected o.pos with a per-eye HMD projection selected
@@ -628,8 +644,8 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
   ShaderCode input_extract;
 
   // VK_KHR_multiview path: the VS reads gl_ViewIndex (0/1) to select the per-eye
-  // HMD projection. The extension must be declared at the top of the GLSL source.
-  if (UseVRMultiviewVSProjection(api_type, host_config))
+  // HMD projection or stereo offset. The extension must be declared at the top of the source.
+  if (UseMultiviewVS(api_type, host_config))
     out.Write("#extension GL_EXT_multiview : require\n");
 
   out.Write("{}", s_lighting_struct);
@@ -648,11 +664,10 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
   }
 
   // The GSBlock UBO is normally only consumed by the GS (and by VS when expanding
-  // line/point primitives). Under the multiview VR path the VS performs per-eye
-  // projection itself, so it must read the same uniforms.
-  const bool needs_gs_block = uid_data->vs_expand != VSExpand::None ||
-                              (host_config.vr_stereo && host_config.vk_multiview &&
-                               (api_type == APIType::OpenGL || api_type == APIType::Vulkan));
+  // line/point primitives). Under multiview the VS does the GS's per-eye work itself
+  // (VR projection or stereo offset), so it must read the same uniforms.
+  const bool needs_gs_block =
+      uid_data->vs_expand != VSExpand::None || UseMultiviewVS(api_type, host_config);
   if (needs_gs_block)
   {
     out.Write("UBO_BINDING(std140, 4) uniform GSBlock {{\n");
@@ -1186,6 +1201,11 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
               "\to.pos.y = ((ss_pixel_y / (" I_VIEWPORT_SIZE ".y * 0.5f)) - 1.0f);\n"
               "}}\n");
   }
+
+  // Dolphin's own stereoscopy under multiview (VR flat screen): the per-view offset the stereo
+  // GS would apply to this output position.
+  if (UseMultiviewVS(api_type, host_config) && !host_config.vr_stereo)
+    GenerateMultiviewStereoOffset(out);
 
   if (host_config.backend_geometry_shaders)
   {

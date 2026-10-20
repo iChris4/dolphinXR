@@ -1251,8 +1251,7 @@ CreateFramebufferInternal(VKTexture* color_attachment, VKTexture* depth_attachme
   const bool can_use_multiview =
       layers == 2 && samples == 1 && g_vulkan_context->SupportsMultiview();
   const bool automatic_efb_multiview =
-      is_current_efb && can_use_multiview && g_ActiveConfig.vr_use_vulkan_multiview &&
-      g_ActiveConfig.stereo_mode == StereoMode::OpenXR;
+      is_current_efb && can_use_multiview && g_ActiveConfig.UseStereoMultiview();
   const bool use_multiview = force_multiview || automatic_efb_multiview;
   if (use_multiview && !can_use_multiview)
   {

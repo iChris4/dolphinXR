@@ -666,7 +666,8 @@ void VRPane::AddDescriptions()
       "<br><br>This setting cannot be changed while emulation is active."
       "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static constexpr char TR_USE_VULKAN_MULTIVIEW_DESCRIPTION[] = QT_TR_NOOP(
-      "Uses Vulkan multiview for OpenXR stereo rendering when the GPU and runtime support it."
+      "Uses Vulkan multiview for OpenXR stereo rendering, and for the 3D of the Flat Screen, "
+      "when the GPU and runtime support it."
       "<br><br>This renders both eyes through a multiview render pass instead of using "
       "geometry-shader stereo expansion, which can be much faster on Quest/Adreno."
       "<br><br>This setting only affects the Vulkan backend and requires restarting emulation."

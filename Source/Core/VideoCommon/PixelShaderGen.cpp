@@ -572,8 +572,7 @@ uint WrapCoord(int coord, uint wrap, int size) {{
 
   out.Write("\nint4 sampleTexture(uint texmap, in sampler2DArray tex, int2 uv, int layer) {{\n");
 
-  if (host_config.vr_stereo && host_config.vk_multiview &&
-      (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
+  if (host_config.vk_multiview && (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
   {
     // Multiview renders one fragment shader invocation per eye, but most game textures are still
     // single-layer sampler2DArray views. Clamp per sampled texture so EFB/XFB/effect copies can
@@ -792,8 +791,7 @@ ShaderCode GeneratePixelShaderCode(APIType api_type, const ShaderHostConfig& hos
   const bool stereo = host_config.stereo;
   const u32 numStages = uid_data->genMode_numtevstages + 1;
 
-  if (host_config.vr_stereo && host_config.vk_multiview &&
-      (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
+  if (host_config.vk_multiview && (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
   {
     out.Write("#extension GL_EXT_multiview : require\n");
   }
@@ -1003,8 +1001,7 @@ ShaderCode GeneratePixelShaderCode(APIType api_type, const ShaderHostConfig& hos
     out.Write("\tfloat4 ocol1;\n");
   }
 
-  if (host_config.vr_stereo && host_config.vk_multiview &&
-      (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
+  if (host_config.vk_multiview && (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
   {
     // Use the active multiview eye for stereo render targets. sampleTexture() clamps against the
     // actual texture depth, so normal single-layer textures stay on layer 0.

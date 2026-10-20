@@ -190,7 +190,7 @@ union ShaderHostConfig
   BitField<28, 1, bool, u32> backend_vs_point_line_expand;
   BitField<29, 1, bool, u32> backend_gl_layer_in_fs;
   BitField<30, 1, bool, u32> vr_stereo;  // OpenXR per-eye HMD projection active
-  BitField<31, 1, bool, u32> vk_multiview;  // VK_KHR_multiview path: VS does per-eye, GS skips stereo
+  BitField<31, 1, bool, u32> vk_multiview;  // VK_KHR_multiview: VS does per-view, no stereo GS
 
   static ShaderHostConfig GetCurrent();
 };

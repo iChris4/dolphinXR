@@ -101,8 +101,7 @@ ShaderCode GenPixelShader(APIType api_type, const ShaderHostConfig& host_config,
   ASSERT_MSG(VIDEO, !(use_dual_source && use_framebuffer_fetch),
              "If you're using framebuffer fetch, you shouldn't need dual source blend!");
 
-  if (host_config.vr_stereo && host_config.vk_multiview &&
-      (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
+  if (host_config.vk_multiview && (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
   {
     out.Write("#extension GL_EXT_multiview : require\n");
   }
@@ -637,8 +636,7 @@ ShaderCode GenPixelShader(APIType api_type, const ShaderHostConfig& host_config,
               "  float4 ocol1;\n");
   }
 
-  if (host_config.vr_stereo && host_config.vk_multiview &&
-      (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
+  if (host_config.vk_multiview && (api_type == APIType::OpenGL || api_type == APIType::Vulkan))
   {
     // Use the active multiview eye for stereo render targets. sampleTexture() clamps against the
     // actual texture depth, so normal single-layer textures stay on layer 0.

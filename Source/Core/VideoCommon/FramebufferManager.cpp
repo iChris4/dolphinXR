@@ -231,9 +231,9 @@ FramebufferState FramebufferManager::GetEFBFramebufferState(bool with_coverage) 
   // the EFB must use a multiview-compatible render pass. The actual capability check
   // happens backend-side; this flag merely propagates intent through pipeline config.
   ret.multiview = (m_efb_color_texture->GetLayers() == 2 && ret.samples == 1 &&
-                   g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
-                   g_ActiveConfig.vr_use_vulkan_multiview &&
-                   g_backend_info.bSupportsMultiview) ? 1u : 0u;
+                   g_ActiveConfig.UseStereoMultiview()) ?
+                      1u :
+                      0u;
   // EFB foveation (Vulkan VR): pipelines must target the fragment-density-map render
   // pass the backend gave the EFB framebuffer. Latched, so always consistent with it.
   ret.fragment_density_map = IsEFBFoveated() ? 1u : 0u;
@@ -355,6 +355,10 @@ bool FramebufferManager::CreateEFBFramebuffer(int efb_scale)
   if (!m_efb_framebuffer || !m_efb_convert_framebuffer)
     return false;
 
+  INFO_LOG_FMT(VIDEO, "EFB created: {}x{}, {} layer(s), stereo_mode={}, multiview={}", width,
+               height, efb_color_texture_config.layers,
+               static_cast<int>(g_ActiveConfig.stereo_mode),
+               GetEFBFramebufferState().multiview != 0);
   INFO_LOG_FMT(VIDEO,
                "VR passthrough at EFB creation: enabled={} (config={} stereo_openxr={} "
                "coverage_support={} sample_counts={:#x} msaa={})",

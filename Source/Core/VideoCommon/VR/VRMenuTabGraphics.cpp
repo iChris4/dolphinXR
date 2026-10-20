@@ -155,8 +155,10 @@ private:
 
     // Multiview needs single-sampled eye targets, so any MSAA or SSAA mode falls back to
     // rendering each eye separately (see ShaderGenCommon's vk_multiview bit).
-    if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && g_backend_info.bSupportsMultiview &&
-        g_ActiveConfig.vr_use_vulkan_multiview)
+    const bool stereo =
+        g_ActiveConfig.stereo_mode == StereoMode::OpenXR ||
+        (g_ActiveConfig.vr_flat_screen && g_ActiveConfig.stereo_mode != StereoMode::Off);
+    if (stereo && g_backend_info.bSupportsMultiview && g_ActiveConfig.vr_use_vulkan_multiview)
     {
       ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
       ImGui::TextWrapped("MSAA and SSAA turn off Vulkan multiview (both eyes in one pass), which "

@@ -48,14 +48,16 @@ ShaderCode GenVertexShader(APIType api_type, const ShaderHostConfig& host_config
   // Vertices come from the vertex SSBO (and are decoded here) rather than vertex attributes.
   const bool vertex_loader = host_config.backend_dynamic_vertex_loader || vs_expand;
   const u32 num_texgen = uid_data->num_texgens;
-  // Multiview VR path: no GS stage for triangles, so this VS applies the per-eye HMD
-  // projection itself via gl_ViewIndex (shared with the specialized VS generator).
+  // Multiview path: no GS stage for triangles, so this VS does the GS's per-eye work itself via
+  // gl_ViewIndex (shared with the specialized VS generator): the HMD projection in OpenXR stereo,
+  // or Dolphin's stereo offset on the VR flat screen.
+  const bool multiview_vs = UseMultiviewVS(api_type, host_config);
   const bool vr_multiview_vs = UseVRMultiviewVSProjection(api_type, host_config);
   ShaderCode out;
 
   out.Write("// {}\n\n", *uid_data);
 
-  if (vr_multiview_vs)
+  if (multiview_vs)
     out.Write("#extension GL_EXT_multiview : require\n");
 
   out.Write("{}", s_lighting_struct);
@@ -66,8 +68,8 @@ ShaderCode GenVertexShader(APIType api_type, const ShaderHostConfig& host_config
   out.Write("}};\n");
 
   // The GSBlock UBO is consumed here by the dynamic vertex loader (vs_expand,
-  // vertex_stride, ...) and by the multiview VR path (per-eye projection uniforms).
-  if (vertex_loader || vr_multiview_vs)
+  // vertex_stride, ...) and by the multiview path (per-eye projection or stereo offset).
+  if (vertex_loader || multiview_vs)
   {
     out.Write("UBO_BINDING(std140, 4) uniform GSBlock {{\n");
     out.Write("{}", s_geometry_shader_uniforms);
@@ -563,6 +565,11 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
               "\to.pos.y = ((ss_pixel_y / (" I_VIEWPORT_SIZE ".y * 0.5f)) - 1.0f);\n"
               "}}\n");
   }
+
+  // Dolphin's own stereoscopy under multiview (VR flat screen): the per-view offset the stereo
+  // GS would apply to this output position.
+  if (multiview_vs && !host_config.vr_stereo)
+    GenerateMultiviewStereoOffset(out);
 
   if (host_config.backend_geometry_shaders)
   {

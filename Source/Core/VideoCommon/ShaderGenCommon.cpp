@@ -78,9 +78,9 @@ ShaderHostConfig ShaderHostConfig::GetCurrent()
   bits.backend_gl_layer_in_fs = g_backend_info.bSupportsGLLayerInFS;
 #ifdef ENABLE_VR
   bits.vr_stereo = g_ActiveConfig.stereo_mode == StereoMode::OpenXR;
-  bits.vk_multiview = bits.vr_stereo && g_backend_info.bSupportsMultiview &&
-                      g_ActiveConfig.vr_use_vulkan_multiview &&
-                      g_ActiveConfig.iMultisamples == 1;
+  // OpenXR stereo, or the VR flat screen's own stereoscopy (vr_stereo off: the VS only applies
+  // Dolphin's per-view stereo offset).
+  bits.vk_multiview = g_ActiveConfig.UseStereoMultiview();
 #endif
   return bits;
 }

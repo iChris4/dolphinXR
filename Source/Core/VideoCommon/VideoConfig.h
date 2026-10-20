@@ -482,20 +482,33 @@ struct VideoConfig final
   VertexLoaderType vertex_loader_type;
 
   // Utility
+  // The 2-layer stereo EFB is rendered through VK_KHR_multiview: both views in one render pass,
+  // no geometry shader. Used by OpenXR stereo (the VS applies the per-eye HMD projection) and by
+  // the VR flat screen with Dolphin's own stereoscopy (the VS applies the per-view stereo
+  // offset). Desktop stereoscopy keeps the stereo GS. Multiview needs single-sampled targets.
+  // The shader host config, the EFB framebuffer state, the Vulkan EFB framebuffer and
+  // UseVSForLinePointExpand all derive from this, so they always agree.
+  bool UseStereoMultiview() const
+  {
+#ifdef ENABLE_VR
+    if (!vr_use_vulkan_multiview || !g_backend_info.bSupportsMultiview || iMultisamples != 1)
+      return false;
+    return stereo_mode == StereoMode::OpenXR || (vr_flat_screen && stereo_mode != StereoMode::Off);
+#else
+    return false;
+#endif
+  }
   bool UseVSForLinePointExpand() const
   {
     if (!g_backend_info.bSupportsVSLinePointExpand)
       return false;
-#ifdef ENABLE_VR
     // VK_KHR_multiview drops the GS stage entirely, so points/lines must be VS-expanded.
     // Must match ShaderHostConfig's vk_multiview bit exactly: on backends without multiview
-    // (D3D11/D3D12), OpenXR stereo still renders through the stereo GS, and forcing VS expand
+    // (D3D11/D3D12), stereo still renders through the stereo GS, and forcing VS expand
     // here desyncs the D3D12 GX root signature, which binds either the VS-expand CBV or the
     // GS CBV — every GS-bearing PSO then fails to build (E_INVALIDARG) and nothing draws.
-    if (stereo_mode == StereoMode::OpenXR && vr_use_vulkan_multiview &&
-        g_backend_info.bSupportsMultiview && iMultisamples == 1)
+    if (UseStereoMultiview())
       return true;
-#endif
     if (!g_backend_info.bSupportsGeometryShaders)
       return true;
     return bPreferVSForLinePointExpansion;
