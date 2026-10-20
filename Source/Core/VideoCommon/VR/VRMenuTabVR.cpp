@@ -66,10 +66,10 @@ public:
     MenuWidgets::TouchedKeys* touched = &context.touched;
     DrawMode(touched);
     DrawRendering(touched);
+    DrawPassthrough(context.flat_screen, touched);
     DrawScreen(context, touched);
     if (!context.flat_screen)
       DrawCamera(touched);
-    DrawPassthrough(context.flat_screen, touched);
     MenuWidgets::SectionHeader("Menu");
     MenuWidgets::Combo<VRMenuToggleButton>(
         "Open Menu With",
@@ -90,7 +90,7 @@ private:
     // OpenGL picks its depth setup for VR stereo or the flat screen when the game starts.
     const bool locked = g_backend_info.api_type == APIType::OpenGL;
     ImGui::BeginDisabled(locked);
-    MenuWidgets::Checkbox(
+    const bool flat_changed = MenuWidgets::Checkbox(
         "Flat Screen",
         locked ? "Shows the game on a flat screen in front of you instead of all around you. "
                  "OpenGL cannot switch while a game runs: change it in the settings before "
@@ -99,6 +99,15 @@ private:
                  "Switches right away; the screen's 3D settings appear below it.",
         Config::GFX_VR_FLAT_SCREEN, touched);
     ImGui::EndDisabled();
+    // Passthrough is on by default on the flat screen. A choice made there lasts until the flat
+    // screen is turned off: the next one starts with passthrough on again, and VR stereo keeps
+    // following the Passthrough setting.
+    if (flat_changed && !Config::Get(Config::GFX_VR_FLAT_SCREEN) &&
+        Config::GetLayer(Config::LayerType::CurrentRun)
+            ->DeleteKey(Config::GFX_VR_FLAT_SCREEN_PASSTHROUGH.GetLocation()))
+    {
+      Config::OnConfigChanged();
+    }
 
     // The flat screen's 3D, under its toggle (VR stereo renders each eye itself).
     if (Config::Get(Config::GFX_VR_FLAT_SCREEN))
@@ -417,11 +426,23 @@ private:
       return;
 
     MenuWidgets::SectionHeader("Passthrough");
-    MenuWidgets::Checkbox("Passthrough",
-                          flat_screen ? "Show your surroundings around the screen." :
-                                        "Show your surroundings where the game draws nothing.",
+    if (flat_screen)
+    {
+      // Its own setting, on by default: changed here for this session only (see DrawMode).
+      bool passthrough = Config::Get(Config::GFX_VR_FLAT_SCREEN_PASSTHROUGH);
+      if (MenuWidgets::Checkbox("Passthrough",
+                                "Show your surroundings around the screen. On by default with "
+                                "the flat screen; VR keeps its own Passthrough setting.",
+                                &passthrough))
+      {
+        Config::SetCurrent(Config::GFX_VR_FLAT_SCREEN_PASSTHROUGH, passthrough);
+      }
+      return;
+    }
+
+    MenuWidgets::Checkbox("Passthrough", "Show your surroundings where the game draws nothing.",
                           Config::GFX_VR_PASSTHROUGH, touched);
-    if (!flat_screen && Config::Get(Config::GFX_VR_PASSTHROUGH))
+    if (Config::Get(Config::GFX_VR_PASSTHROUGH))
     {
       MenuWidgets::SliderFloat("Scene Opacity", nullptr, Config::GFX_VR_PASSTHROUGH_SCENE_OPACITY,
                                {.min = Config::GFX_VR_PASSTHROUGH_SCENE_OPACITY_MIN,

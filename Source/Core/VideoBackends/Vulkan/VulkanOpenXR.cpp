@@ -604,13 +604,10 @@ bool VulkanOpenXR::Initialize()
 #if defined(_WIN32) || defined(ANDROID)
   // Windows desktop and Quest standalone: keep coverage only when the OpenXR runtime
   // can actually composite it (XR_FB_passthrough or an ALPHA_BLEND environment). The flat
-  // screen's passthrough needs no coverage, only the runtime's support.
+  // screen's passthrough has its own setting and needs no coverage.
   g_backend_info.bSupportsVRPassthroughCoverage &=
       VR::g_openxr->SupportsPassthrough();
-  const bool passthrough_possible = g_ActiveConfig.vr_flat_screen ?
-                                        VR::g_openxr->SupportsPassthrough() :
-                                        g_backend_info.bSupportsVRPassthroughCoverage;
-  if (g_ActiveConfig.vr_passthrough && !passthrough_possible)
+  if (g_ActiveConfig.vr_passthrough && !g_backend_info.bSupportsVRPassthroughCoverage)
   {
     OSD::AddMessage("Passthrough disabled: this OpenXR runtime does not expose a compatible "
                     "passthrough mode.",

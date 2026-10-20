@@ -283,6 +283,9 @@ extern const Info<bool> GFX_VR_SKIP_BACKGROUND_FILL;
 extern const Info<bool> GFX_VR_METROID_THERMAL_VISOR_FIX;
 extern const Info<bool> GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX;
 extern const Info<bool> GFX_VR_PASSTHROUGH;
+// Passthrough around the flat screen. On by default; the in-game VR menu changes it for the
+// session only, and turning the flat screen off from the menu resets it.
+extern const Info<bool> GFX_VR_FLAT_SCREEN_PASSTHROUGH;
 extern const Info<bool> GFX_VR_PASSTHROUGH_REMOVE_BLACK_BG;
 extern const Info<bool> GFX_VR_PASSTHROUGH_REMOVE_BLACK_CLEARS;
 extern const Info<float> GFX_VR_PASSTHROUGH_SCENE_OPACITY;

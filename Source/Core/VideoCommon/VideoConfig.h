@@ -428,6 +428,8 @@ struct VideoConfig final
   bool vr_metroid_thermal_visor_fix = false;  // Preserve thermal EFB copy layers for MP1 Vulkan
   bool vr_metroid_d3d_thermal_palette_fix = false;  // Layered MP1 thermal palette conversion on D3D11
   bool vr_passthrough = false;  // Show the headset camera feed behind unrendered (transparent) areas
+  // Show the headset camera feed around the flat screen (GFX_VR_FLAT_SCREEN_PASSTHROUGH).
+  bool vr_flat_screen_passthrough = true;
   // Reveal EFB regions untouched by game color draws or clears. Off initializes coverage
   // opaque so only elements marked with Passthrough overrides make holes.
   bool vr_passthrough_remove_black_bg = true;
@@ -540,9 +542,10 @@ struct VideoConfig final
   }
   // Flat screen passthrough: the room shows around the opaque panel, as in PPSSPP VR. Nothing
   // in the game image is see-through, so no coverage target is needed and any backend works.
+  // It has its own setting, on by default, so the VR Passthrough setting is unchanged by it.
   bool VRFlatPassthroughEnabled() const
   {
-    return vr_passthrough && vr_flat_screen && stereo_mode != StereoMode::OpenXR;
+    return vr_flat_screen_passthrough && vr_flat_screen && stereo_mode != StereoMode::OpenXR;
   }
   // Whether the headset's camera feed is composited behind the game layers at all.
   bool VRPassthroughLayerActive() const
