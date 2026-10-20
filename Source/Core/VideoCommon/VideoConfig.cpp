@@ -523,6 +523,12 @@ void CheckForConfigChanges()
 
   float old_scale = g_framebuffer_manager->GetEFBScale();
 
+  // A switch between VR stereo and the flat screen while a game runs: EFB foveation is a VR
+  // stereo choice, so the new EFB decides it again (the host config changed with the mode, so the
+  // shaders and EFB pipelines are rebuilt below).
+  if ((old_stereo == StereoMode::OpenXR) != (g_ActiveConfig.stereo_mode == StereoMode::OpenXR))
+    g_framebuffer_manager->ResetEFBFoveation();
+
   // Framebuffer changed?
   if (changed_bits & (CONFIG_CHANGE_BIT_MULTISAMPLES | CONFIG_CHANGE_BIT_STEREO_MODE |
                       CONFIG_CHANGE_BIT_TARGET_SIZE | CONFIG_CHANGE_BIT_HDR) ||

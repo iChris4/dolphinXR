@@ -79,6 +79,9 @@ public:
   // pass layout, so it must not flip mid-session (setting changes need a restart).
   // The backend consults this when creating the EFB framebuffer to attach the map.
   bool IsEFBFoveated() const { return m_efb_foveated.value_or(false); }
+  // Decide foveation again at the next EFB creation. Only for a switch between VR stereo and the
+  // flat screen, which also reloads the shaders and rebuilds the EFB pipelines.
+  void ResetEFBFoveation() { m_efb_foveated.reset(); }
 
   // EFB coordinate conversion functions
   // Use this to convert a whole native EFB rect to backbuffer coordinates

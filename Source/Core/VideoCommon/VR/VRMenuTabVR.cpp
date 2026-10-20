@@ -64,6 +64,7 @@ public:
   void Draw(VRMenuContext& context) override
   {
     MenuWidgets::TouchedKeys* touched = &context.touched;
+    DrawMode(touched);
     DrawRendering(touched);
     DrawScreen(context, touched);
     if (!context.flat_screen)
@@ -81,6 +82,25 @@ public:
   }
 
 private:
+  // VR stereo or the flat screen. The switch happens at the next frame: the eye swapchains, the
+  // EFB and the shaders are rebuilt for the new mode.
+  static void DrawMode(MenuWidgets::TouchedKeys* touched)
+  {
+    MenuWidgets::SectionHeader("Mode");
+    // OpenGL picks its depth setup for VR stereo or the flat screen when the game starts.
+    const bool locked = g_backend_info.api_type == APIType::OpenGL;
+    ImGui::BeginDisabled(locked);
+    MenuWidgets::Checkbox(
+        "Flat Screen",
+        locked ? "Shows the game on a flat screen in front of you instead of all around you. "
+                 "OpenGL cannot switch while a game runs: change it in the settings before "
+                 "starting the game." :
+                 "Shows the game on a flat screen in front of you instead of all around you. "
+                 "Switches right away. The screen's 3D is in the Graphics tab, Stereoscopy.",
+        Config::GFX_VR_FLAT_SCREEN, touched);
+    ImGui::EndDisabled();
+  }
+
   // The "VR Hacks" group of the desktop VR settings.
   static void DrawVRHacks(MenuWidgets::TouchedKeys* touched)
   {
@@ -247,7 +267,7 @@ private:
                              Apply::Live, touched);
     if (context.flat_screen)
     {
-      DrawFlatScreen3D(touched);
+      DrawFlatScreenAspect(touched);
       return;
     }
 
@@ -332,46 +352,14 @@ private:
                           Config::GFX_VR_ENABLE_CONTROLLER_ANCHOR, touched);
   }
 
-  // Flat screen: the panel's aspect ratio, and Dolphin's stereoscopic 3D (Graphics >
-  // Enhancements > Stereoscopy), which gives the panel depth with one image per eye.
-  static void DrawFlatScreen3D(MenuWidgets::TouchedKeys* touched)
+  // Flat screen: the panel's aspect ratio. Its 3D is in the Graphics tab (Stereoscopy).
+  static void DrawFlatScreenAspect(MenuWidgets::TouchedKeys* touched)
   {
     MenuWidgets::Combo<AspectMode>(
         "Aspect Ratio",
         "Auto picks 4:3 or 16:9 from the game: the Wii's screen setting, or what a GameCube game "
         "draws. Force a ratio when it guesses wrong.",
         Config::GFX_ASPECT_RATIO, ASPECT_MODES, touched);
-
-    const StereoMode mode = Config::Get(Config::GFX_STEREO_MODE);
-    bool stereo = mode != StereoMode::Off && mode != StereoMode::OpenXR;
-    if (MenuWidgets::Checkbox("3D",
-                              "Stereoscopic 3D inside the screen. Turning it on or off "
-                              "reloads the shaders.",
-                              &stereo))
-    {
-      Config::SetBaseOrCurrent(Config::GFX_STEREO_MODE,
-                               stereo ? StereoMode::SideBySide : StereoMode::Off);
-      if (touched)
-        touched->Add(Config::GFX_STEREO_MODE.GetLocation());
-    }
-    if (!stereo)
-      return;
-
-    MenuWidgets::SliderFloat(
-        "3D Depth", "Distance between the two cameras: higher values give stronger depth.",
-        Config::GFX_STEREO_DEPTH,
-        {.min = 0.0f, .max = Config::GFX_STEREO_DEPTH_MAXIMUM, .step = 5.0f, .format = "%.0f"},
-        Apply::Live, touched);
-    MenuWidgets::SliderFloat("3D Convergence",
-                             "Distance at which objects sit on the screen's surface: higher "
-                             "values bring more of the scene out of the screen.",
-                             Config::GFX_STEREO_CONVERGENCE,
-                             {.min = 0.0f,
-                              .max = Config::GFX_STEREO_CONVERGENCE_MAXIMUM,
-                              .step = 5.0f,
-                              .format = "%.0f"},
-                             Apply::Live, touched);
-    MenuWidgets::Checkbox("Swap Eyes", nullptr, Config::GFX_STEREO_SWAP_EYES, touched);
   }
 
   static void DrawPassthrough(bool flat_screen, MenuWidgets::TouchedKeys* touched)

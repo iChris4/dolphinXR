@@ -265,6 +265,9 @@ private:
   void UpdateEyeResolutionScale();
   float m_pending_eye_resolution_scale = 0.0f;
   u64 m_pending_eye_resolution_since_us = 0;
+  // Live switch between VR stereo and the flat screen: rebuilds the eye swapchains for the new
+  // mode (see OpenXRManager::UpdateSwapchainMode).
+  void UpdateOpenXRSwapchainMode();
 #endif
 };
 

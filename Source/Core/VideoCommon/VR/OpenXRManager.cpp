@@ -1083,6 +1083,55 @@ bool OpenXRManager::ChangeEyeResolutionScale(float scale)
   return recreated;
 }
 
+bool OpenXRManager::UpdateSwapchainMode(bool flat_screen)
+{
+  if (!m_swapchain || flat_screen == m_swapchains_flat)
+    return true;
+
+  // Android finalizes frames on the submit worker, which still references the eye images.
+  if (!m_swapchain->WaitForPendingFrameFinalization("VR mode switch"))
+    return false;
+
+  // CreateSwapchainSet reads the new mode from the config: layered and foveated images are for
+  // VR stereo only, the flat panel uses one plain swapchain per eye.
+  const u64 start_us = Common::Timer::NowUs();
+  const bool paused = PauseFrameThread();
+  const u64 generation = m_swapchain_generation.load();
+  // Never swap swapchains under a running pacing thread.
+  const bool recreated =
+      (paused || !IsFrameThreadActive()) && m_swapchain->RecreateEyeSwapchains(generation);
+  if (recreated)
+  {
+    m_swapchain_generation.store(generation + 1);
+    m_swapchains_flat = flat_screen;
+  }
+  if (paused)
+    ResumeFrameThread();
+
+  if (!recreated)
+  {
+    if (!m_swapchain_mode_switch_failed)
+    {
+      ERROR_LOG_FMT(OPENXR, "OpenXR: could not recreate the eye swapchains for the {}; retrying.",
+                    flat_screen ? "flat screen" : "VR stereo");
+    }
+    m_swapchain_mode_switch_failed = true;
+    return false;
+  }
+
+  m_swapchain_mode_switch_failed = false;
+  if (flat_screen)
+  {
+    // The panel appears in front of the head, as when a game starts on the flat screen.
+    std::lock_guard lock(m_flat_screen_anchor_mutex);
+    m_flat_screen_anchor.reset();
+  }
+  INFO_LOG_FMT(OPENXR, "OpenXR: switched to the {}: eye swapchains generation {} -> {}, {} us",
+               flat_screen ? "flat screen" : "VR stereo", generation, generation + 1,
+               Common::Timer::NowUs() - start_us);
+  return true;
+}
+
 bool OpenXRManager::IsSwapchainGenerationRetired(u64 generation) const
 {
   // Once a newer generation was submitted the pacing thread never re-submits older content.
@@ -1138,6 +1187,11 @@ void OpenXRManager::SetSwapchain(IOpenXRSwapchain* swapchain)
   }
 
   m_swapchain = swapchain;
+  // The backend just made the eye swapchains for the current mode.
+  m_swapchains_flat =
+      g_ActiveConfig.vr_flat_screen && g_ActiveConfig.stereo_mode != StereoMode::OpenXR;
+  m_swapchain_mode_switch_failed = false;
+  m_flat_rendered_generation = ~u64{0};
   if (!swapchain->SupportsDetachedFrameLoop())
   {
     INFO_LOG_FMT(OPENXR, "OpenXR: backend requires the inline frame flow (no pacing thread).");
@@ -3277,7 +3331,10 @@ bool OpenXRManager::SubmitFlatQuadFrame(const FlatQuadSource& left,
   const auto valid = [](const FlatQuadSource& source) {
     return source.swapchain != XR_NULL_HANDLE && source.width != 0 && source.height != 0;
   };
-  if (!valid(left))
+  // Nothing to show until the panel images of the current swapchain generation were rendered
+  // once (session start, or a switch from VR stereo): with the pacing thread the last content
+  // stays up, the legacy flow ends the frame empty.
+  if (!valid(left) || m_flat_rendered_generation != m_swapchain_generation.load())
     return IsFrameThreadActive() ? true : EndFrame({});
   // A right image that can't be shown leaves a single quad both eyes see.
   const bool stereo = right.has_value() && valid(*right);

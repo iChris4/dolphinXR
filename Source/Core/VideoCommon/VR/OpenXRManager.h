@@ -410,6 +410,16 @@ public:
   // compositor can no longer reference swapchains of `generation`.
   bool IsSwapchainGenerationRetired(u64 generation) const;
 
+  // ---- Live switch between VR stereo and the flat screen (GFX_VR_FLAT_SCREEN) ----
+  // Video thread, at a present: when the eye swapchains were made for the other mode (VR stereo
+  // uses layered and foveated images), rebuilds them like a resolution change. Switching to the
+  // flat screen places the panel in front of the head again. Returns false and keeps the old
+  // swapchains on failure (the caller retries at a later present).
+  bool UpdateSwapchainMode(bool flat_screen);
+  // Video thread: the flat panel images of the current swapchain generation were rendered, so
+  // the panel quads may reference them.
+  void NoteFlatImagesRendered() { m_flat_rendered_generation = m_swapchain_generation.load(); }
+
   // ---- Accessors ----
 
   XrInstance GetInstance() const { return m_instance; }
@@ -863,6 +873,11 @@ private:
   std::array<XrViewConfigurationView, 2> m_recommended_view_config_views{};
   float m_eye_resolution_scale = 1.0f;
   float m_failed_eye_resolution_scale = 0.0f;  // Video thread only.
+  // The mode the eye swapchains were made for (see UpdateSwapchainMode). Video thread only.
+  bool m_swapchains_flat = false;
+  bool m_swapchain_mode_switch_failed = false;
+  // Swapchain generation whose flat panel images were rendered (NoteFlatImagesRendered).
+  u64 m_flat_rendered_generation = ~u64{0};
   void ApplyEyeResolutionScale(float scale);
 
   // Eye swapchain generations (see IsSwapchainGenerationRetired).

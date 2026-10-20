@@ -65,7 +65,8 @@ const std::vector<VRSetting>& GetVRSettings()
 {
   static const std::vector<VRSetting> settings = {
       Entry(Config::GFX_VR_ENABLE_OPENXR, "restart the game"),
-      Entry(Config::GFX_VR_FLAT_SCREEN, "flat screen instead of stereo; restart the game"),
+      Entry(Config::GFX_VR_FLAT_SCREEN,
+            "flat screen instead of stereo; switches live (OpenGL: restart the game)"),
       Entry(Config::GFX_VR_UNITS_PER_METER, "world scale: game units per meter"),
       Entry(Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE),
       Entry(Config::GFX_VR_LEAN_BACK_ANGLE, "degrees"),

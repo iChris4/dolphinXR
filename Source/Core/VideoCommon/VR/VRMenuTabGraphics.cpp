@@ -21,6 +21,8 @@ namespace VR
 {
 namespace
 {
+using MenuWidgets::Apply;
+
 constexpr std::array<std::pair<ShaderCompilationMode, const char*>, 4> SHADER_COMPILATION_MODES{{
     {ShaderCompilationMode::Synchronous, "Specialized (Default)"},
     {ShaderCompilationMode::SynchronousUberShaders, "Exclusive Ubershaders"},
@@ -62,6 +64,7 @@ public:
   {
     MenuWidgets::TouchedKeys* touched = &context.touched;
     DrawEnhancements(touched);
+    DrawStereoscopy(context, touched);
     DrawShaderCompilation(touched);
     DrawHacks(touched);
     DrawSaveForGameSection(context);
@@ -94,6 +97,52 @@ private:
     MenuWidgets::Checkbox("Arbitrary Mipmap Detection",
                           "Detects textures with custom mipmaps (e.g. depth effects).",
                           Config::GFX_ENHANCE_ARBITRARY_MIPMAP_DETECTION, touched);
+  }
+
+  // Dolphin's stereoscopy (Enhancements > Stereoscopy): the flat screen's 3D, one image per eye.
+  // VR stereo renders each eye from its own position instead, so these only apply to the flat
+  // screen; they stay editable in VR to prepare a switch.
+  static void DrawStereoscopy(const VRMenuContext& context, MenuWidgets::TouchedKeys* touched)
+  {
+    MenuWidgets::SectionHeader("Stereoscopy");
+    if (!context.flat_screen)
+    {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+      ImGui::TextWrapped("For the Flat Screen (VR tab, Mode). In VR, each eye already sees the "
+                         "game from its own position.");
+      ImGui::PopStyleColor();
+    }
+
+    const StereoMode mode = Config::Get(Config::GFX_STEREO_MODE);
+    bool stereo = mode != StereoMode::Off && mode != StereoMode::OpenXR;
+    if (MenuWidgets::Checkbox("3D",
+                              "Stereoscopic 3D inside the flat screen. Turning it on or off "
+                              "reloads the shaders.",
+                              &stereo))
+    {
+      Config::SetBaseOrCurrent(Config::GFX_STEREO_MODE,
+                               stereo ? StereoMode::SideBySide : StereoMode::Off);
+      if (touched)
+        touched->Add(Config::GFX_STEREO_MODE.GetLocation());
+    }
+    if (!stereo)
+      return;
+
+    MenuWidgets::SliderFloat(
+        "Depth", "Distance between the two cameras: higher values give stronger depth.",
+        Config::GFX_STEREO_DEPTH,
+        {.min = 0.0f, .max = Config::GFX_STEREO_DEPTH_MAXIMUM, .step = 5.0f, .format = "%.0f"},
+        Apply::Live, touched);
+    MenuWidgets::SliderFloat("Convergence",
+                             "Distance at which objects sit on the screen's surface: higher "
+                             "values bring more of the scene out of the screen.",
+                             Config::GFX_STEREO_CONVERGENCE,
+                             {.min = 0.0f,
+                              .max = Config::GFX_STEREO_CONVERGENCE_MAXIMUM,
+                              .step = 5.0f,
+                              .format = "%.0f"},
+                             Apply::Live, touched);
+    MenuWidgets::Checkbox("Swap Eyes", nullptr, Config::GFX_STEREO_SWAP_EYES, touched);
   }
 
   // MSAA and SSAA share one list, as in the desktop and Android settings.

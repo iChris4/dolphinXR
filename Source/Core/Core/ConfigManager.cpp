@@ -235,10 +235,10 @@ static void ApplyVRSetting(const VRSettingMap& values, const char* key, const Co
     Config::DeleteKey(Config::LayerType::CurrentRun, info);
 }
 
-// EnableOpenXR and FlatScreen choose stereo or the flat panel when the video backend creates the
-// OpenXR swapchains, so once emulation has started they keep the values of the title that was
-// booted. A disc started from the Wii System Menu stays on the menu's flat panel until emulation
-// stops, instead of switching to stereo on swapchains made for the panel.
+// EnableOpenXR and FlatScreen choose stereo or the flat panel when the video backend starts, so
+// once emulation has started a game INI no longer changes them: a disc started from the Wii System
+// Menu stays on the menu's flat panel. The user can still switch between VR stereo and the flat
+// screen from the in-game VR menu (not on OpenGL, which sets up its depth for one mode at start).
 static void ApplyGameVRConfigOverrides(std::string_view game_id, std::optional<u16> revision,
                                        bool emulation_started)
 {

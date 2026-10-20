@@ -1179,7 +1179,10 @@ void Presenter::BlitCurrentSourceToOpenXRFlat(const AbstractTexture* source_text
   }
   // A right image that could not be rendered leaves the left one on a quad both eyes see.
   if (eyes_rendered > 0)
+  {
     m_openxr_flat_stereo = eyes_rendered == 2;
+    VR::g_openxr->NoteFlatImagesRendered();
+  }
 
   if (saved_fb)
     g_gfx->SetFramebuffer(saved_fb);
@@ -1412,7 +1415,10 @@ void Presenter::Present(PresentInfo* present_info)
   // Swapchains are only swapped at a present that publishes a new frame, so the frame rendered
   // into the new ones reaches the pacing thread right away.
   if (vr_frame_started && !vr_skip_duplicate_publish && m_xfb_entry)
+  {
+    UpdateOpenXRSwapchainMode();
     UpdateEyeResolutionScale();
+  }
   if (VR::g_openxr && VR::g_openxr->GetSwapchain())
     VR::g_openxr->GetSwapchain()->CollectRetiredSwapchains(false);
 
@@ -1519,6 +1525,31 @@ void Presenter::Present(PresentInfo* present_info)
 }
 
 #ifdef ENABLE_VR
+void Presenter::UpdateOpenXRSwapchainMode()
+{
+  VR::OpenXRManager* manager = VR::g_openxr.get();
+  if (!manager || !manager->GetSwapchain())
+    return;
+
+  VR::IOpenXRSwapchain* swapchain = manager->GetSwapchain();
+  const bool was_foveated = swapchain->HasFoveatedFramebuffers();
+  const u64 generation = manager->GetSwapchainGeneration();
+  if (!manager->UpdateSwapchainMode(IsOpenXRFlat()) ||
+      manager->GetSwapchainGeneration() == generation)
+  {
+    return;
+  }
+
+  // The flat panel decides mono or stereo again from its first blit into the new images.
+  m_openxr_flat_stereo = false;
+  if (m_post_processor && swapchain->HasFoveatedFramebuffers() != was_foveated)
+  {
+    // The eye blit pipelines are compiled against (non-)foveated render passes.
+    g_gfx->WaitForGPUIdle();
+    m_post_processor->RecompilePipeline();
+  }
+}
+
 void Presenter::UpdateEyeResolutionScale()
 {
   VR::OpenXRManager* manager = VR::g_openxr.get();

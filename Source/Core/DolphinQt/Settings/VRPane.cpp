@@ -663,7 +663,8 @@ void VRPane::AddDescriptions()
       "surroundings around the screen."
       "<br><br>Uses the Screen Distance and Screen Size settings below to position and size "
       "the panel. The screen is world-locked; use Recenter to bring it back in front of you."
-      "<br><br>This setting cannot be changed while emulation is active."
+      "<br><br>This setting cannot be changed here while emulation is active. In the headset, "
+      "the in-game VR menu switches it right away (VR tab, Mode), except on OpenGL."
       "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static constexpr char TR_USE_VULKAN_MULTIVIEW_DESCRIPTION[] = QT_TR_NOOP(
       "Uses Vulkan multiview for OpenXR stereo rendering, and for the 3D of the Flat Screen, "
