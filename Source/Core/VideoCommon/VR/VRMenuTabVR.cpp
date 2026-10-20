@@ -37,6 +37,18 @@ constexpr std::array<std::pair<OpenXRTrackingMode, const char*>, 3> TRACKING_MOD
     {OpenXRTrackingMode::None, "None (fixed view)"},
 }};
 
+// Flat screen: the panel takes this aspect (Graphics > General > Aspect Ratio). Stretch has no
+// window to stretch to in the headset, so it behaves like Auto.
+constexpr std::array<std::pair<AspectMode, const char*>, 7> ASPECT_MODES{{
+    {AspectMode::Auto, "Auto"},
+    {AspectMode::ForceWide, "Force 16:9"},
+    {AspectMode::ForceStandard, "Force 4:3"},
+    {AspectMode::Stretch, "Stretch (Auto here)"},
+    {AspectMode::Custom, "Custom"},
+    {AspectMode::CustomStretch, "Custom (Stretch)"},
+    {AspectMode::Raw, "Raw (Square Pixels)"},
+}};
+
 constexpr std::array<std::pair<VRMenuToggleButton, const char*>, 4> MENU_BUTTONS{{
     {VRMenuToggleButton::LeftThumbstick, "Left Thumbstick Click"},
     {VRMenuToggleButton::RightThumbstick, "Right Thumbstick Click"},
@@ -55,10 +67,8 @@ public:
     DrawRendering(touched);
     DrawScreen(context, touched);
     if (!context.flat_screen)
-    {
       DrawCamera(touched);
-      DrawPassthrough(touched);
-    }
+    DrawPassthrough(context.flat_screen, touched);
     MenuWidgets::SectionHeader("Menu");
     MenuWidgets::Combo<VRMenuToggleButton>(
         "Open Menu With",
@@ -236,7 +246,10 @@ private:
                               .format = "%.1f m"},
                              Apply::Live, touched);
     if (context.flat_screen)
+    {
+      DrawFlatScreen3D(touched);
       return;
+    }
 
     MenuWidgets::SliderFloat("Head-Locked Curvature", nullptr,
                              Config::GFX_VR_HEAD_LOCKED_CURVATURE,
@@ -319,16 +332,64 @@ private:
                           Config::GFX_VR_ENABLE_CONTROLLER_ANCHOR, touched);
   }
 
-  static void DrawPassthrough(MenuWidgets::TouchedKeys* touched)
+  // Flat screen: the panel's aspect ratio, and Dolphin's stereoscopic 3D (Graphics >
+  // Enhancements > Stereoscopy), which gives the panel depth with one image per eye.
+  static void DrawFlatScreen3D(MenuWidgets::TouchedKeys* touched)
+  {
+    MenuWidgets::Combo<AspectMode>(
+        "Aspect Ratio",
+        "Auto picks 4:3 or 16:9 from the game: the Wii's screen setting, or what a GameCube game "
+        "draws. Force a ratio when it guesses wrong.",
+        Config::GFX_ASPECT_RATIO, ASPECT_MODES, touched);
+
+    const StereoMode mode = Config::Get(Config::GFX_STEREO_MODE);
+    bool stereo = mode != StereoMode::Off && mode != StereoMode::OpenXR;
+    if (MenuWidgets::Checkbox("3D",
+                              "Stereoscopic 3D inside the screen. Turning it on or off "
+                              "reloads the shaders.",
+                              &stereo))
+    {
+      Config::SetBaseOrCurrent(Config::GFX_STEREO_MODE,
+                               stereo ? StereoMode::SideBySide : StereoMode::Off);
+      if (touched)
+        touched->Add(Config::GFX_STEREO_MODE.GetLocation());
+    }
+    if (!stereo)
+      return;
+
+    MenuWidgets::SliderFloat(
+        "3D Depth", "Distance between the two cameras: higher values give stronger depth.",
+        Config::GFX_STEREO_DEPTH,
+        {.min = 0.0f, .max = Config::GFX_STEREO_DEPTH_MAXIMUM, .step = 5.0f, .format = "%.0f"},
+        Apply::Live, touched);
+    MenuWidgets::SliderFloat("3D Convergence",
+                             "Distance at which objects sit on the screen's surface: higher "
+                             "values bring more of the scene out of the screen.",
+                             Config::GFX_STEREO_CONVERGENCE,
+                             {.min = 0.0f,
+                              .max = Config::GFX_STEREO_CONVERGENCE_MAXIMUM,
+                              .step = 5.0f,
+                              .format = "%.0f"},
+                             Apply::Live, touched);
+    MenuWidgets::Checkbox("Swap Eyes", nullptr, Config::GFX_STEREO_SWAP_EYES, touched);
+  }
+
+  static void DrawPassthrough(bool flat_screen, MenuWidgets::TouchedKeys* touched)
   {
     const OpenXRManager* manager = g_openxr.get();
     if (!manager || !manager->SupportsPassthrough())
       return;
+    // In VR stereo the game's empty areas become see-through, which needs the backend's
+    // coverage target (Vulkan). The flat screen shows the room around its opaque panel.
+    if (!flat_screen && !g_backend_info.bSupportsVRPassthroughCoverage)
+      return;
 
     MenuWidgets::SectionHeader("Passthrough");
-    MenuWidgets::Checkbox("Passthrough", "Show your surroundings where the game draws nothing.",
+    MenuWidgets::Checkbox("Passthrough",
+                          flat_screen ? "Show your surroundings around the screen." :
+                                        "Show your surroundings where the game draws nothing.",
                           Config::GFX_VR_PASSTHROUGH, touched);
-    if (Config::Get(Config::GFX_VR_PASSTHROUGH))
+    if (!flat_screen && Config::Get(Config::GFX_VR_PASSTHROUGH))
     {
       MenuWidgets::SliderFloat("Scene Opacity", nullptr, Config::GFX_VR_PASSTHROUGH_SCENE_OPACITY,
                                {.min = Config::GFX_VR_PASSTHROUGH_SCENE_OPACITY_MIN,

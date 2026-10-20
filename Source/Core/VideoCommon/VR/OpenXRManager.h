@@ -45,6 +45,14 @@ struct XREyeView
   XrFovf fov;
 };
 
+// One eye's swapchain image as the flat panel quad samples it (the whole image).
+struct FlatQuadSource
+{
+  XrSwapchain swapchain = XR_NULL_HANDLE;
+  uint32_t width = 0;
+  uint32_t height = 0;
+};
+
 // Abstract interface for backend-specific per-eye swapchain management.
 // Implemented by D3DOpenXR. Used by Presenter::RenderXFBToScreen() to blit game
 // frames into the HMD's eye textures without depending on D3D11-specific types.
@@ -76,18 +84,26 @@ public:
   // keeps the legacy inline frame flow.
   virtual bool SupportsDetachedFrameLoop() const { return true; }
 
-  // ---- Flat mono panel path (StereoMode::Off + vr_flat_screen) ----
-  // The game is rendered mono and shown on a world-locked quad in the VR scene. The default
-  // implementations reuse per-eye swapchain #0, so a backend only needs to expose that image's
-  // raw XrSwapchain handle via GetFlatSwapchain() to opt in.
-  virtual XrSwapchain GetFlatSwapchain() const { return XR_NULL_HANDLE; }
-  virtual bool SupportsFlatScreen() const { return GetFlatSwapchain() != XR_NULL_HANDLE; }
-  // Acquire the swapchain image the mono game frame is blit into.
-  virtual AbstractFramebuffer* AcquireFlatFramebuffer() { return AcquireEyeFramebuffer(0); }
-  virtual void ReleaseFlatTexture() { ReleaseEyeTexture(0); }
-  // Build the XrCompositionLayerQuad from the flat swapchain and submit via xrEndFrame.
+  // ---- Flat panel path (vr_flat_screen) ----
+  // The game is shown on a world-locked quad in the VR scene: one quad seen by both eyes, or,
+  // when Dolphin's own stereoscopy renders two layers, one quad per eye. The panel reuses the
+  // per-eye swapchains (the layered one is made for StereoMode::OpenXR only), so a backend opts in
+  // by exposing each eye's raw XrSwapchain handle and size through GetFlatQuadSource().
+  virtual FlatQuadSource GetFlatQuadSource(uint32_t eye) const { return {}; }
+  virtual bool SupportsFlatScreen() const
+  {
+    return GetFlatQuadSource(0).swapchain != XR_NULL_HANDLE;
+  }
+  // Acquire the swapchain image one eye's picture of the panel is blit into.
+  virtual AbstractFramebuffer* AcquireFlatFramebuffer(uint32_t eye)
+  {
+    return AcquireEyeFramebuffer(eye);
+  }
+  virtual void ReleaseFlatTexture(uint32_t eye) { ReleaseEyeTexture(eye); }
+  // Build the panel quads and submit them via xrEndFrame. stereo: both eye images were
+  // rendered (a left and a right quad); otherwise only eye 0's (one quad for both eyes).
   // Defined in OpenXRManager.cpp; delegates the quad math to OpenXRManager::SubmitFlatQuadFrame.
-  virtual bool SubmitFlatFrame();
+  virtual bool SubmitFlatFrame(bool stereo);
 
   // ---- In-game VR menu panel (VR::VRMenu) ----
   // One extra non-foveated color swapchain the menu is drawn into and composited as a quad
@@ -271,8 +287,8 @@ public:
   // until StopFrameThread().
   void PublishFrame(const std::array<XrCompositionLayerProjectionView, 2>& views,
                     XrCompositionLayerFlags layer_flags);
-  // Flat mono panel variant: a fully built world-locked quad layer.
-  void PublishQuadFrame(const XrCompositionLayerQuad& quad);
+  // Flat panel variant: fully built world-locked quad layers (1 for both eyes, or 2 per-eye).
+  void PublishQuadFrame(const std::array<XrCompositionLayerQuad, 2>& quads, uint32_t quad_count);
 
   // Video thread: whether this Present() skips the window present and sends the frame to the
   // headset only (Android direct-to-HMD). Latched by the Presenter so the backend's XR submit,
@@ -327,14 +343,17 @@ public:
   // ---- Flat mono panel (vr_flat_screen) ----
 
   // Aspect ratio (width / height) of the flat game panel. Set by the presenter each frame
-  // before SubmitFlatFrame so the quad's world size matches the game's output.
-  void SetFlatScreenAspect(float aspect) { m_flat_screen_aspect = aspect; }
+  // before SubmitFlatFrame so the quad's world size matches the game's output. The input thread
+  // reads it to map the controller ray onto the panel.
+  void SetFlatScreenAspect(float aspect);
 
-  // Build a world-locked XrCompositionLayerQuad from an already-rendered mono swapchain image
-  // and submit it via EndFrame(). Distance/size come from vr_screen_distance/vr_screen_size;
-  // pose is captured on first use and recomputed on recenter. Backends call this from
-  // SubmitFlatFrame(); passthrough layers are prepended centrally in EndFrameDetached.
-  bool SubmitFlatQuadFrame(XrSwapchain swapchain, uint32_t width, uint32_t height);
+  // Build the world-locked panel quad(s) from already-rendered swapchain images and submit them
+  // via EndFrame(). Without a right image, one quad shows the left image to both eyes; with
+  // one, the left and right quads share the pose and size and each is seen by its own eye.
+  // Distance/size come from vr_screen_distance/vr_screen_size; the pose is captured on first use
+  // and recomputed on recenter. Backends call this from SubmitFlatFrame(); passthrough layers
+  // are prepended centrally in EndFrameDetached.
+  bool SubmitFlatQuadFrame(const FlatQuadSource& left, const std::optional<FlatQuadSource>& right);
 
   // ---- In-game VR menu (VR::VRMenu) ----
   // The input thread decides when the menu is open (UpdateMenuGate, published in the input
@@ -761,7 +780,10 @@ private:
     bool is_quad = false;
     std::array<XrCompositionLayerProjectionView, 2> views{};
     XrCompositionLayerFlags layer_flags = 0;
-    XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    // Flat panel: quad_count quads (1 for both eyes, or left + right).
+    std::array<XrCompositionLayerQuad, 2> quads{
+        {{XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD}}};
+    uint32_t quad_count = 0;
   };
 
   std::thread m_frame_thread;
@@ -892,14 +914,15 @@ private:
   std::atomic<float> m_agent_look_pitch_deg{0.0f};
   std::atomic<float> m_agent_look_roll_deg{0.0f};
 
-  // Flat mono panel state. The anchor (head center + heading) is captured lazily on the video
+  // Flat panel state. The anchor (head center + heading) is captured lazily on the video
   // thread and invalidated on recenter; the pose is rebuilt from it with the live screen
   // distance. Guarded by a mutex because the input thread raycasts against it. The composition
-  // layer member gives stable storage across the xrEndFrame call that references it.
-  float m_flat_screen_aspect = 16.0f / 9.0f;
+  // layer members give stable storage across the xrEndFrame call that references them.
+  std::atomic<float> m_flat_screen_aspect{16.0f / 9.0f};
   mutable std::mutex m_flat_screen_anchor_mutex;
   mutable std::optional<PanelMath::YawAnchor> m_flat_screen_anchor;
-  XrCompositionLayerQuad m_flat_quad_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  std::array<XrCompositionLayerQuad, 2> m_flat_quad_layers{
+      {{XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD}}};
 };
 
 // Global instance — created by the backend during VideoBackend::Initialize().

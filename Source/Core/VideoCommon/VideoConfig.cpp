@@ -175,11 +175,31 @@ void VideoConfig::Refresh()
   stereo_mode = Config::Get(Config::GFX_STEREO_MODE);
   const bool vr_openxr_enabled = Config::Get(Config::GFX_VR_ENABLE_OPENXR);
   vr_flat_screen = Config::Get(Config::GFX_VR_FLAT_SCREEN);
-  if (vr_openxr_enabled)
+  if (vr_openxr_enabled && !vr_flat_screen)
   {
-    // OpenXR mode is now driven by a dedicated VR setting. Flat mode keeps the session running
-    // but renders the game mono (StereoMode::Off); the present path swaps to a quad layer.
-    stereo_mode = vr_flat_screen ? StereoMode::Off : StereoMode::OpenXR;
+    // OpenXR mode is driven by a dedicated VR setting.
+    stereo_mode = StereoMode::OpenXR;
+  }
+  else if (vr_openxr_enabled)
+  {
+    // Flat panel: the session keeps running and the present path swaps to quad layers. Dolphin's
+    // own stereoscopy (Enhancements) gives the panel depth, one quad per eye. Every 3D mode
+    // renders the two layers those quads show; the modes that merge both layers into one
+    // picture (anaglyph, passive, quad-buffered) become side-by-side, so the per-eye blits never
+    // run their merge shader and no backend sets up a quad-buffered window.
+    switch (stereo_mode)
+    {
+    case StereoMode::OpenXR:
+      stereo_mode = StereoMode::Off;
+      break;
+    case StereoMode::Anaglyph:
+    case StereoMode::Passive:
+    case StereoMode::QuadBuffer:
+      stereo_mode = StereoMode::SideBySide;
+      break;
+    default:
+      break;
+    }
   }
   else
   {

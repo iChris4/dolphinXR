@@ -829,7 +829,7 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_enable_openxr">Enable OpenXR on Quest</string>
     <string name="quest_enable_openxr_description">Allows Quest launches to switch Dolphin into the OpenXR renderer.</string>
     <string name="quest_launch_in_vr">Launch games in VR</string>
-    <string name="quest_launch_in_vr_description">On: renders games in stereoscopic 3D VR. Off: shows the game on a flat screen in the headset (requires Enable OpenXR).</string>
+    <string name="quest_launch_in_vr_description">On: renders games in stereoscopic 3D VR. Off: shows the game on a flat screen in the headset (requires Enable OpenXR), with the game\'s 4:3 or 16:9 aspect ratio. Graphics &gt; Enhancements &gt; Stereoscopy shows it in 3D inside the screen, and Enable passthrough shows your surroundings around it.</string>
     <string name="quest_recenter_on_launch">Recenter on launch</string>
     <string name="quest_recenter_on_launch_description">Recenters the active OpenXR view as soon as emulation starts.</string>
     <string name="quest_forced_vbi_frequency">Forced VBI Frequency</string>
@@ -888,7 +888,7 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_skip_background_fill">Skip Background Fill</string>
     <string name="quest_skip_background_fill_description">Skips the opaque untextured quad some games draw over the frame to colour the empty background, which lands in front of the scene in VR (Phantasy Star Online\'s white square). It can also skip a solid shape a game means to show, so turn it on per game.</string>
     <string name="quest_passthrough">Enable passthrough</string>
-    <string name="quest_passthrough_description">Shows the headset camera feed wherever the game renders nothing, using a dedicated coverage buffer that leaves game rendering untouched (XR_FB_passthrough).</string>
+    <string name="quest_passthrough_description">Shows the headset camera feed wherever the game renders nothing, using a dedicated coverage buffer that leaves game rendering untouched (XR_FB_passthrough). On the flat screen (Launch games in VR off), it shows your surroundings around the screen, and the other passthrough options do not apply.</string>
     <string name="quest_passthrough_reveal_unrendered">Reveal unrendered areas</string>
     <string name="quest_passthrough_reveal_unrendered_description">Reveals EFB regions no game draw or clear touched. Disable to keep the scene opaque and use only Passthrough element overrides.</string>
     <string name="quest_passthrough_remove_black_clears">Remove black EFB clears</string>

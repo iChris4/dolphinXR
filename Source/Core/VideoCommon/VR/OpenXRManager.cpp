@@ -507,16 +507,13 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
   }
 
   // XR_FB_passthrough: Windows (Meta Horizon Link exposes it when passthrough over Link
-  // is enabled) and Quest standalone. Vulkan-only — the dedicated coverage target that
-  // produces the projection layer's alpha is a Vulkan feature.
+  // is enabled) and Quest standalone, with every graphics binding. Stereo passthrough also
+  // needs the coverage target that produces the projection layer's alpha, a Vulkan feature
+  // (bSupportsVRPassthroughCoverage); the flat screen only composites the camera feed around
+  // its opaque panel, which works on any backend.
   std::vector<const char*> enabled_extensions(extra_extensions);
 #if defined(_WIN32) || defined(ANDROID)
-  const bool is_vulkan_binding =
-      std::find_if(extra_extensions.begin(), extra_extensions.end(), [](const char* extension) {
-        return std::string_view{extension} == "XR_KHR_vulkan_enable" ||
-               std::string_view{extension} == "XR_KHR_vulkan_enable2";
-      }) != extra_extensions.end();
-  if (is_vulkan_binding && runtime_has(XR_FB_PASSTHROUGH_EXTENSION_NAME))
+  if (runtime_has(XR_FB_PASSTHROUGH_EXTENSION_NAME))
     enabled_extensions.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
 #endif
 
@@ -1263,7 +1260,6 @@ void OpenXRManager::DestroySession()
   {
     std::lock_guard<std::mutex> lock(m_publish_mutex);
     m_published_frame = {};
-    m_published_frame.quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
     m_publish_serial = 0;
   }
   m_video_handoff_active.store(0, std::memory_order_release);
@@ -1290,7 +1286,7 @@ void OpenXRManager::DestroySession()
     std::lock_guard lock(m_flat_screen_anchor_mutex);
     m_flat_screen_anchor.reset();
   }
-  m_flat_quad_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+  m_flat_quad_layers = {{{XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD}}};
   m_controller_anchor_cache_valid = {false, false};
 }
 
@@ -1317,12 +1313,14 @@ void OpenXRManager::PublishFrame(const std::array<XrCompositionLayerProjectionVi
   m_publish_cv.notify_all();
 }
 
-void OpenXRManager::PublishQuadFrame(const XrCompositionLayerQuad& quad)
+void OpenXRManager::PublishQuadFrame(const std::array<XrCompositionLayerQuad, 2>& quads,
+                                     uint32_t quad_count)
 {
   std::lock_guard<std::mutex> lock(m_publish_mutex);
   m_published_frame.generation = m_swapchain_generation.load();
   m_published_frame.is_quad = true;
-  m_published_frame.quad = quad;
+  m_published_frame.quads = quads;
+  m_published_frame.quad_count = std::min<uint32_t>(quad_count, 2);
   m_publish_serial++;
   m_publish_cv.notify_all();
 }
@@ -1520,7 +1518,10 @@ void OpenXRManager::FrameThreadLoop()
     {
       if (last_frame.is_quad)
       {
-        layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&last_frame.quad));
+        for (uint32_t i = 0; i < last_frame.quad_count; ++i)
+        {
+          layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&last_frame.quads[i]));
+        }
       }
       else
       {
@@ -2912,8 +2913,10 @@ XrEnvironmentBlendMode OpenXRManager::GetActiveBlendMode() const
 {
   // XR_FB_passthrough composites its own layer behind an OPAQUE projection layer, so
   // ALPHA_BLEND is only the fallback for runtimes without the extension.
-  if (g_ActiveConfig.VRPassthroughEnabled() && !IsFBPassthroughUsable() && SupportsAlphaBlend())
+  if (g_ActiveConfig.VRPassthroughLayerActive() && !IsFBPassthroughUsable() && SupportsAlphaBlend())
+  {
     return XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND;
+  }
   return XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 }
 
@@ -3047,10 +3050,11 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
 {
   // Keep the FB passthrough feed in sync with the Passthrough setting. Gated on a
   // registered swapchain so the controller-binding utility session never starts it.
-  UpdateFBPassthrough(g_ActiveConfig.VRPassthroughEnabled() && m_swapchain != nullptr);
+  UpdateFBPassthrough(g_ActiveConfig.VRPassthroughLayerActive() && m_swapchain != nullptr);
 
-  // The passthrough layer composites first (behind the projection layer), replacing the
-  // black void with the camera feed wherever the projection layer's alpha is 0.
+  // The passthrough layer composites first (behind the game layers), replacing the black void
+  // with the camera feed wherever the projection layer's alpha is 0, or around the opaque flat
+  // screen quads.
   // The in-game VR menu panel composites last, over the game. Copied under its lock: this runs
   // on the pacing thread, the video thread or the Android submit worker.
   XrCompositionLayerQuad menu_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -3260,35 +3264,68 @@ std::optional<XrPosef> OpenXRManager::GetAnchoredFlatScreenPose() const
   return PanelMath::PoseInFront(*m_flat_screen_anchor, g_ActiveConfig.vr_screen_distance);
 }
 
-bool OpenXRManager::SubmitFlatQuadFrame(XrSwapchain swapchain, uint32_t width, uint32_t height)
+void OpenXRManager::SetFlatScreenAspect(float aspect)
 {
-  if (swapchain == XR_NULL_HANDLE || width == 0 || height == 0)
+  const float previous = m_flat_screen_aspect.exchange(aspect, std::memory_order_relaxed);
+  if (std::abs(previous - aspect) > 0.005f)
+    INFO_LOG_FMT(OPENXR, "OpenXR: Flat screen aspect ratio {:.3f} (was {:.3f}).", aspect, previous);
+}
+
+bool OpenXRManager::SubmitFlatQuadFrame(const FlatQuadSource& left,
+                                        const std::optional<FlatQuadSource>& right)
+{
+  const auto valid = [](const FlatQuadSource& source) {
+    return source.swapchain != XR_NULL_HANDLE && source.width != 0 && source.height != 0;
+  };
+  if (!valid(left))
     return IsFrameThreadActive() ? true : EndFrame({});
+  // A right image that can't be shown leaves a single quad both eyes see.
+  const bool stereo = right.has_value() && valid(*right);
 
   const float height_m = g_ActiveConfig.vr_screen_size;
+  const float panel_aspect = m_flat_screen_aspect.load(std::memory_order_relaxed);
   const float aspect =
-      m_flat_screen_aspect > 0.f ? m_flat_screen_aspect : static_cast<float>(width) / height;
+      panel_aspect > 0.f ? panel_aspect : static_cast<float>(left.width) / left.height;
+  const XrPosef pose = GetFlatScreenPose();
 
-  m_flat_quad_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-  m_flat_quad_layer.layerFlags = 0;
-  m_flat_quad_layer.space = m_reference_space;
-  m_flat_quad_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-  m_flat_quad_layer.pose = GetFlatScreenPose();
-  m_flat_quad_layer.size = {height_m * aspect, height_m};
-  m_flat_quad_layer.subImage.swapchain = swapchain;
-  m_flat_quad_layer.subImage.imageArrayIndex = 0;
-  m_flat_quad_layer.subImage.imageRect.offset = {0, 0};
-  m_flat_quad_layer.subImage.imageRect.extent = {static_cast<int32_t>(width),
-                                                 static_cast<int32_t>(height)};
+  const auto build_quad = [&](XrCompositionLayerQuad* quad, const FlatQuadSource& source,
+                              XrEyeVisibility eye_visibility) {
+    *quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    quad->layerFlags = 0;
+    quad->space = m_reference_space;
+    quad->eyeVisibility = eye_visibility;
+    quad->pose = pose;
+    quad->size = {height_m * aspect, height_m};
+    quad->subImage.swapchain = source.swapchain;
+    quad->subImage.imageArrayIndex = 0;
+    quad->subImage.imageRect.offset = {0, 0};
+    quad->subImage.imageRect.extent = {static_cast<int32_t>(source.width),
+                                       static_cast<int32_t>(source.height)};
+  };
+
+  uint32_t quad_count = 1;
+  if (stereo)
+  {
+    // Same pose and size for both eyes: the picture's own parallax (Dolphin's stereoscopy)
+    // gives the depth inside the panel.
+    build_quad(&m_flat_quad_layers[0], left, XR_EYE_VISIBILITY_LEFT);
+    build_quad(&m_flat_quad_layers[1], *right, XR_EYE_VISIBILITY_RIGHT);
+    quad_count = 2;
+  }
+  else
+  {
+    build_quad(&m_flat_quad_layers[0], left, XR_EYE_VISIBILITY_BOTH);
+  }
 
   if (IsFrameThreadActive())
   {
-    PublishQuadFrame(m_flat_quad_layer);
+    PublishQuadFrame(m_flat_quad_layers, quad_count);
     return true;
   }
 
-  const std::vector<XrCompositionLayerBaseHeader*> layers = {
-      reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_flat_quad_layer)};
+  std::vector<XrCompositionLayerBaseHeader*> layers;
+  for (uint32_t i = 0; i < quad_count; ++i)
+    layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_flat_quad_layers[i]));
   return EndFrame(layers);
 }
 
@@ -3341,11 +3378,14 @@ bool IOpenXRSwapchain::ReleaseExtraSwapchainImage(XrSwapchain swapchain, const c
   return true;
 }
 
-bool IOpenXRSwapchain::SubmitFlatFrame()
+bool IOpenXRSwapchain::SubmitFlatFrame(bool stereo)
 {
   if (!g_openxr)
     return false;
-  return g_openxr->SubmitFlatQuadFrame(GetFlatSwapchain(), GetEyeWidth(), GetEyeHeight());
+  std::optional<FlatQuadSource> right;
+  if (stereo)
+    right = GetFlatQuadSource(1);
+  return g_openxr->SubmitFlatQuadFrame(GetFlatQuadSource(0), right);
 }
 
 void OpenXRManager::RecordRenderedEyeViews()
@@ -3781,7 +3821,8 @@ void OpenXRManager::ComputeVirtualScreenHit(const Common::VR::OpenXRPoseState& a
       return;
 
     const float half_h = std::max(g_ActiveConfig.vr_screen_size * 0.5f, 1e-4f);
-    const float aspect = m_flat_screen_aspect > 0.0f ? m_flat_screen_aspect : (16.0f / 9.0f);
+    const float panel_aspect = m_flat_screen_aspect.load(std::memory_order_relaxed);
+    const float aspect = panel_aspect > 0.0f ? panel_aspect : (16.0f / 9.0f);
     const float half_w = half_h * aspect;
     out_hit->valid = true;
     out_hit->u = hit->x / half_w;

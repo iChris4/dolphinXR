@@ -87,8 +87,14 @@ public:
   uint32_t GetEyeWidth() const override { return m_eye_swapchains[0].width; }
   uint32_t GetEyeHeight() const override { return m_eye_swapchains[0].height; }
 
-  // Flat mono panel path reuses eye swapchain #0; the base class handles acquire/release/submit.
-  XrSwapchain GetFlatSwapchain() const override { return m_eye_swapchains[0].swapchain; }
+  // Flat panel path reuses the per-eye swapchains; the base class handles acquire/release/submit.
+  VR::FlatQuadSource GetFlatQuadSource(uint32_t eye) const override
+  {
+    if (eye >= m_eye_swapchains.size())
+      return {};
+    const auto& sc = m_eye_swapchains[eye];
+    return {sc.swapchain, sc.width, sc.height};
+  }
 
   // In-game VR menu panel.
   bool CreateMenuSwapchain(uint32_t width, uint32_t height) override;

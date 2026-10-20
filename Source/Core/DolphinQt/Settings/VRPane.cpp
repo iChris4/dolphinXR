@@ -78,7 +78,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   passthrough_group->setLayout(passthrough_layout);
 
   m_enable_openxr = new ConfigBool(tr("Enable VR"), Config::GFX_VR_ENABLE_OPENXR);
-  m_flat_screen = new ConfigBool(tr("Flat Screen (2D, no stereo)"), Config::GFX_VR_FLAT_SCREEN);
+  m_flat_screen = new ConfigBool(tr("Flat Screen"), Config::GFX_VR_FLAT_SCREEN);
   m_reference_space_mode = new ConfigChoiceMap<OpenXRReferenceSpaceMode>(
       {{tr("LOCAL"), OpenXRReferenceSpaceMode::Local},
        {tr("STAGE + Height"), OpenXRReferenceSpaceMode::StageHeight},
@@ -525,8 +525,18 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   passthrough_layout->addWidget(new QLabel(tr("Coverage Mode:")), 4, 0);
   passthrough_layout->addWidget(m_passthrough_coverage_mode, 4, 1, 1, 2);
 #if defined(_WIN32)
-  const auto update_passthrough_backend = [passthrough_group] {
-    passthrough_group->setEnabled(Config::Get(Config::MAIN_GFX_BACKEND) == "Vulkan");
+  // VR stereo passthrough needs Vulkan's coverage target. The flat screen shows the room around
+  // its opaque panel on any backend, and the coverage options don't apply to it.
+  const auto update_passthrough_backend = [this, passthrough_group] {
+    const bool flat_screen = Config::Get(Config::GFX_VR_FLAT_SCREEN);
+    passthrough_group->setEnabled(flat_screen || Config::Get(Config::MAIN_GFX_BACKEND) == "Vulkan");
+    for (QWidget* coverage_option : std::initializer_list<QWidget*>{
+             m_passthrough_remove_black_bg, m_passthrough_remove_black_clears,
+             m_passthrough_scene_opacity, m_passthrough_scene_opacity_value,
+             m_passthrough_coverage_mode})
+    {
+      coverage_option->setEnabled(!flat_screen);
+    }
   };
   connect(&Settings::Instance(), &Settings::ConfigChanged, passthrough_group,
           update_passthrough_backend);
@@ -644,11 +654,15 @@ void VRPane::AddDescriptions()
       "<br><br>This setting cannot be changed while emulation is active."
       "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static constexpr char TR_FLAT_SCREEN_DESCRIPTION[] = QT_TR_NOOP(
-      "Shows the game on a flat 2D screen floating in the VR scene instead of rendering in "
-      "stereoscopic 3D."
-      "<br><br>Requires Enable VR. Uses the Screen Distance and Screen Size settings below to "
-      "position and size the panel. The screen is world-locked; use Recenter to bring it back "
-      "in front of you."
+      "Shows the game on a flat screen floating in the VR scene instead of rendering the VR "
+      "scene around you."
+      "<br><br>Requires Enable VR. The screen takes the game's aspect ratio (4:3 or 16:9, "
+      "detected like for the desktop window: Graphics &gt; General &gt; Aspect Ratio). "
+      "Graphics &gt; Enhancements &gt; Stereoscopy shows the game in 3D inside the screen, "
+      "using its Depth, Convergence and Swap Eyes settings. Enable Passthrough shows your "
+      "surroundings around the screen."
+      "<br><br>Uses the Screen Distance and Screen Size settings below to position and size "
+      "the panel. The screen is world-locked; use Recenter to bring it back in front of you."
       "<br><br>This setting cannot be changed while emulation is active."
       "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static constexpr char TR_USE_VULKAN_MULTIVIEW_DESCRIPTION[] = QT_TR_NOOP(
@@ -822,6 +836,8 @@ void VRPane::AddDescriptions()
   static constexpr char TR_PASSTHROUGH_DESCRIPTION[] = QT_TR_NOOP(
       "Shows the headset camera feed through the dedicated coverage mask. This is supported "
       "only by Windows Vulkan OpenXR."
+      "<br><br>With Flat Screen, the camera feed shows around the screen instead, on every "
+      "backend; the coverage options below do not apply."
       "<br><br>Meta Horizon Link uses <code>XR_FB_passthrough</code> when <b>Passthrough over "
       "Meta Horizon Link</b> is enabled. Other runtimes may use the <code>ALPHA_BLEND</code> "
       "environment blend mode."

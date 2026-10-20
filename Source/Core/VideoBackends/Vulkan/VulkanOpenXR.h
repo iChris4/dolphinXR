@@ -142,11 +142,18 @@ public:
 
   const XRVkEyeSwapchain& GetEyeSwapchain(uint32_t eye) const { return m_eye_swapchains[eye]; }
 
-  // Flat mono panel path reuses eye swapchain #0 (layered multiview is stereo-only). Acquire and
-  // release go through the base defaults; SubmitFlatFrame is overridden to submit the mono blit
-  // and advance the Vulkan frame (direct-to-HMD skips PresentBackbuffer()).
-  XrSwapchain GetFlatSwapchain() const override { return m_eye_swapchains[0].swapchain; }
-  bool SubmitFlatFrame() override;
+  // Flat panel path reuses the per-eye swapchains (layered multiview is made for
+  // StereoMode::OpenXR only). Acquire and release go through the base defaults; SubmitFlatFrame
+  // is overridden to submit the panel blits and advance the Vulkan frame (direct-to-HMD skips
+  // PresentBackbuffer()).
+  VR::FlatQuadSource GetFlatQuadSource(uint32_t eye) const override
+  {
+    if (eye >= m_eye_swapchains.size())
+      return {};
+    const auto& sc = m_eye_swapchains[eye];
+    return {sc.swapchain, sc.width, sc.height};
+  }
+  bool SubmitFlatFrame(bool stereo) override;
 
   // In-game VR menu panel. The release submits the menu draws synchronously, independent of
   // the eye images' (possibly asynchronous) frame finalization.

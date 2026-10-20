@@ -411,16 +411,20 @@ object QuestVrSettings {
         StringSetting.MAIN_GFX_BACKEND.setString(settings, "Vulkan")
 
         // The OpenXR immersive session runs whenever the runtime is enabled. "Launch games in VR"
-        // then chooses stereo 3D (StereoMode::OpenXR) vs. a flat mono panel in the VR scene.
+        // then chooses VR stereo 3D (StereoMode::OpenXR) vs. a flat panel in the VR scene.
         val immersive = isOpenXrImmersiveEnabled()
         val stereo = isLaunchInVrEnabled()
         openXrRuntimeSetting().setBoolean(settings, immersive)
         flatScreenSetting().setBoolean(settings, immersive && !stereo)
 
+        // The native side derives StereoMode::OpenXR from EnableOpenXR + FlatScreen, so
+        // GFX_STEREO_MODE keeps the user's Stereoscopy choice, which gives the flat panel its 3D.
+        // A value of OpenXR stored by older versions is cleared.
+        if (IntSetting.GFX_STEREO_MODE.int == STEREO_MODE_OPENXR) {
+            IntSetting.GFX_STEREO_MODE.setInt(settings, 0)
+        }
+
         if (immersive) {
-            // Native side maps EnableOpenXR + FlatScreen to the stereo mode; keep GFX_STEREO_MODE
-            // set to OpenXR only for the stereo path so a stale value can't force stereo in flat.
-            IntSetting.GFX_STEREO_MODE.setInt(settings, if (stereo) STEREO_MODE_OPENXR else 0)
             if (!backendMultithreadingReenabledSetting().boolean) {
                 BooleanSetting.GFX_BACKEND_MULTITHREADING.setBoolean(settings, true)
                 backendMultithreadingReenabledSetting().setBoolean(settings, true)
@@ -430,11 +434,6 @@ object QuestVrSettings {
             // turns it on): games that need it off now render correctly in VR, and the
             // head-pose lock is applied automatically whenever it is off.
             BooleanSetting.GFX_HACK_VI_SKIP.setBoolean(settings, false)
-        } else {
-            // flatScreen already set false above (immersive is false here).
-            if (IntSetting.GFX_STEREO_MODE.int == STEREO_MODE_OPENXR) {
-                IntSetting.GFX_STEREO_MODE.setInt(settings, 0)
-            }
         }
 
         // Controller profiles are configured explicitly by the first-launch prompt or settings UI.

@@ -3,6 +3,8 @@
 
 #include "VideoCommon/Present.h"
 
+#include <cmath>
+
 #include "Common/ChunkFile.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Config/MainSettings.h"
@@ -523,7 +525,7 @@ float Presenter::AdjustAspectRatioForCustomCrop(float input_aspect_ratio) const
   return input_aspect_ratio * (relative_width_difference / relative_height_difference);
 }
 
-float Presenter::CalculateDrawAspectRatio(bool allow_stretch) const
+float Presenter::CalculateDrawAspectRatio(bool allow_stretch, bool apply_stereo_layout) const
 {
   auto aspect_mode = g_ActiveConfig.aspect_mode;
   float resulting_aspect_ratio;
@@ -572,7 +574,7 @@ float Presenter::CalculateDrawAspectRatio(bool allow_stretch) const
     }
   }
 
-  if (g_ActiveConfig.stereo_per_eye_resolution_full)
+  if (apply_stereo_layout && g_ActiveConfig.stereo_per_eye_resolution_full)
   {
     if (g_ActiveConfig.stereo_mode == StereoMode::SideBySide)
     {
@@ -1144,24 +1146,40 @@ void Presenter::BlitCurrentSourceToOpenXRFlat(const AbstractTexture* source_text
   }
 
   VR::IOpenXRSwapchain* sc = VR::g_openxr->GetSwapchain();
-  AbstractFramebuffer* flat_fb = sc->AcquireFlatFramebuffer();
-  if (!flat_fb)
-    return;
-
   AbstractFramebuffer* saved_fb = g_gfx->GetCurrentFramebuffer();
 
-  // The game aspect drives the world size of the quad; the mono frame is stretched to fill the
-  // (roughly square) eye-0 image, and the non-square quad undoes the stretch.
-  const int src_w = source_rc.GetWidth();
-  const int src_h = source_rc.GetHeight();
-  if (src_w > 0 && src_h > 0)
-    VR::g_openxr->SetFlatScreenAspect(static_cast<float>(src_w) / static_cast<float>(src_h));
+  // The panel takes the aspect the desktop window would use: the VI picture aspect, widescreen
+  // detection (Wii: the console's screen setting; GameCube: the anamorphic-projection
+  // heuristic), the Aspect Ratio setting and custom crop. Stretch means Auto here, and a
+  // side-by-side window layout does not widen the panel. The frame is stretched over the whole
+  // (roughly square) eye image, and the quad's world size undoes the stretch.
+  const float aspect = CalculateDrawAspectRatio(/*allow_stretch=*/false,
+                                                /*apply_stereo_layout=*/false);
+  if (std::isfinite(aspect) && aspect > 0.0f)
+    VR::g_openxr->SetFlatScreenAspect(aspect);
 
-  const MathUtil::Rectangle<int> flat_rect{
-      0, 0, static_cast<int>(sc->GetEyeWidth()), static_cast<int>(sc->GetEyeHeight())};
-  g_gfx->SetAndClearFramebuffer(flat_fb, {0.f, 0.f, 0.f, 1.f});
-  m_post_processor->BlitFromTexture(flat_rect, source_rc, source_texture, 0);
-  sc->ReleaseFlatTexture();
+  // Dolphin's stereoscopy renders one XFB layer per eye (Swap Eyes is already applied in the
+  // layers): each goes to its own eye swapchain, shown by that eye's quad. Mono uses eye 0 only.
+  const MathUtil::Rectangle<int> cropped_source_rc = AdjustForCustomCrop(source_rc);
+  const u32 eye_count =
+      (g_ActiveConfig.stereo_mode != StereoMode::Off && source_texture->GetLayers() > 1) ? 2 : 1;
+  u32 eyes_rendered = 0;
+  for (u32 eye = 0; eye < eye_count; ++eye)
+  {
+    AbstractFramebuffer* flat_fb = sc->AcquireFlatFramebuffer(eye);
+    if (!flat_fb)
+      break;
+    const MathUtil::Rectangle<int> flat_rect{0, 0, static_cast<int>(flat_fb->GetWidth()),
+                                             static_cast<int>(flat_fb->GetHeight())};
+    g_gfx->SetAndClearFramebuffer(flat_fb, {0.f, 0.f, 0.f, 1.f});
+    m_post_processor->BlitFromTexture(flat_rect, cropped_source_rc, source_texture,
+                                      static_cast<int>(eye));
+    sc->ReleaseFlatTexture(eye);
+    ++eyes_rendered;
+  }
+  // A right image that could not be rendered leaves the left one on a quad both eyes see.
+  if (eyes_rendered > 0)
+    m_openxr_flat_stereo = eyes_rendered == 2;
 
   if (saved_fb)
     g_gfx->SetFramebuffer(saved_fb);
@@ -1188,7 +1206,7 @@ bool Presenter::SubmitOpenXRFrameFromCurrentSource(const AbstractTexture* source
       // only mirrors to the desktop window, and on Quest the direct-to-HMD branch skips the
       // stereo eye blit for flat mode.
       BlitCurrentSourceToOpenXRFlat(source_texture, source_rc);
-      return sc->SubmitFlatFrame();
+      return sc->SubmitFlatFrame(m_openxr_flat_stereo);
     }
 
     if (blit_source)

@@ -12,7 +12,7 @@ std::string GetServerInstructions()
 General rules
 - The user wears the headset; you see screenshots. Depth, scale and comfort are the user's call: propose, then ask them to confirm in the headset before saving.
 - Nothing is saved until a save_* tool (or add_code / save_patch_as_ar_code) runs. Overrides and VR settings you set are for this session only.
-- Most tools need a running game. Start with get_status. If no game runs, ask the user to start it with VR enabled. Outside a stereo VR session (flat Dolphin, or "Launch games in VR" off) screenshots are mono and draws carry no VR route.
+- Most tools need a running game. Start with get_status. If no game runs, ask the user to start it with VR enabled. Outside a stereo VR session (flat Dolphin, or "Launch games in VR" off) screenshots are mono (two eyes when the flat screen uses Dolphin's Stereoscopy) and draws carry no VR route.
 - Make agent savestates (save_state label=...) as reference points. Never overwrite the user's slots unless asked. Savestates from another Dolphin version do not load.
 - In a VR session, screenshots and frame stepping work while paused. Outside VR, resume before tools that need the video thread.
 - Unknown tool arguments are ignored and reported: read the note.

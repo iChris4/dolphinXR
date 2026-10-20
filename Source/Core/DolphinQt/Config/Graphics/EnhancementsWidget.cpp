@@ -377,8 +377,11 @@ void EnhancementsWidget::OnBackendChanged()
 void EnhancementsWidget::UpdateStereoscopyAvailability()
 {
   const bool supports_stereoscopy = g_backend_info.bSupportsGeometryShaders;
-  const bool openxr_enabled = Config::Get(Config::GFX_VR_ENABLE_OPENXR);
-  m_stereoscopy_box->setEnabled(supports_stereoscopy && !openxr_enabled);
+  // OpenXR stereo renders per eye on its own; the VR flat screen shows this stereoscopy on the
+  // panel instead.
+  const bool openxr_stereo =
+      Config::Get(Config::GFX_VR_ENABLE_OPENXR) && !Config::Get(Config::GFX_VR_FLAT_SCREEN);
+  m_stereoscopy_box->setEnabled(supports_stereoscopy && !openxr_stereo);
 }
 
 void EnhancementsWidget::ShaderChanged()

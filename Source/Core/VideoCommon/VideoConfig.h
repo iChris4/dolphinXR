@@ -394,8 +394,9 @@ struct VideoConfig final
   // them natively over each eye (like a Fullscreen override) instead of capturing them onto the
   // virtual screen. Downscaled copies always qualify; full-res copies only when blended.
   bool vr_auto_native_efb_effects = true;
-  // Render the whole game as a flat mono panel in the VR scene (StereoMode::Off), while the
-  // OpenXR session still runs. Used by the "Launch games in VR = off" cinema path on Quest.
+  // Show the whole game on a flat panel in the VR scene while the OpenXR session still runs:
+  // mono (StereoMode::Off), or with Dolphin's own stereoscopy, one image per eye. Used by the
+  // "Launch games in VR = off" cinema path on Quest.
   bool vr_flat_screen = false;
   float vr_screen_distance = 1.5f;
   float vr_screen_size = 1.5f;
@@ -501,8 +502,9 @@ struct VideoConfig final
   }
   bool MultisamplingEnabled() const { return iMultisamples > 1; }
   // True whenever an OpenXR session must run: either per-eye stereo (StereoMode::OpenXR) or the
-  // flat mono panel path (stereo_mode is Off but vr_flat_screen keeps the session alive). Use
-  // this for session lifecycle gates; keep stereo-specific rendering on stereo_mode == OpenXR.
+  // flat panel path (vr_flat_screen keeps the session alive, stereo_mode is Off or one of
+  // Dolphin's own 3D modes). Use this for session lifecycle gates; keep VR stereo rendering on
+  // stereo_mode == OpenXR.
   bool VRSessionActive() const
   {
     return stereo_mode == StereoMode::OpenXR || vr_flat_screen;
@@ -516,11 +518,23 @@ struct VideoConfig final
   bool VRLockHeadPosePerFrame() const { return !bImmediateXFB; }
   // VR passthrough (headset camera feed behind unrendered areas) is only meaningful
   // while rendering through OpenXR.
+  // It gates the EFB coverage target that gives the projection layer its alpha.
   bool VRPassthroughEnabled() const
   {
     return vr_passthrough && stereo_mode == StereoMode::OpenXR &&
            g_backend_info.bSupportsVRPassthroughCoverage &&
            (g_backend_info.vr_passthrough_coverage_sample_counts & iMultisamples) != 0;
+  }
+  // Flat screen passthrough: the room shows around the opaque panel, as in PPSSPP VR. Nothing
+  // in the game image is see-through, so no coverage target is needed and any backend works.
+  bool VRFlatPassthroughEnabled() const
+  {
+    return vr_passthrough && vr_flat_screen && stereo_mode != StereoMode::OpenXR;
+  }
+  // Whether the headset's camera feed is composited behind the game layers at all.
+  bool VRPassthroughLayerActive() const
+  {
+    return VRPassthroughEnabled() || VRFlatPassthroughEnabled();
   }
   // Quest Screen Recording Compatibility: drop the secondary (dual-source) fragment output from
   // shaders whose blend state doesn't read it, as with BUG_BROKEN_DUAL_SOURCE_BLENDING. Dolphin

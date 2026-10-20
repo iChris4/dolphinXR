@@ -180,8 +180,7 @@ void VRConfigWidget::CreateWidgets()
       Config::GFX_VR_MIRROR_VIEW, layer, m_global_layer.get()));
   openxr_layout->addWidget(new QLabel(tr("Desktop Mirror View:")), 2, 0);
   openxr_layout->addWidget(mirror_view, 2, 1, 1, 2);
-  openxr_layout->addWidget(make_bool(tr("Flat Screen (2D, no stereo)"), Config::GFX_VR_FLAT_SCREEN),
-                           3, 0, 1, 3);
+  openxr_layout->addWidget(make_bool(tr("Flat Screen"), Config::GFX_VR_FLAT_SCREEN), 3, 0, 1, 3);
 
   auto* camera_group = new QGroupBox(tr("Camera"));
   auto* camera_layout = new QGridLayout(camera_group);

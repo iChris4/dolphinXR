@@ -80,7 +80,9 @@ public:
   float AdjustAspectRatioForCustomCrop(float input_aspect_ratio) const;
 
   // Returns the target aspect ratio the XFB output should be drawn with.
-  float CalculateDrawAspectRatio(bool allow_stretch = true) const;
+  // apply_stereo_layout = false leaves out the side-by-side / top-and-bottom window layout
+  // (full per-eye resolution), giving the aspect of one eye's picture.
+  float CalculateDrawAspectRatio(bool allow_stretch = true, bool apply_stereo_layout = true) const;
 
   // Crops the target rectangle to the framebuffer dimensions, reducing the size of the source
   // rectangle if it is greater. Works even if the source and target rectangles don't have a
@@ -162,11 +164,12 @@ private:
   // Sets m_openxr_eyes_rendered when both eye images were rendered and released.
   void BlitCurrentSourceToOpenXREyes(const AbstractTexture* source_texture,
                                      const MathUtil::Rectangle<int>& source_rc);
-  // Flat mono panel path: blit the mono XFB into the flat swapchain image and set the quad aspect.
+  // Flat panel path: blit the XFB into the panel image(s), one per eye when Dolphin's
+  // stereoscopy rendered two layers, set the quad aspect and m_openxr_flat_stereo.
   void BlitCurrentSourceToOpenXRFlat(const AbstractTexture* source_texture,
                                      const MathUtil::Rectangle<int>& source_rc);
-  // True when an OpenXR session is running but the game is shown as a flat mono panel
-  // (StereoMode::Off + vr_flat_screen) rather than per-eye stereo.
+  // True when an OpenXR session is running but the game is shown on a flat panel
+  // (vr_flat_screen, any stereo mode but StereoMode::OpenXR) rather than per-eye OpenXR stereo.
   bool IsOpenXRFlat() const;
   bool SubmitOpenXRFrameFromCurrentSource(const AbstractTexture* source_texture,
                                           const MathUtil::Rectangle<int>& source_rc,
@@ -244,6 +247,9 @@ private:
   // RAM while paused. The eye swapchains of D3D12's layered path never hold a released image,
   // so publishing them would get XR_ERROR_LAYER_INVALID at every paused present.
   bool m_openxr_eyes_rendered = false;
+  // The flat panel images last rendered were a stereo pair (one per eye swapchain), so the
+  // panel is submitted as a left and a right quad. Kept while a present renders no panel image.
+  bool m_openxr_flat_stereo = false;
   double m_last_openxr_wait_frame_ms = 0.0;
   double m_last_openxr_locate_views_ms = 0.0;
   // Rolling 5s window measuring how long the presenting (video/emu) thread spends

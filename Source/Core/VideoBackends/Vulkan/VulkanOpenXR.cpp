@@ -603,11 +603,14 @@ bool VulkanOpenXR::Initialize()
 
 #if defined(_WIN32) || defined(ANDROID)
   // Windows desktop and Quest standalone: keep coverage only when the OpenXR runtime
-  // can actually composite it (XR_FB_passthrough or an ALPHA_BLEND environment).
+  // can actually composite it (XR_FB_passthrough or an ALPHA_BLEND environment). The flat
+  // screen's passthrough needs no coverage, only the runtime's support.
   g_backend_info.bSupportsVRPassthroughCoverage &=
       VR::g_openxr->SupportsPassthrough();
-  if (g_ActiveConfig.vr_passthrough &&
-      !g_backend_info.bSupportsVRPassthroughCoverage)
+  const bool passthrough_possible = g_ActiveConfig.vr_flat_screen ?
+                                        VR::g_openxr->SupportsPassthrough() :
+                                        g_backend_info.bSupportsVRPassthroughCoverage;
+  if (g_ActiveConfig.vr_passthrough && !passthrough_possible)
   {
     OSD::AddMessage("Passthrough disabled: this OpenXR runtime does not expose a compatible "
                     "passthrough mode.",
@@ -1945,48 +1948,47 @@ bool VulkanOpenXR::SubmitFrame()
   return result;
 }
 
-bool VulkanOpenXR::SubmitFlatFrame()
+bool VulkanOpenXR::SubmitFlatFrame(bool stereo)
 {
   DrainRecordingWorkerForDirectAccess();
   ASSERT(VR::g_openxr != nullptr);
 
 #if defined(ANDROID)
   // On Android the per-eye ReleaseEyeTexture only ends the render pass; the command-buffer
-  // submit and xrReleaseSwapchainImage are deferred to submit time. Flat mode has a single
-  // image, so do that here synchronously. In direct-to-HMD mode this submit also advances the
-  // frame resources, since PresentBackbuffer() was skipped. The spec only requires the
+  // submit and xrReleaseSwapchainImage are deferred to submit time. Flat mode doesn't go
+  // through SubmitFrame, so do that here synchronously: one submit for the panel image(s), then
+  // release every acquired eye image (a stereo panel acquires both). In direct-to-HMD mode
+  // this submit also advances the frame resources, since PresentBackbuffer() was skipped (with
+  // no panel image this time it is still the frame's only submit). The spec only requires the
   // writes to be submitted (not completed) before release; the shared graphics queue preserves
   // ordering, so we do not wait for the GPU.
-  if (m_image_acquired[0])
+  const bool any_acquired = m_image_acquired[0] || m_image_acquired[1];
+  if (any_acquired || VR::g_openxr->IsDirectPresentActive())
   {
     StateTracker::GetInstance()->EndRenderPass();
     g_command_buffer_mgr->SubmitCommandBuffer(false, false, VR::g_openxr->IsDirectPresentActive());
     StateTracker::GetInstance()->InvalidateCachedState();
-
+  }
+  for (uint32_t eye = 0; eye < 2; ++eye)
+  {
+    if (!m_image_acquired[eye])
+      continue;
     XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
     XrResult result = XR_SUCCESS;
     {
       auto queue_lock = AcquireGraphicsQueueLock();
-      result = xrReleaseSwapchainImage(m_eye_swapchains[0].swapchain, &release_info);
+      result = xrReleaseSwapchainImage(m_eye_swapchains[eye].swapchain, &release_info);
     }
     if (XR_FAILED(result))
     {
-      WARN_LOG_FMT(VIDEO, "OpenXR: xrReleaseSwapchainImage failed for flat panel ({}).",
+      WARN_LOG_FMT(VIDEO, "OpenXR: xrReleaseSwapchainImage failed for flat panel eye {} ({}).", eye,
                    static_cast<int>(result));
     }
-    m_image_acquired[0] = false;
-  }
-  else if (VR::g_openxr->IsDirectPresentActive())
-  {
-    // No panel image this time, but this is still the frame's only submit (see SubmitFrame).
-    StateTracker::GetInstance()->EndRenderPass();
-    g_command_buffer_mgr->SubmitCommandBuffer(false, false, true);
-    StateTracker::GetInstance()->InvalidateCachedState();
+    m_image_acquired[eye] = false;
   }
 #endif
 
-  return VR::g_openxr->SubmitFlatQuadFrame(m_eye_swapchains[0].swapchain,
-                                           m_eye_swapchains[0].width, m_eye_swapchains[0].height);
+  return IOpenXRSwapchain::SubmitFlatFrame(stereo);
 }
 
 #if defined(ANDROID)
