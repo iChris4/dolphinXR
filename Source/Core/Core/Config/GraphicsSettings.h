@@ -259,6 +259,12 @@ extern const Info<bool> GFX_VR_USE_XR_PACING_THREAD;
 // runs on its own so motion controls are not limited to the game's frame rate. 0 polls once per
 // frame instead. INI-only.
 extern const Info<int> GFX_VR_INPUT_POLL_HZ;
+// Degrees the OpenXR Wii Remote's body (gyroscope axes, gravity, accelerometer) is pitched
+// nose-up from the controller's aim ray: where the remote's axis sits in the hand that holds the
+// controller like a remote. 20 fitted on Touch controllers against a real remote in Skyward
+// Sword (a horizontal swing is then yaw, as on the real remote, not yaw and roll). The IR
+// pointer always follows the aim ray. INI-only.
+extern const Info<float> GFX_VR_WIIMOTE_MOTION_PITCH;
 // Samples per-draw CPU timing into the Vulkan VKPERF counters. Off by default: the timer
 // reads alone cost about 3% of the video thread on Quest. Counts are always accumulated.
 extern const Info<bool> GFX_VR_PERF_COUNTERS;

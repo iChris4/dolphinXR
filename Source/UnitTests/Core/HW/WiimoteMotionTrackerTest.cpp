@@ -8,6 +8,9 @@
 #include <cmath>
 #include <initializer_list>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "Common/BitUtils.h"
@@ -528,5 +531,167 @@ TEST(WiimoteMotionTrackerAngles, OpenXRControllerPoseMapsToTheWiiRemoteFrame)
   EXPECT_NEAR(actual.x, expected.x, 1e-5f);
   EXPECT_NEAR(actual.y, expected.y, 1e-5f);
   EXPECT_NEAR(actual.z, expected.z, 1e-5f);
+}
+
+namespace
+{
+float AngleBetween(const Common::Quaternion& a, const Common::Quaternion& b)
+{
+  return 2 * std::acos(std::min(1.f, std::abs((a * b.Conjugate()).data.w)));
+}
+
+// What a MotionPlus game integrates: each sample over the time since the previous one.
+Common::Quaternion Integrate(const Common::Quaternion& orientation, const Common::Vec3& rate,
+                             double seconds)
+{
+  return (orientation * WiimoteEmu::GetRotationFromGyroscope(rate * float(seconds))).Normalized();
+}
+
+// The controller turning about a fixed body axis, sampled like OpenXR snapshots on PC.
+struct TurningController
+{
+  Common::Quaternion start = Common::Quaternion::RotateX(0.3f) * Common::Quaternion::RotateZ(0.5f);
+  Common::Vec3 rate{4, -7, 5};
+
+  Common::Quaternion PoseAt(double t) const { return Integrate(start, rate, t); }
+};
+
+// A 540 deg/s turn for one second, then still. Reports come every 5.33 ms of emulated time, but
+// the emulation runs in bursts of three reports, so the 30 Hz snapshots reach it irregularly.
+// The game receives the rate of every report, or of every other one (MotionPlus passthrough
+// modes, starting at report first_sample). Returns the worst error while turning.
+float SimulateTurn(int sample_every, int first_sample, float* final_error)
+{
+  constexpr double REPORT_SECONDS = 1.0 / 187.5;
+  constexpr double SNAPSHOT_SECONDS = 1.0 / 30;
+  const TurningController controller;
+  Wiimote::OpenXRGyroSteering steering;
+  Common::Quaternion game = controller.start;
+  Common::Quaternion snapshot = controller.start;
+  Common::Vec3 snapshot_rate{};
+  double snapshot_time = 0;
+  double last_sample = 0;
+  float worst_while_turning = 0;
+  steering.Step(snapshot, snapshot_rate, 0);
+  for (int i = 1; i * REPORT_SECONDS < 2.0; ++i)
+  {
+    const double t = i * REPORT_SECONDS;
+    const double real_time = (i / 3) * 3 * REPORT_SECONDS;
+    while (snapshot_time + SNAPSHOT_SECONDS <= real_time)
+    {
+      snapshot_time += SNAPSHOT_SECONDS;
+      const Common::Quaternion pose = controller.PoseAt(std::min(snapshot_time, 1.0));
+      snapshot_rate =
+          Wiimote::GetOpenXRBodyAngularVelocity(snapshot, pose, float(SNAPSHOT_SECONDS));
+      snapshot = pose;
+    }
+    const Common::Vec3 rate = steering.Step(snapshot, snapshot_rate, REPORT_SECONDS);
+    if (i % sample_every == first_sample)
+    {
+      game = Integrate(game, rate, t - last_sample);
+      last_sample = t;
+    }
+    if (t < 1.0)
+      worst_while_turning = std::max(worst_while_turning, AngleBetween(game, snapshot));
+  }
+  *final_error = AngleBetween(game, controller.PoseAt(1.0));
+  return worst_while_turning;
+}
+}  // namespace
+
+TEST(WiimoteOpenXRGyro, BodyAngularVelocityUsesTheMotionPlusAxes)
+{
+  const Common::Quaternion base = Common::Quaternion::RotateZ(1.0f);
+  const Common::Vec3 nose_down =
+      Wiimote::GetOpenXRBodyAngularVelocity(base, base * Common::Quaternion::RotateX(0.1f), 0.1f);
+  EXPECT_NEAR(nose_down.x, 1, 1e-4f);
+  EXPECT_NEAR(nose_down.y, 0, 1e-4f);
+  EXPECT_NEAR(nose_down.z, 0, 1e-4f);
+
+  // The same rotation with the opposite quaternion sign takes the short way.
+  const Common::Quaternion roll = base * Common::Quaternion::RotateY(-0.2f);
+  const Common::Quaternion negated(-roll.data.w, -roll.data.x, -roll.data.y, -roll.data.z);
+  const Common::Vec3 roll_rate = Wiimote::GetOpenXRBodyAngularVelocity(base, negated, 0.1f);
+  EXPECT_NEAR(roll_rate.x, 0, 1e-4f);
+  EXPECT_NEAR(roll_rate.y, -2, 1e-4f);
+  EXPECT_NEAR(roll_rate.z, 0, 1e-4f);
+}
+
+TEST(WiimoteOpenXRGyro, SteeringKeepsTheGameOnTheControllerPose)
+{
+  for (const auto& [sample_every, first_sample] :
+       {std::pair(1, 0), std::pair(2, 0), std::pair(2, 1)})
+  {
+    float final_error = 0;
+    const float worst_while_turning = SimulateTurn(sample_every, first_sample, &final_error);
+    // Behind by about one snapshot while turning, and nothing left once the controller stops.
+    EXPECT_LT(worst_while_turning, 25 * DEG) << sample_every << ' ' << first_sample;
+    EXPECT_LT(final_error, 0.5f * DEG) << sample_every << ' ' << first_sample;
+  }
+}
+
+TEST(WiimoteOpenXRGyro, PoseHistoryFindsTheSampleOneWindowBack)
+{
+  constexpr s64 MS = 1'000'000;
+  Wiimote::OpenXRPoseSample sample;
+  Wiimote::OpenXRPoseHistory history;
+  EXPECT_EQ(history.FindOlderThan(100 * MS, 16 * MS), nullptr);
+
+  // 250 Hz polling: the sample one window back.
+  for (s64 t = 0; t <= 100 * MS; t += 4 * MS)
+  {
+    sample.time_ns = t;
+    history.Push(sample);
+  }
+  ASSERT_NE(history.FindOlderThan(100 * MS, 16 * MS), nullptr);
+  EXPECT_EQ(history.FindOlderThan(100 * MS, 16 * MS)->time_ns, 84 * MS);
+  EXPECT_EQ(history.FindOlderThan(102 * MS, 16 * MS)->time_ns, 84 * MS);
+  // Per-frame polling: the previous sample, older than the window.
+  EXPECT_EQ(history.FindOlderThan(133 * MS, 16 * MS)->time_ns, 100 * MS);
+
+  // A young history gives its oldest sample once that is half a window old.
+  Wiimote::OpenXRPoseHistory young;
+  sample.time_ns = 0;
+  young.Push(sample);
+  EXPECT_EQ(young.FindOlderThan(5 * MS, 16 * MS), nullptr);
+  ASSERT_NE(young.FindOlderThan(8 * MS, 16 * MS), nullptr);
+  EXPECT_EQ(young.FindOlderThan(8 * MS, 16 * MS)->time_ns, 0);
+
+  // The ring keeps the last CAPACITY samples.
+  Wiimote::OpenXRPoseHistory ring;
+  for (s64 t = 0; t != 200; ++t)
+  {
+    sample.time_ns = t * MS;
+    ring.Push(sample);
+  }
+  ASSERT_NE(ring.FindOlderThan(199 * MS, 100 * MS), nullptr);
+  EXPECT_EQ(ring.FindOlderThan(199 * MS, 100 * MS)->time_ns,
+            (200 - s64(Wiimote::OpenXRPoseHistory::CAPACITY)) * MS);
+  ring.Clear();
+  EXPECT_EQ(ring.FindOlderThan(199 * MS, 1 * MS), nullptr);
+}
+
+TEST(WiimoteOpenXRGyro, SteeringCatchesUpWithAPoseJumpAtALimitedSpeed)
+{
+  Wiimote::OpenXRGyroSteering steering;
+  const Common::Quaternion before = Common::Quaternion::Identity();
+  const Common::Quaternion after = Common::Quaternion::RotateZ(90 * DEG);
+  steering.Step(before, {}, 0);
+
+  Common::Quaternion game = before;
+  float fastest = 0;
+  for (int i = 0; i != 400; ++i)
+  {
+    const Common::Vec3 rate = steering.Step(after, {}, 0.005);
+    fastest = std::max(fastest, rate.Length());
+    game = Integrate(game, rate, 0.005);
+  }
+  EXPECT_LE(fastest, Wiimote::OpenXRGyroSteering::MAX_STEERING_SPEED + 1e-4f);
+  EXPECT_LT(AngleBetween(game, after), 0.5f * DEG);
+
+  // A pause restarts the integral at the pose instead of spinning toward it.
+  const Common::Vec3 after_pause = steering.Step(before, {}, 1.0);
+  EXPECT_EQ(after_pause.Length(), 0);
+  EXPECT_LT(AngleBetween(steering.integrated, before), 1e-4f);
 }
 #endif
