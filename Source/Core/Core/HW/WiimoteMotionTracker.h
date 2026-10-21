@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <vector>
 
 #include "Common/CommonTypes.h"
@@ -169,6 +170,17 @@ void RequestOrientationReset(u32 slot);
 Snapshot GetSnapshot(u32 slot);
 // Appends the samples newer than since_seq (at most the ring size) and returns the newest seq.
 u64 CopyNewSamples(u32 slot, u64 since_seq, std::vector<Sample>* out);
+
+// While recording, each data report becomes a CSV row with the columns of GetRecordingColumns():
+// what the game received, the tester's decoding of it and, for the OpenXR source, the VR
+// controller data and the input override's output behind it. Reports are decoded while
+// recording even if the tester is disabled. Times start at the first recorded report.
+void SetRecording(u32 slot, bool recording);
+bool IsRecording(u32 slot);
+// Moves the rows recorded since the last call to the end of out. Returns how many there were.
+u64 TakeRecordedRows(u32 slot, std::string* out);
+// The CSV header line, newline included.
+std::string GetRecordingColumns();
 
 // Radians: pitch (nose down +), roll (left +), yaw (left +) of a world-around-device rotation.
 Common::Vec3 GetAngles(const Common::Quaternion& world_around_device);

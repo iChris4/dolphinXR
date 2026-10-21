@@ -5,11 +5,17 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
+#include <limits>
 #include <mutex>
 #include <optional>
+#include <string_view>
 #include <utility>
+
+#include <fmt/format.h>
 
 #include "Common/BitUtils.h"
 #include "Common/MathUtil.h"
@@ -52,6 +58,8 @@ constexpr float ACCEL_WEIGHT_WITH_GYRO = 0.04f;
 constexpr float ACCEL_WEIGHT_WITHOUT_GYRO = 0.5f;
 constexpr float IR_WEIGHT_WITH_GYRO = 0.035f;
 constexpr float IR_WEIGHT_WITHOUT_GYRO = 0.45f;
+// The gravity correction fades out as |a| leaves 1 g by this much.
+constexpr float ACCEL_TRUST_RANGE_G = 0.5f;
 
 // Consecutive MotionPlus-looking frames before an unknown MotionPlus state is assumed active.
 constexpr int ASSUME_MOTION_PLUS_FRAMES = 20;
@@ -171,6 +179,8 @@ struct SlotState
   std::atomic<bool> restart{true};
   std::atomic<bool> ir_correction{false};
   std::atomic<bool> reset_requested{false};
+  std::atomic<bool> recording{false};
+  std::atomic<bool> recording_restart{false};
 
   // CPU thread: protocol tracking.
   bool has_source = false;
@@ -214,11 +224,19 @@ struct SlotState
   bool ir_distance_valid = false;
   float ir_distance = DEFAULT_IR_DISTANCE;
 
+  // CPU thread, while recording.
+  u64 recording_start_ticks = 0;
+  std::chrono::steady_clock::time_point recording_start_time{};
+  bool have_recording_xr_time = false;
+  s64 recording_start_xr_time = 0;
+
   // Published to the UI.
   std::mutex mutex;
   Snapshot snapshot;
   std::vector<Sample> ring;
   u64 seq = 0;
+  std::string recorded_rows;
+  u64 recorded_row_count = 0;
 };
 
 std::array<SlotState, MAX_WIIMOTES> s_slots;
@@ -714,6 +732,241 @@ void UpdateMotionPlusHeuristic(SlotState& s, const MotionPlus::DataFormat& data)
   }
 }
 
+// The recording's columns. Angles are in degrees. The fused orientation is the rotation of the
+// world around the device. The xr_ columns are the runtime's raw data in the OpenXR reference
+// space (X right, Y up, Z back; quaternions x, y, z, w), the in_ columns what the input override
+// fed the emulated remote (acceleration in m/s² along the body axes, gyro about the MotionPlus
+// axes, IR cursor -1..+1).
+constexpr std::string_view RECORDING_COLUMNS =
+    "wall_s,emu_s,report,dup,mplus,"
+    "accel_x_g,accel_y_g,accel_z_g,"
+    "gyro_new,gyro_pitch_dps,gyro_roll_dps,gyro_yaw_dps,"
+    "gyro_pitch_raw,gyro_roll_raw,gyro_yaw_raw,gyro_slow,"
+    "fused_w,fused_x,fused_y,fused_z,fused_pitch_deg,fused_roll_deg,fused_yaw_deg,"
+    "ir_dots,ir_cx,ir_cy,ir_yaw_deg,ir_pitch_deg,ir_dist_m,"
+    "ghost_pitch_deg,ghost_roll_deg,ghost_yaw_deg,"
+    // RECORDING_XR_COLUMNS of them.
+    "xr_gen,xr_time_s,xr_hand,xr_withheld,"
+    "xr_aim_qx,xr_aim_qy,xr_aim_qz,xr_aim_qw,"
+    "xr_ptr_qx,xr_ptr_qy,xr_ptr_qz,xr_ptr_qw,"
+    "xr_grip_qx,xr_grip_qy,xr_grip_qz,xr_grip_qw,xr_grip_x,xr_grip_y,xr_grip_z,"
+    "xr_angvel_x,xr_angvel_y,xr_angvel_z,xr_linvel_x,xr_linvel_y,xr_linvel_z,"
+    "xr_hit_u,xr_hit_v,xr_hit_dist_m,"
+    // RECORDING_INPUT_COLUMNS of them.
+    "in_gen,in_accel_x,in_accel_y,in_accel_z,in_gyro_pitch_dps,in_gyro_roll_dps,in_gyro_yaw_dps,"
+    "in_ir_x,in_ir_y,in_ir_z";
+constexpr int RECORDING_XR_COLUMNS = 28;
+constexpr int RECORDING_INPUT_COLUMNS = 10;
+
+class CsvRow
+{
+public:
+  explicit CsvRow(std::string* out) : m_out(out) {}
+
+  void Empty(int count = 1)
+  {
+    for (int i = 0; i != count; ++i)
+      Next();
+  }
+  void Text(std::string_view text)
+  {
+    Next();
+    m_out->append(text);
+  }
+  void Integer(s64 value)
+  {
+    Next();
+    fmt::format_to(std::back_inserter(*m_out), "{}", value);
+  }
+  // Non-finite values (a hidden pointer) are left empty.
+  void Number(double value, int precision)
+  {
+    Next();
+    if (std::isfinite(value))
+      fmt::format_to(std::back_inserter(*m_out), "{:.{}f}", value, precision);
+  }
+  void Numbers(const float* values, size_t count, int precision, float scale = 1)
+  {
+    for (size_t i = 0; i != count; ++i)
+      Number(values[i] * scale, precision);
+  }
+  void Vec3(const Common::Vec3& value, int precision, float scale = 1)
+  {
+    Numbers(value.data.data(), value.data.size(), precision, scale);
+  }
+  void End() { m_out->push_back('\n'); }
+
+private:
+  void Next()
+  {
+    if (m_count++ != 0)
+      m_out->push_back(',');
+  }
+
+  std::string* m_out;
+  int m_count = 0;
+};
+
+struct RecordedReport
+{
+  // Seconds since the first recorded report.
+  double wall_time = 0;
+  double emulated_time = 0;
+  bool duplicate = false;
+  bool new_gyro = false;
+#ifdef ENABLE_VR
+  const Wiimote::OpenXRWiiRemotePose* pose = nullptr;
+  const Wiimote::OpenXRWiiRemoteInput* input = nullptr;
+  // Seconds of the runtime's sample time since the first recorded one.
+  double xr_time = 0;
+#endif
+};
+
+std::string_view GetMotionPlusStateName(MotionPlusState state)
+{
+  switch (state)
+  {
+  case MotionPlusState::Active:
+    return "active";
+  case MotionPlusState::AssumedActive:
+    return "assumed";
+  case MotionPlusState::Unknown:
+    return "unknown";
+  default:
+    return "inactive";
+  }
+}
+
+void AppendRecordedRow(const Snapshot& snapshot, const RecordedReport& report, std::string* out)
+{
+  constexpr float DEGREES = float(360 / MathUtil::TAU);
+  CsvRow row(out);
+
+  row.Number(report.wall_time, 6);
+  row.Number(report.emulated_time, 6);
+  std::string bytes;
+  for (size_t i = 0; i != snapshot.last_report_size; ++i)
+    fmt::format_to(std::back_inserter(bytes), "{:02X}", snapshot.last_report[i]);
+  row.Text(bytes);
+  row.Integer(report.duplicate);
+  row.Text(GetMotionPlusStateName(snapshot.motion_plus));
+
+  if (snapshot.has_accel)
+    row.Vec3(snapshot.accel_g, 4);
+  else
+    row.Empty(3);
+
+  row.Integer(report.new_gyro);
+  if (snapshot.has_gyro)
+  {
+    row.Vec3(snapshot.gyro_rad_s, 2, DEGREES);
+    for (const u16 raw : snapshot.gyro_raw)
+      row.Integer(raw);
+    std::string ranges;
+    for (const bool slow : snapshot.gyro_slow)
+      ranges.push_back(slow ? 'S' : 'F');
+    row.Text(ranges);
+  }
+  else
+  {
+    row.Empty(7);
+  }
+
+  const auto& orientation = snapshot.orientation.data;
+  row.Number(orientation.w, 6);
+  row.Number(orientation.x, 6);
+  row.Number(orientation.y, 6);
+  row.Number(orientation.z, 6);
+  row.Vec3(snapshot.angles, 3, DEGREES);
+
+  row.Integer(snapshot.ir_visible);
+  if (snapshot.ir_visible > 0)
+  {
+    row.Number(snapshot.ir_center.x, 4);
+    row.Number(snapshot.ir_center.y, 4);
+    row.Number(snapshot.ir_yaw * DEGREES, 3);
+    row.Number(snapshot.ir_pitch * DEGREES, 3);
+  }
+  else
+  {
+    row.Empty(4);
+  }
+  // The distance is held while the dots are lost; record it only when measured.
+  if (snapshot.ir_distance_valid && snapshot.ir_visible >= 2)
+    row.Number(snapshot.ir_distance_m, 3);
+  else
+    row.Empty();
+
+  if (snapshot.ghost_valid)
+    row.Vec3(snapshot.ghost_angles, 3, DEGREES);
+  else
+    row.Empty(3);
+
+#ifdef ENABLE_VR
+  if (const Wiimote::OpenXRWiiRemotePose* const pose = report.pose)
+  {
+    const Common::VR::OpenXRControllerState& controller = pose->controller;
+    row.Integer(s64(pose->generation));
+    row.Number(report.xr_time, 6);
+    row.Text(pose->left_hand ? "L" : "R");
+    row.Integer(pose->input_withheld);
+    for (const Common::VR::OpenXRPoseState* const state :
+         {&controller.aim_pose, &controller.pointer_pose, &controller.grip_pose})
+    {
+      if (state->valid)
+        row.Numbers(state->orientation.data(), 4, 6);
+      else
+        row.Empty(4);
+    }
+    if (controller.grip_pose.valid)
+      row.Numbers(controller.grip_pose.position.data(), 3, 4);
+    else
+      row.Empty(3);
+    if (controller.grip_velocity.angular_valid)
+      row.Numbers(controller.grip_velocity.angular.data(), 3, 4);
+    else
+      row.Empty(3);
+    if (controller.grip_velocity.linear_valid)
+      row.Numbers(controller.grip_velocity.linear.data(), 3, 4);
+    else
+      row.Empty(3);
+    const Common::VR::OpenXRScreenHit& hit = controller.screen_hit;
+    if (hit.valid)
+    {
+      row.Number(hit.u, 4);
+      row.Number(hit.v, 4);
+      row.Number(hit.distance_m, 3);
+    }
+    else
+    {
+      row.Empty(3);
+    }
+  }
+  else
+  {
+    row.Empty(RECORDING_XR_COLUMNS);
+  }
+
+  if (const Wiimote::OpenXRWiiRemoteInput* const input = report.input)
+  {
+    row.Integer(s64(input->generation));
+    row.Vec3(input->acceleration, 3);
+    row.Vec3(input->angular_velocity, 2, DEGREES);
+    row.Number(input->ir_x, 4);
+    row.Number(input->ir_y, 4);
+    row.Number(input->ir_z, 3);
+  }
+  else
+  {
+    row.Empty(RECORDING_INPUT_COLUMNS);
+  }
+#else
+  row.Empty(RECORDING_XR_COLUMNS + RECORDING_INPUT_COLUMNS);
+#endif
+
+  row.End();
+}
+
 void StartDecoding(SlotState& s, u64 ticks)
 {
   s.start_ticks = ticks;
@@ -856,9 +1109,14 @@ void DecodeDataReport(SlotState& s, u32 slot, const u8* report, u32 size, u64 ti
     }
     if (usable_accel)
     {
+      // The accelerometer only measures gravity while the remote is not accelerating: a swing's
+      // centripetal push of several g would roll the orientation by tens of degrees.
+      const float accel_trust =
+          std::clamp(1 - std::abs(accel_g.Length() - 1) / ACCEL_TRUST_RANGE_G, 0.f, 1.f);
       s.orientation = ComplementaryFilter(
           s.orientation, accel_g,
-          motion_plus_active ? ACCEL_WEIGHT_WITH_GYRO : ACCEL_WEIGHT_WITHOUT_GYRO, {0, 0, 1});
+          (motion_plus_active ? ACCEL_WEIGHT_WITH_GYRO : ACCEL_WEIGHT_WITHOUT_GYRO) * accel_trust,
+          {0, 0, 1});
     }
     if (s.ir_correction.load(std::memory_order_relaxed) && ir.visible > 0)
     {
@@ -887,7 +1145,8 @@ void DecodeDataReport(SlotState& s, u32 slot, const u8* report, u32 size, u64 ti
   bool ghost_distance_valid = false;
   float ghost_distance = 0;
 #ifdef ENABLE_VR
-  if (const auto pose = Wiimote::GetOpenXRWiiRemotePose(slot))
+  const std::optional<Wiimote::OpenXRWiiRemotePose> pose = Wiimote::GetOpenXRWiiRemotePose(slot);
+  if (pose)
   {
     const Common::Quaternion device_to_world = pose->orientation.Normalized();
     if (aligned_now || !s.ghost_offset_valid)
@@ -911,6 +1170,44 @@ void DecodeDataReport(SlotState& s, u32 slot, const u8* report, u32 size, u64 ti
   (void)slot;
   (void)aligned_now;
 #endif
+
+  const bool recording = s.recording.load(std::memory_order_relaxed);
+  RecordedReport recorded;
+#ifdef ENABLE_VR
+  std::optional<Wiimote::OpenXRWiiRemoteInput> input;
+#endif
+  if (recording)
+  {
+    const auto now = std::chrono::steady_clock::now();
+    if (s.recording_restart.exchange(false))
+    {
+      s.recording_start_ticks = ticks;
+      s.recording_start_time = now;
+      s.have_recording_xr_time = false;
+    }
+    recorded.wall_time = std::chrono::duration<double>(now - s.recording_start_time).count();
+    // Negative after loading an older savestate.
+    recorded.emulated_time = double(s64(ticks - s.recording_start_ticks)) * seconds_per_tick;
+    recorded.duplicate = duplicate;
+    recorded.new_gyro = new_gyro;
+#ifdef ENABLE_VR
+    if (pose)
+    {
+      if (!s.have_recording_xr_time && pose->sample_time_ns != 0)
+      {
+        s.recording_start_xr_time = pose->sample_time_ns;
+        s.have_recording_xr_time = true;
+      }
+      recorded.xr_time = s.have_recording_xr_time && pose->sample_time_ns != 0 ?
+                             double(pose->sample_time_ns - s.recording_start_xr_time) * 1e-9 :
+                             std::numeric_limits<double>::quiet_NaN();
+      recorded.pose = &*pose;
+      input = Wiimote::GetOpenXRWiiRemoteInput(slot);
+      if (input)
+        recorded.input = &*input;
+    }
+#endif
+  }
 
   Sample sample;
   sample.time = float(double(ticks - s.start_ticks) * seconds_per_tick);
@@ -976,6 +1273,12 @@ void DecodeDataReport(SlotState& s, u32 slot, const u8* report, u32 size, u64 ti
     ++s.seq;
   }
   snapshot.sample_seq = s.seq;
+
+  if (recording)
+  {
+    AppendRecordedRow(snapshot, recorded, &s.recorded_rows);
+    ++s.recorded_row_count;
+  }
 }
 }  // namespace
 
@@ -1058,7 +1361,7 @@ void OnInputReport(u32 slot, const u8* report, u32 size, u64 ticks, u64 ticks_pe
     return;
   }
 
-  if (!s->enabled.load(std::memory_order_relaxed))
+  if (!s->enabled.load(std::memory_order_relaxed) && !s->recording.load(std::memory_order_relaxed))
     return;
 
   DecodeDataReport(*s, slot, report, size, ticks, ticks_per_second);
@@ -1114,6 +1417,45 @@ Snapshot GetSnapshot(u32 slot)
 
   std::lock_guard lock(s->mutex);
   return s->snapshot;
+}
+
+void SetRecording(u32 slot, bool recording)
+{
+  SlotState* const s = GetSlot(slot);
+  if (!s)
+    return;
+
+  if (recording)
+  {
+    std::lock_guard lock(s->mutex);
+    s->recorded_rows.clear();
+    s->recorded_row_count = 0;
+  }
+  s->recording_restart = true;
+  s->recording = recording;
+}
+
+bool IsRecording(u32 slot)
+{
+  const SlotState* const s = GetSlot(slot);
+  return s && s->recording.load(std::memory_order_relaxed);
+}
+
+u64 TakeRecordedRows(u32 slot, std::string* out)
+{
+  SlotState* const s = GetSlot(slot);
+  if (!s)
+    return 0;
+
+  std::lock_guard lock(s->mutex);
+  out->append(s->recorded_rows);
+  s->recorded_rows.clear();
+  return std::exchange(s->recorded_row_count, 0);
+}
+
+std::string GetRecordingColumns()
+{
+  return std::string(RECORDING_COLUMNS) + '\n';
 }
 
 u64 CopyNewSamples(u32 slot, u64 since_seq, std::vector<Sample>* out)

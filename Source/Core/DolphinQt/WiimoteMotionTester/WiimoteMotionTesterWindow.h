@@ -5,6 +5,8 @@
 
 #include <array>
 #include <chrono>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include <QDialog>
@@ -13,6 +15,11 @@
 #include "Common/CommonTypes.h"
 #include "Core/HW/Wiimote.h"
 #include "Core/HW/WiimoteMotionTracker.h"
+
+namespace File
+{
+class IOFile;
+}
 
 class QCheckBox;
 class QComboBox;
@@ -48,6 +55,12 @@ private:
   void UpdateSource();
   void UpdateReadouts(const WiimoteMotionTracker::Snapshot& snapshot, bool has_data);
   void ClearHistory();
+  void StartRecording();
+  // Saves and closes the recording. The reason is shown next to the saved file.
+  void StopRecording(const QString& reason = {});
+  void WriteRecordedRows();
+  void UpdateRecordingLabel();
+  std::string GetRecordingHeader() const;
 
   int m_slot = 0;
   WiimoteSource m_source = WiimoteSource::None;
@@ -58,11 +71,20 @@ private:
   int m_tick = 0;
   std::vector<WiimoteMotionTracker::Sample> m_new_samples;
 
+  std::unique_ptr<File::IOFile> m_record_file;
+  QString m_record_path;
+  std::string m_record_buffer;
+  u64 m_record_rows = 0;
+  u64 m_record_bytes = 0;
+  std::chrono::steady_clock::time_point m_record_start{};
+
   QTimer* m_timer;
   QComboBox* m_slot_combo;
   QLabel* m_source_label;
   QLabel* m_status_label;
   QPushButton* m_reset_button;
+  QPushButton* m_record_button;
+  QLabel* m_record_label;
   QCheckBox* m_ir_correction;
   QCheckBox* m_show_ghost;
   QCheckBox* m_use_ir_distance;

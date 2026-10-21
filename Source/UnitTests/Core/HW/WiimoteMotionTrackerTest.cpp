@@ -99,6 +99,7 @@ protected:
 
   void TearDown() override
   {
+    Tracker::SetRecording(SLOT, false);
     Tracker::SetEnabled(SLOT, false);
     Tracker::OnSourceChanged(SLOT, false);
   }
@@ -492,6 +493,98 @@ TEST_F(WiimoteMotionTrackerTest, SavestateLoadAssumesMotionPlusFromItsData)
   const Tracker::Snapshot snapshot = Tracker::GetSnapshot(SLOT);
   EXPECT_EQ(snapshot.motion_plus, Tracker::MotionPlusState::AssumedActive);
   EXPECT_TRUE(snapshot.has_gyro);
+}
+
+namespace
+{
+std::vector<std::string> Split(std::string_view text, char separator)
+{
+  std::vector<std::string> result;
+  size_t start = 0;
+  while (true)
+  {
+    const size_t end = text.find(separator, start);
+    result.emplace_back(text.substr(start, end - start));
+    if (end == std::string_view::npos)
+      return result;
+    start = end + 1;
+  }
+}
+
+// The rows of a CSV text whose lines all end with a newline.
+std::vector<std::vector<std::string>> ParseRows(std::string_view text)
+{
+  std::vector<std::vector<std::string>> rows;
+  for (const std::string& line : Split(text, '\n'))
+  {
+    if (!line.empty())
+      rows.push_back(Split(line, ','));
+  }
+  return rows;
+}
+}  // namespace
+
+TEST_F(WiimoteMotionTrackerTest, RecordingWritesARowPerReport)
+{
+  ActivateMotionPlus(MotionPlus::PassthroughMode::Disabled);
+  Data(InputReportID::ReportCoreAccelExt16, {0, 0, G}, MakeMotionPlusData({0, 0, 0}));
+
+  Tracker::SetRecording(SLOT, true);
+  for (int i = 0; i != 3; ++i)
+    Data(InputReportID::ReportCoreAccelExt16, {0, 0, G}, MakeMotionPlusData({0, 0, 1}));
+  Tracker::SetRecording(SLOT, false);
+  Data(InputReportID::ReportCoreAccelExt16, {0, 0, G}, MakeMotionPlusData({0, 0, 1}));
+
+  std::string text;
+  EXPECT_EQ(Tracker::TakeRecordedRows(SLOT, &text), 3u);
+  const std::string columns = Tracker::GetRecordingColumns();
+  ASSERT_EQ(columns.back(), '\n');
+  const std::vector<std::string> header = Split(columns.substr(0, columns.size() - 1), ',');
+  const auto rows = ParseRows(text);
+  ASSERT_EQ(rows.size(), 3u);
+  for (const auto& row : rows)
+    EXPECT_EQ(row.size(), header.size());
+
+  const auto field = [&header, &rows](size_t row, std::string_view name) {
+    const auto column = std::find(header.begin(), header.end(), name);
+    EXPECT_NE(column, header.end()) << name;
+    return column == header.end() ? std::string() : rows[row][column - header.begin()];
+  };
+  // Times start at the first recorded report.
+  EXPECT_DOUBLE_EQ(std::stod(field(0, "emu_s")), 0.0);
+  EXPECT_NEAR(std::stod(field(2, "emu_s")), 2.0 / 200, 1e-6);
+  EXPECT_GE(std::stod(field(2, "wall_s")), std::stod(field(0, "wall_s")));
+  EXPECT_EQ(field(0, "report").substr(0, 2), "35");
+  EXPECT_EQ(field(0, "dup"), "0");
+  EXPECT_EQ(field(1, "dup"), "1");
+  EXPECT_EQ(field(0, "mplus"), "active");
+  EXPECT_NEAR(std::stod(field(0, "accel_z_g")), 1.0, 0.01);
+  EXPECT_EQ(field(0, "gyro_new"), "1");
+  EXPECT_NEAR(std::stod(field(0, "gyro_yaw_dps")), 1 / DEG, 0.3);
+  EXPECT_EQ(field(0, "gyro_slow"), "SSS");
+  EXPECT_EQ(field(0, "ir_dots"), "0");
+  EXPECT_TRUE(field(0, "ir_cx").empty());
+  // Not an OpenXR remote.
+  EXPECT_TRUE(field(0, "xr_gen").empty());
+  EXPECT_TRUE(field(0, "in_gen").empty());
+
+  // A new recording starts empty.
+  Tracker::SetRecording(SLOT, true);
+  text.clear();
+  EXPECT_EQ(Tracker::TakeRecordedRows(SLOT, &text), 0u);
+  EXPECT_TRUE(text.empty());
+}
+
+TEST_F(WiimoteMotionTrackerTest, RecordingDecodesWhileTheTesterIsDisabled)
+{
+  Tracker::SetEnabled(SLOT, false);
+  Tracker::SetRecording(SLOT, true);
+  Data(InputReportID::ReportCoreAccel, {0, 0, G});
+  Data(InputReportID::ReportCoreAccel, {0, 0, G});
+
+  std::string text;
+  EXPECT_EQ(Tracker::TakeRecordedRows(SLOT, &text), 2u);
+  EXPECT_EQ(ParseRows(text).size(), 2u);
 }
 
 TEST(WiimoteMotionTrackerAngles, SignsFollowTheRightHandRule)

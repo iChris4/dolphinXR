@@ -5,10 +5,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
+#include <string_view>
 #include <utility>
+
+#include <fmt/format.h>
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDateTime>
+#include <QDesktopServices>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QFontMetrics>
 #include <QFormLayout>
@@ -21,19 +28,33 @@
 #include <QScrollArea>
 #include <QSplitter>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
 
+#include "Common/CommonPaths.h"
 #include "Common/Config/Config.h"
+#include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Common/MathUtil.h"
+#include "Common/Version.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/WiimoteSettings.h"
+#include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/HW/Wiimote.h"
+#include "Core/HW/WiimoteEmu/WiimoteEmu.h"
 #include "Core/NetPlayProto.h"
 #include "Core/System.h"
 #include "DolphinQt/Settings.h"
 #include "DolphinQt/WiimoteMotionTester/WiimoteMotionPlot.h"
 #include "DolphinQt/WiimoteMotionTester/WiimoteMotionView.h"
+#include "InputCommon/ControllerEmu/ControlGroup/Cursor.h"
+#include "InputCommon/ControllerEmu/ControllerEmu.h"
+
+#ifdef ENABLE_VR
+#include "Common/VR/OpenXRInputState.h"
+#include "Core/Config/GraphicsSettings.h"
+#endif
 
 namespace
 {
@@ -49,6 +70,35 @@ constexpr auto STALE_TIME = std::chrono::milliseconds(500);
 constexpr int READOUT_TICKS = 4;
 constexpr int READOUTS_MIN_WIDTH = 420;
 constexpr int READOUTS_WIDTH = 480;
+constexpr auto MAX_RECORDING_TIME = std::chrono::minutes(10);
+
+std::string_view GetSourceName(WiimoteSource source)
+{
+  switch (source)
+  {
+  case WiimoteSource::Emulated:
+    return "Emulated";
+  case WiimoteSource::OpenXR:
+    return "OpenXR";
+  case WiimoteSource::Real:
+    return "Real";
+  default:
+    return "None";
+  }
+}
+
+std::string_view GetCalibrationName(CalibrationSource source)
+{
+  switch (source)
+  {
+  case CalibrationSource::Device:
+    return "device";
+  case CalibrationSource::DeviceBadChecksum:
+    return "device, bad checksum";
+  default:
+    return "nominal";
+  }
+}
 
 QString Signed(float value, int precision)
 {
@@ -146,6 +196,7 @@ WiimoteMotionTesterWindow::WiimoteMotionTesterWindow(QWidget* parent) : QDialog(
 
 WiimoteMotionTesterWindow::~WiimoteMotionTesterWindow()
 {
+  StopRecording();
   SetActive(false);
   Settings::GetQSettings().setValue(QStringLiteral("wiimotemotiontester/geometry"), saveGeometry());
 }
@@ -163,6 +214,15 @@ void WiimoteMotionTesterWindow::CreateWidgets()
       tr("Sets the orientation back to the accelerometer's pitch and roll. The yaw comes from the "
          "IR dots when the sensor bar is visible; otherwise the remote is assumed to point at the "
          "sensor bar. The VR controller's yaw is aligned to it."));
+  m_record_button = new QPushButton(tr("Record"));
+  m_record_button->setToolTip(
+      tr("Saves every report this Wii Remote sends to the game in a CSV file in "
+         "Dump/WiimoteMotion, with the VR controller data behind each report for the OpenXR "
+         "source. Minimizing the window keeps recording; closing it stops. A recording stops "
+         "after 10 minutes."));
+  m_record_label = new QLabel;
+  m_record_label->setTextFormat(Qt::RichText);
+  m_record_label->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
 
   m_ir_correction = new QCheckBox(tr("IR Yaw Correction"));
   m_ir_correction->setToolTip(tr(
@@ -191,6 +251,7 @@ void WiimoteMotionTesterWindow::CreateWidgets()
   top->addWidget(m_slot_combo);
   top->addWidget(m_source_label, 1);
   top->addWidget(m_reset_button);
+  top->addWidget(m_record_button);
 
   auto* const options = new QHBoxLayout;
   options->addWidget(m_ir_correction);
@@ -198,6 +259,7 @@ void WiimoteMotionTesterWindow::CreateWidgets()
   options->addWidget(m_use_ir_distance);
   options->addWidget(m_show_ir);
   options->addStretch(1);
+  options->addWidget(m_record_label);
 
   m_view = new WiimoteMotionView;
   m_accel_plot = new WiimoteMotionPlot(WiimoteMotionPlot::Kind::Accelerometer);
@@ -292,7 +354,8 @@ void WiimoteMotionTesterWindow::CreateWidgets()
 #endif
   auto* const convention =
       new QLabel(tr("Angles: positive nose down, rolled left, turned left (the MotionPlus axes). "
-                    "Body axes: X left, Y back, Z up."));
+                    "Body axes: X left, Y back, Z up. The fused orientation trusts the "
+                    "accelerometer less the further |a| is from 1 g."));
   convention->setWordWrap(true);
   motion->addWidget(convention, ROW_COUNT + 1, 0, 1, MOTION_COLUMNS + 1);
 
@@ -331,12 +394,23 @@ void WiimoteMotionTesterWindow::ConnectWidgets()
   connect(m_slot_combo, &QComboBox::currentIndexChanged, this, &WiimoteMotionTesterWindow::SetSlot);
   connect(m_reset_button, &QPushButton::clicked, this,
           [this] { WiimoteMotionTracker::RequestOrientationReset(u32(m_slot)); });
+  connect(m_record_button, &QPushButton::clicked, this, [this] {
+    if (m_record_file)
+      StopRecording();
+    else
+      StartRecording();
+  });
+  connect(m_record_label, &QLabel::linkActivated, this, [this] {
+    QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(m_record_path).absolutePath()));
+  });
   connect(m_ir_correction, &QCheckBox::toggled, this,
           [this](bool checked) { WiimoteMotionTracker::SetIRCorrection(u32(m_slot), checked); });
   connect(m_show_ghost, &QCheckBox::toggled, m_view, &WiimoteMotionView::SetShowGhost);
   connect(m_use_ir_distance, &QCheckBox::toggled, m_view, &WiimoteMotionView::SetUseIRDistance);
   connect(m_show_ir, &QCheckBox::toggled, m_view, &WiimoteMotionView::SetShowIR);
-  connect(&Settings::Instance(), &Settings::EmulationStateChanged, this, [this](Core::State) {
+  connect(&Settings::Instance(), &Settings::EmulationStateChanged, this, [this](Core::State state) {
+    if (state == Core::State::Uninitialized)
+      StopRecording(tr("emulation stopped"));
     ClearHistory();
     UpdateSource();
   });
@@ -352,7 +426,13 @@ void WiimoteMotionTesterWindow::showEvent(QShowEvent* event)
 
 void WiimoteMotionTesterWindow::hideEvent(QHideEvent* event)
 {
-  SetActive(false);
+  // A recording goes on while the window is minimized (the user is in the headset), and ends
+  // when it is closed.
+  if (!m_record_file || !isMinimized())
+  {
+    StopRecording();
+    SetActive(false);
+  }
   Settings::GetQSettings().setValue(QStringLiteral("wiimotemotiontester/geometry"), saveGeometry());
   QDialog::hideEvent(event);
 }
@@ -385,6 +465,7 @@ void WiimoteMotionTesterWindow::SetSlot(int slot)
     return;
 
   const bool active = m_active;
+  StopRecording();
   SetActive(false);
   m_slot = slot;
   SetActive(active);
@@ -398,6 +479,155 @@ void WiimoteMotionTesterWindow::ClearHistory()
   m_last_report_time = {};
   m_accel_plot->Clear();
   m_gyro_plot->Clear();
+}
+
+void WiimoteMotionTesterWindow::StartRecording()
+{
+  if (m_record_file)
+    return;
+
+  const std::string directory = File::GetUserPath(D_DUMP_IDX) + "WiimoteMotion" DIR_SEP;
+  std::string game_id = SConfig::GetInstance().GetGameID();
+  if (game_id.empty())
+    game_id = "NoGame";
+  const std::string path = fmt::format(
+      "{}{}_{}_Wiimote{}.csv", directory, game_id,
+      QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_HH-mm-ss")).toStdString(),
+      m_slot + 1);
+  m_record_path = QString::fromStdString(path);
+
+  auto file = std::make_unique<File::IOFile>();
+  if (!File::CreateFullPath(directory) || !file->Open(path, "wb") ||
+      !file->WriteString(GetRecordingHeader() + WiimoteMotionTracker::GetRecordingColumns()))
+  {
+    m_record_label->setText(tr("Could not create %1").arg(m_record_path.toHtmlEscaped()));
+    return;
+  }
+
+  m_record_file = std::move(file);
+  m_record_rows = 0;
+  m_record_bytes = 0;
+  m_record_start = std::chrono::steady_clock::now();
+  WiimoteMotionTracker::SetRecording(u32(m_slot), true);
+  m_record_button->setText(tr("Stop Recording"));
+  m_slot_combo->setEnabled(false);
+  UpdateRecordingLabel();
+}
+
+void WiimoteMotionTesterWindow::StopRecording(const QString& reason)
+{
+  if (!m_record_file)
+    return;
+
+  WiimoteMotionTracker::SetRecording(u32(m_slot), false);
+  WriteRecordedRows();
+  const bool write_failed = !m_record_file || !m_record_file->Close();
+  m_record_file.reset();
+  m_record_button->setText(tr("Record"));
+  m_slot_combo->setEnabled(true);
+
+  const QString seconds = QString::number(
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - m_record_start).count(), 'f',
+      1);
+  QString text = tr("Saved %1 reports (%2 s) to <a href=\"folder\">%3</a>")
+                     .arg(m_record_rows)
+                     .arg(seconds)
+                     .arg(QFileInfo(m_record_path).fileName().toHtmlEscaped());
+  if (write_failed)
+    text = tr("Could not write %1").arg(m_record_path.toHtmlEscaped());
+  else if (!reason.isEmpty())
+    text += QStringLiteral(" (%1)").arg(reason.toHtmlEscaped());
+  m_record_label->setText(text);
+}
+
+void WiimoteMotionTesterWindow::WriteRecordedRows()
+{
+  if (!m_record_file)
+    return;
+
+  m_record_buffer.clear();
+  m_record_rows += WiimoteMotionTracker::TakeRecordedRows(u32(m_slot), &m_record_buffer);
+  if (m_record_buffer.empty())
+    return;
+  if (!m_record_file->WriteString(m_record_buffer))
+  {
+    WiimoteMotionTracker::SetRecording(u32(m_slot), false);
+    m_record_file.reset();
+    m_record_button->setText(tr("Record"));
+    m_slot_combo->setEnabled(true);
+    m_record_label->setText(tr("Could not write %1").arg(m_record_path.toHtmlEscaped()));
+    return;
+  }
+  m_record_bytes += m_record_buffer.size();
+}
+
+void WiimoteMotionTesterWindow::UpdateRecordingLabel()
+{
+  const double seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - m_record_start).count();
+  m_record_label->setText(tr("Recording: %1 s, %2 reports, %3 MB")
+                              .arg(seconds, 0, 'f', 1)
+                              .arg(m_record_rows)
+                              .arg(double(m_record_bytes) / (1024 * 1024), 0, 'f', 1));
+}
+
+std::string WiimoteMotionTesterWindow::GetRecordingHeader() const
+{
+  std::string header = "# Dolphin Wii Remote Motion Tester recording, format 1\n";
+  const auto line = [&header](std::string_view key, std::string_view value) {
+    fmt::format_to(std::back_inserter(header), "# {}: {}\n", key, value);
+  };
+
+  const SConfig& config = SConfig::GetInstance();
+  line("dolphin", Common::GetScmDescStr());
+  line("started", QDateTime::currentDateTime().toString(Qt::ISODate).toStdString());
+  line("game", fmt::format("{} {}", config.GetGameID(), config.GetTitleName()));
+  line("slot", fmt::to_string(m_slot + 1));
+  line("source", GetSourceName(m_source));
+  line("emulation_speed",
+       fmt::format("{:.2f} (0 = unlimited)", Config::Get(Config::MAIN_EMULATION_SPEED)));
+  line("dual_core", Config::Get(Config::MAIN_CPU_THREAD) ? "1" : "0");
+  line("fused_ir_yaw_correction", m_ir_correction->isChecked() ? "1" : "0");
+
+  {
+    const auto lock = ControllerEmu::EmulatedController::GetStateLock();
+    const auto* const point = static_cast<const ControllerEmu::Cursor*>(
+        Wiimote::GetWiimoteGroup(m_slot, WiimoteEmu::WiimoteGroup::Point));
+    constexpr double DEGREES = 360 / MathUtil::TAU;
+    line("point", fmt::format("total_yaw_deg={:.1f} total_pitch_deg={:.1f} "
+                              "vertical_offset_cm={:.1f} distance_sensitivity={:.2f}",
+                              point->GetTotalYaw() * DEGREES, point->GetTotalPitch() * DEGREES,
+                              point->GetVerticalOffset() * 100, point->GetDistanceSensitivity()));
+  }
+
+  const Snapshot snapshot = WiimoteMotionTracker::GetSnapshot(u32(m_slot));
+  line("accel_calibration",
+       fmt::format("{}, zero_g {} {} {}, one_g {} {} {}",
+                   GetCalibrationName(snapshot.accel_calibration), snapshot.accel_zero_g[0],
+                   snapshot.accel_zero_g[1], snapshot.accel_zero_g[2], snapshot.accel_one_g[0],
+                   snapshot.accel_one_g[1], snapshot.accel_one_g[2]));
+  line("motionplus_calibration", GetCalibrationName(snapshot.motion_plus_calibration));
+
+#ifdef ENABLE_VR
+  const Common::VR::OpenXRInputSnapshot xr = Common::VR::OpenXRInputState::GetSnapshot();
+  line("xr_profiles",
+       fmt::format("left {}, right {}", xr.interaction_profiles[0], xr.interaction_profiles[1]));
+  line("vr_screen", fmt::format("distance_m {:.2f}, size {:.2f}, flat_screen {}",
+                                Config::Get(Config::GFX_VR_SCREEN_DISTANCE),
+                                Config::Get(Config::GFX_VR_SCREEN_SIZE),
+                                Config::Get(Config::GFX_VR_FLAT_SCREEN) ? 1 : 0));
+#endif
+
+  header += "# Angles in degrees: positive nose down, rolled left, turned left (the MotionPlus "
+            "axes). Body axes X left, Y back, Z up. fused_* is the tester's fusion "
+            "(world-around-device quaternion), ghost_* the VR controller with its yaw aligned at "
+            "the last Reset Orientation.\n";
+  header += "# xr_*: the runtime's data in the OpenXR reference space (X right, Y up, Z back), "
+            "quaternions x y z w; aim at the predicted display time, ptr (pointer) and grip at "
+            "the input sample time; angvel rad/s, linvel m/s.\n";
+  header += "# in_*: what the OpenXR input override fed the emulated remote: accel m/s^2 along "
+            "the body axes, gyro deg/s, IR cursor -1..1 (in_ir_x empty while hidden).\n";
+  return header;
 }
 
 void WiimoteMotionTesterWindow::UpdateSource()
@@ -452,8 +682,19 @@ void WiimoteMotionTesterWindow::Tick()
   m_view->SetSnapshot(snapshot, has_data);
   m_ir_view->SetSnapshot(snapshot, has_data);
 
+  if (m_record_file)
+  {
+    WriteRecordedRows();
+    if (m_record_file && now - m_record_start >= MAX_RECORDING_TIME)
+      StopRecording(tr("stopped after 10 minutes"));
+  }
+
   if (m_tick++ % READOUT_TICKS == 0)
+  {
     UpdateReadouts(snapshot, has_data);
+    if (m_record_file)
+      UpdateRecordingLabel();
+  }
 }
 
 void WiimoteMotionTesterWindow::SetMotionRow(MotionRow row, const QString& x, const QString& y,
