@@ -258,6 +258,7 @@ void VideoConfig::Refresh()
   vr_tracking_mode = Config::Get(Config::GFX_VR_TRACKING_MODE);
   vr_use_openxr_play_space_center = Config::Get(Config::GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER);
   vr_use_xr_pacing_thread = Config::Get(Config::GFX_VR_USE_XR_PACING_THREAD);
+  vr_input_poll_hz = Config::Get(Config::GFX_VR_INPUT_POLL_HZ);
   vr_perf_counters = Config::Get(Config::GFX_VR_PERF_COUNTERS);
   vr_eager_heartbeat = Config::Get(Config::GFX_VR_EAGER_HEARTBEAT);
   if (!Config::GetAsString(Config::GFX_VR_REFERENCE_SPACE_MODE.GetLocation()) &&

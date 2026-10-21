@@ -644,9 +644,11 @@ private:
   // renderer uses to place that screen.
   void ComputeVirtualScreenHit(const Common::VR::OpenXRPoseState& aim,
                                Common::VR::OpenXRScreenHit* out_hit) const;
-  // XrTime of "now" via the platform time-conversion extension; falls back to the
-  // predicted display time when unavailable. Input wants measured poses — locating at the
-  // predicted display time extrapolates fast controller motion several frames ahead.
+  // XrTime of "now" via the platform time-conversion extension, 0 when unavailable.
+  XrTime GetNowTime();
+  // Input wants measured poses — locating at the predicted display time extrapolates fast
+  // controller motion several frames ahead. "Now", but never later than the frame's display
+  // time; the display time when the conversion is unavailable.
   XrTime GetInputSampleTime();
   void EnsureHomePositionFromCurrentViews() const;
   std::array<XREyeView, 2> GetTrackingAdjustedEyeViews() const;
@@ -780,6 +782,28 @@ private:
   std::atomic<int64_t> m_predicted_display_period_snapshot{0};
   std::atomic<bool> m_should_render_snapshot{false};
 
+  // ---- XR input thread ----
+  // Polls the controllers (xrSyncActions and the pose locates) at GFX_VR_INPUT_POLL_HZ on its
+  // own thread. The frame loop only runs at the game's frame rate (30 Hz in Skyward Sword on
+  // PC), far too slow for a MotionPlus sword swing. Started with the session's input actions;
+  // while it is not running, WaitFrame polls once per frame instead.
+  void StartInputThread();
+  void StopInputThread();
+  bool IsInputThreadActive() const
+  {
+    return m_input_thread_running.load(std::memory_order_acquire);
+  }
+  void InputThreadLoop();
+  // The input thread owns the input state while it runs and resets it itself when the session
+  // stops; the frame thread's session-state handling resets it otherwise.
+  void ResetInputActionsStateUnlessPolling();
+  std::thread m_input_thread;
+  std::atomic<bool> m_input_thread_running{false};
+  std::atomic<bool> m_input_thread_should_exit{false};
+  // Polling thread only: UpdateHaptics and the diagnostic log are throttled by time.
+  u64 m_last_haptics_update_us = 0;
+  u64 m_last_input_log_us = 0;
+
   // ---- XR pacing thread state ----
   void FrameThreadLoop();
 
@@ -845,6 +869,8 @@ private:
     // A hand's select only counts after it was seen released while the menu is open, so a
     // trigger held in game does not click the moment the panel appears.
     std::array<bool, 2> select_armed{};
+    // Common::Timer::NowUs of the previous update, for the time-based scroll.
+    u64 last_update_us = 0;
   };
   MenuGateState m_menu_gate;
   enum class MenuRequest : int

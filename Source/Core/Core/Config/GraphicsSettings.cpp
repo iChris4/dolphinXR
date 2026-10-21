@@ -250,6 +250,7 @@ const Info<VRMenuToggleButton> GFX_VR_MENU_TOGGLE_BUTTON{{System::GFX, "VR", "Me
 const Info<bool> GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER{
     {System::GFX, "VR", "UseOpenXRPlaySpaceCenter"}, false};
 const Info<bool> GFX_VR_USE_XR_PACING_THREAD{{System::GFX, "VR", "UseXRPacingThread"}, true};
+const Info<int> GFX_VR_INPUT_POLL_HZ{{System::GFX, "VR", "InputPollHz"}, 250};
 const Info<bool> GFX_VR_PERF_COUNTERS{{System::GFX, "VR", "PerfCounters"}, false};
 #if defined(__ANDROID__)
 constexpr bool DEFAULT_VR_PIN_EMULATION_CORES = true;

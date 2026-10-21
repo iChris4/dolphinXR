@@ -962,6 +962,8 @@ bool OpenXRManager::EnumerateViewConfigurations()
 
 void OpenXRManager::SetSession(XrSession session)
 {
+  // The input thread polls the previous session's actions.
+  StopInputThread();
   // Passthrough objects are children of the previous session; drop them before switching.
   DestroyFBPassthrough();
 
@@ -985,7 +987,9 @@ void OpenXRManager::SetSession(XrSession session)
   {
     WARN_LOG_FMT(OPENXR, "OpenXR: Controller input actions unavailable.");
     ResetInputActionsState();
+    return;
   }
+  StartInputThread();
 }
 
 void OpenXRManager::ApplyEyeResolutionScale(float scale)
@@ -1232,9 +1236,71 @@ void OpenXRManager::StopFrameThread()
   INFO_LOG_FMT(OPENXR, "OpenXR: XR pacing thread stopped.");
 }
 
+void OpenXRManager::StartInputThread()
+{
+  if (m_input_thread.joinable())
+    return;
+
+  const int poll_hz = Config::Get(Config::GFX_VR_INPUT_POLL_HZ);
+  if (poll_hz <= 0)
+  {
+    INFO_LOG_FMT(OPENXR, "OpenXR: XR input thread disabled by config (input polled per frame).");
+    return;
+  }
+
+  m_input_thread_should_exit.store(false, std::memory_order_release);
+  m_input_thread_running.store(true, std::memory_order_release);
+  m_input_thread = std::thread(&OpenXRManager::InputThreadLoop, this);
+  INFO_LOG_FMT(OPENXR, "OpenXR: XR input thread started ({} Hz).", poll_hz);
+}
+
+void OpenXRManager::StopInputThread()
+{
+  if (!m_input_thread.joinable())
+    return;
+
+  m_input_thread_should_exit.store(true, std::memory_order_release);
+  m_input_thread.join();
+  m_input_thread_running.store(false, std::memory_order_release);
+  INFO_LOG_FMT(OPENXR, "OpenXR: XR input thread stopped.");
+}
+
+void OpenXRManager::InputThreadLoop()
+{
+  Common::SetCurrentThreadName("OpenXR Input");
+#if defined(ANDROID)
+  RegisterCurrentAndroidThread(AndroidThreadType::ApplicationWorker, "OpenXR Input");
+#endif
+
+  // xrSyncActions and xrLocateSpace have no external synchronization requirement, so they can
+  // run here while the pacing thread is inside the frame protocol.
+  bool reset_pending = false;
+  while (!m_input_thread_should_exit.load(std::memory_order_acquire))
+  {
+    if (!m_session_running.load(std::memory_order_acquire))
+    {
+      if (reset_pending)
+      {
+        ResetInputActionsState();
+        reset_pending = false;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      continue;
+    }
+
+    const int poll_hz = std::clamp(g_ActiveConfig.vr_input_poll_hz, 30, 1000);
+    const auto period = std::chrono::microseconds(1'000'000 / poll_hz);
+    const auto start = std::chrono::steady_clock::now();
+    UpdateInputActions();
+    reset_pending = true;
+    std::this_thread::sleep_until(start + period);
+  }
+}
+
 void OpenXRManager::ShutdownSession()
 {
   StopFrameThread();
+  StopInputThread();
 
   if (m_session == XR_NULL_HANDLE || !m_session_running.load(std::memory_order_acquire))
     return;
@@ -2195,6 +2261,12 @@ void OpenXRManager::ResetInputActionsState()
   Common::VR::OpenXRInputState::Reset();
 }
 
+void OpenXRManager::ResetInputActionsStateUnlessPolling()
+{
+  if (!IsInputThreadActive())
+    ResetInputActionsState();
+}
+
 void OpenXRManager::ResetMenuGate()
 {
   if (m_menu_gate.input.open)
@@ -2210,6 +2282,15 @@ void OpenXRManager::UpdateMenuGate(
 {
   MenuGateState& gate = m_menu_gate;
   Common::VR::OpenXRMenuInput& menu = gate.input;
+
+  // Time since the previous update: the input thread calls this far more often than once per
+  // frame, so the display period would scroll several times too fast.
+  const u64 update_now_us = Common::Timer::NowUs();
+  const double period_s =
+      gate.last_update_us == 0 ?
+          0.0 :
+          std::clamp(static_cast<double>(update_now_us - gate.last_update_us) / 1e6, 0.0, 0.1);
+  gate.last_update_us = update_now_us;
 
   bool toggle = false;
   switch (Config::Get(Config::GFX_VR_MENU_TOGGLE_BUTTON))
@@ -2296,8 +2377,6 @@ void OpenXRManager::UpdateMenuGate(
 
   if (menu.open)
   {
-    const double period_s =
-        std::clamp(static_cast<double>(m_frame_state.predictedDisplayPeriod) / 1e9, 0.0, 0.1);
     for (size_t hand = 0; hand < controllers.size(); ++hand)
     {
       const bool pressed = select_pressed(hand);
@@ -2413,8 +2492,19 @@ void OpenXRManager::UpdateHaptics()
   if (!m_session_running || m_session == XR_NULL_HANDLE || m_action_haptic == XR_NULL_HANDLE)
     return;
 
-  const auto haptics = Common::VR::OpenXRInputState::TakeHaptics();
   const u64 now_us = Common::Timer::NowUs();
+  // The input thread calls this hundreds of times a second: re-sending the 50 ms rumble pulse
+  // on every call would flood the runtime, so game rumble is refreshed every 10 ms. One-shot
+  // UI pulses go out at once.
+  constexpr u64 RUMBLE_REFRESH_INTERVAL_US = 10'000;
+  if (now_us - m_last_haptics_update_us < RUMBLE_REFRESH_INTERVAL_US)
+  {
+    const auto pending = Common::VR::OpenXRInputState::GetHaptics();
+    if (pending.pulse_amplitude[0] <= 0.001f && pending.pulse_amplitude[1] <= 0.001f)
+      return;
+  }
+  m_last_haptics_update_us = now_us;
+  const auto haptics = Common::VR::OpenXRInputState::TakeHaptics();
 
   // Re-send short pulses while active to approximate continuous rumble.
   constexpr XrDuration vibration_duration_ns = 50'000'000;
@@ -2469,12 +2559,12 @@ void OpenXRManager::UpdateHaptics()
   }
 }
 
-XrTime OpenXRManager::GetInputSampleTime()
+XrTime OpenXRManager::GetNowTime()
 {
-  const XrTime display_time = m_frame_state.predictedDisplayTime;
+  constexpr XrTime unavailable = 0;
 #if defined(_WIN32)
   if (!IsExtensionEnabled(XR_KHR_WIN32_CONVERT_PERFORMANCE_COUNTER_TIME_EXTENSION_NAME))
-    return display_time;
+    return unavailable;
   if (!m_pfn_convert_now_to_time)
   {
     xrGetInstanceProcAddr(m_instance, "xrConvertWin32PerformanceCounterToTimeKHR",
@@ -2489,12 +2579,12 @@ XrTime OpenXRManager::GetInputSampleTime()
             m_pfn_convert_now_to_time)(m_instance, &qpc, &now_time)) &&
         now_time > 0)
     {
-      return std::min(display_time, now_time);
+      return now_time;
     }
   }
 #elif defined(ANDROID)
   if (!IsExtensionEnabled(XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME))
-    return display_time;
+    return unavailable;
   if (!m_pfn_convert_now_to_time)
   {
     xrGetInstanceProcAddr(m_instance, "xrConvertTimespecTimeToTimeKHR",
@@ -2509,11 +2599,20 @@ XrTime OpenXRManager::GetInputSampleTime()
             m_pfn_convert_now_to_time)(m_instance, &ts, &now_time)) &&
         now_time > 0)
     {
-      return std::min(display_time, now_time);
+      return now_time;
     }
   }
 #endif
-  return display_time;
+  return unavailable;
+}
+
+XrTime OpenXRManager::GetInputSampleTime()
+{
+  const XrTime display_time = GetPredictedDisplayTime();
+  const XrTime now = GetNowTime();
+  if (now <= 0)
+    return display_time;
+  return display_time > 0 ? std::min(display_time, now) : now;
 }
 
 void OpenXRManager::UpdateInputActions()
@@ -2547,7 +2646,16 @@ void OpenXRManager::UpdateInputActions()
   // time so anchored elements stay glued to the rendered frame; pure input consumers (the
   // Wii pointer, motion) want measured poses at "now" — prediction extrapolates fast
   // controller motion several frames ahead and sprays the aim ray.
-  const XrTime input_time = GetInputSampleTime();
+  // The input thread polls between frames and wants the measured pose of each poll. The
+  // per-frame fallback never samples later than the frame's display time.
+  XrTime input_time = GetInputSampleTime();
+  if (IsInputThreadActive())
+  {
+    if (const XrTime now = GetNowTime(); now > 0)
+      input_time = now;
+  }
+  const XrTime predicted_display_time = GetPredictedDisplayTime();
+  const XrTime display_time = predicted_display_time > 0 ? predicted_display_time : input_time;
 
   const auto locate_space_state = [this](XrSpace space, XrTime time,
                                          Common::VR::OpenXRPoseState* pose_state,
@@ -2653,8 +2761,7 @@ void OpenXRManager::UpdateInputActions()
     controller.thumbstick_x = std::clamp(get_float(m_action_thumbstick_x), -1.0f, 1.0f);
     controller.thumbstick_y = std::clamp(get_float(m_action_thumbstick_y), -1.0f, 1.0f);
 
-    locate_space_state(m_aim_spaces[hand], m_frame_state.predictedDisplayTime,
-                       &controller.aim_pose, nullptr);
+    locate_space_state(m_aim_spaces[hand], display_time, &controller.aim_pose, nullptr);
     locate_space_state(m_grip_spaces[hand], input_time, &controller.grip_pose,
                        &controller.grip_velocity);
 
@@ -2673,10 +2780,11 @@ void OpenXRManager::UpdateInputActions()
     controller.connected = action_seen || controller.aim_pose.valid || controller.grip_pose.valid;
   }
 
-  // Throttled periodic diagnostic log (~every 5 seconds at 60fps).
-  static uint64_t s_sync_log_counter = 0;
-  if ((++s_sync_log_counter % 300) == 1)
+  // Throttled periodic diagnostic log.
+  const u64 log_now_us = Common::Timer::NowUs();
+  if (log_now_us - m_last_input_log_us >= 5'000'000)
   {
+    m_last_input_log_us = log_now_us;
     INFO_LOG_FMT(OPENXR,
                  "OpenXR input: sync={}, focused={}, left_connected={}, right_connected={}",
                  static_cast<int>(sync_result), m_session_focused.load(),
@@ -2770,7 +2878,7 @@ bool OpenXRManager::PollEvents()
     case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
       WARN_LOG_FMT(OPENXR, "OpenXR: Instance loss pending — stopping VR.");
       m_exit_render_loop = true;
-      ResetInputActionsState();
+      ResetInputActionsStateUnlessPolling();
       return false;
 
     case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
@@ -2858,7 +2966,7 @@ void OpenXRManager::HandleSessionStateChange(XrSessionState new_state)
     }
     m_session_running = false;
     m_session_focused = false;
-    ResetInputActionsState();
+    ResetInputActionsStateUnlessPolling();
     INFO_LOG_FMT(OPENXR, "OpenXR: Session stopped.");
     break;
   }
@@ -2868,7 +2976,7 @@ void OpenXRManager::HandleSessionStateChange(XrSessionState new_state)
     m_exit_render_loop = true;
     m_session_running = false;
     m_session_focused = false;
-    ResetInputActionsState();
+    ResetInputActionsStateUnlessPolling();
     break;
 
   default:
@@ -2915,7 +3023,8 @@ bool OpenXRManager::WaitFrame()
   }
 
   m_last_predicted_display_time = m_frame_state.predictedDisplayTime;
-  UpdateInputActions();
+  if (!IsInputThreadActive())
+    UpdateInputActions();
   return true;
 }
 
