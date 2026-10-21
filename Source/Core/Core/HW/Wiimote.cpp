@@ -525,6 +525,51 @@ std::optional<OpenXRWiiRemoteState> GetOpenXRWiiRemoteState(unsigned int index)
 #endif
 }
 
+#ifdef ENABLE_VR
+Common::Quaternion OpenXRToWiimoteRotation(const Common::Quaternion& q)
+{
+  // BuildOpenXRState maps OpenXR vectors (X right, Y up, Z back) to the Wii Remote's with
+  // v -> (-x, z, y). That basis change is a proper rotation, so the rotation keeps its angle and
+  // its axis is mapped the same way.
+  return Common::Quaternion(q.data.w, -q.data.x, q.data.z, q.data.y);
+}
+
+std::optional<OpenXRWiiRemotePose> GetOpenXRWiiRemotePose(unsigned int index)
+{
+  if (index >= MAX_WIIMOTES || s_wiimote_sources[index].load() != WiimoteSource::OpenXR)
+    return std::nullopt;
+
+  const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetGameSnapshot();
+  if (!snapshot.runtime_active)
+    return std::nullopt;
+
+  // Same hand choice as the input override (CreateOpenXRInputOverrideFunction).
+  const bool prefer_left_hand =
+      Config::Get(Config::Info<bool>{{Config::System::Main, "Android", "QuestLeftHanded"}, false});
+  const auto is_valid = [](const Common::VR::OpenXRControllerState& controller) {
+    return controller.grip_pose.valid || controller.aim_pose.valid;
+  };
+  bool left_hand;
+  if (!prefer_left_hand && is_valid(snapshot.controllers[1]))
+    left_hand = false;
+  else if (is_valid(snapshot.controllers[0]))
+    left_hand = true;
+  else
+    return std::nullopt;
+
+  // The aim pose is the motion reference frame of BuildOpenXRState, grip only as a fallback.
+  const Common::VR::OpenXRControllerState& controller = snapshot.controllers[left_hand ? 0 : 1];
+  const Common::VR::OpenXRPoseState& pose =
+      controller.aim_pose.valid ? controller.aim_pose : controller.grip_pose;
+  OpenXRWiiRemotePose out;
+  out.orientation = OpenXRToWiimoteRotation(ToQuaternion(pose.orientation).Normalized());
+  out.screen_distance_valid = controller.screen_hit.valid;
+  out.screen_distance_m = controller.screen_hit.distance_m;
+  out.left_hand = left_hand;
+  return out;
+}
+#endif
+
 std::optional<OpenXRWiiRemoteState> GetOpenXRHandState(bool left_hand)
 {
 #ifdef ENABLE_VR

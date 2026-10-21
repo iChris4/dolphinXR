@@ -15,11 +15,14 @@
 #include "Common/MsgHandler.h"
 #include "Common/Swap.h"
 #include "Core/Core.h"
+#include "Core/CoreTiming.h"
+#include "Core/HW/SystemTimers.h"
 #include "Core/HW/WII_IPC.h"
 #include "Core/HW/Wiimote.h"
 #include "Core/HW/WiimoteCommon/WiimoteConstants.h"
 #include "Core/HW/WiimoteCommon/WiimoteHid.h"
 #include "Core/HW/WiimoteEmu/DesiredWiimoteState.h"
+#include "Core/HW/WiimoteMotionTracker.h"
 #include "Core/Host.h"
 #include "Core/IOS/USB/Bluetooth/BTEmu.h"
 #include "Core/IOS/USB/Bluetooth/WiimoteHIDAttr.h"
@@ -80,7 +83,10 @@ WiimoteDevice::WiimoteDevice(BluetoothEmuDevice* host, bdaddr_t bd, unsigned int
   SetSource(hid_source);
 }
 
-WiimoteDevice::~WiimoteDevice() = default;
+WiimoteDevice::~WiimoteDevice()
+{
+  WiimoteMotionTracker::OnSourceChanged(GetNumber(), false);
+}
 
 WiimoteDevice::SChannel::SChannel() : psm(L2CAP_PSM_ANY), remote_cid(L2CAP_NULL_CID)
 {
@@ -114,6 +120,9 @@ void WiimoteDevice::DoState(PointerWrap& p)
   p.Do(m_name);
   p.Do(m_channels);
   p.Do(m_connection_request_counter);
+
+  if (p.IsReadMode())
+    WiimoteMotionTracker::OnStateLoaded(GetNumber());
 }
 
 u32 WiimoteDevice::GetNumber() const
@@ -285,6 +294,9 @@ void WiimoteDevice::SetSource(WiimoteCommon::HIDWiimote* hid_source)
     Activate(false);
   }
 
+  if (hid_source != m_hid_source)
+    WiimoteMotionTracker::OnSourceChanged(GetNumber(), hid_source != nullptr);
+
   m_hid_source = hid_source;
 
   if (m_hid_source)
@@ -297,6 +309,8 @@ void WiimoteDevice::SetSource(WiimoteCommon::HIDWiimote* hid_source)
 
 void WiimoteDevice::Reset()
 {
+  WiimoteMotionTracker::OnDisconnect(GetNumber());
+
   SetBasebandState(BasebandState::Inactive);
   m_hid_state = HIDState::Inactive;
   m_channels = {};
@@ -448,6 +462,8 @@ void WiimoteDevice::ExecuteL2capCmd(u8* ptr, u32 size)
 
       m_host->SendACLPacket(GetBD(), reinterpret_cast<const u8*>(&data_frame), sizeof(data_frame));
 
+      WiimoteMotionTracker::OnOutputReport(GetNumber(), data + sizeof(hid_type),
+                                           data_size - sizeof(hid_type));
       // Does the wii remote reply on the control or interrupt channel in this situation?
       m_hid_source->InterruptDataOutput(data + sizeof(hid_type), data_size - sizeof(hid_type));
     }
@@ -462,7 +478,11 @@ void WiimoteDevice::ExecuteL2capCmd(u8* ptr, u32 size)
   {
     const u8 hid_type = data[0];
     if (hid_type == ((WiimoteCommon::HID_TYPE_DATA << 4) | WiimoteCommon::HID_PARAM_OUTPUT))
+    {
+      WiimoteMotionTracker::OnOutputReport(GetNumber(), data + sizeof(hid_type),
+                                           data_size - sizeof(hid_type));
       m_hid_source->InterruptDataOutput(data + sizeof(hid_type), data_size - sizeof(hid_type));
+    }
     else
       ERROR_LOG_FMT(IOS_WIIMOTE, "Unknown HID-type ({:#x}) on L2CAP_PSM_HID_INTR", hid_type);
   }
@@ -979,6 +999,14 @@ void WiimoteDevice::InterruptDataInputCallback(u8 hid_type, const u8* data, u32 
   {
     WARN_LOG_FMT(IOS_WIIMOTE, "Data callback with invalid L2CAP_PSM_HID_INTR channel.");
     return;
+  }
+
+  // The Wii Remote Motion Tester observes what the game receives.
+  if (hid_type == ((WiimoteCommon::HID_TYPE_DATA << 4) | WiimoteCommon::HID_PARAM_INPUT))
+  {
+    auto& system = m_host->GetSystem();
+    WiimoteMotionTracker::OnInputReport(GetNumber(), data, size, system.GetCoreTiming().GetTicks(),
+                                        system.GetSystemTimers().GetTicksPerSecond());
   }
 
   struct DataFrame

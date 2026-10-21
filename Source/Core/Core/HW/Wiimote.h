@@ -9,6 +9,7 @@
 
 #include "Common/Common.h"
 #include "Common/CommonTypes.h"
+#include "Common/Matrix.h"
 
 class InputConfig;
 class PointerWrap;
@@ -98,6 +99,22 @@ std::optional<OpenXRWiiRemoteState> GetOpenXRHandState(bool left_hand);
 // The OpenXR source's input override is installed on this remote and its attachments (it also
 // returns the agent server's input). Hold EmulatedController::GetStateLock().
 bool IsOpenXRInputOverrideInstalled(unsigned int index);
+
+// The pose of the VR controller that drives an OpenXR Wii Remote (the same hand and aim pose the
+// input override uses), in Dolphin's Wii Remote frames: body +X left, +Y backward, +Z up, and a
+// world with +Z up whose -Y axis is OpenXR's forward (-Z).
+struct OpenXRWiiRemotePose
+{
+  // Device to world: v_world = orientation * v_device.
+  Common::Quaternion orientation = Common::Quaternion::Identity();
+  bool screen_distance_valid = false;
+  // Distance from the controller to the virtual screen along the aim ray, in meters.
+  float screen_distance_m = 0.0f;
+  bool left_hand = false;
+};
+std::optional<OpenXRWiiRemotePose> GetOpenXRWiiRemotePose(unsigned int index);
+// An OpenXR rotation (X right, Y up, Z back) expressed in the frames above.
+Common::Quaternion OpenXRToWiimoteRotation(const Common::Quaternion& openxr_rotation);
 #endif
 
 void DoState(PointerWrap& p);

@@ -128,6 +128,7 @@
 #include "DolphinQt/TAS/WiiTASInputWindow.h"
 #include "DolphinQt/ToolBar.h"
 #include "DolphinQt/WiiUpdate.h"
+#include "DolphinQt/WiimoteMotionTester/WiimoteMotionTesterWindow.h"
 
 #include "UICommon/DiscordPresence.h"
 #include "UICommon/GameFile.h"
@@ -607,6 +608,8 @@ void MainWindow::ConnectMenuBar()
   connect(m_menu_bar, &MenuBar::ShowWiiSpeakWindow, this, &MainWindow::ShowWiiSpeakWindow);
   connect(m_menu_bar, &MenuBar::ShowLogitechMicWindow, this, &MainWindow::ShowLogitechMicWindow);
   connect(m_menu_bar, &MenuBar::ConnectWiiRemote, this, &MainWindow::OnConnectWiiRemote);
+  connect(m_menu_bar, &MenuBar::ShowWiimoteMotionTester, this,
+          &MainWindow::ShowWiimoteMotionTester);
 
 #ifdef USE_RETRO_ACHIEVEMENTS
   connect(m_menu_bar, &MenuBar::ShowAchievementsWindow, this, &MainWindow::ShowAchievementsWindow);
@@ -1397,6 +1400,19 @@ void MainWindow::ShowFreeLookWindow()
   m_freelook_window->show();
   m_freelook_window->raise();
   m_freelook_window->activateWindow();
+}
+
+void MainWindow::ShowWiimoteMotionTester()
+{
+  if (!m_wiimote_motion_tester)
+  {
+    m_wiimote_motion_tester = new WiimoteMotionTesterWindow(this);
+    InstallHotkeyFilter(m_wiimote_motion_tester);
+  }
+
+  m_wiimote_motion_tester->show();
+  m_wiimote_motion_tester->raise();
+  m_wiimote_motion_tester->activateWindow();
 }
 
 void MainWindow::ShowSettingsWindow()

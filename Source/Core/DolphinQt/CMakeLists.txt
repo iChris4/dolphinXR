@@ -465,6 +465,12 @@ add_executable(dolphin-emu
   Updater.h
   WiiUpdate.cpp
   WiiUpdate.h
+  WiimoteMotionTester/WiimoteMotionPlot.cpp
+  WiimoteMotionTester/WiimoteMotionPlot.h
+  WiimoteMotionTester/WiimoteMotionTesterWindow.cpp
+  WiimoteMotionTester/WiimoteMotionTesterWindow.h
+  WiimoteMotionTester/WiimoteMotionView.cpp
+  WiimoteMotionTester/WiimoteMotionView.h
 )
 
 if (WIN32)

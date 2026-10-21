@@ -368,6 +368,7 @@ void MenuBar::AddToolsMenu()
 
   tools_menu->addSeparator();
   tools_menu->addMenu(connect_wii_remotes_menu);
+  tools_menu->addAction(tr("Wii Remote Motion &Tester"), this, &MenuBar::ShowWiimoteMotionTester);
 
   for (int i = 0; i < 4; i++)
   {
