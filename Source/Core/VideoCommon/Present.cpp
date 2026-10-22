@@ -1212,6 +1212,18 @@ bool Presenter::SubmitOpenXRFrameFromCurrentSource(const AbstractTexture* source
       return sc->SubmitFlatFrame(m_openxr_flat_stereo);
     }
 
+    // A mono frame in a VR stereo session: one layer makes no eye images. A game composes such
+    // frames in RAM (Rogue Leader's title screen and pause menu, FMVs the CPU writes to the XFB),
+    // so show it on the flat panel as the flat screen does, once the game has presented mono
+    // frames in a row (m_openxr_mono_frames). The pacing thread shows the panel until the next
+    // two-layer frame publishes a projection layer again.
+    if (source_texture && source_texture->GetLayers() < 2 &&
+        m_openxr_mono_frames >= m_openxr_mono_frames_needed && sc->SupportsFlatScreen())
+    {
+      BlitCurrentSourceToOpenXRFlat(source_texture, source_rc);
+      return sc->SubmitFlatFrame(/*stereo=*/false);
+    }
+
     if (blit_source)
       BlitCurrentSourceToOpenXREyes(source_texture, source_rc);
     // Nothing rendered (see m_openxr_eyes_rendered): the pacing thread keeps showing the last
@@ -1404,6 +1416,30 @@ void Presenter::Present(PresentInfo* present_info)
       vr_frame_started && present_info != nullptr &&
       present_info->reason == PresentInfo::PresentReason::VideoInterfaceDuplicate &&
       VR::g_openxr && VR::g_openxr->IsFrameThreadActive();
+
+  // Mono XFB in a VR stereo session (see SubmitOpenXRFrameFromCurrentSource): count the new
+  // frames in a row the game presents one for, and place the panel in front of the head when
+  // such a stretch starts, as a pause menu would.
+  if (vr_frame_started && present_info != nullptr && m_xfb_entry && !IsOpenXRFlat() &&
+      present_info->reason != PresentInfo::PresentReason::VideoInterfaceDuplicate)
+  {
+    if (m_xfb_entry->texture->GetLayers() >= 2)
+    {
+      if (m_openxr_mono_frames >= m_openxr_mono_frames_needed)
+        INFO_LOG_FMT(OPENXR, "OpenXR: two-layer frames again, back from the flat panel to stereo.");
+      m_openxr_mono_frames = 0;
+      m_openxr_mono_frames_needed = OPENXR_MONO_PANEL_FRAMES;
+    }
+    else if (m_openxr_mono_frames < m_openxr_mono_frames_needed)
+    {
+      if (++m_openxr_mono_frames == m_openxr_mono_frames_needed && VR::g_openxr)
+      {
+        INFO_LOG_FMT(OPENXR, "OpenXR: the game presents mono frames (an XFB composed in RAM): "
+                             "showing them on the flat panel.");
+        VR::g_openxr->ResetFlatScreenAnchor();
+      }
+    }
+  }
 #endif
 #ifndef ENABLE_VR
   constexpr bool openxr_direct_to_hmd = false;
@@ -1649,6 +1685,12 @@ void Presenter::DoState(PointerWrap& p)
   // If we're loading and there is a last XFB, re-display it.
   if (p.IsReadMode() && m_last_xfb_stride != 0)
   {
+#ifdef ENABLE_VR
+    // The XFBs a load rebuilds from RAM are mono: start the mono-frame count over, with the longer
+    // run a load needs before a VR stereo session switches to the flat panel.
+    m_openxr_mono_frames = 0;
+    m_openxr_mono_frames_needed = OPENXR_MONO_PANEL_FRAMES_AFTER_LOAD;
+#endif
     // This technically counts as the end of the frame
     GetVideoEvents().after_frame_event.Trigger(Core::System::GetInstance());
 

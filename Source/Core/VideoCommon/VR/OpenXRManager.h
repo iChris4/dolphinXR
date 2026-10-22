@@ -419,6 +419,9 @@ public:
   // Video thread: the flat panel images of the current swapchain generation were rendered, so
   // the panel quads may reference them.
   void NoteFlatImagesRendered() { m_flat_rendered_generation = m_swapchain_generation.load(); }
+  // Drops the flat panel's anchor: GetFlatScreenPose places the panel in front of the head again
+  // at its next use (a recenter, a switch to the flat screen, a mono stretch in VR stereo).
+  void ResetFlatScreenAnchor();
 
   // ---- Accessors ----
 

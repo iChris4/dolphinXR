@@ -244,12 +244,22 @@ private:
   bool m_openxr_frame_prepared = false;
   // This present rendered the eye images (BlitCurrentSourceToOpenXREyes). Without them there
   // is nothing new to publish: no XFB, or a mono one such as the XFB a savestate rebuilds from
-  // RAM while paused. The eye swapchains of D3D12's layered path never hold a released image,
-  // so publishing them would get XR_ERROR_LAYER_INVALID at every paused present.
+  // RAM while paused (a mono XFB the game keeps presenting goes to the flat panel instead, see
+  // m_openxr_mono_frames). The eye swapchains of D3D12's layered path never hold a released
+  // image, so publishing them would get XR_ERROR_LAYER_INVALID at every paused present.
   bool m_openxr_eyes_rendered = false;
   // The flat panel images last rendered were a stereo pair (one per eye swapchain), so the
   // panel is submitted as a left and a right quad. Kept while a present renders no panel image.
   bool m_openxr_flat_stereo = false;
+  // New frames in a row (VI duplicates not counted) whose XFB has one layer, and how many of them
+  // make a VR stereo session show the mono frame on the flat panel
+  // (SubmitOpenXRFrameFromCurrentSource): two in play, ten after a savestate load. A load presents
+  // a few mono XFBs rebuilt from RAM: the one it re-displays, then the game's other XFB buffers
+  // until it has copied a frame into each again (Rogue Leader: two more).
+  static constexpr u32 OPENXR_MONO_PANEL_FRAMES = 2;
+  static constexpr u32 OPENXR_MONO_PANEL_FRAMES_AFTER_LOAD = 10;
+  u32 m_openxr_mono_frames = 0;
+  u32 m_openxr_mono_frames_needed = OPENXR_MONO_PANEL_FRAMES;
   double m_last_openxr_wait_frame_ms = 0.0;
   double m_last_openxr_locate_views_ms = 0.0;
   // Rolling 5s window measuring how long the presenting (video/emu) thread spends

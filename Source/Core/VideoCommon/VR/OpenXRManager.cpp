@@ -1124,12 +1124,9 @@ bool OpenXRManager::UpdateSwapchainMode(bool flat_screen)
   }
 
   m_swapchain_mode_switch_failed = false;
+  // The panel appears in front of the head, as when a game starts on the flat screen.
   if (flat_screen)
-  {
-    // The panel appears in front of the head, as when a game starts on the flat screen.
-    std::lock_guard lock(m_flat_screen_anchor_mutex);
-    m_flat_screen_anchor.reset();
-  }
+    ResetFlatScreenAnchor();
   INFO_LOG_FMT(OPENXR, "OpenXR: switched to the {}: eye swapchains generation {} -> {}, {} us",
                flat_screen ? "flat screen" : "VR stereo", generation, generation + 1,
                Common::Timer::NowUs() - start_us);
@@ -1402,10 +1399,7 @@ void OpenXRManager::DestroySession()
   m_home_set = false;
   m_home_position = {0.f, 0.f, 0.f};
   m_recenter_requested.store(false, std::memory_order_release);
-  {
-    std::lock_guard lock(m_flat_screen_anchor_mutex);
-    m_flat_screen_anchor.reset();
-  }
+  ResetFlatScreenAnchor();
   m_flat_quad_layers = {{{XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD}}};
   m_controller_anchor_cache_valid = {false, false};
 }
@@ -3369,10 +3363,7 @@ bool OpenXRManager::LocateViews()
     m_home_set = true;
     ++m_recenter_generation;
     // Re-place the flat panel in front of the newly recentered head pose.
-    {
-      std::lock_guard lock(m_flat_screen_anchor_mutex);
-      m_flat_screen_anchor.reset();
-    }
+    ResetFlatScreenAnchor();
     INFO_LOG_FMT(OPENXR, "OpenXR: Recentered home position to ({:.4f},{:.4f},{:.4f})",
                  m_home_position.x, m_home_position.y, m_home_position.z);
   }
@@ -3397,6 +3388,12 @@ std::array<float, 3> OpenXRManager::GetAgentLookOffset() const
   return {m_agent_look_yaw_deg.load(std::memory_order_relaxed),
           m_agent_look_pitch_deg.load(std::memory_order_relaxed),
           m_agent_look_roll_deg.load(std::memory_order_relaxed)};
+}
+
+void OpenXRManager::ResetFlatScreenAnchor()
+{
+  std::lock_guard lock(m_flat_screen_anchor_mutex);
+  m_flat_screen_anchor.reset();
 }
 
 XrPosef OpenXRManager::GetFlatScreenPose() const

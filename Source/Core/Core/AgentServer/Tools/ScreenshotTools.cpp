@@ -38,7 +38,10 @@ std::string AppendScreenshots(ToolResult& result, u32 max_width, bool left, bool
     result.AddImagePng(*png);
   }
   if (capture.layers < 2)
-    text += " (no stereo VR session: mono frame)";
+  {
+    text += " (mono frame: no stereo VR session, or a one-layer XFB the game composed in RAM, "
+            "which the headset shows on the flat panel)";
+  }
   return text;
 }
 
