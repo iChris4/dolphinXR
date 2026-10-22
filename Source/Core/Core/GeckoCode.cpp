@@ -223,7 +223,12 @@ void DoState(PointerWrap& p)
 {
   std::lock_guard codes_lock(s_active_codes_lock);
   p.Do(s_code_handler_installed);
-  // FIXME: The active codes list will disagree with the embedded GCT
+  // The loaded RAM holds the code list that was active when the state was saved, which can disagree
+  // with the active codes (a code edited, enabled or disabled since). Reinstall the handler with
+  // the active codes at the next frame, or stop running it if there are none. RunCodeHandler only
+  // runs at a VI, so a handler run the state caught midway has returned by then.
+  if (p.IsReadMode() && s_code_handler_installed == Installation::Installed)
+    s_code_handler_installed = Installation::Uninstalled;
 }
 
 void Shutdown()

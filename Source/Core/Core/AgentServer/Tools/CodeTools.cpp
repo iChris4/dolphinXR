@@ -242,12 +242,6 @@ ToolResult SetCheatsEnabled(const ToolArgs& args)
 }
 }  // namespace
 
-void ReapplyGeckoCodes()
-{
-  const SConfig& config = SConfig::GetInstance();
-  Gecko::SetActiveCodes(LoadGeckoCodes(), config.GetGameID(), config.GetRevision());
-}
-
 std::string AddActionReplayCode(const std::string& name, const std::vector<std::string>& lines,
                                 bool enabled, bool replace)
 {
