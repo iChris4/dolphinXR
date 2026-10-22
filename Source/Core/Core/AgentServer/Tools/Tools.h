@@ -54,6 +54,11 @@ std::string AppendScreenshots(ToolResult& result, u32 max_width, bool left, bool
 // ToolError.
 std::string AddActionReplayCode(const std::string& name, const std::vector<std::string>& lines,
                                 bool enabled, bool replace);
+// Makes the game's Gecko codes, as saved in its INI files, the active codes again. A savestate
+// brings back the code handler with the code list that was in RAM when it was saved
+// (Gecko::DoState), so after a load the codes changed since then would run their old version; this
+// reinstalls the handler with the current list the next time it runs.
+void ReapplyGeckoCodes();
 
 // ---- MemoryTools.cpp ----
 

@@ -141,7 +141,11 @@ void LoadStateAndWait(const std::string& path, std::chrono::milliseconds timeout
   const bool state_loaded =
       ticks_after != ticks_before || IsStateFileUnchangedAt(path, ticks_after);
   if (state_loaded)
+  {
     RememberStateFile(path, ticks_after);
+    // Before resuming, so no frame runs the code list the savestate brought back.
+    ReapplyGeckoCodes();
+  }
   INFO_LOG_FMT(OPENXR, "AgentServer: load done ({})", state_loaded ? "loaded" : "refused");
   if (was_running)
     ResumeEmulation();
