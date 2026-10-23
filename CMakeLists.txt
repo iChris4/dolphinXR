@@ -788,6 +788,11 @@ include_directories(Externals/picojson)
 
 add_subdirectory(Externals/expr)
 
+if(ENABLE_VR)
+  # Runs the VR game patches (Source/Core/Core/VRPatch).
+  add_subdirectory(Externals/lua)
+endif()
+
 add_subdirectory(Externals/FatFs)
 
 if (USE_RETRO_ACHIEVEMENTS)
