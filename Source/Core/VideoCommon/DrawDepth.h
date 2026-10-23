@@ -23,6 +23,16 @@ struct DrawDepthRange
   bool sampled = false;
 };
 
+// Distance of a draw's vertices from the camera: the length of the vertex transformed by its GX
+// position matrix, in game units. Detect Skybox uses the closest one.
+struct DrawDistanceRange
+{
+  float min = std::numeric_limits<float>::quiet_NaN();
+  float max = std::numeric_limits<float>::quiet_NaN();
+  bool valid = false;
+  bool sampled = false;
+};
+
 constexpr u32 DRAW_DEPTH_MAX_SAMPLES = 256;
 
 // `vertices` holds `count` vertices in the native format `decl` (positions are 2 or 3 floats;
@@ -34,6 +44,12 @@ DrawDepthRange ComputeDrawDepthRange(const u8* vertices, u32 count, u32 stride,
                                      const PortableVertexDeclaration& decl,
                                      const float* pos_matrices, u32 shared_matrix_index,
                                      u32 max_samples = DRAW_DEPTH_MAX_SAMPLES);
+
+// The same vertices and sampling, for their distance from the camera.
+DrawDistanceRange ComputeDrawDistanceRange(const u8* vertices, u32 count, u32 stride,
+                                           const PortableVertexDeclaration& decl,
+                                           const float* pos_matrices, u32 shared_matrix_index,
+                                           u32 max_samples = DRAW_DEPTH_MAX_SAMPLES);
 
 // The depth of the draw VertexManagerBase::Flush is resolving, computed on first use. Flush
 // fills it for every draw (pointers only) and the override managers only ask for the range once
@@ -47,6 +63,8 @@ public:
                   const float* pos_matrices, u32 shared_matrix_index);
 
   const DrawDepthRange& Get() const;
+  // The distance range, computed on first use too.
+  const DrawDistanceRange& GetDistance() const;
 
   // Whether the vertices carry their own position matrix index (decl.posmtx).
   bool HasPerVertexMatrix() const;
@@ -63,6 +81,8 @@ private:
   u32 m_shared_matrix_index = 0;
   mutable bool m_computed = false;
   mutable DrawDepthRange m_range;
+  mutable bool m_distance_computed = false;
+  mutable DrawDistanceRange m_distance;
 };
 
 // The min_depth / max_depth rule of the VR overrides (a value <= 0 is unset). True when neither

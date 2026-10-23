@@ -571,9 +571,16 @@ std::string FormatDrawDetails(const DrawRecord& draw)
                           draw.vertex_translation[0], draw.vertex_translation[1],
                           draw.vertex_translation[2]);
     }
-    text += fmt::format("\nDetect Skybox: {}\n", !draw.detect_skybox ? "off" :
-                                                 draw.skybox         ? "a skybox (no translation)" :
-                                                                       "not a skybox");
+    // The near plane in near planes: how IsSkyboxDraw compares the closest vertex.
+    if (!std::isnan(draw.min_distance))
+    {
+      text += fmt::format("; closest vertex {:.4g} game units ({:.3g} near planes)",
+                          draw.min_distance, draw.min_distance / std::fabs(p[2]));
+    }
+    text += fmt::format("\nDetect Skybox: {}\n",
+                        !draw.detect_skybox ? "off" :
+                        draw.skybox         ? "a skybox (at the camera and far from it)" :
+                                              "not a skybox");
   }
   text += fmt::format("Render state: color write {}, alpha write {}, z test {} (func {}), z write "
                       "{}, blend {}, alpha test {:08x}\n",

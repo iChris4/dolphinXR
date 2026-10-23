@@ -208,6 +208,28 @@ TEST(DrawDepth, SourceComputesOnce)
   EXPECT_FALSE(DrawDepthSource().Get().valid);
 }
 
+TEST(DrawDepth, DistanceRange)
+{
+  const PortableVertexDeclaration decl = MakeDecl(12, 0, 3);
+  Matrices matrices{};
+  // Matrix 0: the identity rotation with a translation of (0, 0, -10).
+  matrices[0] = 1;
+  matrices[5] = 1;
+  matrices[10] = 1;
+  matrices[11] = -10;
+  // Distances: |(3, 4, -10)| and |(0, 0, -10 + 10)| = 0, |(0, 6, -2)|.
+  const std::vector<u8> buffer = MakeBuffer(decl, {{3, 4, 0}, {0, 0, 10}, {0, 6, 8}});
+  const DrawDistanceRange range =
+      ComputeDrawDistanceRange(buffer.data(), 3, decl.stride, decl, matrices.data(), 0);
+  ASSERT_TRUE(range.valid);
+  EXPECT_FLOAT_EQ(range.min, 0.0f);
+  EXPECT_FLOAT_EQ(range.max, std::sqrt(125.0f));
+
+  const DrawDepthSource source(buffer.data(), 3, 12, &decl, matrices.data(), 0);
+  EXPECT_FLOAT_EQ(source.GetDistance().max, std::sqrt(125.0f));
+  EXPECT_FALSE(DrawDepthSource().GetDistance().valid);
+}
+
 TEST(DrawDepth, FirstVertexMatrix)
 {
   const Matrices matrices = Identity();

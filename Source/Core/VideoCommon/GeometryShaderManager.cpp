@@ -359,20 +359,14 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
             // Perspective flag consumed in the OpenXR GS path.
             constants.stereoparams[3] = 1.0f;
 
-            // Skybox heuristic (Hydra "Detect Skybox"): an object drawn at the camera origin
-            // (translation 0,0,0) with a non-identity matrix is treated as a skybox.  Render it
-            // with the eye position locked at 0,0,0 (rotation only, no IPD/positional offset) so
-            // it sits at infinity instead of appearing too close.  cstereo.z is the per-draw
-            // world-position weight consumed in the GS perspective path: 1.0 = normal (apply eye
-            // position), 0.0 = skybox (rotation only).  This must be set for EVERY perspective VR
-            // draw, otherwise normal geometry would lose its per-eye offset and stereo would break.
-            bool is_skybox = false;
-            if (g_ActiveConfig.vr_detect_skybox)
-            {
-              const auto& pnm = vertex_shader_manager.constants.posnormalmatrix;
-              is_skybox = IsSkyboxPositionMatrix(pnm[0], pnm[1], pnm[2]);
-            }
-            constants.stereoparams[2] = is_skybox ? 0.0f : 1.0f;
+            // Skybox heuristic (Hydra "Detect Skybox", decided per draw by VertexManagerBase with
+            // IsSkyboxDraw): an object drawn at the camera origin is rendered with the eye
+            // position locked at 0,0,0 (rotation only, no IPD/positional offset) so it sits at
+            // infinity instead of appearing too close.  cstereo.z is the per-draw world-position
+            // weight consumed in the GS perspective path: 1.0 = normal (apply eye position), 0.0 =
+            // skybox (rotation only).  This must be set for EVERY perspective VR draw, otherwise
+            // normal geometry would lose its per-eye offset and stereo would break.
+            constants.stereoparams[2] = vr_skybox_draw ? 0.0f : 1.0f;
 
             // Hydra-style viewport classification (measured against the XFB display region):
             // perspective draws in sub-screen panes (MKDD character select) must NOT be

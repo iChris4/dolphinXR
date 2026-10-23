@@ -161,6 +161,8 @@ struct DrawRecord
   float shared_scale_x = 0.0f;
   bool per_vertex_matrix = false;
   std::array<float, 3> vertex_translation{};
+  // Distance of the closest vertex from the camera (game units), NaN when unknown.
+  float min_distance = std::numeric_limits<float>::quiet_NaN();
 };
 
 // One EFB copy of a captured frame: a render to texture, or the frame's copy to the XFB.

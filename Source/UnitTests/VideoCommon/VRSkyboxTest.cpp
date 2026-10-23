@@ -3,47 +3,75 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+
 #include "VideoCommon/GeometryShaderManager.h"
 
 namespace
 {
-// A rotation about the vertical axis by about 4 degrees ([0][0] 0.9977, as Rogue Leader's camera),
-// with the given translation.
-bool IsSkybox(float tx, float ty, float tz)
+// A 3x4 position matrix: a rotation about the vertical axis by about 4 degrees ([0][0] 0.9977, as
+// Rogue Leader's camera) with the given translation.
+std::array<float, 12> Matrix(float tx, float ty, float tz)
 {
-  const float4 row0 = {0.997726f, 0.0f, -0.0674f, tx};
-  const float4 row1 = {0.0f, 1.0f, 0.0f, ty};
-  const float4 row2 = {0.0674f, 0.0f, 0.997726f, tz};
-  return IsSkyboxPositionMatrix(row0, row1, row2);
+  return {0.997726f, 0.0f, -0.0674f, tx, 0.0f, 1.0f, 0.0f, ty, 0.0674f, 0.0f, 0.997726f, tz};
+}
+
+bool IsSky(float tx, float ty, float tz, float min_distance, float near_z)
+{
+  return IsSkyboxDraw(Matrix(tx, ty, tz).data(), min_distance, near_z);
 }
 }  // namespace
 
-TEST(VRSkybox, NoTranslationIsASkybox)
+TEST(VRSkybox, ADomeAtTheCameraIsASky)
 {
-  EXPECT_TRUE(IsSkybox(0.0f, 0.0f, 0.0f));
-  EXPECT_TRUE(IsSkybox(-0.0f, 0.0f, -0.0f));
+  // Rogue Leader's space dome: 21 units away at the closest, near plane 0.1.
+  EXPECT_TRUE(IsSky(0.0f, 0.0f, 0.0f, 21.0f, 0.1f));
+  EXPECT_TRUE(IsSky(-0.0f, 0.0f, -0.0f, 21.0f, 0.1f));
 }
 
-TEST(VRSkybox, RoundingNoiseStillCountsAsNoTranslation)
+TEST(VRSkybox, RoundingNoiseScalesWithTheDistance)
 {
-  // Rogue Leader's space dome, in frames where the camera minus itself is not exactly zero.
-  EXPECT_TRUE(IsSkybox(-1.90735e-06f, 0.0f, 0.0f));
-  EXPECT_TRUE(IsSkybox(0.0f, 7.62939e-06f, 0.0f));
-  EXPECT_TRUE(IsSkybox(VR_SKYBOX_MAX_TRANSLATION, -VR_SKYBOX_MAX_TRANSLATION, 0.0f));
+  // Rogue Leader: a few millionths.
+  EXPECT_TRUE(IsSky(-1.90735e-06f, 0.0f, 0.0f, 21.0f, 0.1f));
+  EXPECT_TRUE(IsSky(0.0f, 7.62939e-06f, 0.0f, 21.0f, 0.1f));
+  // SSX 3, with world positions around 200000: 1/128 and 1/64 of a unit, sky 100 units away.
+  EXPECT_TRUE(IsSky(-0.0078125f, -0.015625f, 0.0f, 100.0f, 1.0f));
+  // The same offset is not noise for geometry 5 units away.
+  EXPECT_FALSE(IsSky(-0.0078125f, -0.015625f, 0.0f, 5.0f, 0.1f));
+}
+
+TEST(VRSkybox, AHudAtTheCameraIsNot)
+{
+  // Rogue Leader's cockpit gauges: no translation, 0.64 units away with a 0.1 near plane.
+  EXPECT_FALSE(IsSky(0.0f, 0.0f, 0.0f, 0.64f, 0.1f));
+  // Metroid Prime's closest sky piece: 8.7 units, near plane 0.2 (43 near planes).
+  EXPECT_TRUE(IsSky(0.0f, 0.0f, 0.0f, 8.7f, 0.2f));
+  EXPECT_FALSE(IsSky(0.0f, 0.0f, 0.0f, VR_SKYBOX_MIN_NEAR_PLANES * 0.2f * 0.99f, 0.2f));
 }
 
 TEST(VRSkybox, ObjectsAwayFromTheCameraAreNot)
 {
-  EXPECT_FALSE(IsSkybox(0.0f, 0.0f, -20.0f));
-  EXPECT_FALSE(IsSkybox(0.5f, -0.3f, 0.0f));
-  EXPECT_FALSE(IsSkybox(0.0f, 2.0f * VR_SKYBOX_MAX_TRANSLATION, 0.0f));
+  // Rogue Leader's ship in front of the camera.
+  EXPECT_FALSE(IsSky(0.0f, -0.71f, 3.2f, 2.0f, 0.1f));
+  // An object 50 units ahead.
+  EXPECT_FALSE(IsSky(0.0f, 0.0f, -50.0f, 45.0f, 0.1f));
 }
 
 TEST(VRSkybox, IdentityIsNot)
 {
   // Draws already in view space use the identity; they are not a sky.
-  const float4 row0 = {1.0f, 0.0f, 0.0f, 0.0f};
-  const float4 row1 = {0.0f, 1.0f, 0.0f, 0.0f};
-  const float4 row2 = {0.0f, 0.0f, 1.0f, 0.0f};
-  EXPECT_FALSE(IsSkyboxPositionMatrix(row0, row1, row2));
+  const std::array<float, 12> identity = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+  EXPECT_FALSE(IsSkyboxCandidate(identity.data(), 10000.0f));
+  EXPECT_FALSE(IsSkyboxDraw(identity.data(), 100.0f, 0.1f));
+}
+
+TEST(VRSkybox, CandidatesAreLimitedByTheFarPlane)
+{
+  // The vertices are read only for draws whose translation could pass next to a sky as far as the
+  // far plane.
+  EXPECT_TRUE(IsSkyboxCandidate(Matrix(0.0f, -0.015625f, 0.0f).data(), 30000.0f));
+  EXPECT_TRUE(IsSkyboxCandidate(Matrix(0.0f, 0.0f, 0.0f).data(), 8000.0f));
+  // A ship a few units from the camera is a candidate; its close vertices fail IsSkyboxDraw.
+  EXPECT_TRUE(IsSkyboxCandidate(Matrix(0.0f, -0.71f, 3.2f).data(), 8000.0f));
+  EXPECT_FALSE(IsSkyboxCandidate(Matrix(0.0f, 0.0f, -50.0f).data(), 8000.0f));
 }

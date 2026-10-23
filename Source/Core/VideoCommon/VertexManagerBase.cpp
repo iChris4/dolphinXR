@@ -1040,13 +1040,40 @@ static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool age
   }
   const auto& pnm = Core::System::GetInstance().GetVertexShaderManager().constants.posnormalmatrix;
   record->detect_skybox = g_ActiveConfig.vr_detect_skybox;
-  record->skybox =
-      record->detect_skybox && record->perspective && IsSkyboxPositionMatrix(pnm[0], pnm[1], pnm[2]);
+  record->skybox = geometry_shader_manager.vr_skybox_draw;
   record->shared_translation = {pnm[0][3], pnm[1][3], pnm[2][3]};
   record->shared_scale_x = pnm[0][0];
   record->per_vertex_matrix = draw_depth.HasPerVertexMatrix();
   if (const float* matrix = draw_depth.FirstVertexMatrix(); matrix && record->per_vertex_matrix)
     record->vertex_translation = {matrix[3], matrix[7], matrix[11]};
+  if (record->perspective)
+  {
+    const DrawDistanceRange& distance = draw_depth.GetDistance();
+    if (distance.valid)
+      record->min_distance = distance.min;
+  }
+}
+
+// Detect Skybox's verdict for the draw being flushed (IsSkyboxDraw). The vertices are read only
+// for the few draws whose matrix passes IsSkyboxCandidate.
+static bool DetectVRSkybox(const DrawDepthSource& draw_depth)
+{
+  if (!g_ActiveConfig.vr_detect_skybox || g_ActiveConfig.stereo_mode != StereoMode::OpenXR ||
+      xfmem.projection.type != ProjectionType::Perspective)
+  {
+    return false;
+  }
+  const float* matrix = draw_depth.FirstVertexMatrix();
+  if (matrix == nullptr)
+    return false;
+  // The far and near planes, as BeginAgentDrawRecord derives them.
+  const float* p = xfmem.projection.rawProjection.data();
+  const float far_z = std::fabs(p[5] / p[4]);
+  const float near_z = std::fabs(far_z * p[4] / (p[4] - 1.0f));
+  if (!IsSkyboxCandidate(matrix, far_z))
+    return false;
+  const DrawDistanceRange& distance = draw_depth.GetDistance();
+  return distance.valid && IsSkyboxDraw(matrix, distance.min, near_z);
 }
 #endif
 
@@ -1308,9 +1335,20 @@ void VertexManagerBase::Flush()
         bool hunter_skip = false;
         bool elements_skip = false;
         bool texmgr_skip = false;
-        // The camera depth of this draw's vertices, read only when an override with min_depth /
-        // max_depth or the agent capture asks for it. Stays empty outside the override pass.
+        // The camera depth and distance of this draw's vertices, read only when an override with
+        // min_depth / max_depth, Detect Skybox or the agent capture asks for it. This batch's
+        // vertices are the GetNumVerts() * stride bytes before m_cur_buffer_pointer
+        // (m_base_buffer_pointer is the start of the whole stream buffer on most backends). xfmem
+        // and the matrix index are this batch's: changing them flushes.
         DrawDepthSource draw_depth;
+        if (const NativeVertexFormat* format = VertexLoaderManager::GetCurrentVertexFormat())
+        {
+          const u32 stride = format->GetVertexStride();
+          const u32 num_vertices = m_index_generator.GetNumVerts();
+          draw_depth = DrawDepthSource(m_cur_buffer_pointer - num_vertices * stride, num_vertices,
+                                       stride, &format->GetVertexDeclaration(), xfmem.posMatrices,
+                                       g_main_cp_state.matrix_index_a.PosNormalMtxIdx);
+        }
         auto& hunter = ShaderHunter::GetInstance();
         auto& elements = ElementsGroupManager::GetInstance();
         auto& texmgr = TextureElementManager::GetInstance();
@@ -1358,17 +1396,6 @@ void VertexManagerBase::Flush()
           const u64 ps_hash = uid_crc(m_ps_override_ids, ps.GetUidDataRaw(), ps.GetUidDataSize());
           const u64 gs_hash = uid_crc(m_gs_override_ids, gs.GetUidDataRaw(), gs.GetUidDataSize());
 
-          // This batch's vertices are the GetNumVerts() * stride bytes before
-          // m_cur_buffer_pointer (m_base_buffer_pointer is the start of the whole stream buffer
-          // on most backends). xfmem and the matrix index are this batch's: changing them flushes.
-          if (const NativeVertexFormat* format = VertexLoaderManager::GetCurrentVertexFormat())
-          {
-            const u32 stride = format->GetVertexStride();
-            const u32 num_vertices = m_index_generator.GetNumVerts();
-            draw_depth = DrawDepthSource(m_cur_buffer_pointer - num_vertices * stride, num_vertices,
-                                         stride, &format->GetVertexDeclaration(), xfmem.posMatrices,
-                                         g_main_cp_state.matrix_index_a.PosNormalMtxIdx);
-          }
           hunter.SetCurrentDrawDepth(&draw_depth);
           Common::ScopeGuard clear_hunter_depth([&hunter] { hunter.SetCurrentDrawDepth(nullptr); });
 
@@ -2130,6 +2157,7 @@ void VertexManagerBase::Flush()
         }
 
 #ifdef ENABLE_VR
+        geometry_shader_manager.vr_skybox_draw = DetectVRSkybox(draw_depth);
         if (agent_record) [[unlikely]]
         {
           FinishAgentDrawRecord(agent_record, agent_preview_skip, background_fill_skip, hunter_skip,

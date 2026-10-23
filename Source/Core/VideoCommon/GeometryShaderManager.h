@@ -15,19 +15,38 @@
 class PointerWrap;
 enum class PrimitiveType : u32;
 
-// Detect Skybox: a draw whose position matrix (3 rows of 4) has no translation, so its object
-// sits at the camera, and is not the identity is treated as a skybox. Games compute that
-// translation as the camera position minus itself, which float rounding leaves a few millionths
-// off zero in some frames (Rogue Leader's space dome), so a translation within this many game
-// units still counts as none; with an exact test the sky jumped between infinity and its real
-// distance from frame to frame.
-constexpr float VR_SKYBOX_MAX_TRANSLATION = 0.01f;
+// Detect Skybox: a perspective draw placed at the camera (its position matrix has no
+// translation) and not the identity is a sky, rendered with head rotation only.
+// - Games compute that translation as the camera position minus itself, and float rounding
+//   leaves noise that grows with the world coordinates: a few millionths in Rogue Leader, 1/64 in
+//   SSX 3 (positions around 200000). So the translation only has to be small next to the distance
+//   of the draw's closest vertex; with an exact test the sky jumped between infinity and its real
+//   distance from frame to frame.
+// - A HUD drawn in perspective at the camera has no translation either (Rogue Leader's cockpit
+//   gauges, 6 near planes away), while a sky is far: the closest vertex must be this many near
+//   planes away (Metroid Prime's sky starts at 43, Rogue Leader's at 200, SSX 3's at about 100).
+constexpr float VR_SKYBOX_MAX_RELATIVE_TRANSLATION = 1.0e-3f;
+constexpr float VR_SKYBOX_MIN_NEAR_PLANES = 20.0f;
 
-inline bool IsSkyboxPositionMatrix(const float4& row0, const float4& row1, const float4& row2)
+inline float SkyboxTranslationLength(const float* matrix)
 {
-  return std::fabs(row0[3]) <= VR_SKYBOX_MAX_TRANSLATION &&
-         std::fabs(row1[3]) <= VR_SKYBOX_MAX_TRANSLATION &&
-         std::fabs(row2[3]) <= VR_SKYBOX_MAX_TRANSLATION && row0[0] != 1.0f;
+  return std::sqrt(matrix[3] * matrix[3] + matrix[7] * matrix[7] + matrix[11] * matrix[11]);
+}
+
+// The test before reading any vertex: `matrix` is the 3x4 row-major position matrix. No vertex of
+// a sky is beyond the far plane, so a draw whose translation is too large next to it cannot pass
+// IsSkyboxDraw.
+inline bool IsSkyboxCandidate(const float* matrix, float far_z)
+{
+  return matrix[0] != 1.0f &&
+         SkyboxTranslationLength(matrix) <= VR_SKYBOX_MAX_RELATIVE_TRANSLATION * far_z;
+}
+
+// The full test, with the distance of the draw's closest vertex from the camera.
+inline bool IsSkyboxDraw(const float* matrix, float min_distance, float near_z)
+{
+  return matrix[0] != 1.0f && min_distance >= VR_SKYBOX_MIN_NEAR_PLANES * near_z &&
+         SkyboxTranslationLength(matrix) <= VR_SKYBOX_MAX_RELATIVE_TRANSLATION * min_distance;
 }
 
 // The non-API dependent parts.
@@ -71,6 +90,9 @@ public:
   // VR_STEREO_SCREEN_PANE_3D = force a world-fixed perspective pane.
   // VR_STEREO_SCREEN_PANE_3D_VR_DEPTH = same, with physically projected depth.
   float vr_stereo_override = std::numeric_limits<float>::quiet_NaN();
+  // Detect Skybox's verdict for the next draw (IsSkyboxDraw), set by VertexManagerBase before
+  // every draw.
+  bool vr_skybox_draw = false;
 
   // Apply the original perspective viewport as a pane-to-frame NDC remap for one explicit
   // Screen Pane draw. The matching full-frame GPU viewport is installed by VertexManagerBase.
