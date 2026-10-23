@@ -33,6 +33,9 @@
 #include "DolphinQt/Config/ConfigControls/ConfigFloatSlider.h"
 #include "DolphinQt/Config/ConfigControls/ConfigSlider.h"
 #include "DolphinQt/Config/GameConfigEdit.h"
+#ifdef ENABLE_VR
+#include "DolphinQt/Config/VRPatchesWidget.h"
+#endif
 #include "DolphinQt/QtUtils/QtUtils.h"
 #include "DolphinQt/QtUtils/WrapInScrollArea.h"
 #include "DolphinQt/Settings.h"
@@ -388,6 +391,9 @@ void VRConfigWidget::CreateWidgets()
   auto* tabs = new QTabWidget;
   tabs->addTab(GetWrappedWidget(general_page), tr("General"));
   tabs->addTab(GetWrappedWidget(hacks_page), tr("Hacks"));
+#ifdef ENABLE_VR
+  tabs->addTab(new VRPatchesWidget(m_game_id, m_revision), tr("VR Patches"));
+#endif
   const int editor_index = tabs->addTab(editor_page, tr("Editor"));
 
   connect(tabs, &QTabWidget::currentChanged, this, [this, editor_index](int index) {

@@ -14,8 +14,7 @@ patch = {
   author = "Nobbie (PrimedGun), ported to DolphinXR",
   version = "1.0",
   description = "The arm cannon is aimed and placed by your VR controller, and shots leave it "
-    .. "where it points. Turn the profile's Cannon override off: this patch turns it off while it "
-    .. "runs.",
+    .. "where it points. For Metroid Prime NTSC-U 1.00.",
   games = {"GM8E01"},
   revision = 0,
   scratch = 0x230,

@@ -486,6 +486,13 @@ if (NOT WIN32)
   )
 endif()
 
+if(ENABLE_VR)
+  target_sources(dolphin-emu PRIVATE
+    Config/VRPatchesWidget.cpp
+    Config/VRPatchesWidget.h
+  )
+endif()
+
 target_compile_definitions(dolphin-emu
 PRIVATE
   -DQT_USE_QSTRINGBUILDER
