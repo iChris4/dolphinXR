@@ -1066,11 +1066,10 @@ static bool DetectVRSkybox(const DrawDepthSource& draw_depth)
   const float* matrix = draw_depth.FirstVertexMatrix();
   if (matrix == nullptr)
     return false;
-  // The far and near planes, as BeginAgentDrawRecord derives them.
+  // The near plane, as BeginAgentDrawRecord derives it.
   const float* p = xfmem.projection.rawProjection.data();
-  const float far_z = std::fabs(p[5] / p[4]);
-  const float near_z = std::fabs(far_z * p[4] / (p[4] - 1.0f));
-  if (!IsSkyboxCandidate(matrix, far_z))
+  const float near_z = std::fabs(p[5] / (p[4] - 1.0f));
+  if (!IsSkyboxCandidate(matrix, near_z))
     return false;
   const DrawDistanceRange& distance = draw_depth.GetDistance();
   return distance.valid && IsSkyboxDraw(matrix, distance.min, near_z);

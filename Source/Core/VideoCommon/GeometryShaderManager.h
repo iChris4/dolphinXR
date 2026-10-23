@@ -19,9 +19,10 @@ enum class PrimitiveType : u32;
 // translation) and not the identity is a sky, rendered with head rotation only.
 // - Games compute that translation as the camera position minus itself, and float rounding
 //   leaves noise that grows with the world coordinates: a few millionths in Rogue Leader, 1/64 in
-//   SSX 3 (positions around 200000). So the translation only has to be small next to the distance
-//   of the draw's closest vertex; with an exact test the sky jumped between infinity and its real
-//   distance from frame to frame.
+//   SSX 3 (positions around 200000). With an exact test the sky jumped between infinity and its
+//   real distance from frame to frame. So the object's origin only has to be nearer to the camera
+//   than the near plane (Metroid Prime's map pieces, 2 units away with a near plane of 1, are not
+//   at the camera) and within a small fraction of the distance of the draw's closest vertex.
 // - A HUD drawn in perspective at the camera has no translation either (Rogue Leader's cockpit
 //   gauges, 6 near planes away), while a sky is far: the closest vertex must be this many near
 //   planes away (Metroid Prime's sky starts at 43, Rogue Leader's at 200, SSX 3's at about 100).
@@ -33,19 +34,17 @@ inline float SkyboxTranslationLength(const float* matrix)
   return std::sqrt(matrix[3] * matrix[3] + matrix[7] * matrix[7] + matrix[11] * matrix[11]);
 }
 
-// The test before reading any vertex: `matrix` is the 3x4 row-major position matrix. No vertex of
-// a sky is beyond the far plane, so a draw whose translation is too large next to it cannot pass
-// IsSkyboxDraw.
-inline bool IsSkyboxCandidate(const float* matrix, float far_z)
+// The test before reading any vertex: `matrix` is the 3x4 row-major position matrix, its origin
+// must be nearer to the camera than the near plane.
+inline bool IsSkyboxCandidate(const float* matrix, float near_z)
 {
-  return matrix[0] != 1.0f &&
-         SkyboxTranslationLength(matrix) <= VR_SKYBOX_MAX_RELATIVE_TRANSLATION * far_z;
+  return matrix[0] != 1.0f && SkyboxTranslationLength(matrix) <= near_z;
 }
 
 // The full test, with the distance of the draw's closest vertex from the camera.
 inline bool IsSkyboxDraw(const float* matrix, float min_distance, float near_z)
 {
-  return matrix[0] != 1.0f && min_distance >= VR_SKYBOX_MIN_NEAR_PLANES * near_z &&
+  return IsSkyboxCandidate(matrix, near_z) && min_distance >= VR_SKYBOX_MIN_NEAR_PLANES * near_z &&
          SkyboxTranslationLength(matrix) <= VR_SKYBOX_MAX_RELATIVE_TRANSLATION * min_distance;
 }
 

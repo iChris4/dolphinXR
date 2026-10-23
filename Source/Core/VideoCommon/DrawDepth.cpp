@@ -147,7 +147,7 @@ const DrawDistanceRange& DrawDepthSource::GetDistance() const
     if (m_decl != nullptr)
     {
       m_distance = ComputeDrawDistanceRange(m_vertices, m_count, m_stride, *m_decl, m_pos_matrices,
-                                            m_shared_matrix_index);
+                                            m_shared_matrix_index, DRAW_DISTANCE_MAX_SAMPLES);
     }
     m_distance_computed = true;
   }

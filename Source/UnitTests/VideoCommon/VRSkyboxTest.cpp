@@ -65,13 +65,20 @@ TEST(VRSkybox, IdentityIsNot)
   EXPECT_FALSE(IsSkyboxDraw(identity.data(), 100.0f, 0.1f));
 }
 
-TEST(VRSkybox, CandidatesAreLimitedByTheFarPlane)
+TEST(VRSkybox, OnlyOriginsWithinTheNearPlaneAreCandidates)
 {
-  // The vertices are read only for draws whose translation could pass next to a sky as far as the
-  // far plane.
-  EXPECT_TRUE(IsSkyboxCandidate(Matrix(0.0f, -0.015625f, 0.0f).data(), 30000.0f));
-  EXPECT_TRUE(IsSkyboxCandidate(Matrix(0.0f, 0.0f, 0.0f).data(), 8000.0f));
-  // A ship a few units from the camera is a candidate; its close vertices fail IsSkyboxDraw.
-  EXPECT_TRUE(IsSkyboxCandidate(Matrix(0.0f, -0.71f, 3.2f).data(), 8000.0f));
-  EXPECT_FALSE(IsSkyboxCandidate(Matrix(0.0f, 0.0f, -50.0f).data(), 8000.0f));
+  // The vertices are read only for draws whose origin is nearer to the camera than the near
+  // plane: SSX 3's noise (near plane 1), Rogue Leader's dome (0.1).
+  EXPECT_TRUE(IsSkyboxCandidate(Matrix(-0.0078125f, -0.015625f, 0.0f).data(), 1.0f));
+  EXPECT_TRUE(IsSkyboxCandidate(Matrix(0.0f, 7.62939e-06f, 0.0f).data(), 0.1f));
+  // Rogue Leader's ship, 3 units in front of a 0.1 near plane.
+  EXPECT_FALSE(IsSkyboxCandidate(Matrix(0.0f, -0.71f, 3.2f).data(), 0.1f));
+}
+
+TEST(VRSkybox, AFarModelOffTheCameraIsNot)
+{
+  // Metroid Prime's map: pieces 2000 units away from the camera, whose origin is 2 units from it
+  // (near plane 1). The origin is not at the camera, even if 2 is small next to 2000.
+  EXPECT_FALSE(IsSkyboxCandidate(Matrix(0.0f, 0.0f, -2.028f).data(), 1.0f));
+  EXPECT_FALSE(IsSky(0.0f, 0.0f, -2.028f, 3000.0f, 1.0f));
 }
