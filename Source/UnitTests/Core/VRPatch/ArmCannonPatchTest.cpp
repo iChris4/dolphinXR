@@ -1,0 +1,291 @@
+// Copyright 2026 Dolphin Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+// The shipped Metroid Prime arm cannon patch (Data/Sys/VRPatches/GM8E01/arm-cannon.lua) against
+// fake memory: its hooks, its arming, and its cannon basis compared with PrimedGun's math.
+
+#include <gtest/gtest.h>
+
+#include <array>
+#include <bit>
+#include <cmath>
+#include <map>
+#include <string>
+
+#include "Common/CommonPaths.h"
+#include "Common/FileUtil.h"
+#include "Core/VRPatch/MemoryAccess.h"
+#include "Core/VRPatch/PatchScript.h"
+
+using namespace VRPatch;
+
+namespace
+{
+class Memory final : public MemoryAccess
+{
+public:
+  bool IsRAM(u32 address, u32 size) const override
+  {
+    return size != 0 && address >= 0x80000000 && static_cast<u64>(address) + size <= 0x81800000;
+  }
+  std::optional<u8> Read8(u32 a) const override { return Read<u8>(a); }
+  std::optional<u16> Read16(u32 a) const override { return Read<u16>(a); }
+  std::optional<u32> Read32(u32 a) const override { return Read<u32>(a); }
+  std::optional<u64> Read64(u32 a) const override { return Read<u64>(a); }
+  bool Write8(u32 a, u8 v) override { return Write<u8>(a, v); }
+  bool Write16(u32 a, u16 v) override { return Write<u16>(a, v); }
+  bool Write32(u32 a, u32 v) override { return Write<u32>(a, v); }
+  bool Write64(u32 a, u64 v) override { return Write<u64>(a, v); }
+  void InvalidateCode(u32, u32) override {}
+
+  u32 Get32(u32 a) const { return Read32(a).value_or(0); }
+  float GetF32(u32 a) const { return std::bit_cast<float>(Get32(a)); }
+  void SetF32(u32 a, float v) { Write32(a, std::bit_cast<u32>(v)); }
+  void SetMatrix(u32 a, const std::array<float, 12>& m)
+  {
+    for (size_t i = 0; i < 12; ++i)
+      SetF32(a + static_cast<u32>(i) * 4, m[i]);
+  }
+
+private:
+  template <typename T>
+  std::optional<T> Read(u32 address) const
+  {
+    if (!IsRAM(address, sizeof(T)))
+      return std::nullopt;
+    u64 value = 0;
+    for (u32 i = 0; i < sizeof(T); ++i)
+    {
+      const auto it = bytes.find(address + i);
+      value = value << 8 | (it == bytes.end() ? 0 : it->second);
+    }
+    return static_cast<T>(value);
+  }
+  template <typename T>
+  bool Write(u32 address, T value)
+  {
+    if (!IsRAM(address, sizeof(T)))
+      return false;
+    for (u32 i = 0; i < sizeof(T); ++i)
+      bytes[address + i] = static_cast<u8>(static_cast<u64>(value) >> (8 * (sizeof(T) - 1 - i)));
+    return true;
+  }
+  std::map<u32, u8> bytes;
+};
+
+constexpr u32 SCRATCH = 0x80002DC0;
+constexpr u32 ROTATION_HOOK = 0x80040FEC;
+constexpr u32 MODEL_HOOK = 0x80041A8C;
+constexpr u32 MODEL_ORIGINAL = 0x9421FFD0;  // stwu r1, -0x30(r1)
+constexpr u32 PROJECTILE_FUNCTION = 0x801BB888;
+constexpr std::array<u32, 6> PROJECTILE_CALLS = {0x800DF8DC, 0x800DF008, 0x800DF038,
+                                                 0x800E1240, 0x8018C950, 0x8018C988};
+constexpr u32 STATE_MANAGER = 0x8045A1A8;
+constexpr u32 PLAYER = 0x80500000;
+constexpr u32 GUN = 0x80600000;
+constexpr u32 CAMERA = 0x80720000;
+constexpr float PI = 3.14159265358979f;
+
+u32 Branch(u32 from, u32 to, bool link)
+{
+  return 0x48000000u | ((to - from) & 0x03FFFFFCu) | (link ? 1u : 0u);
+}
+
+// ---- PrimedGun's math (NativeRuntime.cpp), as the reference ----
+
+struct Quat
+{
+  float x, y, z, w;
+};
+
+Quat Mul(const Quat& a, const Quat& b)
+{
+  return {
+      a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+      a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+}
+
+// ApplyTrackingWorldYaw then PoseToPrimeMatrix's rotation, rows of the 3x3.
+std::array<float, 9> PrimedGunBasis(Quat q, float yaw_deg, float rx, float ry, float rz)
+{
+  const float half = yaw_deg * PI / 180 * 0.5f;
+  q = Mul({0, std::sin(half), 0, std::cos(half)}, q);
+  const auto axis = [](float deg, int index) {
+    const float h = deg * PI / 180 * 0.5f;
+    Quat r{0, 0, 0, std::cos(h)};
+    (&r.x)[index] = std::sin(h);
+    return r;
+  };
+  q = Mul(q, Mul(Mul(axis(ry, 1), axis(rx, 0)), axis(rz, 2)));
+  const float r00 = 1 - 2 * (q.y * q.y + q.z * q.z), r01 = 2 * (q.x * q.y - q.w * q.z),
+              r02 = 2 * (q.x * q.z + q.w * q.y), r10 = 2 * (q.x * q.y + q.w * q.z),
+              r11 = 1 - 2 * (q.x * q.x + q.z * q.z), r12 = 2 * (q.y * q.z - q.w * q.x),
+              r20 = 2 * (q.x * q.z - q.w * q.y), r21 = 2 * (q.y * q.z + q.w * q.x),
+              r22 = 1 - 2 * (q.x * q.x + q.y * q.y);
+  return {-r00, r02, -r01, r20, -r22, r21, r10, -r12, r11};
+}
+
+struct Game
+{
+  Game()
+  {
+    memory.Write32(ROTATION_HOOK, 0x807C0740);
+    memory.Write32(MODEL_HOOK, MODEL_ORIGINAL);
+    for (const u32 call : PROJECTILE_CALLS)
+      memory.Write32(call, Branch(call, PROJECTILE_FUNCTION, true));
+    // The player, ready to shoot in first person, and its cannon.
+    memory.Write32(STATE_MANAGER + 0x84C, PLAYER);
+    memory.Write32(PLAYER + 0x2F4, 0);
+    memory.Write32(PLAYER + 0x2F8, 0);
+    memory.SetF32(PLAYER + 0x494, 1.0f);
+    memory.Write32(PLAYER + 0x498, 2);
+    memory.Write32(PLAYER + 0x490, GUN);
+    const std::array<float, 12> identity = {1, 0, 0, 5, 0, 1, 0, 6, 0, 0, 1, 7};
+    memory.SetMatrix(GUN + 0x4A8, identity);
+    memory.SetMatrix(GUN + 0x4D8, identity);
+    // The camera manager -> camera uid 5 -> the camera in the object list.
+    memory.Write32(STATE_MANAGER + 0x86C, 0x80700000);
+    memory.Write32(0x80700000, 0x00050000);
+    memory.Write32(STATE_MANAGER + 0x810, 0x80710000);
+    memory.Write32(0x80710000 + 5 * 8 + 4, CAMERA);
+    SetCameraYaw(30);
+
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "GM8E01";
+    env.scratch_base = SCRATCH;
+    env.scratch_size = 0x230;
+    env.units_per_meter = 1.5;
+  }
+
+  void SetCameraYaw(float degrees)
+  {
+    const float c = std::cos(degrees * PI / 180), s = std::sin(degrees * PI / 180);
+    memory.SetMatrix(CAMERA + 0x34, {c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0});
+  }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+};
+
+std::string ReadPatch()
+{
+  std::string source;
+  File::ReadFileToString(File::GetSysDirectory() + VRPATCHES_DIR "/GM8E01/arm-cannon.lua", source);
+  return source;
+}
+}  // namespace
+
+TEST(ArmCannonPatch, ManifestIsValid)
+{
+  const std::string source = ReadPatch();
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/GM8E01/arm-cannon.lua is missing";
+  const auto read = ReadManifest(source, "arm-cannon");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"GM8E01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_GE(manifest.scratch_bytes, 0x230u);
+  EXPECT_TRUE(manifest.reserve.empty());  // its caves are in its scratch memory
+  ASSERT_EQ(manifest.conflicts.size(), 1u);
+  EXPECT_EQ(manifest.conflicts[0].name, "Cannon");
+}
+
+TEST(ArmCannonPatch, HooksTracksAndRestores)
+{
+  Game game;
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+
+  // Branches into the caves, which run the replaced instructions and come back.
+  Memory& m = game.memory;
+  EXPECT_EQ(m.Get32(ROTATION_HOOK), Branch(ROTATION_HOOK, SCRATCH + 0xA0, false));
+  EXPECT_EQ(m.Get32(MODEL_HOOK), Branch(MODEL_HOOK, SCRATCH + 0x140, false));
+  for (const u32 call : PROJECTILE_CALLS)
+    EXPECT_EQ(m.Get32(call), Branch(call, SCRATCH + 0x190, true)) << std::hex << call;
+  EXPECT_EQ(m.Get32(SCRATCH + 0xA0), 0x807C0740u);  // lwz r3, 0x740(r28)
+  EXPECT_EQ(m.Get32(SCRATCH + 0xA0 + 35 * 4),
+            Branch(SCRATCH + 0xA0 + 35 * 4, ROTATION_HOOK + 4, false));
+  EXPECT_EQ(m.Get32(SCRATCH + 0x140 + 15 * 4), MODEL_ORIGINAL);
+  EXPECT_EQ(m.Get32(SCRATCH + 0x140 + 16 * 4),
+            Branch(SCRATCH + 0x140 + 16 * 4, MODEL_HOOK + 4, false));
+  EXPECT_EQ(m.Get32(SCRATCH + 0x190), 0x9421FFF0u);  // stwu r1, -16(r1)
+  // Not armed before a hand is tracked.
+  EXPECT_EQ(m.Get32(SCRATCH + 0x38), 0u);
+
+  // The right hand, pitched up and turned a little, seen from the game camera.
+  HandInput& hand = game.input.hands[1];
+  hand.connected = true;
+  const Quat rotation =
+      Mul(Quat{0, std::sin(0.2f), 0, std::cos(0.2f)}, Quat{std::sin(0.15f), 0, 0, std::cos(0.15f)});
+  hand.view = {true, {0.2f, -0.3f, -0.4f}, {rotation.x, rotation.y, rotation.z, rotation.w}};
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(SCRATCH + 0x38), GUN);
+
+  // PrimedGun's yaw delta for a camera yaw of 30 degrees: -(30 + 180) wrapped = 150.
+  const std::array<float, 9> expected = PrimedGunBasis(rotation, 150, 0, 0, 0);
+  for (size_t i = 0; i < 9; ++i)
+    EXPECT_NEAR(m.GetF32(SCRATCH + static_cast<u32>(i) * 4), expected[i], 1e-4f) << i;
+  // The position, camera-local in game units: (x, -z, y) * 1.5.
+  EXPECT_NEAR(m.GetF32(0x8045BCE8), 0.3f, 1e-5f);
+  EXPECT_NEAR(m.GetF32(0x8045BCEC), 0.6f, 1e-5f);
+  EXPECT_NEAR(m.GetF32(0x8045BCF0), -0.45f, 1e-5f);
+  // The model offset: the basis times (0, -0.08, 0) * 1.5.
+  EXPECT_NEAR(m.GetF32(SCRATCH + 0x40), expected[1] * -0.12f, 1e-5f);
+  EXPECT_NEAR(m.GetF32(SCRATCH + 0x44), expected[4] * -0.12f, 1e-5f);
+
+  // Morph ball: the patch stops feeding the cannon.
+  m.Write32(PLAYER + 0x2F8, 1);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(SCRATCH + 0x38), 0u);
+  m.Write32(PLAYER + 0x2F8, 0);
+
+  // A setting turns the beam hooks off.
+  const Manifest& manifest = script.GetManifest();
+  ASSERT_TRUE(script.SetSettingValue(*manifest.FindSetting("beams"), 0));
+  ASSERT_TRUE(script.CallSettingChanged("beams", 0, game.env)) << script.Error();
+  for (const u32 call : PROJECTILE_CALLS)
+    EXPECT_EQ(m.Get32(call), Branch(call, PROJECTILE_FUNCTION, true));
+
+  // Disabled: the game's code is back.
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(ROTATION_HOOK), 0x807C0740u);
+  EXPECT_EQ(m.Get32(MODEL_HOOK), MODEL_ORIGINAL);
+  EXPECT_EQ(m.Get32(SCRATCH + 0x38), 0u);
+}
+
+TEST(ArmCannonPatch, RefusesOtherCode)
+{
+  Game game;
+  game.memory.Write32(ROTATION_HOOK, 0x60000000);  // not Metroid Prime 1.00 code
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(MODEL_HOOK), MODEL_ORIGINAL);
+  bool warned = false;
+  for (const LogLine& line : script.TakeLog())
+    warned |= line.level == 1 && line.text.find("not installed") != std::string::npos;
+  EXPECT_TRUE(warned);
+}
+
+TEST(ArmCannonPatch, ReinstallsOverAnotherScratchAddress)
+{
+  // A savestate made while the patch had its caves at another address.
+  Game game;
+  constexpr u32 OLD = 0x80002C00;
+  game.memory.Write32(ROTATION_HOOK, Branch(ROTATION_HOOK, OLD + 0xA0, false));
+  game.memory.Write32(MODEL_HOOK, Branch(MODEL_HOOK, OLD + 0x140, false));
+  game.memory.Write32(OLD + 0x140 + 15 * 4, MODEL_ORIGINAL);
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(ROTATION_HOOK), Branch(ROTATION_HOOK, SCRATCH + 0xA0, false));
+  EXPECT_EQ(game.memory.Get32(MODEL_HOOK), Branch(MODEL_HOOK, SCRATCH + 0x140, false));
+  EXPECT_EQ(game.memory.Get32(SCRATCH + 0x140 + 15 * 4), MODEL_ORIGINAL);
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(MODEL_HOOK), MODEL_ORIGINAL);
+}
