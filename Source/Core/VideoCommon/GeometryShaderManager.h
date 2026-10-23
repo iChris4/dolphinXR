@@ -15,6 +15,21 @@
 class PointerWrap;
 enum class PrimitiveType : u32;
 
+// Detect Skybox: a draw whose position matrix (3 rows of 4) has no translation, so its object
+// sits at the camera, and is not the identity is treated as a skybox. Games compute that
+// translation as the camera position minus itself, which float rounding leaves a few millionths
+// off zero in some frames (Rogue Leader's space dome), so a translation within this many game
+// units still counts as none; with an exact test the sky jumped between infinity and its real
+// distance from frame to frame.
+constexpr float VR_SKYBOX_MAX_TRANSLATION = 0.01f;
+
+inline bool IsSkyboxPositionMatrix(const float4& row0, const float4& row1, const float4& row2)
+{
+  return std::fabs(row0[3]) <= VR_SKYBOX_MAX_TRANSLATION &&
+         std::fabs(row1[3]) <= VR_SKYBOX_MAX_TRANSLATION &&
+         std::fabs(row2[3]) <= VR_SKYBOX_MAX_TRANSLATION && row0[0] != 1.0f;
+}
+
 // The non-API dependent parts.
 class GeometryShaderManager
 {

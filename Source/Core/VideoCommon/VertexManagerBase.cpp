@@ -1038,6 +1038,15 @@ static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool age
     record->depth_max = depth.max;
     record->depth_sampled = depth.sampled;
   }
+  const auto& pnm = Core::System::GetInstance().GetVertexShaderManager().constants.posnormalmatrix;
+  record->detect_skybox = g_ActiveConfig.vr_detect_skybox;
+  record->skybox =
+      record->detect_skybox && record->perspective && IsSkyboxPositionMatrix(pnm[0], pnm[1], pnm[2]);
+  record->shared_translation = {pnm[0][3], pnm[1][3], pnm[2][3]};
+  record->shared_scale_x = pnm[0][0];
+  record->per_vertex_matrix = draw_depth.HasPerVertexMatrix();
+  if (const float* matrix = draw_depth.FirstVertexMatrix(); matrix && record->per_vertex_matrix)
+    record->vertex_translation = {matrix[3], matrix[7], matrix[11]};
 }
 #endif
 

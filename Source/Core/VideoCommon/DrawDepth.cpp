@@ -89,6 +89,28 @@ const DrawDepthRange& DrawDepthSource::Get() const
   return m_range;
 }
 
+bool DrawDepthSource::HasPerVertexMatrix() const
+{
+  return m_decl != nullptr && m_decl->posmtx.enable;
+}
+
+const float* DrawDepthSource::FirstVertexMatrix() const
+{
+  if (m_vertices == nullptr || m_pos_matrices == nullptr || m_count == 0)
+    return nullptr;
+  u32 matrix_index = m_shared_matrix_index;
+  if (HasPerVertexMatrix())
+  {
+    if (m_decl->posmtx.offset < 0 ||
+        static_cast<u32>(m_decl->posmtx.offset) + sizeof(u32) > m_stride)
+    {
+      return nullptr;
+    }
+    std::memcpy(&matrix_index, m_vertices + m_decl->posmtx.offset, sizeof(matrix_index));
+  }
+  return &m_pos_matrices[(matrix_index & 0x3f) * 4];
+}
+
 bool DrawPassesDepthConstraints(const DrawDepthSource* depth, float min_depth, float max_depth)
 {
   const bool has_min = min_depth > 0.0f;

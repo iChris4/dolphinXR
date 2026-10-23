@@ -152,6 +152,15 @@ struct DrawRecord
   float depth_min = std::numeric_limits<float>::quiet_NaN();
   float depth_max = std::numeric_limits<float>::quiet_NaN();
   bool depth_sampled = false;
+  // Detect Skybox (GeometryShaderManager): whether it is on, its verdict, and the shared position
+  // matrix it tests (translation and [0][0]). With per_vertex_matrix, the vertices carry their own
+  // matrix index, and vertex_translation is the first vertex's matrix translation.
+  bool detect_skybox = false;
+  bool skybox = false;
+  std::array<float, 3> shared_translation{};
+  float shared_scale_x = 0.0f;
+  bool per_vertex_matrix = false;
+  std::array<float, 3> vertex_translation{};
 };
 
 // One EFB copy of a captured frame: a render to texture, or the frame's copy to the XFB.

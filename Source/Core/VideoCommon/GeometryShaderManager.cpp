@@ -370,11 +370,7 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
             if (g_ActiveConfig.vr_detect_skybox)
             {
               const auto& pnm = vertex_shader_manager.constants.posnormalmatrix;
-              if (pnm[0][3] == 0.0f && pnm[1][3] == 0.0f && pnm[2][3] == 0.0f &&
-                  pnm[0][0] != 1.0f)
-              {
-                is_skybox = true;
-              }
+              is_skybox = IsSkyboxPositionMatrix(pnm[0], pnm[1], pnm[2]);
             }
             constants.stereoparams[2] = is_skybox ? 0.0f : 1.0f;
 

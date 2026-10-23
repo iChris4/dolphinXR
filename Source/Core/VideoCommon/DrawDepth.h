@@ -48,6 +48,12 @@ public:
 
   const DrawDepthRange& Get() const;
 
+  // Whether the vertices carry their own position matrix index (decl.posmtx).
+  bool HasPerVertexMatrix() const;
+  // The 3x4 row-major position matrix of the first vertex: its own one when the vertices carry an
+  // index, else the shared one. Null without vertices. Reads the vertex buffer.
+  const float* FirstVertexMatrix() const;
+
 private:
   const u8* m_vertices = nullptr;
   u32 m_count = 0;

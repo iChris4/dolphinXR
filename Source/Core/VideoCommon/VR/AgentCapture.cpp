@@ -432,7 +432,9 @@ std::string DescribeRoute(const DrawRecord& draw)
       {
         return "virtual screen (small 3D pane)";
       }
-      return render_target ? "native (render to texture)" : "stereo 3D";
+      if (render_target)
+        return "native (render to texture)";
+      return draw.skybox ? "stereo 3D, skybox (head rotation only)" : "stereo 3D";
     }
     if (!draw.virtual_screen)
       return "2D per eye, head-locked (VirtualScreen is off)";
@@ -556,6 +558,22 @@ std::string FormatDrawDetails(const DrawRecord& draw)
     text += fmt::format("Camera depth: {:.4g} to {:.4g} game units{}\n",
                         WithoutNegativeZero(draw.depth_min), WithoutNegativeZero(draw.depth_max),
                         draw.depth_sampled ? " (some vertices of this big draw)" : "");
+  }
+  if (draw.perspective)
+  {
+    text += fmt::format("Position matrix: translation ({:.6g}, {:.6g}, {:.6g}), [0][0] {:.6g}",
+                        draw.shared_translation[0], draw.shared_translation[1],
+                        draw.shared_translation[2], draw.shared_scale_x);
+    if (draw.per_vertex_matrix)
+    {
+      text += fmt::format("; the vertices carry their own matrix index, the first one's "
+                          "translation is ({:.6g}, {:.6g}, {:.6g})",
+                          draw.vertex_translation[0], draw.vertex_translation[1],
+                          draw.vertex_translation[2]);
+    }
+    text += fmt::format("\nDetect Skybox: {}\n", !draw.detect_skybox ? "off" :
+                                                 draw.skybox         ? "a skybox (no translation)" :
+                                                                       "not a skybox");
   }
   text += fmt::format("Render state: color write {}, alpha write {}, z test {} (func {}), z write "
                       "{}, blend {}, alpha test {:08x}\n",

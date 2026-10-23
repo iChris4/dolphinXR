@@ -208,6 +208,27 @@ TEST(DrawDepth, SourceComputesOnce)
   EXPECT_FALSE(DrawDepthSource().Get().valid);
 }
 
+TEST(DrawDepth, FirstVertexMatrix)
+{
+  const Matrices matrices = Identity();
+  const PortableVertexDeclaration shared = MakeDecl(12, 0, 3);
+  const std::vector<u8> shared_buffer = MakeBuffer(shared, {{0, 0, -1}});
+  const DrawDepthSource shared_source(shared_buffer.data(), 1, 12, &shared, matrices.data(), 6);
+  EXPECT_FALSE(shared_source.HasPerVertexMatrix());
+  EXPECT_EQ(shared_source.FirstVertexMatrix(), &matrices[6 * 4]);
+
+  // The first vertex's own index wins (masked to 6 bits), not the shared one.
+  const PortableVertexDeclaration own = MakeDecl(16, 4, 3, 0);
+  const std::vector<u8> own_buffer = MakeBuffer(own, {{0, 0, -1, 0x49}, {0, 0, -1, 3}});
+  const DrawDepthSource own_source(own_buffer.data(), 2, 16, &own, matrices.data(), 6);
+  EXPECT_TRUE(own_source.HasPerVertexMatrix());
+  EXPECT_EQ(own_source.FirstVertexMatrix(), &matrices[9 * 4]);
+
+  EXPECT_EQ(DrawDepthSource().FirstVertexMatrix(), nullptr);
+  const DrawDepthSource no_vertices(shared_buffer.data(), 0, 12, &shared, matrices.data(), 6);
+  EXPECT_EQ(no_vertices.FirstVertexMatrix(), nullptr);
+}
+
 TEST(DrawDepth, ConstraintRule)
 {
   const PortableVertexDeclaration decl = MakeDecl(12, 0, 3);
