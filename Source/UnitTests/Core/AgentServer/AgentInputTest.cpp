@@ -99,3 +99,32 @@ TEST(AgentInput, HoldsAndReleases)
   ReleaseAll();
   EXPECT_FALSE(Lookup(Device::GCPad, 0, "Buttons", "B"));
 }
+
+TEST(AgentInput, LayersHoldIndependently)
+{
+  // A VR patch holds the stick and A; the agent's step holds A released and B.
+  Hold(Layer::Patch, Device::GCPad, 0, {{"Buttons", "A", 1.0}, {"Main Stick", "X", 0.5}});
+  Hold(Layer::Agent, Device::GCPad, 0, {{"Buttons", "A", 0.0}, {"Buttons", "B", 1.0}});
+  // The agent wins on the controls both hold; the others come from the layer that holds them.
+  EXPECT_EQ(Lookup(Device::GCPad, 0, "Buttons", "A"), 0.0);
+  EXPECT_EQ(Lookup(Device::GCPad, 0, "Buttons", "B"), 1.0);
+  EXPECT_EQ(Lookup(Device::GCPad, 0, "Main Stick", "X"), 0.5);
+
+  // The agent's step ends: the patch's holds stay.
+  ReleaseAll();
+  EXPECT_EQ(Lookup(Device::GCPad, 0, "Buttons", "A"), 1.0);
+  EXPECT_FALSE(Lookup(Device::GCPad, 0, "Buttons", "B"));
+
+  // A new patch hold replaces only the patch layer.
+  Hold(Layer::Agent, Device::GCPad, 0, {{"Buttons", "X", 1.0}});
+  Hold(Layer::Patch, Device::GCPad, 0, {{"Buttons", "Y", 1.0}});
+  EXPECT_EQ(Lookup(Device::GCPad, 0, "Buttons", "X"), 1.0);
+  EXPECT_EQ(Lookup(Device::GCPad, 0, "Buttons", "Y"), 1.0);
+  EXPECT_FALSE(Lookup(Device::GCPad, 0, "Buttons", "A"));
+
+  ReleaseLayer(Layer::Patch);
+  EXPECT_FALSE(Lookup(Device::GCPad, 0, "Buttons", "Y"));
+  EXPECT_EQ(Lookup(Device::GCPad, 0, "Buttons", "X"), 1.0);
+  ReleaseAll();
+  EXPECT_FALSE(Lookup(Device::GCPad, 0, "Buttons", "X"));
+}

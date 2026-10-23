@@ -97,6 +97,16 @@ struct Step
 
 Step ParseStep(const std::vector<GroupInfo>& groups, const picojson::object& object)
 {
+  // A misspelled key would make the step a plain wait: say so.
+  for (const auto& [key, value] : object)
+  {
+    if (key != "press" && key != "sticks" && key != "analog" && key != "pointer" && key != "frames")
+    {
+      throw ToolError(fmt::format("Unknown step key \"{}\": a step has press, sticks, analog, "
+                                  "pointer and frames.",
+                                  key));
+    }
+  }
   const ToolArgs args(object);
   Step step;
   std::vector<std::string> parts;

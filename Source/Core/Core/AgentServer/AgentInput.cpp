@@ -3,6 +3,7 @@
 
 #include "Core/AgentServer/AgentInput.h"
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <utility>
@@ -33,6 +34,7 @@ constexpr unsigned int GC_PORTS = 4;
 
 struct Entry
 {
+  Layer layer;
   Device device;
   unsigned int port;
   HeldControl control;
@@ -95,32 +97,46 @@ std::optional<double> Lookup(Device device, unsigned int port, std::string_view 
   if (!s_holding.load(std::memory_order_acquire))
     return std::nullopt;
   std::lock_guard lock(s_mutex);
+  std::optional<double> patch_value;
   for (const Entry& entry : s_held)
   {
     if (entry.device == device && entry.port == port && entry.control.group == group &&
         entry.control.control == control)
     {
-      return entry.control.value;
+      if (entry.layer == Layer::Agent)
+        return entry.control.value;
+      patch_value = entry.control.value;
     }
   }
-  return std::nullopt;
+  return patch_value;
+}
+
+void Hold(Layer layer, Device device, unsigned int port, std::vector<HeldControl> controls)
+{
+  std::lock_guard lock(s_mutex);
+  std::erase_if(s_held, [&](const Entry& entry) {
+    return entry.layer == layer && entry.device == device && entry.port == port;
+  });
+  for (HeldControl& control : controls)
+    s_held.push_back({layer, device, port, std::move(control)});
+  s_holding.store(!s_held.empty(), std::memory_order_release);
+}
+
+void ReleaseLayer(Layer layer)
+{
+  std::lock_guard lock(s_mutex);
+  std::erase_if(s_held, [&](const Entry& entry) { return entry.layer == layer; });
+  s_holding.store(!s_held.empty(), std::memory_order_release);
 }
 
 void Hold(Device device, unsigned int port, std::vector<HeldControl> controls)
 {
-  std::lock_guard lock(s_mutex);
-  std::erase_if(s_held,
-                [&](const Entry& entry) { return entry.device == device && entry.port == port; });
-  for (HeldControl& control : controls)
-    s_held.push_back({device, port, std::move(control)});
-  s_holding.store(!s_held.empty(), std::memory_order_release);
+  Hold(Layer::Agent, device, port, std::move(controls));
 }
 
 void ReleaseAll()
 {
-  std::lock_guard lock(s_mutex);
-  s_held.clear();
-  s_holding.store(false, std::memory_order_release);
+  ReleaseLayer(Layer::Agent);
 }
 
 ControllerEmu::ControlGroupContainer* GetController(Device device, unsigned int port,
@@ -202,26 +218,43 @@ bool Attach(Device device, unsigned int port, std::string* error)
   return true;
 }
 
-void DetachAll()
+void Detach(Layer layer)
 {
-  ReleaseAll();
+  ReleaseLayer(layer);
+
+  // The controllers the other layer still holds keep their override function.
+  std::vector<std::pair<Device, unsigned int>> still_held;
+  {
+    std::lock_guard lock(s_mutex);
+    for (const Entry& entry : s_held)
+      still_held.emplace_back(entry.device, entry.port);
+  }
+  const auto is_held = [&](Device device, unsigned int port) {
+    return std::ranges::find(still_held, std::make_pair(device, port)) != still_held.end();
+  };
 
   const auto lock = ControllerEmu::EmulatedController::GetStateLock();
-  const auto detach = [](ControllerEmu::ControlGroupContainer* controller) {
-    if (controller && IsAgentOverride(*controller))
+  const auto detach = [&](ControllerEmu::ControlGroupContainer* controller, Device device,
+                          unsigned int port) {
+    if (controller && IsAgentOverride(*controller) && !is_held(device, port))
       controller->ClearInputOverrideFunction();
   };
   for (unsigned int port = 0; port < GC_PORTS; ++port)
-    detach(Pad::GetConfig()->GetController(static_cast<int>(port)));
+    detach(Pad::GetConfig()->GetController(static_cast<int>(port)), Device::GCPad, port);
   for (unsigned int port = 0; port < MAX_WIIMOTES; ++port)
   {
-    detach(Wiimote::GetConfig()->GetController(static_cast<int>(port)));
+    detach(Wiimote::GetConfig()->GetController(static_cast<int>(port)), Device::Wiimote, port);
     if (ControllerEmu::Attachments* attachments = GetAttachments(port))
     {
       for (const auto& attachment : attachments->GetAttachmentList())
-        detach(attachment.get());
+        detach(attachment.get(), Device::Attachment, port);
     }
   }
+}
+
+void DetachAll()
+{
+  Detach(Layer::Agent);
 }
 
 std::vector<GroupInfo> DescribeController(const ControllerEmu::ControlGroupContainer& controller)

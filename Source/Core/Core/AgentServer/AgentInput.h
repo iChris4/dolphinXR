@@ -15,14 +15,17 @@ namespace ControllerEmu
 class ControlGroupContainer;
 }
 
-// Controller input held by the agent server (press_input): values for chosen controls of an
-// emulated GameCube controller, Wii Remote or Wii Remote attachment, returned by input override
-// functions in place of what the user's controller reports. The other controls keep the user's
-// input.
+// Controller input held by the agent server (press_input) and by the VR game patches (pad.*):
+// values for chosen controls of an emulated GameCube controller, Wii Remote or Wii Remote
+// attachment, returned by input override functions in place of what the user's controller reports.
+// The other controls keep the user's input.
 //
-// Threads: the CPU thread reads the held values from the override functions (Lookup). The server
-// thread changes them, and installs or removes its override functions under
-// ControllerEmu::EmulatedController::GetStateLock().
+// Two layers hold values independently. The agent's timed steps win over a patch's holds of the
+// same control, and releasing or detaching one layer leaves the other in place.
+//
+// Threads: the CPU thread reads the held values from the override functions (Lookup), and changes
+// the Patch layer. The server thread changes the Agent layer. Override functions are installed or
+// removed under ControllerEmu::EmulatedController::GetStateLock().
 namespace AgentServer::AgentInput
 {
 enum class Device : u8
@@ -31,6 +34,12 @@ enum class Device : u8
   Wiimote,
   // The extension plugged in the Wii Remote (Nunchuk, Classic Controller...).
   Attachment,
+};
+
+enum class Layer : u8
+{
+  Agent,
+  Patch,
 };
 
 // A control by its ControllerEmu names, e.g. "Buttons"/"A" or "Main Stick"/"X".
@@ -46,7 +55,10 @@ struct HeldControl
 std::optional<double> Lookup(Device device, unsigned int port, std::string_view group,
                              std::string_view control);
 
-// Replaces what the agent holds on that controller.
+// Replaces what the layer holds on that controller.
+void Hold(Layer layer, Device device, unsigned int port, std::vector<HeldControl> controls);
+void ReleaseLayer(Layer layer);
+// The agent's layer.
 void Hold(Device device, unsigned int port, std::vector<HeldControl> controls);
 void ReleaseAll();
 
@@ -58,7 +70,10 @@ ControllerEmu::ControlGroupContainer* GetController(Device device, unsigned int 
 // the VR (OpenXR) override of the Wii Remote returns them already.
 // Fails when another override owns the controller (a TAS input window).
 bool Attach(Device device, unsigned int port, std::string* error);
-// Releases everything and removes the agent's override functions (never the VR one).
+// Releases the layer, and removes the override functions of the controllers no layer holds any
+// more (never the VR one).
+void Detach(Layer layer);
+// Detach(Layer::Agent).
 void DetachAll();
 
 // ---- Control names (pure) ----
