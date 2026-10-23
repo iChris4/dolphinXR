@@ -277,6 +277,9 @@ void CreateDirectories()
   File::CreateFullPath(File::GetUserPath(D_DUMPDEBUG_JITBLOCKS_IDX));
   File::CreateFullPath(File::GetUserPath(D_GAMESETTINGS_IDX));
   File::CreateFullPath(File::GetUserPath(D_GAMESETTINGSVR_IDX));
+#ifdef ENABLE_VR
+  File::CreateFullPath(File::GetUserPath(D_VRPATCHES_IDX));
+#endif
   File::CreateFullPath(File::GetUserPath(D_GCUSER_IDX));
   File::CreateFullPath(File::GetUserPath(D_GCUSER_IDX) + USA_DIR DIR_SEP);
   File::CreateFullPath(File::GetUserPath(D_GCUSER_IDX) + EUR_DIR DIR_SEP);

@@ -19,6 +19,7 @@
 #include "Common/Logging/Log.h"
 #include "Core/ConfigLoaders/GameConfigLoader.h"
 #include "VideoCommon/DrawDepth.h"
+#include "VideoCommon/VR/OverrideSuppression.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace
@@ -524,6 +525,8 @@ void TextureElementManager::ApplyOverrideList(const std::string& game_id,
   m_flag_rules.clear();
   m_loaded_game_id = game_id;
   m_has_overrides.store(false, std::memory_order_relaxed);
+  m_applied_overrides = all;
+  m_suppression_generation = VR::OverrideSuppression::GetGeneration();
 
   if (game_id.empty())
     return;
@@ -532,8 +535,11 @@ void TextureElementManager::ApplyOverrideList(const std::string& game_id,
 
   for (auto& ovr : all)
   {
-    if (!ovr.enabled || ovr.texture_hashes.empty())
+    if (!ovr.enabled || ovr.texture_hashes.empty() ||
+        VR::OverrideSuppression::IsSuppressed(VR::OverrideSuppression::Kind::Texture, ovr.name))
+    {
       continue;
+    }
 
     has_overrides = true;
 
@@ -584,7 +590,19 @@ void TextureElementManager::ApplyOverrideList(const std::string& game_id,
 void TextureElementManager::LoadOverridesIfNeeded(const std::string& game_id)
 {
   if (game_id == m_loaded_game_id)
+  {
+    // A VR patch started or stopped suppressing overrides: activate the same list again.
+    if (m_suppression_generation != VR::OverrideSuppression::GetGeneration())
+    {
+      std::vector<TextureElementOverride> all;
+      {
+        std::lock_guard lock(m_mutex);
+        all = m_applied_overrides;
+      }
+      ApplyOverrideList(game_id, std::move(all));
+    }
     return;
+  }
   LoadOverrides(game_id);
 }
 

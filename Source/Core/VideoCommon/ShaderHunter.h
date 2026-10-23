@@ -416,6 +416,9 @@ private:
   // hash → ControllerAnchor params
   std::unordered_map<u64, ControllerAnchorParams> m_controller_anchors;
   std::string m_loaded_game_id;
+  // The whole list given to ApplyOverrideList, re-applied when VR::OverrideSuppression changes.
+  std::vector<ShaderOverride> m_applied_overrides;
+  u64 m_suppression_generation = 0;
   std::atomic_bool m_has_overrides = false;
   std::atomic_bool m_needs_shader_family_signatures = false;
   std::atomic_bool m_needs_texture_hashes = false;

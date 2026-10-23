@@ -131,4 +131,5 @@ void RegisterCodeTools(ToolRegistry& registry, Server& server);
 void RegisterMemoryTools(ToolRegistry& registry, Server& server);
 void RegisterExperimentTools(ToolRegistry& registry, Server& server);
 void RegisterInputTools(ToolRegistry& registry, Server& server);
+void RegisterVRPatchTools(ToolRegistry& registry, Server& server);
 }  // namespace AgentServer

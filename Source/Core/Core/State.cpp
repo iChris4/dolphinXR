@@ -49,6 +49,9 @@
 #include "Core/NetPlayProto.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/System.h"
+#ifdef ENABLE_VR
+#include "Core/VRPatch/VRPatch.h"
+#endif
 
 #include "UICommon/UICommon.h"
 
@@ -196,6 +199,10 @@ static void DoState(Core::System& system, PointerWrap& p)
   p.DoMarker("Wiimote");
   Gecko::DoState(p);
   p.DoMarker("Gecko");
+#ifdef ENABLE_VR
+  // Writes nothing: after a load, the VR game patches reinstall what the loaded RAM lacks.
+  VRPatch::DoState(p);
+#endif
 
 #ifdef USE_RETRO_ACHIEVEMENTS
   AchievementManager::GetInstance().DoState(p);

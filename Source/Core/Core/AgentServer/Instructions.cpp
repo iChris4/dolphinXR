@@ -7,7 +7,7 @@ namespace AgentServer
 {
 std::string GetServerInstructions()
 {
-  return R"INSTRUCTIONS(DolphinXR is the Dolphin GameCube/Wii emulator with OpenXR VR. This server lets you help the user make a game comfortable in VR: fix visuals with VR overrides and settings, and find codes such as no-culling or 60fps.
+  return R"INSTRUCTIONS(DolphinXR is the Dolphin GameCube/Wii emulator with OpenXR VR. This server lets you help the user make a game comfortable in VR: fix visuals with VR overrides and settings, find codes such as no-culling or 60fps, and write VR game patches (Lua files that add VR controls to a game, e.g. a weapon that follows the controller).
 
 General rules
 - The user wears the headset; you see screenshots. Depth, scale and comfort are the user's call: propose, then ask them to confirm in the headset before saving.
@@ -57,12 +57,30 @@ Workflow 5: 60fps code
 4. test_memory_write reference=ref writes={address, type, value=1} (rewritten at every field like an AR 04 code); frames/field should go to about 1.0. Then check the game speed: timers, animations and physics must not run twice as fast (watch_memory a timer, or ask the user). Many games need more than one write.
 5. add_code type=ar with the AR lines (04xxxxxx 00000001 writes a u32 every frame), enabled, then ask the user to play-test.
 - A 60fps code doubles the GPU work: check performance on Quest.
+)INSTRUCTIONS"
+         R"INSTRUCTIONS(
+Workflow 6: VR control patch (a game object follows the VR controller, motion controls)
+- A VR patch is a Lua file run at every field (describe_vr_patch_api has the format and the API): it reads the VR input (vr.*) and the game's memory (mem.*), writes values or code caves, and can hold controller input (pad.*). It needs no special Dolphin build, and the user can share the file. list_vr_patches shows the game's patches (Sys/VRPatches/GM8E01/arm-cannon.lua, Metroid Prime's arm cannon, is a complete example: get_vr_patch id=arm-cannon source=true). Ask the user first whether a mod already does it for this game.
+1. Make a reference in gameplay, where the object (the gun, the camera) is visible: save_state label=ref.
+2. Find the camera: find_transforms label=a (layout 3x4 is the GameCube Mtx), turn the game's camera (press_input on the camera stick, or ask the user), then find_transforms compare_to=a: the camera and the player's transforms turned the most. watch_memory on the candidates while turning confirms.
+3. Find the object's transform the same way (move it with the game's own controls between two scans), or from a pointer chain: symbols (list_symbols, get_symbol) and read_memory format=f32 around the structures they use. cheat_search finds the pointers to it.
+4. Prove it: write a tilted basis with test_memory_write reference=ref or write_memory type=f32 floats=[...], and take a screenshot. If nothing changes, the game rewrites it every frame: set_watchpoint on it (or trace_memory write=true) gives the code that stores it.
+5. Choose how to drive it:
+   - a host write, when the game reads the value but does not rebuild it every frame: write it from on_frame;
+   - a code cave, when it does: hook right after the code that stores it, branch to code in the patch's scratch memory (manifest scratch = N bytes; mem.scratch) that copies a matrix the patch writes there, only when the object's pointer matches a guard word the patch writes (other objects keep theirs), then branch back. assemble gives the words (absolute branch targets in backquotes). Install with mem.ensure_code (or mem.ensure_patches) in on_load and on_state_loaded, since a savestate load replaces RAM, re-check every 60 fields, and restore the original words in on_unload.
+6. Map the VR pose to the game: vr.hand(hand) is in OpenXR space (meters, +Y up, -Z forward). Scale positions by vr.units_per_meter() or a setting, swap to the game's axes (a Z-up game: x, -z, y), and align the yaw with the game's camera (atan2 of its basis). Smooth with smoother(keep, snap). Check each step with get_vr_input and screenshots; the user's hands in the headset are the final judge.
+7. Write the patch: patch = {title, games = {"<GameID>"}, settings (calibration offsets, the hand, switches), scratch, reserve (the fixed addresses it writes), conflicts (a Controller Anchor override that already moves the same object, which would move it twice)}. set_vr_patch_source id=<name> source=<file> runs it live and returns load errors and the log; get_vr_patch_log shows what log() wrote. Gate everything on the game's state (valid pointers, gameplay rather than menus) and write nothing when a pointer is nil.
+8. When the user confirms in the headset: save_vr_patch (User/VRPatches/<GameID>/<id>.lua, enabled for the game). That file is what users share. set_vr_patch_setting tunes the calibration.
+- Fixed addresses in the Gecko code handler's region (0x80001800-0x80003000) cannot be used together with the game's Gecko codes: prefer the scratch memory, which the engine allocates there without conflict.
+- Patches run on the CPU thread at every field: keep on_frame small (list_vr_patches shows the time per field). Quest CPUs are slower.
+- A savestate made while a patch ran contains its code caves: load it with the patch enabled.
 
 Controller input
 - press_input plays steps on an emulated controller (GameCube pad, Wii Remote or its attachment): each step holds buttons, sticks, analog triggers or the Wii pointer for some VI fields, a step with only frames waits. Hold a button 3 or 4 fields and put a wait step between two presses of the same button. It ends with a screenshot.
 - list_input_controls gives the exact names (write Group/Control when a name is ambiguous, e.g. D-Pad/Up).
 - Tell the user before you navigate: the input goes to their game. Prefer an agent savestate before going through menus that change the game (saving, deleting a file).
 - Many games only listen to the controller that started the game, file or race (Mario Kart Wii with a GameCube pad ignores the Wii Remote). If a press changes nothing, ask the user which controller they play with.
+- VR patches hold controller input with pad.* underneath press_input: your steps win while they run.
 
 Debugger tools
 - set_breakpoint / wait_for_break / get_registers / get_callstack / step_instruction / remove_breakpoint, set_watchpoint / remove_watchpoint, read_memory / write_memory. Debugging mode is enabled when needed and released when no agent breakpoint remains.

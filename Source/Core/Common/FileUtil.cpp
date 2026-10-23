@@ -848,6 +848,7 @@ static void RebuildUserDirectories(unsigned int dir_index)
     s_user_paths[D_GAMESETTINGS_IDX] = s_user_paths[D_USER_IDX] + GAMESETTINGS_DIR DIR_SEP;
     s_user_paths[D_GAMESETTINGSVR_IDX] =
         s_user_paths[D_USER_IDX] + GAMESETTINGSVR_DIR DIR_SEP;
+    s_user_paths[D_VRPATCHES_IDX] = s_user_paths[D_USER_IDX] + VRPATCHES_DIR DIR_SEP;
     s_user_paths[D_MAPS_IDX] = s_user_paths[D_USER_IDX] + MAPS_DIR DIR_SEP;
     s_user_paths[D_CACHE_IDX] = s_user_paths[D_USER_IDX] + CACHE_DIR DIR_SEP;
     s_user_paths[D_COVERCACHE_IDX] = s_user_paths[D_CACHE_IDX] + COVERCACHE_DIR DIR_SEP;

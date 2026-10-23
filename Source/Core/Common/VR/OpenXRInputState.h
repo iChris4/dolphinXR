@@ -63,6 +63,10 @@ struct OpenXRControllerState
   OpenXRPoseState grip_pose;
   OpenXRVelocityState grip_velocity;
   OpenXRScreenHit screen_hit;
+  // The aim pose relative to the game camera, in meters (+X right, +Y up, -Z forward of the
+  // camera): the same chain the Controller Anchor and the eyes use (recenter, camera height and
+  // forward, Camera Anchor). Invalid in flat-screen mode, where there is no game view to match.
+  OpenXRPoseState view_pose;
 };
 
 // In-game VR menu state, decided on the input thread from the raw controller state.
@@ -145,6 +149,7 @@ public:
       controller.thumbstick_x = 0.0f;
       controller.thumbstick_y = 0.0f;
       controller.aim_pose = frozen.aim_pose;
+      controller.view_pose = frozen.view_pose;
       controller.pointer_pose = frozen.pointer_pose;
       controller.grip_pose = frozen.grip_pose;
       controller.grip_velocity = {};

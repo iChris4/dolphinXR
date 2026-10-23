@@ -57,6 +57,7 @@ Server::Server()
   RegisterMemoryTools(m_registry, *this);
   RegisterExperimentTools(m_registry, *this);
   RegisterInputTools(m_registry, *this);
+  RegisterVRPatchTools(m_registry, *this);
 }
 
 namespace

@@ -8,10 +8,12 @@ if(ENABLE_VR)
     AgentServer/McpServerTest.cpp
     AgentServer/OverrideSessionTest.cpp
     AgentServer/ToolRegistryTest.cpp
+    AgentServer/TransformScanTest.cpp
   )
   if(NOT MSVC)
     target_compile_options(AgentServerTest PRIVATE -fexceptions)
   endif()
+  add_dolphin_test(VRPatchTest VRPatch/VRPatchTest.cpp)
 endif()
 add_dolphin_test(PageFaultTest PageFaultTest.cpp)
 add_dolphin_test(CoreTimingTest CoreTimingTest.cpp)

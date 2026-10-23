@@ -2758,6 +2758,9 @@ void OpenXRManager::UpdateInputActions()
     locate_space_state(m_aim_spaces[hand], display_time, &controller.aim_pose, nullptr);
     locate_space_state(m_grip_spaces[hand], input_time, &controller.grip_pose,
                        &controller.grip_velocity);
+    // For VR game patches: the display-time aim seen from the game camera, like the Controller
+    // Anchor (a patch writes game memory that is rendered at about that time).
+    ComputeViewPose(controller.aim_pose, &controller.view_pose);
 
     // Absolute pointing target for the emulated Wii Remote IR: where the aim ray meets
     // the virtual screen the renderer is actually displaying. Uses a dedicated measured
@@ -3963,6 +3966,61 @@ bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
   if (out_rotation)
     *out_rotation = rot;
   return true;
+}
+
+void OpenXRManager::ComputeViewPose(const Common::VR::OpenXRPoseState& aim,
+                                    Common::VR::OpenXRPoseState* out_pose) const
+{
+  *out_pose = {};
+  if (!aim.valid || g_ActiveConfig.vr_flat_screen)
+    return;
+  const float upm = std::max(GetEffectiveUnitsPerMeter(), 0.0001f);
+  std::array<float, 3> position{};
+  std::array<float, 9> m{};
+  if (!MapAimPoseToGameView(aim, upm, &position, &m))
+    return;
+
+  // Rotation matrix (columns = controller axes in view space) to a quaternion.
+  float x, y, z, w;
+  const float trace = m[0] + m[4] + m[8];
+  if (trace > 0.0f)
+  {
+    const float s = 0.5f / std::sqrt(trace + 1.0f);
+    w = 0.25f / s;
+    x = (m[7] - m[5]) * s;
+    y = (m[2] - m[6]) * s;
+    z = (m[3] - m[1]) * s;
+  }
+  else if (m[0] > m[4] && m[0] > m[8])
+  {
+    const float s = 2.0f * std::sqrt(1.0f + m[0] - m[4] - m[8]);
+    w = (m[7] - m[5]) / s;
+    x = 0.25f * s;
+    y = (m[1] + m[3]) / s;
+    z = (m[2] + m[6]) / s;
+  }
+  else if (m[4] > m[8])
+  {
+    const float s = 2.0f * std::sqrt(1.0f + m[4] - m[0] - m[8]);
+    w = (m[2] - m[6]) / s;
+    x = (m[1] + m[3]) / s;
+    y = 0.25f * s;
+    z = (m[5] + m[7]) / s;
+  }
+  else
+  {
+    const float s = 2.0f * std::sqrt(1.0f + m[8] - m[0] - m[4]);
+    w = (m[3] - m[1]) / s;
+    x = (m[2] + m[6]) / s;
+    y = (m[5] + m[7]) / s;
+    z = 0.25f * s;
+  }
+  const float length = std::sqrt(x * x + y * y + z * z + w * w);
+  if (!std::isfinite(length) || length < 1e-6f)
+    return;
+  out_pose->valid = true;
+  out_pose->position = {position[0] / upm, position[1] / upm, position[2] / upm};
+  out_pose->orientation = {x / length, y / length, z / length, w / length};
 }
 
 void OpenXRManager::ComputeVirtualScreenHit(const Common::VR::OpenXRPoseState& aim,

@@ -313,18 +313,51 @@ ToolResult ReadMemory(const ToolArgs& args)
   return ToolResult::Text(std::move(text));
 }
 
+// write_memory with type f32 / f64: `floats` is a list of numbers.
+ToolResult WriteFloats(const ToolArgs& args, u32 address, bool doubles)
+{
+  const picojson::array* floats = args.GetArray("floats");
+  if (!floats || floats->empty())
+    throw ToolError("For f32 and f64, floats is a list of numbers, e.g. [1.0, 0.5].");
+  std::vector<double> values;
+  for (const picojson::value& value : *floats)
+  {
+    if (!value.is<double>() || !std::isfinite(value.get<double>()))
+      throw ToolError("floats holds finite numbers only.");
+    values.push_back(value.get<double>());
+  }
+  Core::CPUThreadGuard guard(GetSystem());
+  const u32 size = doubles ? 8 : 4;
+  for (size_t i = 0; i < values.size(); ++i)
+  {
+    const u32 at = address + static_cast<u32>(i) * size;
+    const bool ok =
+        doubles ?
+            PowerPC::MMU::HostTryWrite<double>(guard, values[i], at).has_value() :
+            PowerPC::MMU::HostTryWrite<float>(guard, static_cast<float>(values[i]), at).has_value();
+    if (!ok)
+      throw ToolError(fmt::format("{:08X} is not writable.", at));
+  }
+  return ToolResult::Text(fmt::format("Wrote {} {} value(s) at {}. This is not saved and a "
+                                      "savestate load undoes it.",
+                                      values.size(), doubles ? "f64" : "f32",
+                                      DescribeAddress(address)));
+}
+
 ToolResult WriteMemory(const ToolArgs& args)
 {
   RequireGame();
   const u32 address = args.RequireAddress("address");
   const std::string type = args.GetString("type", "u32");
+  if (type == "f32" || type == "f64")
+    return WriteFloats(args, address, type == "f64");
   const std::vector<u64> values = args.GetHexArray("values");
   if (values.empty())
     throw ToolError("values is a list of hex values, e.g. [\"0x38600001\"].");
   const bool code = args.GetBool("code", false);
   const u32 size = type == "u8" ? 1 : type == "u16" ? 2 : type == "u32" ? 4 : 0;
   if (size == 0)
-    throw ToolError("type is u8, u16 or u32.");
+    throw ToolError("type is u8, u16, u32, f32 or f64.");
 
   Core::CPUThreadGuard guard(GetSystem());
   auto& power_pc = GetSystem().GetPowerPC();
@@ -753,19 +786,23 @@ void RegisterMemoryTools(ToolRegistry& registry, Server& server)
        .idempotent = true,
        .handler = ReadMemory});
 
-  registry.Add({.name = "write_memory",
-                .title = "Write memory",
-                .description = "Writes emulated memory now (not saved; a savestate load undoes "
-                               "it). code=true invalidates the instruction caches.",
-                .input_schema = Schema()
-                                    .Hex("address", "Start address.")
-                                    .String("type", "Default u32.", {"u8", "u16", "u32"})
-                                    .HexArray("values", "Hex values written one after the other.")
-                                    .Boolean("code", "The bytes are instructions.")
-                                    .Required({"address", "values"})
-                                    .Build(),
-                .destructive = true,
-                .handler = WriteMemory});
+  registry.Add(
+      {.name = "write_memory",
+       .title = "Write memory",
+       .description = "Writes emulated memory now (not saved; a savestate load undoes "
+                      "it). code=true invalidates the instruction caches. Floats: "
+                      "type f32 or f64 with `floats`.",
+       .input_schema = Schema()
+                           .Hex("address", "Start address.")
+                           .String("type", "Default u32.", {"u8", "u16", "u32", "f32", "f64"})
+                           .HexArray("values", "Hex values written one after the other.")
+                           .ArrayOf("floats", "f32 / f64: numbers written one after the other.",
+                                    picojson::object{{"type", picojson::value("number")}})
+                           .Boolean("code", "The bytes are instructions.")
+                           .Required({"address"})
+                           .Build(),
+       .destructive = true,
+       .handler = WriteMemory});
 
   registry.Add(
       {.name = "set_breakpoint",

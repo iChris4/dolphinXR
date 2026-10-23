@@ -20,6 +20,7 @@
 #include "VideoCommon/GeometryShaderGen.h"
 #include "VideoCommon/PixelShaderGen.h"
 #include "VideoCommon/ShaderGenCommon.h"
+#include "VideoCommon/VR/OverrideSuppression.h"
 #include "VideoCommon/VertexShaderGen.h"
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
@@ -1433,6 +1434,8 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
   m_all_override_hashes.clear();
   m_has_texture_overrides = false;
   m_loaded_game_id = game_id;
+  m_applied_overrides = all;
+  m_suppression_generation = VR::OverrideSuppression::GetGeneration();
   m_has_overrides.store(false, std::memory_order_relaxed);
   m_needs_shader_family_signatures.store(false, std::memory_order_relaxed);
   m_needs_texture_hashes.store(false, std::memory_order_relaxed);
@@ -1446,8 +1449,11 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
 
   for (auto& ovr : all)
   {
-    if (!ovr.enabled)
+    if (!ovr.enabled ||
+        VR::OverrideSuppression::IsSuppressed(VR::OverrideSuppression::Kind::Shader, ovr.name))
+    {
       continue;
+    }
 
     has_overrides = true;
     if (ovr.hash_family_match)
@@ -1555,7 +1561,19 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
 void ShaderHunter::LoadOverridesIfNeeded(const std::string& game_id)
 {
   if (game_id == m_loaded_game_id)
+  {
+    // A VR patch started or stopped suppressing overrides: activate the same list again.
+    if (m_suppression_generation != VR::OverrideSuppression::GetGeneration())
+    {
+      std::vector<ShaderOverride> all;
+      {
+        std::lock_guard lock(m_mutex);
+        all = m_applied_overrides;
+      }
+      ApplyOverrideList(game_id, std::move(all));
+    }
     return;
+  }
   LoadOverrides(game_id);
 }
 

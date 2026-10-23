@@ -20,6 +20,7 @@
 #include "Core/ConfigLoaders/GameConfigLoader.h"
 #include "VideoCommon/DrawDepth.h"
 #include "VideoCommon/RuntimeElementMatcher.h"
+#include "VideoCommon/VR/OverrideSuppression.h"
 
 namespace
 {
@@ -1118,6 +1119,8 @@ void ElementsGroupManager::ApplyOverrideList(const std::string& game_id,
   std::lock_guard lock(m_mutex);
   m_loaded_game_id = game_id;
   m_overrides.clear();
+  m_applied_overrides = all_overrides;
+  m_suppression_generation = VR::OverrideSuppression::GetGeneration();
   m_clear_next_efb = false;
   m_pending_clear_min = 0;
   m_pending_clear_max = 0;
@@ -1129,8 +1132,11 @@ void ElementsGroupManager::ApplyOverrideList(const std::string& game_id,
 
   for (auto& entry : all_overrides)
   {
-    if (entry.enabled)
+    if (entry.enabled &&
+        !VR::OverrideSuppression::IsSuppressed(VR::OverrideSuppression::Kind::Elements, entry.name))
+    {
       m_overrides.push_back(std::move(entry));
+    }
   }
 
   m_has_overrides.store(!m_overrides.empty());
@@ -1144,12 +1150,23 @@ void ElementsGroupManager::ApplyOverrideList(const std::string& game_id,
 
 void ElementsGroupManager::LoadOverridesIfNeeded(const std::string& game_id)
 {
+  bool same_game = false;
+  std::vector<ElementGroupOverride> all;
   {
     std::lock_guard lock(m_mutex);
-    if (game_id == m_loaded_game_id)
-      return;
+    same_game = game_id == m_loaded_game_id;
+    if (same_game)
+    {
+      if (m_suppression_generation == VR::OverrideSuppression::GetGeneration())
+        return;
+      // A VR patch started or stopped suppressing overrides: activate the same list again.
+      all = m_applied_overrides;
+    }
   }
-  LoadOverrides(game_id);
+  if (same_game)
+    ApplyOverrideList(game_id, std::move(all));
+  else
+    LoadOverrides(game_id);
 }
 
 bool ElementsGroupManager::HasOverrides() const

@@ -35,6 +35,9 @@
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/System.h"
+#ifdef ENABLE_VR
+#include "Core/VRPatch/VRPatch.h"
+#endif
 #include "VideoCommon/OnScreenDisplay.h"
 
 namespace PatchEngine
@@ -213,6 +216,11 @@ void LoadPatches()
   const size_t enabled_cheat_count = ActionReplay::CountEnabledCodes() + Gecko::CountEnabledCodes();
   if (enabled_cheat_count > 0)
     OSD::AddMessage(fmt::format("{} cheat(s) enabled", enabled_cheat_count), OSD::Duration::NORMAL);
+
+#ifdef ENABLE_VR
+  VRPatch::OnGameLoaded(sconfig.GetGameID(), sconfig.GetRevision(),
+                        Core::System::GetInstance().IsWii());
+#endif
 }
 
 static void ApplyPatches(const Core::CPUThreadGuard& guard, const std::vector<Patch>& patches)
@@ -346,6 +354,11 @@ bool ApplyFramePatches(Core::System& system)
   ApplyPatches(guard, s_on_frame);
   ApplyMemoryPatches(guard, s_on_frame_memory);
 
+#ifdef ENABLE_VR
+  // VR game patches, before the Gecko codes so that both see the same field's writes.
+  VRPatch::RunFrame(guard);
+#endif
+
   // Run the Gecko code handler
   Gecko::RunCodeHandler(guard);
   ActionReplay::RunAllActive(guard);
@@ -355,6 +368,10 @@ bool ApplyFramePatches(Core::System& system)
 
 void Shutdown()
 {
+#ifdef ENABLE_VR
+  // Emulated memory may be gone already (emulation stop): Reload stops the patches with memory.
+  VRPatch::OnGameUnloaded(nullptr);
+#endif
   s_on_frame.clear();
   ActionReplay::ApplyCodes({}, "", 0);
   Gecko::Shutdown();
@@ -362,6 +379,13 @@ void Shutdown()
 
 void Reload(Core::System& system)
 {
+#ifdef ENABLE_VR
+  {
+    // A title change: the patches can restore the game's code before the next title loads.
+    Core::CPUThreadGuard guard(system);
+    VRPatch::OnGameUnloaded(&guard);
+  }
+#endif
   Shutdown();
   LoadPatches();
   ApplyStartupPatches(system);

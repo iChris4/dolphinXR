@@ -373,6 +373,9 @@ private:
 
   std::vector<ElementGroupOverride> m_overrides;
   std::string m_loaded_game_id;
+  // The whole list given to ApplyOverrideList, re-applied when VR::OverrideSuppression changes.
+  std::vector<ElementGroupOverride> m_applied_overrides;
+  u64 m_suppression_generation = 0;
 
   // Clear EFB pending state (video thread): armed by CheckClearEFBForDraw, consumed by the next
   // ShouldClearEFBCopy.

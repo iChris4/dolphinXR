@@ -33,6 +33,7 @@ enum
   D_GAMESETTINGS_IDX,     // user-specified settings which override both the global and the default
                           // settings (per game)
   D_GAMESETTINGSVR_IDX,   // per-game VR settings/shader override INIs
+  D_VRPATCHES_IDX,        // VR game patches (Lua), one folder per game ID
   D_SKYLANDERS_IDX,
 
   D_MAPS_IDX,

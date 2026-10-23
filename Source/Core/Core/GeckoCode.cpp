@@ -22,6 +22,12 @@
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/System.h"
 
+#ifdef ENABLE_VR
+#include <fmt/format.h>
+
+#include "VideoCommon/OnScreenDisplay.h"
+#endif
+
 namespace Gecko
 {
 static constexpr u32 CODE_SIZE = 8;
@@ -48,6 +54,28 @@ static Installation s_code_handler_installed = Installation::Uninstalled;
 static std::vector<GeckoCode> s_active_codes;
 static std::vector<GeckoCode> s_synced_codes;
 static std::mutex s_active_codes_lock;
+#ifdef ENABLE_VR
+static VRPatchRegion s_vr_patch_region;
+// Whether the installed code list includes the user's codes (cheats enabled at install time).
+static bool s_installed_user_codes = false;
+
+void SetVRPatchRegion(VRPatchRegion region)
+{
+  std::lock_guard lk(s_active_codes_lock);
+  if (region == s_vr_patch_region)
+    return;
+  s_vr_patch_region = std::move(region);
+  s_code_handler_installed = Installation::Uninstalled;
+}
+
+bool HasActiveUserCodes()
+{
+  if (!Config::AreCheatsEnabled())
+    return false;
+  std::lock_guard lk(s_active_codes_lock);
+  return !s_active_codes.empty();
+}
+#endif
 
 size_t CountEnabledCodes()
 {
@@ -114,7 +142,8 @@ std::vector<GeckoCode> SetAndReturnActiveCodes(std::span<const GeckoCode> gcodes
 
 // Requires s_active_codes_lock
 // NOTE: Refer to "codehandleronly.s" from Gecko OS.
-static Installation InstallCodeHandlerLocked(const Core::CPUThreadGuard& guard)
+static Installation InstallCodeHandlerLocked(const Core::CPUThreadGuard& guard,
+                                             [[maybe_unused]] bool include_user_codes)
 {
   std::string data;
   if (!File::ReadFileToString(File::GetSysDirectory() + GECKO_CODE_HANDLER, data))
@@ -129,6 +158,31 @@ static Installation InstallCodeHandlerLocked(const Core::CPUThreadGuard& guard)
     ERROR_LOG_FMT(ACTIONREPLAY, GECKO_CODE_HANDLER " is too big. The file may be corrupt.");
     return Installation::Failed;
   }
+
+#ifdef ENABLE_VR
+  // VR patches' scratch memory sits at the top of the region: the code list ends below it.
+  const u32 codelist_end_address =
+      std::clamp(s_vr_patch_region.code_list_end,
+                 INSTALLER_BASE_ADDRESS + static_cast<u32>(data.size()) + 2 * CODE_SIZE,
+                 INSTALLER_END_ADDRESS);
+  for (const auto& [start, end] : s_vr_patch_region.reserved)
+  {
+    if (start < codelist_end_address && INSTALLER_BASE_ADDRESS < end)
+    {
+      ERROR_LOG_FMT(ACTIONREPLAY,
+                    "Gecko codes are off: the VR patch {} writes {:08x}-{:08x}, inside the code "
+                    "handler's memory.",
+                    s_vr_patch_region.owners, start, end);
+      OSD::AddMessage(fmt::format("Gecko codes are off while the VR patch {} runs (both use the "
+                                  "memory at {:08x})",
+                                  s_vr_patch_region.owners, start),
+                      OSD::Duration::VERY_LONG, OSD::Color::RED);
+      return Installation::Failed;
+    }
+  }
+#else
+  const u32 codelist_end_address = INSTALLER_END_ADDRESS;
+#endif
 
   u8 mmio_addr = 0xCC;
   if (guard.GetSystem().IsWii())
@@ -154,7 +208,6 @@ static Installation InstallCodeHandlerLocked(const Core::CPUThreadGuard& guard)
 
   const u32 codelist_base_address =
       INSTALLER_BASE_ADDRESS + static_cast<u32>(data.size()) - CODE_SIZE;
-  const u32 codelist_end_address = INSTALLER_END_ADDRESS;
 
   // Write a magic value to 'gameid' (codehandleronly does not actually read this).
   // This value will be read back and modified over time by HLE_Misc::GeckoCodeHandlerICacheFlush.
@@ -169,27 +222,37 @@ static Installation InstallCodeHandlerLocked(const Core::CPUThreadGuard& guard)
   const u32 end_address = codelist_end_address - CODE_SIZE;
   u32 next_address = start_address;
 
-  // NOTE: Only active codes are in the list
-  for (const GeckoCode& active_code : s_active_codes)
-  {
-    // If the code is not going to fit in the space we have left then we have to skip it
-    if (next_address + active_code.codes.size() * CODE_SIZE > end_address)
+  const auto write_codes = [&](std::span<const GeckoCode> codes) {
+    for (const GeckoCode& active_code : codes)
     {
-      NOTICE_LOG_FMT(ACTIONREPLAY,
-                     "Too many GeckoCodes! Ran out of storage space in Game RAM. Could "
-                     "not write: \"{}\". Need {} bytes, only {} remain.",
-                     active_code.name, active_code.codes.size() * CODE_SIZE,
-                     end_address - next_address);
-      continue;
-    }
+      // If the code is not going to fit in the space we have left then we have to skip it
+      if (next_address + active_code.codes.size() * CODE_SIZE > end_address)
+      {
+        NOTICE_LOG_FMT(ACTIONREPLAY,
+                       "Too many GeckoCodes! Ran out of storage space in Game RAM. Could "
+                       "not write: \"{}\". Need {} bytes, only {} remain.",
+                       active_code.name, active_code.codes.size() * CODE_SIZE,
+                       end_address - next_address);
+        continue;
+      }
 
-    for (const GeckoCode::Code& code : active_code.codes)
-    {
-      PowerPC::MMU::HostWrite<u32>(guard, code.address, next_address);
-      PowerPC::MMU::HostWrite<u32>(guard, code.data, next_address + 4);
-      next_address += CODE_SIZE;
+      for (const GeckoCode::Code& code : active_code.codes)
+      {
+        PowerPC::MMU::HostWrite<u32>(guard, code.address, next_address);
+        PowerPC::MMU::HostWrite<u32>(guard, code.data, next_address + 4);
+        next_address += CODE_SIZE;
+      }
     }
-  }
+  };
+
+  // NOTE: Only active codes are in the list
+#ifdef ENABLE_VR
+  if (include_user_codes)
+    write_codes(s_active_codes);
+  write_codes(s_vr_patch_region.codes);
+#else
+  write_codes(s_active_codes);
+#endif
 
   WARN_LOG_FMT(ACTIONREPLAY, "GeckoCodes: Using {} of {} bytes", next_address - start_address,
                end_address - start_address);
@@ -197,7 +260,10 @@ static Installation InstallCodeHandlerLocked(const Core::CPUThreadGuard& guard)
   // Stop code. Tells the handler that this is the end of the list.
   PowerPC::MMU::HostWrite<u32>(guard, 0xF0000000, next_address);
   PowerPC::MMU::HostWrite<u32>(guard, 0x00000000, next_address + 4);
-  PowerPC::MMU::HostWrite<u32>(guard, 0, HLE_TRAMPOLINE_ADDRESS);
+  // With VR patch scratch memory above the list, the trampoline word is left alone (it is an HLE
+  // hook address; only a max-length list reaches it).
+  if (codelist_end_address == INSTALLER_END_ADDRESS)
+    PowerPC::MMU::HostWrite<u32>(guard, 0, HLE_TRAMPOLINE_ADDRESS);
 
   // Turn on codes
   PowerPC::MMU::HostWrite<u8>(guard, 1, INSTALLER_BASE_ADDRESS + 7);
@@ -211,6 +277,9 @@ static Installation InstallCodeHandlerLocked(const Core::CPUThreadGuard& guard)
     ppc_state.iCache.Invalidate(memory, jit_interface, INSTALLER_BASE_ADDRESS + j);
   }
   Host_JitCacheInvalidation();
+#ifdef ENABLE_VR
+  s_installed_user_codes = include_user_codes;
+#endif
   return Installation::Installed;
 }
 
@@ -235,24 +304,50 @@ void Shutdown()
 {
   std::lock_guard codes_lock(s_active_codes_lock);
   s_active_codes.clear();
+#ifdef ENABLE_VR
+  s_vr_patch_region = {};
+#endif
   s_code_handler_installed = Installation::Uninstalled;
 }
 
 void RunCodeHandler(const Core::CPUThreadGuard& guard)
 {
-  if (!Config::AreCheatsEnabled())
+  const bool cheats_enabled = Config::AreCheatsEnabled();
+#ifdef ENABLE_VR
+  // VR patches bring their own codes, which run whether or not cheats are enabled.
+  {
+    std::lock_guard codes_lock(s_active_codes_lock);
+    if (!cheats_enabled && s_vr_patch_region.codes.empty())
+      return;
+  }
+#else
+  if (!cheats_enabled)
     return;
+#endif
 
   // NOTE: Need to release the lock because of GUI deadlocks with PanicAlert in HostWrite_*
   {
     std::lock_guard codes_lock(s_active_codes_lock);
+#ifdef ENABLE_VR
+    const bool include_user_codes = cheats_enabled && !s_active_codes.empty();
+    // Cheats were turned on or off since the install: the list must gain or lose the user's codes.
+    if (s_code_handler_installed == Installation::Installed &&
+        include_user_codes != s_installed_user_codes)
+    {
+      s_code_handler_installed = Installation::Uninstalled;
+    }
+    const bool has_codes = include_user_codes || !s_vr_patch_region.codes.empty();
+#else
+    constexpr bool include_user_codes = true;
+    const bool has_codes = !s_active_codes.empty();
+#endif
     if (s_code_handler_installed != Installation::Installed)
     {
       // Don't spam retry if the install failed. The corrupt / missing disk file is not likely to be
       // fixed within 1 frame of the last error.
-      if (s_active_codes.empty() || s_code_handler_installed == Installation::Failed)
+      if (!has_codes || s_code_handler_installed == Installation::Failed)
         return;
-      s_code_handler_installed = InstallCodeHandlerLocked(guard);
+      s_code_handler_installed = InstallCodeHandlerLocked(guard, include_user_codes);
 
       // A warning was already issued for the install failing
       if (s_code_handler_installed != Installation::Installed)

@@ -647,6 +647,10 @@ private:
   // renderer uses to place that screen.
   void ComputeVirtualScreenHit(const Common::VR::OpenXRPoseState& aim,
                                Common::VR::OpenXRScreenHit* out_hit) const;
+  // The aim pose relative to the game camera in meters (OpenXRControllerState::view_pose), from
+  // MapAimPoseToGameView. Invalid in flat-screen mode.
+  void ComputeViewPose(const Common::VR::OpenXRPoseState& aim,
+                       Common::VR::OpenXRPoseState* out_pose) const;
   // XrTime of "now" via the platform time-conversion extension, 0 when unavailable.
   XrTime GetNowTime();
   // Input wants measured poses — locating at the predicted display time extrapolates fast

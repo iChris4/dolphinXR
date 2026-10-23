@@ -721,10 +721,39 @@ if(ENABLE_VR)
     AgentServer/Tools/OverrideTools.cpp
     AgentServer/Tools/ScreenshotTools.cpp
     AgentServer/Tools/Tools.h
+    AgentServer/Tools/VRPatchTools.cpp
     AgentServer/Tracepoints.cpp
     AgentServer/Tracepoints.h
+    AgentServer/TransformScan.cpp
+    AgentServer/TransformScan.h
   )
   target_sources(core PRIVATE ${AGENT_SERVER_SOURCES})
+
+  # VR game patches: per-game Lua files (see VRPatch/VRPatch.h). Lua is C and reports errors with
+  # longjmp, so these files need no exceptions; ScriptContext.h has the rules its bindings follow.
+  target_sources(core PRIVATE
+    VRPatch/ApiReference.cpp
+    VRPatch/BindingsMem.cpp
+    VRPatch/BindingsMisc.cpp
+    VRPatch/BindingsVR.cpp
+    VRPatch/GeckoRegion.cpp
+    VRPatch/GeckoRegion.h
+    VRPatch/MemoryAccess.cpp
+    VRPatch/MemoryAccess.h
+    VRPatch/PatchIni.cpp
+    VRPatch/PatchIni.h
+    VRPatch/PatchScript.cpp
+    VRPatch/PatchScript.h
+    VRPatch/PatchTypes.cpp
+    VRPatch/PatchTypes.h
+    VRPatch/Prelude.cpp
+    VRPatch/ScriptContext.h
+    VRPatch/VRPatch.h
+    VRPatch/VRPatchManager.cpp
+    VRPatch/VRSettingsTable.cpp
+    VRPatch/VRSettingsTable.h
+  )
+  target_link_libraries(core PRIVATE lua)
   # Tool handlers report errors with C++ exceptions, which Dolphin is built without outside MSVC.
   # No exception leaves agent code: every entry point that Dolphin calls catches them.
   if(NOT MSVC)

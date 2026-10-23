@@ -51,6 +51,7 @@
 #define CONFIG_DIR "Config"
 #define GAMESETTINGS_DIR "GameSettings"
 #define GAMESETTINGSVR_DIR "GameSettingsVR"
+#define VRPATCHES_DIR "VRPatches"
 #define MAPS_DIR "Maps"
 #define CACHE_DIR "Cache"
 #define COVERCACHE_DIR "GameCovers"

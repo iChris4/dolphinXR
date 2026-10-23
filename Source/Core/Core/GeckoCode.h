@@ -60,6 +60,27 @@ constexpr u32 HLE_TRAMPOLINE_ADDRESS = INSTALLER_END_ADDRESS - 4;
 // preserve the emulation performance.
 constexpr u32 MAGIC_GAMEID = 0xD01F1BAD;
 
+#ifdef ENABLE_VR
+// What the running VR game patches (Core/VRPatch) need from the code handler's region.
+struct VRPatchRegion
+{
+  // Installed after the user's codes, whether or not cheats are enabled.
+  std::vector<GeckoCode> codes;
+  // The code list ends here, below the patches' scratch memory (INSTALLER_END_ADDRESS when none).
+  u32 code_list_end = INSTALLER_END_ADDRESS;
+  // [start, end) ranges patches write at fixed addresses. The handler is not installed while one
+  // of them is inside its region; the message names `owners`.
+  std::vector<std::pair<u32, u32>> reserved;
+  std::string owners;
+
+  bool operator==(const VRPatchRegion&) const = default;
+};
+// Reinstalls the handler at the next frame when the region changes.
+void SetVRPatchRegion(VRPatchRegion region);
+// Cheats are enabled and the game has active user codes.
+bool HasActiveUserCodes();
+#endif
+
 size_t CountEnabledCodes();
 void SetActiveCodes(std::span<const GeckoCode> gcodes, const std::string& game_id, u16 revision);
 void SetSyncedCodesAsActive();

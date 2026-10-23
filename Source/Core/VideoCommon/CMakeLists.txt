@@ -242,6 +242,8 @@ add_library(videocommon
   VideoConfig.h
   VideoState.cpp
   VideoState.h
+  VR/OverrideSuppression.cpp
+  VR/OverrideSuppression.h
   VR/VRFrameRegion.cpp
   VR/VRFrameRegion.h
   Widescreen.cpp
