@@ -1277,23 +1277,28 @@ bool SetPatchEnabled(const std::string& game_id, const std::string& id, bool ena
 }
 
 bool SetPatchSetting(const std::string& game_id, const std::string& id, const std::string& name,
-                     double value)
+                     double value, bool save)
 {
   if (game_id.empty() || !IsValidPatchId(id) || name.empty())
     return false;
-  if (const std::optional<PatchInfo> info = FindPatch(game_id, GetRunningRevision(), id))
+  bool saved = true;
+  if (save)
   {
-    if (info->manifest)
+    // The running patch normalizes live values itself; the file gets the normalized one.
+    if (const std::optional<PatchInfo> info = FindPatch(game_id, GetRunningRevision(), id))
     {
-      const SettingDef* def = info->manifest->FindSetting(name);
-      if (!def)
-        return false;
-      value = def->Normalize(value);
+      if (info->manifest)
+      {
+        const SettingDef* def = info->manifest->FindSetting(name);
+        if (!def)
+          return false;
+        value = def->Normalize(value);
+      }
     }
+    PatchValues values = LoadUserPatchValues(game_id);
+    values.settings[id][name] = value;
+    saved = SaveUserPatchValues(game_id, values);
   }
-  PatchValues values = LoadUserPatchValues(game_id);
-  values.settings[id][name] = value;
-  const bool saved = SaveUserPatchValues(game_id, values);
   if (GetRunningGameId() == game_id)
     Queue({Command::Type::Setting, id, false, name, value});
   return saved;

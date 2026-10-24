@@ -95,8 +95,10 @@ std::string ReadPatchSource(const std::string& game_id, std::optional<u16> revis
 
 // Saved to the user's GameSettingsVR/<GameID>.ini; applied at the next field when the game runs.
 bool SetPatchEnabled(const std::string& game_id, const std::string& id, bool enabled);
+// `save` false applies the value to the running patch without writing the file (a slider being
+// dragged); a later call with `save` keeps it.
 bool SetPatchSetting(const std::string& game_id, const std::string& id, const std::string& name,
-                     double value);
+                     double value, bool save = true);
 // Restarts the running game's patches from their files.
 void ReloadPatches();
 

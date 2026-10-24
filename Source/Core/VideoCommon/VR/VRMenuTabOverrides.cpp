@@ -27,6 +27,7 @@
 #include "VideoCommon/ShaderHunter.h"
 #include "VideoCommon/TextureElementManager.h"
 #include "VideoCommon/VR/VRMenuActions.h"
+#include "VideoCommon/VR/VRMenuPatches.h"
 #include "VideoCommon/VR/VRMenuTabs.h"
 #include "VideoCommon/VR/VRMenuWidgets.h"
 #include "VideoCommon/VR/VRTextInput.h"
@@ -320,6 +321,7 @@ public:
       TextureElementManager::GetInstance().SetHunterActive(false);
     if (m_elements_hunt_held)
       SetElementsHunting(false);
+    m_patches.Flush();
   }
 
   const char* GetName() const override { return "Overrides"; }
@@ -331,6 +333,8 @@ public:
     EndRename();
     m_delete_armed.clear();
   }
+
+  void OnClose(VRMenuContext& context) override { m_patches.Flush(); }
 
   void Draw(VRMenuContext& context) override
   {
@@ -389,6 +393,8 @@ public:
           ApplyHideCodes();
         },
         "Edit in Hide Code Hunting", [&](size_t index) { EditHideCode(context, index); });
+
+    m_patches.Draw(context);
   }
 
 private:
@@ -1622,6 +1628,7 @@ private:
 
   bool m_loaded = false;
   std::string m_game_id;
+  VRMenuPatches m_patches;
   bool m_shader_hunting_started_here = false;
   bool m_texture_hunting_started_here = false;
   SaveOptions m_shader_save;
