@@ -392,3 +392,117 @@ TEST(EchoesNoCutsceneBarsPatch, RefusesOtherCode)
   EXPECT_EQ(game.memory.Get32(CUTSCENE_SITE), CUTSCENE_ORIGINAL);
   EXPECT_TRUE(Warned(script, "not installed"));
 }
+
+// ---- Metroid Prime ----
+
+namespace
+{
+constexpr u32 PRIME_PLAYER = 0x80500000;
+constexpr u32 PRIME_STATE_REF = 0x80510000;
+constexpr u32 PRIME_PLAYER_STATE = 0x80520000;
+
+struct PrimeGame
+{
+  // The state manager and the player's camera and ball fields of the disc revision.
+  PrimeGame(u16 revision, u32 state_manager, u32 camera, u32 ball)
+      : state_manager(state_manager), camera(camera), ball(ball)
+  {
+    // In play, first person, the combat visor.
+    memory.Set32(state_manager + 0x84C, PRIME_PLAYER);
+    memory.Set32(state_manager + 0x8B8, PRIME_STATE_REF);
+    memory.Set32(PRIME_STATE_REF, PRIME_PLAYER_STATE);
+    SetVisor(0);
+
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "GM8E01";
+    env.revision = revision;
+  }
+
+  void SetVisor(u32 visor) { memory.Set32(PRIME_PLAYER_STATE + 0x14, visor); }
+  void SetTransition(u32 transition) { memory.Set32(state_manager + 0xF90, transition); }
+  void SetCamera(u32 state) { memory.Set32(PRIME_PLAYER + camera, state); }
+  void SetBall(u32 state) { memory.Set32(PRIME_PLAYER + ball, state); }
+
+  u32 state_manager, camera, ball;
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+};
+
+void ExpectPrimeFlags(PrimeGame& game)
+{
+  PatchScript script("metroid-state");
+  ASSERT_TRUE(script.Load(ReadStatePatch("GM8E01"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] {
+    EXPECT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+    return script.GetFlags();
+  };
+
+  EXPECT_EQ(frame(), Flags{"mp_visor_combat"});
+  game.SetVisor(1);
+  EXPECT_EQ(frame(), Flags{"mp_visor_xray"});
+  game.SetVisor(2);
+  EXPECT_EQ(frame(), Flags{"mp_visor_scan"});
+  game.SetVisor(3);
+  EXPECT_EQ(frame(), Flags{"mp_visor_thermal"});
+
+  // The map, then the pause screens: no visor while paused.
+  game.SetTransition(1);
+  EXPECT_EQ(frame(), Flags{"mp_paused"});
+  game.SetTransition(2);
+  EXPECT_EQ(frame(), Flags{"mp_paused"});
+  game.SetTransition(0);
+
+  game.SetVisor(0);
+  game.SetBall(1);
+  game.SetCamera(1);
+  EXPECT_EQ(frame(), (Flags{"mp_morphball", "mp_visor_combat"}));
+  game.SetBall(0);
+  game.SetCamera(4);  // spawned: a cutscene
+  EXPECT_EQ(frame(), (Flags{"mp_cinematic", "mp_visor_combat"}));
+  game.SetCamera(0);
+
+  game.memory.Set32(game.state_manager + 0x84C, 0);
+  EXPECT_EQ(frame(), Flags{});
+  EXPECT_FALSE(game.memory.wrote);
+  EXPECT_FALSE(Warned(script, ""));
+}
+}  // namespace
+
+TEST(PrimeStatePatch, ManifestIsValid)
+{
+  const std::string source = ReadStatePatch("GM8E01");
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/GM8E01/metroid-state.lua is missing";
+  const auto read = ReadManifest(source, "metroid-state");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"GM8E01"});
+  EXPECT_FALSE(manifest.revision);  // every revision, from its own table
+  EXPECT_EQ(manifest.scratch_bytes, 0u);
+  EXPECT_TRUE(manifest.conflicts.empty());
+}
+
+TEST(PrimeStatePatch, RaisesTheGameStateOn100)
+{
+  PrimeGame game(0, 0x8045A1A8, 0x2F4, 0x2F8);
+  ExpectPrimeFlags(game);
+}
+
+TEST(PrimeStatePatch, RaisesTheGameStateOn102)
+{
+  PrimeGame game(2, 0x8045B208, 0x304, 0x308);
+  ExpectPrimeFlags(game);
+}
+
+TEST(PrimeStatePatch, UnknownRevisionRaisesNothing)
+{
+  PrimeGame game(7, 0x8045B208, 0x304, 0x308);
+  PatchScript script("metroid-state");
+  ASSERT_TRUE(script.Load(ReadStatePatch("GM8E01"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(script.GetFlags(), Flags{});
+  EXPECT_TRUE(Warned(script, "unknown disc revision"));
+}

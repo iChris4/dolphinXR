@@ -171,8 +171,6 @@ MetroidProjectionMetrics BuildMetroidProjectionMetrics(const XFMemory& xf_memory
 
 MetroidElementProfile GetMetroidProfileForGameID(std::string_view game_id)
 {
-  if (game_id.starts_with("GM8") || game_id.starts_with("D43") || game_id.starts_with("D93"))
-    return MetroidElementProfile::Prime1GC;
   if (game_id.starts_with("R3I"))
     return MetroidElementProfile::Prime1Wii;
   if (game_id.starts_with("R32"))
