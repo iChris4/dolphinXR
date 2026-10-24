@@ -4,7 +4,8 @@
 // The shipped arm cannon patches against fake memory: Metroid Prime
 // (Data/Sys/VRPatches/GM8E01/arm-cannon.lua: its hooks, its arming, and its cannon basis compared
 // with PrimedGun's math), Metroid Prime 2: Echoes (G2ME01) and Metroid Prime 3: Corruption
-// (RM3E01): their hook, their cave and the pose they feed the cave.
+// (RM3E01): their hook, their cave and the pose they feed the cave; Metroid Prime Trilogy
+// (R3ME01): finding the running game of the disc and hooking it.
 
 #include <gtest/gtest.h>
 
@@ -621,4 +622,219 @@ TEST(CorruptionArmCannonPatch, RefusesOtherCode)
   for (const LogLine& line : script.TakeLog())
     warned |= line.level == 1 && line.text.find("not installed") != std::string::npos;
   EXPECT_TRUE(warned);
+}
+
+// ---- Metroid Prime Trilogy ----
+
+namespace
+{
+constexpr u32 TRILOGY_SCRATCH = 0x80002BF0;
+constexpr u32 TRILOGY_SCRATCH_SIZE = 0x400;
+constexpr u32 TRILOGY_CAMERA_XF = TRILOGY_SCRATCH + 0x30;
+constexpr u32 TRILOGY_GUARDS = TRILOGY_SCRATCH + 0x34;
+constexpr u32 TRILOGY_AIM_LENGTH = TRILOGY_SCRATCH + 0x40;
+constexpr u32 TRILOGY_CAVES = TRILOGY_SCRATCH + 0x50;
+
+// Metroid Prime: the end of the cannon updater and the aim ray, each with its next instruction.
+constexpr u32 PRIME_CANNON_HOOK = 0x8018BC74;
+constexpr u32 PRIME_CANNON_ORIGINAL = 0x387904B0;  // addi r3, r25, 0x4B0
+constexpr u32 PRIME_CANNON_NEXT = 0x38810380;
+constexpr u32 PRIME_AIM_HOOK = 0x80015618;
+constexpr u32 PRIME_AIM_ORIGINAL = 0xC00101AC;  // lfs f0, 0x1AC(r1)
+constexpr u32 PRIME_AIM_NEXT = 0xC021019C;
+constexpr u32 PRIME_STATE = 0x804BF420;
+constexpr u32 PRIME_PLAYER = 0x80A00000;
+constexpr u32 PRIME_GUN = 0x80A10000;
+constexpr u32 PRIME_CAMERA = 0x80A20000;
+
+// Metroid Prime 3: Corruption.
+constexpr u32 TRILOGY_CORRUPTION_HOOK = 0x80183C28;
+constexpr u32 TRILOGY_CORRUPTION_ORIGINAL = 0xC0010208;  // lfs f0, 0x208(r1)
+constexpr u32 TRILOGY_CORRUPTION_NEXT = 0x7F83E378;
+constexpr u32 TRILOGY_CORRUPTION_PLAYER = 0x80B00000;
+constexpr u32 TRILOGY_CORRUPTION_GUN = 0x80B10000;
+constexpr u32 TRILOGY_CORRUPTION_CAMERA = 0x80B20000;
+
+struct TrilogyGame
+{
+  TrilogyGame()
+  {
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "R3ME01";
+    env.is_wii = true;
+    env.scratch_base = TRILOGY_SCRATCH;
+    env.scratch_size = TRILOGY_SCRATCH_SIZE;
+    env.units_per_meter = 1.5;
+  }
+
+  // Metroid Prime's executable: its code, the player standing with its gun, and the camera
+  // (camera manager -> object id 0x403 -> the object list).
+  void LoadPrime()
+  {
+    memory.Write32(PRIME_CANNON_HOOK, PRIME_CANNON_ORIGINAL);
+    memory.Write32(PRIME_CANNON_HOOK + 4, PRIME_CANNON_NEXT);
+    memory.Write32(PRIME_AIM_HOOK, PRIME_AIM_ORIGINAL);
+    memory.Write32(PRIME_AIM_HOOK + 4, PRIME_AIM_NEXT);
+    memory.Write32(PRIME_STATE + 0x84C, PRIME_PLAYER);
+    memory.Write32(PRIME_PLAYER + 0x480, PRIME_GUN);
+    memory.Write32(PRIME_STATE + 0x868, 0x80A30000);
+    memory.Write16(0x80A30000, 0x0403);
+    memory.Write32(PRIME_STATE + 0x810, 0x80A40000);
+    memory.Write32(0x80A40000 + 3 * 8 + 4, PRIME_CAMERA);
+  }
+
+  // The player chose Corruption on the disc's menu: its executable replaced Metroid Prime's.
+  void LoadCorruption()
+  {
+    for (const u32 a :
+         {PRIME_CANNON_HOOK, PRIME_CANNON_HOOK + 4, PRIME_AIM_HOOK, PRIME_AIM_HOOK + 4})
+    {
+      memory.Write32(a, 0x60000000);
+    }
+    memory.Write32(TRILOGY_CORRUPTION_HOOK, TRILOGY_CORRUPTION_ORIGINAL);
+    memory.Write32(TRILOGY_CORRUPTION_HOOK + 4, TRILOGY_CORRUPTION_NEXT);
+    memory.Write32(0x805C6C68, 0x80B30000);
+    memory.Write32(0x80B30000 + 0x2184, TRILOGY_CORRUPTION_PLAYER);
+    memory.Write32(TRILOGY_CORRUPTION_PLAYER + 0x3AEC, TRILOGY_CORRUPTION_GUN);
+    memory.Write32(0x805C6C78, 0x80B40000);
+    memory.Write32(0x80B40000 + 0x34, 0x80B50000);
+    memory.Write32(0x80B50000 + 0x20, TRILOGY_CORRUPTION_CAMERA);
+  }
+
+  void TrackRightHand()
+  {
+    HandInput& hand = input.hands[1];
+    hand.connected = true;
+    hand.view = {true, {0.2f, -0.3f, -0.4f}, {std::sin(0.15f), 0, 0, std::cos(0.15f)}};
+  }
+
+  // Where the cave of a hook ends: the replaced instruction, then this branch back.
+  u32 BranchBack(u32 hook) const
+  {
+    for (u32 a = TRILOGY_CAVES; a < TRILOGY_SCRATCH + TRILOGY_SCRATCH_SIZE; a += 4)
+    {
+      if (memory.Get32(a) == Branch(a, hook + 4, false))
+        return a;
+    }
+    return 0;
+  }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+};
+
+std::string ReadTrilogyPatch()
+{
+  std::string source;
+  File::ReadFileToString(File::GetSysDirectory() + VRPATCHES_DIR "/R3ME01/arm-cannon.lua", source);
+  return source;
+}
+
+bool BranchesIntoCaves(u32 from, u32 word)
+{
+  if ((word & 0xFC000003u) != 0x48000000u)
+    return false;
+  u32 offset = word & 0x03FFFFFCu;
+  if (offset & 0x02000000u)
+    offset |= 0xFC000000u;
+  const u32 target = from + offset;
+  return target >= TRILOGY_CAVES && target < TRILOGY_SCRATCH + TRILOGY_SCRATCH_SIZE;
+}
+}  // namespace
+
+TEST(TrilogyArmCannonPatch, ManifestIsValid)
+{
+  const std::string source = ReadTrilogyPatch();
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/R3ME01/arm-cannon.lua is missing";
+  const auto read = ReadManifest(source, "arm-cannon");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"R3ME01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, TRILOGY_SCRATCH_SIZE);
+  EXPECT_TRUE(manifest.reserve.empty());  // its caves are in its scratch memory
+  // The profile's Controller Anchor of the cannon textures would move it twice.
+  ASSERT_EQ(manifest.conflicts.size(), 1u);
+  EXPECT_EQ(manifest.conflicts[0].name, "Arm Cannon");
+}
+
+TEST(TrilogyArmCannonPatch, HooksTheRunningGame)
+{
+  TrilogyGame game;
+  game.LoadPrime();
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadTrilogyPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+
+  // Metroid Prime: the cannon updater and the aim ray branch to their caves, which end with the
+  // replaced instruction and the way back.
+  Memory& m = game.memory;
+  EXPECT_EQ(m.Get32(PRIME_CANNON_HOOK), Branch(PRIME_CANNON_HOOK, TRILOGY_CAVES, false));
+  EXPECT_TRUE(BranchesIntoCaves(PRIME_AIM_HOOK, m.Get32(PRIME_AIM_HOOK)));
+  for (const auto& [hook, original] : {std::pair{PRIME_CANNON_HOOK, PRIME_CANNON_ORIGINAL},
+                                       std::pair{PRIME_AIM_HOOK, PRIME_AIM_ORIGINAL}})
+  {
+    const u32 back = game.BranchBack(hook);
+    ASSERT_NE(back, 0u) << std::hex << hook;
+    EXPECT_EQ(m.Get32(back - 4), original) << std::hex << hook;
+  }
+  // Not armed before a hand is tracked.
+  EXPECT_EQ(m.Get32(TRILOGY_GUARDS), 0u);
+  EXPECT_EQ(m.Get32(TRILOGY_GUARDS + 4), 0u);
+
+  // Armed for the gun (the updater's r25) and the player (the aim ray's r31), with the camera's
+  // transform to read and the aim rays' length.
+  game.TrackRightHand();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(TRILOGY_GUARDS), PRIME_GUN);
+  EXPECT_EQ(m.Get32(TRILOGY_GUARDS + 4), PRIME_PLAYER);
+  EXPECT_EQ(m.Get32(TRILOGY_CAMERA_XF), PRIME_CAMERA + 0x2C);
+  EXPECT_FLOAT_EQ(m.GetF32(TRILOGY_AIM_LENGTH), 1.25f);
+
+  // Morph ball: the patch stops feeding the cannon.
+  m.Write32(PRIME_PLAYER + 0x2F4, 1);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(TRILOGY_GUARDS), 0u);
+  EXPECT_EQ(m.Get32(TRILOGY_GUARDS + 4), 0u);
+  m.Write32(PRIME_PLAYER + 0x2F4, 0);
+
+  game.LoadCorruption();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(TRILOGY_CORRUPTION_HOOK),
+            Branch(TRILOGY_CORRUPTION_HOOK, TRILOGY_CAVES, false));
+  const u32 back = game.BranchBack(TRILOGY_CORRUPTION_HOOK);
+  ASSERT_NE(back, 0u);
+  EXPECT_EQ(m.Get32(back - 4), TRILOGY_CORRUPTION_ORIGINAL);
+  // Armed for the cannon updater's r28 (gun + 0x4D8); Corruption has no aim ray site.
+  EXPECT_EQ(m.Get32(TRILOGY_GUARDS), TRILOGY_CORRUPTION_GUN + 0x4D8);
+  EXPECT_EQ(m.Get32(TRILOGY_GUARDS + 4), 0u);
+  EXPECT_EQ(m.Get32(TRILOGY_CAMERA_XF), TRILOGY_CORRUPTION_CAMERA + 0x3C);
+
+  // Disabled: the game's code is back.
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(TRILOGY_CORRUPTION_HOOK), TRILOGY_CORRUPTION_ORIGINAL);
+}
+
+TEST(TrilogyArmCannonPatch, WaitsOutsideTheGames)
+{
+  // The disc's menu: none of the three executables.
+  TrilogyGame game;
+  game.TrackRightHand();
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadTrilogyPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(TRILOGY_CAVES), 0u);
+  EXPECT_EQ(game.memory.Get32(TRILOGY_GUARDS), 0u);
+  bool waiting = false;
+  for (const LogLine& line : script.TakeLog())
+  {
+    EXPECT_NE(line.level, 1) << line.text;
+    waiting |= line.text.find("waiting") != std::string::npos;
+  }
+  EXPECT_TRUE(waiting);
 }
