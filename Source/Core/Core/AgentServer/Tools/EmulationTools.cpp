@@ -456,12 +456,13 @@ void RegisterEmulationTools(ToolRegistry& registry, Server&)
       {.name = "set_look_offset",
        .title = "Turn the virtual head",
        .description =
-           "Rotates the game camera as if the user turned their head (VR stereo session only), "
-           "to look at what is around or behind without wearing the headset: culling tests, "
-           "edges of the view. Positive yaw turns right and positive pitch looks up. It does "
-           "not move the virtual screen or head-locked "
-           "elements, and the head-cone CPU cull follows it. Stays until clear_look_offset or "
-           "the server stops.",
+           "Turns the head as if the user turned it (VR stereo session only), to look at what "
+           "is around or behind without wearing the headset: culling tests, edges of the view, "
+           "and what stays fixed in the room. Positive yaw turns right and positive pitch looks "
+           "up. The game view and the virtual screen (with its Screen and Screen Pane draws) "
+           "turn as with a real head: world-fixed elements move in the eye images, head-locked "
+           "ones stay where they are. The head-cone CPU cull follows it. Stays until "
+           "clear_look_offset or the server stops.",
        .input_schema =
            Schema()
                .Number("yaw_deg", "Degrees, -180 to 180.")

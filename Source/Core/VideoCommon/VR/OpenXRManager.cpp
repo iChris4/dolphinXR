@@ -4129,10 +4129,11 @@ std::array<OpenXRManager::EyeRig, 2> OpenXRManager::ComputeEyeRigs(float units_p
 
   // Agent look offset (SetAgentLookOffset): L = Ry(-yaw) * Rx(pitch) * Rz(roll), applied like a
   // turn of the rig around the head: it rotates the eye axes (L*R) and the head-relative eye
-  // offsets, not the fixed camera offsets, so the view pivots around the camera.
+  // offsets, not the fixed camera offsets, so the view pivots around the camera. It turns the
+  // tracked rig too, like a real head turn: the virtual screen stays in place in the room, so it
+  // moves in the eye images, while head-locked draws do not.
   std::array<float, 9> look{};
   bool look_offset = false;
-  if (apply_game_camera)
   {
     const float yaw = m_agent_look_yaw_deg.load(std::memory_order_relaxed) * DEG_TO_RAD;
     const float pitch = m_agent_look_pitch_deg.load(std::memory_order_relaxed) * DEG_TO_RAD;
