@@ -14,11 +14,11 @@
 patch = {
   title = "Arm cannon follows the controller",
   author = "Nobbie (PrimedGun), ported to DolphinXR",
-  version = "1.1",
+  version = "1.2",
   description = "The arm cannon is aimed and placed by your VR controller, and shots leave it "
     .. "where it points. For Metroid Prime NTSC-U 1.00 and 1.02.",
   games = {"GM8E01"},
-  scratch = 0x230,
+  scratch = 0x300,
   conflicts = {texture = {"Cannon"}},
   settings = {
     {name = "hand", label = "Cannon hand", type = "choice", options = {"Left", "Right"},
@@ -57,23 +57,31 @@ patch = {
 
 -- Per disc revision. The hooks (PrimedGun's): the instruction after the game rebuilds the
 -- cannon's transform, the cannon model's render function, and the six calls that create a beam's
--- projectile. The player: its camera and morph ball states, its CPlayerGun*, the cannon's
--- visibility (1 when drawn) and holster state (2 when out).
+-- projectile (CGunWeapon::Fire). The wave beam's normal shots and the missiles do not go through
+-- that function: the patch also hooks the two calls that hand the shot transform to the weapons,
+-- the beam's Fire (a bctrl in CPlayerGun::UpdateNormalShotCycle, transform in r6) and
+-- CAuxWeapon::Fire (in CPlayerGun::FireSecondary, transform in r7). The player: its camera and
+-- morph ball states, its CPlayerGun*, the cannon's visibility (1 when drawn) and holster state
+-- (2 when out).
 local REVISIONS = {
   [0] = {state_manager = 0x8045A1A8, gun_position = 0x8045BCE8, player_offset = 0,
          rotation_hook = 0x80040FEC, model_hook = 0x80041A8C, projectile_function = 0x801BB888,
          projectile_calls = {0x800DF8DC, 0x800DF008, 0x800DF038, 0x800E1240, 0x8018C950,
-                             0x8018C988}},
+                             0x8018C988},
+         fire_call = 0x80040424, aux_call = 0x8004013C, aux_function = 0x801B9994},
   [2] = {state_manager = 0x8045B208, gun_position = 0x8045CD48, player_offset = 0x10,
          rotation_hook = 0x800412D8, model_hook = 0x80041D78, projectile_function = 0x801BC0A8,
          projectile_calls = {0x800DFE60, 0x800DF58C, 0x800DF5BC, 0x800E17C4, 0x8018D134,
-                             0x8018D16C}},
+                             0x8018D16C},
+         fire_call = 0x80040710, aux_call = 0x80040428, aux_function = 0x801BA19C},
 }
 
 local STATE_MANAGER, PLAYER, CAMERA_MANAGER, OBJECT_LIST, GUN_POSITION
 local PLAYER_CAMERA_STATE, PLAYER_MORPH_STATE, PLAYER_GUN, PLAYER_GUN_ALPHA, PLAYER_HOLSTER
 local ROTATION_HOOK, MODEL_HOOK, PROJECTILE_FUNCTION, PROJECTILE_CALLS
+local FIRE_CALL, AUX_CALL, AUX_FUNCTION
 local ROTATION_HOOK_ORIGINAL = 0x807C0740  -- lwz r3, 0x740(r28)
+local BCTRL = 0x4E800421
 local GUN_WORLD_XF = 0x4A8                 -- CPlayerGun transforms (3x4)
 local GUN_LOCAL_XF = 0x4D8
 local GUN_XF = 0x3E8
@@ -99,6 +107,9 @@ local function select_revision()
   MODEL_HOOK = r.model_hook            -- stwu r1, ... (the function's first instruction)
   PROJECTILE_FUNCTION = r.projectile_function
   PROJECTILE_CALLS = r.projectile_calls
+  FIRE_CALL = r.fire_call
+  AUX_CALL = r.aux_call
+  AUX_FUNCTION = r.aux_function
   return true
 end
 
@@ -115,6 +126,8 @@ local ROTATION_CAVE = S + 0xA0
 local MODEL_CAVE = S + 0x140
 local MODEL_CAVE_ORIGINAL = 16 -- word index of the relocated first instruction in the model cave
 local PROJECTILE_CAVE = S + 0x190
+local FIRE_CAVE = S + 0x230
+local AUX_CAVE = S + 0x290
 
 -- "lis rD, hi; ori rD, rD, lo" with a signed hi (lis takes a signed immediate).
 local function load_address(register, address)
@@ -182,9 +195,32 @@ local function projectile_cave()
   return assemble(text, PROJECTILE_CAVE)
 end
 
+-- When the basis is for this cannon (r30, the CPlayerGun), write it into the rotation of the shot
+-- transform at `reg` (the caller's copy), then go on to `next_text`.
+local function shot_cave(base, reg, next_text)
+  local text = load_address("r11", S) .. "lwz r12, 0x38(r11)\ncmplw r12, r30\nbne done\n"
+  local slots = {0x0, 0x4, 0x8, 0x10, 0x14, 0x18, 0x20, 0x24, 0x28}
+  for i, slot in ipairs(slots) do
+    text = text .. string.format("lwz r12, 0x%X(r11)\nstw r12, 0x%X(%s)\n", (i - 1) * 4, slot, reg)
+  end
+  local words = assemble(text .. "done:\n" .. next_text, base)
+  assert(base + #words * 4 <= S + mem.scratch_size, "the cave does not fit in the scratch memory")
+  return words
+end
+
+-- In place of the beam's Fire bctrl (the call's target is still in ctr, lr returns to the game).
+local function fire_cave()
+  return shot_cave(FIRE_CAVE, "r6", "bctr\n")
+end
+
+-- In place of the call to CAuxWeapon::Fire (missiles and charge combos).
+local function aux_cave()
+  return shot_cave(AUX_CAVE, "r7", string.format("b `0x%X`\n", AUX_FUNCTION))
+end
+
 -- ---- Installing and removing the hooks ----
 
-local caves = nil          -- {rotation = words, model = words, projectile = words}
+local caves = nil          -- {rotation, model, projectile, fire, aux = words}
 local model_original = nil -- the model function's first instruction
 local installed = false
 local warned = false
@@ -237,12 +273,14 @@ local function install()
   end
   if not caves then
     caves = {rotation = rotation_cave(), model = model_cave(model_original),
-             projectile = projectile_cave()}
+             projectile = projectile_cave(), fire = fire_cave(), aux = aux_cave()}
   end
   -- The caves first, then the branches into them.
   local changed = mem.ensure_code(ROTATION_CAVE, caves.rotation)
   changed = mem.ensure_code(MODEL_CAVE, caves.model) or changed
   changed = mem.ensure_code(PROJECTILE_CAVE, caves.projectile) or changed
+  changed = mem.ensure_code(FIRE_CAVE, caves.fire) or changed
+  changed = mem.ensure_code(AUX_CAVE, caves.aux) or changed
   changed = mem.ensure_code(ROTATION_HOOK, asm.branch(ROTATION_HOOK, ROTATION_CAVE)) or changed
   changed = mem.ensure_code(MODEL_HOOK, asm.branch(MODEL_HOOK, MODEL_CAVE)) or changed
   for _, call in ipairs(PROJECTILE_CALLS) do
@@ -255,6 +293,20 @@ local function install()
     else
       warn("projectile call at " .. mem.hex(call) .. " is not the expected bl: skipped")
     end
+  end
+  -- The beam's Fire (bctrl) and CAuxWeapon::Fire: the wave beam's normal shots and missiles.
+  local current = mem.u32(FIRE_CALL)
+  if current == BCTRL or branch_target(FIRE_CALL, current or 0) then
+    local wanted = settings.beams and asm.branch(FIRE_CALL, FIRE_CAVE, true) or BCTRL
+    changed = mem.ensure_code(FIRE_CALL, wanted) or changed
+  else
+    warn("beam call at " .. mem.hex(FIRE_CALL) .. " is not the expected bctrl: skipped")
+  end
+  if branch_target(AUX_CALL, mem.u32(AUX_CALL) or 0) then
+    local wanted = asm.branch(AUX_CALL, settings.beams and AUX_CAVE or AUX_FUNCTION, true)
+    changed = mem.ensure_code(AUX_CALL, wanted) or changed
+  else
+    warn("missile call at " .. mem.hex(AUX_CALL) .. " is not the expected bl: skipped")
   end
   if changed then log("hooks installed at", mem.hex(S)) end
   installed = true
@@ -278,6 +330,13 @@ local function uninstall()
     if target and target ~= PROJECTILE_FUNCTION then
       mem.write_code(call, asm.branch(call, PROJECTILE_FUNCTION, true))
     end
+  end
+  if branch_target(FIRE_CALL, mem.u32(FIRE_CALL) or 0) then
+    mem.write_code(FIRE_CALL, BCTRL)
+  end
+  local target = branch_target(AUX_CALL, mem.u32(AUX_CALL) or 0)
+  if target and target ~= AUX_FUNCTION then
+    mem.write_code(AUX_CALL, asm.branch(AUX_CALL, AUX_FUNCTION, true))
   end
 end
 

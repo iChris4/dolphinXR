@@ -91,6 +91,9 @@ struct Revision
   u32 state_manager;
   u32 gun_position;
   u32 player_offset;  // added to the 1.00 player fields
+  u32 fire_call;      // the beam's Fire bctrl in CPlayerGun::UpdateNormalShotCycle
+  u32 aux_call;       // the call to CAuxWeapon::Fire in CPlayerGun::FireSecondary
+  u32 aux_function;
 };
 
 constexpr Revision PRIME_100 = {
@@ -101,7 +104,10 @@ constexpr Revision PRIME_100 = {
     {0x800DF8DC, 0x800DF008, 0x800DF038, 0x800E1240, 0x8018C950, 0x8018C988},
     0x8045A1A8,
     0x8045BCE8,
-    0};
+    0,
+    0x80040424,
+    0x8004013C,
+    0x801B9994};
 constexpr Revision PRIME_102 = {
     2,
     0x800412D8,
@@ -110,7 +116,11 @@ constexpr Revision PRIME_102 = {
     {0x800DFE60, 0x800DF58C, 0x800DF5BC, 0x800E17C4, 0x8018D134, 0x8018D16C},
     0x8045B208,
     0x8045CD48,
-    0x10};
+    0x10,
+    0x80040710,
+    0x80040428,
+    0x801BA19C};
+constexpr u32 BCTRL = 0x4E800421;
 constexpr u32 GUN = 0x80600000;
 constexpr u32 CAMERA = 0x80720000;
 constexpr float PI = 3.14159265358979f;
@@ -162,6 +172,8 @@ struct Game
     memory.Write32(rev.model_hook, MODEL_ORIGINAL);
     for (const u32 call : rev.projectile_calls)
       memory.Write32(call, Branch(call, rev.projectile_function, true));
+    memory.Write32(rev.fire_call, BCTRL);
+    memory.Write32(rev.aux_call, Branch(rev.aux_call, rev.aux_function, true));
     // The player, ready to shoot in first person, and its cannon.
     const u32 player = PLAYER + rev.player_offset;
     memory.Write32(rev.state_manager + 0x84C, PLAYER);
@@ -185,7 +197,7 @@ struct Game
     env.game_id = "GM8E01";
     env.revision = rev.revision;
     env.scratch_base = SCRATCH;
-    env.scratch_size = 0x230;
+    env.scratch_size = 0x300;
     env.units_per_meter = 1.5;
   }
 
@@ -253,6 +265,17 @@ void ExpectHooksTracksAndRestores(const Revision& rev)
   EXPECT_EQ(m.Get32(SCRATCH + 0x140 + 16 * 4),
             Branch(SCRATCH + 0x140 + 16 * 4, MODEL_HOOK + 4, false));
   EXPECT_EQ(m.Get32(SCRATCH + 0x190), 0x9421FFF0u);  // stwu r1, -16(r1)
+  // The beam's Fire and CAuxWeapon::Fire (wave beam, missiles): to their caves, which end with
+  // the call they replace.
+  EXPECT_EQ(m.Get32(rev.fire_call), Branch(rev.fire_call, SCRATCH + 0x230, true));
+  EXPECT_EQ(m.Get32(rev.aux_call), Branch(rev.aux_call, SCRATCH + 0x290, true));
+  bool fire_cave_calls = false, aux_cave_calls = false;
+  for (u32 a = SCRATCH + 0x230; a < SCRATCH + 0x290; a += 4)
+    fire_cave_calls |= m.Get32(a) == 0x4E800420;  // bctr
+  for (u32 a = SCRATCH + 0x290; a < SCRATCH + 0x300; a += 4)
+    aux_cave_calls |= m.Get32(a) == Branch(a, rev.aux_function, false);
+  EXPECT_TRUE(fire_cave_calls);
+  EXPECT_TRUE(aux_cave_calls);
   // Not armed before a hand is tracked.
   EXPECT_EQ(m.Get32(SCRATCH + 0x38), 0u);
 
@@ -289,12 +312,19 @@ void ExpectHooksTracksAndRestores(const Revision& rev)
   ASSERT_TRUE(script.CallSettingChanged("beams", 0, game.env)) << script.Error();
   for (const u32 call : PROJECTILE_CALLS)
     EXPECT_EQ(m.Get32(call), Branch(call, PROJECTILE_FUNCTION, true));
+  EXPECT_EQ(m.Get32(rev.fire_call), BCTRL);
+  EXPECT_EQ(m.Get32(rev.aux_call), Branch(rev.aux_call, rev.aux_function, true));
+  ASSERT_TRUE(script.SetSettingValue(*manifest.FindSetting("beams"), 1));
+  ASSERT_TRUE(script.CallSettingChanged("beams", 1, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(rev.fire_call), Branch(rev.fire_call, SCRATCH + 0x230, true));
 
   // Disabled: the game's code is back.
   ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
   EXPECT_EQ(m.Get32(ROTATION_HOOK), 0x807C0740u);
   EXPECT_EQ(m.Get32(MODEL_HOOK), MODEL_ORIGINAL);
   EXPECT_EQ(m.Get32(SCRATCH + 0x38), 0u);
+  EXPECT_EQ(m.Get32(rev.fire_call), BCTRL);
+  EXPECT_EQ(m.Get32(rev.aux_call), Branch(rev.aux_call, rev.aux_function, true));
 }
 }  // namespace
 
