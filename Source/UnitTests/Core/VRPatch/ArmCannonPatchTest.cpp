@@ -1,8 +1,10 @@
 // Copyright 2026 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// The shipped Metroid Prime arm cannon patch (Data/Sys/VRPatches/GM8E01/arm-cannon.lua) against
-// fake memory: its hooks, its arming, and its cannon basis compared with PrimedGun's math.
+// The shipped arm cannon patches against fake memory: Metroid Prime
+// (Data/Sys/VRPatches/GM8E01/arm-cannon.lua: its hooks, its arming, and its cannon basis compared
+// with PrimedGun's math) and Metroid Prime 2: Echoes (G2ME01: its hook, its cave and the pose it
+// feeds the cave).
 
 #include <gtest/gtest.h>
 
@@ -288,4 +290,169 @@ TEST(ArmCannonPatch, ReinstallsOverAnotherScratchAddress)
   EXPECT_EQ(game.memory.Get32(SCRATCH + 0x140 + 15 * 4), MODEL_ORIGINAL);
   ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
   EXPECT_EQ(game.memory.Get32(MODEL_HOOK), MODEL_ORIGINAL);
+}
+
+// ---- Metroid Prime 2: Echoes ----
+
+namespace
+{
+constexpr u32 ECHOES_SCRATCH = 0x80002DF0;
+constexpr u32 ECHOES_SCRATCH_SIZE = 0x200;
+constexpr u32 ECHOES_CAVE = ECHOES_SCRATCH + 0x40;
+constexpr u32 ECHOES_GUARD = ECHOES_SCRATCH + 0x30;
+constexpr u32 ECHOES_HOOK = 0x801DDA84;
+constexpr u32 ECHOES_HOOK_ORIGINAL = 0x7FE4FB78;  // mr r4, r31
+constexpr u32 ECHOES_STATE_MANAGER = 0x803DB6E0;
+constexpr u32 ECHOES_PLAYER = 0x80820F40;
+constexpr u32 ECHOES_GUN = 0x80B689E0;
+
+struct EchoesGame
+{
+  EchoesGame()
+  {
+    memory.Write32(ECHOES_HOOK, ECHOES_HOOK_ORIGINAL);
+    // The player in first person, not morphed, and its gun.
+    memory.Write32(ECHOES_STATE_MANAGER + 0x14FC, ECHOES_PLAYER);
+    memory.Write32(ECHOES_PLAYER + 0x388, 0);
+    memory.Write32(ECHOES_PLAYER + 0x38C, 0);
+    memory.Write32(ECHOES_PLAYER + 0xEBC, ECHOES_GUN);
+
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "G2ME01";
+    env.scratch_base = ECHOES_SCRATCH;
+    env.scratch_size = ECHOES_SCRATCH_SIZE;
+    env.units_per_meter = 1.25;
+  }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+};
+
+std::string ReadEchoesPatch()
+{
+  std::string source;
+  File::ReadFileToString(File::GetSysDirectory() + VRPATCHES_DIR "/G2ME01/arm-cannon.lua", source);
+  return source;
+}
+
+using Vec3 = std::array<float, 3>;
+
+Vec3 Rotate(const Quat& q, const Vec3& v)
+{
+  // v + 2w (u x v) + 2 u x (u x v)
+  const Vec3 u = {q.x, q.y, q.z};
+  const auto cross = [](const Vec3& a, const Vec3& b) {
+    return Vec3{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+  };
+  const Vec3 t = cross(u, v);
+  const Vec3 tt = cross(u, t);
+  return {v[0] + 2 * q.w * t[0] + 2 * tt[0], v[1] + 2 * q.w * t[1] + 2 * tt[1],
+          v[2] + 2 * q.w * t[2] + 2 * tt[2]};
+}
+
+// An OpenXR view-space vector (+X right, +Y up, -Z forward) in the game camera's axes (+X right,
+// +Y forward, +Z up).
+Vec3 GameAxes(const Vec3& v)
+{
+  return {v[0], -v[2], v[1]};
+}
+}  // namespace
+
+TEST(EchoesArmCannonPatch, ManifestIsValid)
+{
+  const std::string source = ReadEchoesPatch();
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/G2ME01/arm-cannon.lua is missing";
+  const auto read = ReadManifest(source, "arm-cannon");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"G2ME01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, ECHOES_SCRATCH_SIZE);
+  EXPECT_TRUE(manifest.reserve.empty());  // its cave is in its scratch memory
+  EXPECT_TRUE(manifest.conflicts.empty());
+}
+
+TEST(EchoesArmCannonPatch, HooksTracksAndRestores)
+{
+  EchoesGame game;
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadEchoesPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+
+  // A branch to the cave, which ends with the replaced instruction and the way back, inside the
+  // scratch memory (past it are the OS globals at 0x80003000).
+  Memory& m = game.memory;
+  EXPECT_EQ(m.Get32(ECHOES_HOOK), Branch(ECHOES_HOOK, ECHOES_CAVE, false));
+  EXPECT_EQ(m.Get32(ECHOES_CAVE), 0x3D608000u);  // lis r11, 0x8000
+  u32 back = 0;
+  for (u32 a = ECHOES_CAVE; a < ECHOES_SCRATCH + ECHOES_SCRATCH_SIZE; a += 4)
+  {
+    if (m.Get32(a) == Branch(a, ECHOES_HOOK + 4, false))
+    {
+      back = a;
+      break;
+    }
+  }
+  ASSERT_NE(back, 0u) << "the cave's branch back is not inside the scratch memory";
+  EXPECT_EQ(m.Get32(back - 4), ECHOES_HOOK_ORIGINAL);
+  // Not armed before a hand is tracked.
+  EXPECT_EQ(m.Get32(ECHOES_GUARD), 0u);
+
+  // The right hand, pitched up and turned a little, seen from the game camera.
+  HandInput& hand = game.input.hands[1];
+  hand.connected = true;
+  const Quat rotation =
+      Mul(Quat{0, std::sin(0.2f), 0, std::cos(0.2f)}, Quat{std::sin(0.15f), 0, 0, std::cos(0.15f)});
+  hand.view = {true, {0.2f, -0.3f, -0.4f}, {rotation.x, rotation.y, rotation.z, rotation.w}};
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(ECHOES_GUARD), ECHOES_GUN);
+
+  // The basis: the controller's right, aim (-Z) and up axes as columns, in the camera's axes.
+  const Vec3 right = GameAxes(Rotate(rotation, {1, 0, 0}));
+  const Vec3 forward = GameAxes(Rotate(rotation, {0, 0, -1}));
+  const Vec3 up = GameAxes(Rotate(rotation, {0, 1, 0}));
+  for (u32 row = 0; row < 3; ++row)
+  {
+    EXPECT_NEAR(m.GetF32(ECHOES_SCRATCH + row * 12 + 0), right[row], 1e-4f) << row;
+    EXPECT_NEAR(m.GetF32(ECHOES_SCRATCH + row * 12 + 4), forward[row], 1e-4f) << row;
+    EXPECT_NEAR(m.GetF32(ECHOES_SCRATCH + row * 12 + 8), up[row], 1e-4f) << row;
+  }
+  // The offset from the eye: the hand in game units, minus where the game draws the cannon
+  // (0.25, 0.30, -0.35), plus the model offset (8 cm back along the aim).
+  const Vec3 position = GameAxes({0.2f, -0.3f, -0.4f});
+  const Vec3 root = {0.25f, 0.30f, -0.35f};
+  for (u32 i = 0; i < 3; ++i)
+  {
+    EXPECT_NEAR(m.GetF32(ECHOES_SCRATCH + 0x24 + i * 4),
+                position[i] * 1.25f - root[i] - forward[i] * 0.08f * 1.25f, 1e-4f)
+        << i;
+  }
+
+  // Morph ball: the patch stops feeding the cannon.
+  m.Write32(ECHOES_PLAYER + 0x38C, 1);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(ECHOES_GUARD), 0u);
+
+  // Disabled: the game's code is back.
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(ECHOES_HOOK), ECHOES_HOOK_ORIGINAL);
+}
+
+TEST(EchoesArmCannonPatch, RefusesOtherCode)
+{
+  EchoesGame game;
+  game.memory.Write32(ECHOES_HOOK, 0x60000000);  // not Echoes NTSC-U code
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadEchoesPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(ECHOES_HOOK), 0x60000000u);
+  EXPECT_EQ(game.memory.Get32(ECHOES_CAVE), 0u);
+  bool warned = false;
+  for (const LogLine& line : script.TakeLog())
+    warned |= line.level == 1 && line.text.find("not installed") != std::string::npos;
+  EXPECT_TRUE(warned);
 }
