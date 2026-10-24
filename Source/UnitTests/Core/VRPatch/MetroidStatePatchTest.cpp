@@ -3,7 +3,7 @@
 
 // The shipped Metroid Prime state patches (Data/Sys/VRPatches/<id>/metroid-state.lua) against fake
 // memory: the override flags they raise for the Sys profiles' entries. Also Echoes' view patches:
-// no morph ball bars, no scan box highlight, smooth scan lines.
+// no morph ball or cutscene bars, no scan box highlight, smooth scan lines.
 
 #include <gtest/gtest.h>
 
@@ -350,5 +350,45 @@ TEST(EchoesNoScanBoxHighlightPatch, RefusesOtherCode)
       << script.Error();
   ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
   EXPECT_EQ(game.memory.Get32(BOX_SITE), BOX_ORIGINAL);
+  EXPECT_TRUE(Warned(script, "not installed"));
+}
+
+// ---- Echoes: no cutscene bars ----
+
+namespace
+{
+constexpr u32 CUTSCENE_SITE = 0x8003AFA4;
+constexpr u32 CUTSCENE_ORIGINAL = 0xFFE00890;  // fmr f31, f1
+constexpr u32 CUTSCENE_COMPARE = 0x8003AF9C;
+constexpr u32 CUTSCENE_COMPARE_ORIGINAL = 0xFC01F840;  // fcmpo cr0, f1, f31
+}  // namespace
+
+TEST(EchoesNoCutsceneBarsPatch, DropsTheFilterHeightAndRestores)
+{
+  EchoesGame game;
+  game.memory.Set32(CUTSCENE_SITE, CUTSCENE_ORIGINAL);
+  game.memory.Set32(CUTSCENE_COMPARE, CUTSCENE_COMPARE_ORIGINAL);
+  PatchScript script("no-cutscene-bars");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "no-cutscene-bars"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(CUTSCENE_SITE), 0x60000000u);
+  game.memory.Set32(CUTSCENE_SITE, CUTSCENE_ORIGINAL);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(CUTSCENE_SITE), 0x60000000u);
+  EXPECT_FALSE(Warned(script, ""));
+
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(CUTSCENE_SITE), CUTSCENE_ORIGINAL);
+}
+
+TEST(EchoesNoCutsceneBarsPatch, RefusesOtherCode)
+{
+  EchoesGame game;
+  game.memory.Set32(CUTSCENE_SITE, CUTSCENE_ORIGINAL);
+  game.memory.Set32(CUTSCENE_COMPARE, 0x60000000);  // another layout
+  PatchScript script("no-cutscene-bars");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "no-cutscene-bars"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(CUTSCENE_SITE), CUTSCENE_ORIGINAL);
   EXPECT_TRUE(Warned(script, "not installed"));
 }
