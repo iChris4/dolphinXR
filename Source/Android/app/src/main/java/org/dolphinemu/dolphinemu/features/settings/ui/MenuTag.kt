@@ -41,6 +41,7 @@ enum class MenuTag {
     QUEST_VR_CONFIG_HACKS("quest_vr_config_hacks"),
     QUEST_VR_CONFIG_PASSTHROUGH("quest_vr_config_passthrough"),
     QUEST_VR_CONFIG_DEBUG("quest_vr_config_debug"),
+    QUEST_VR_CONFIG_PATCHES("quest_vr_config_patches"),
     QUEST_HIDE_OBJECTS("quest_hide_objects"),
     QUEST_SHADER_OVERRIDES("quest_shader_overrides"),
     QUEST_ELEMENTS_GROUP_OVERRIDES("quest_elements_group_overrides"),

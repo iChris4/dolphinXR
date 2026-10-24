@@ -38,6 +38,7 @@ add_library(main SHARED
   MainAndroid.cpp
   RiivolutionPatches.cpp
   SkylanderConfig.cpp
+  VRPatches.cpp
   WiiUtils.cpp
 )
 

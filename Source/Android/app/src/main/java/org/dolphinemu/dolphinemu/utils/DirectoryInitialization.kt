@@ -176,8 +176,19 @@ object DirectoryInitialization {
             emptyArray()
         }
         gameSettingsVrAssets.sort()
+        // And the VR game patches (Sys/VRPatches/<GameID>/<id>.lua).
+        val vrPatchAssets = ArrayList<String>()
+        try {
+            for (folder in context.assets.list("Sys/VRPatches") ?: emptyArray()) {
+                for (file in context.assets.list("Sys/VRPatches/$folder") ?: emptyArray())
+                    vrPatchAssets.add("$folder/$file")
+            }
+        } catch (e: IOException) {
+            Log.warning("[DirectoryInitialization] Failed to list VRPatches assets: $e")
+        }
+        vrPatchAssets.sort()
         return NativeLibrary.GetGitRevision() + "-GameSettingsVR-" +
-            gameSettingsVrAssets.contentHashCode()
+            gameSettingsVrAssets.contentHashCode() + "-VRPatches-" + vrPatchAssets.hashCode()
     }
 
     private fun deleteDirectoryRecursively(file: File) {

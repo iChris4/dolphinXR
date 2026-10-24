@@ -82,6 +82,10 @@ import org.dolphinemu.dolphinemu.features.settings.model.QuestGameOverrideSettin
 import org.dolphinemu.dolphinemu.features.settings.model.QuestGameVrConfigBooleanSetting
 import org.dolphinemu.dolphinemu.features.settings.model.QuestGameVrConfigFloatSetting
 import org.dolphinemu.dolphinemu.features.settings.model.QuestGameVrConfigIntSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestVrPatchBooleanSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestVrPatchEnabledSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestVrPatchFloatSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestVrPatches
 import org.dolphinemu.dolphinemu.features.settings.model.QuestVrSettings
 import java.util.Locale
 import kotlin.math.ceil
@@ -380,6 +384,7 @@ class SettingsFragmentPresenter(
                 MenuTag.QUEST_VR_CONFIG_HACKS -> addQuestGameVrHackSettings(sl)
                 MenuTag.QUEST_VR_CONFIG_PASSTHROUGH -> addQuestGameVrPassthroughSettings(sl)
                 MenuTag.QUEST_VR_CONFIG_DEBUG -> addQuestGameVrDebugSettings(sl)
+                MenuTag.QUEST_VR_CONFIG_PATCHES -> addQuestGameVrPatchSettings(sl)
                 MenuTag.HOTKEYS -> addHotkeySettings(sl)
                 MenuTag.HOTKEYS_GENERAL, MenuTag.HOTKEYS_TAS, MenuTag.HOTKEYS_DEBUGGING, MenuTag.HOTKEYS_WII, MenuTag.HOTKEYS_CONTROLLER_PROFILE, MenuTag.HOTKEYS_GRAPHICS, MenuTag.HOTKEYS_VR, MenuTag.HOTKEYS_3D, MenuTag.HOTKEYS_SAVE_STATES, MenuTag.HOTKEYS_STATES_OTHER, MenuTag.HOTKEYS_GBA, MenuTag.HOTKEYS_USB, MenuTag.HOTKEYS_ANDROID -> addHotkeyCategorySettings(
                     sl, targetMenuTag
@@ -2793,6 +2798,102 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(SubmenuSetting(context, R.string.quest_vr_debug, MenuTag.QUEST_VR_CONFIG_DEBUG))
+        sl.add(
+            SubmenuSetting(context, R.string.quest_vr_patches, MenuTag.QUEST_VR_CONFIG_PATCHES)
+        )
+    }
+
+    private fun addQuestGameVrPatchSettings(sl: ArrayList<SettingsItem>) {
+        val currentGameId = gameId
+        if (currentGameId.isNullOrEmpty()) {
+            sl.add(HeaderSetting(context, R.string.quest_no_stored_vr_config, 0))
+            return
+        }
+
+        sl.add(HeaderSetting(context, R.string.quest_vr_patches_description, 0))
+        val patches = QuestVrPatches.load(currentGameId, revision)
+        if (patches.isEmpty()) {
+            sl.add(
+                HeaderSetting(
+                    context.getString(R.string.quest_vr_patches_none),
+                    context.getString(R.string.quest_vr_patches_folder, currentGameId)
+                )
+            )
+            return
+        }
+
+        for (patch in patches) {
+            val status = when {
+                patch.error.isNotEmpty() -> patch.error
+                !patch.forThisGame -> context.getString(R.string.quest_vr_patch_not_for_game)
+                patch.status.isNotEmpty() -> "${patch.state}: ${patch.status}"
+                else -> patch.state
+            }
+            sl.add(HeaderSetting(patch.title, status))
+            val about = listOf(patch.description, patch.author)
+                .filter { it.isNotEmpty() }
+                .joinToString("\n")
+            sl.add(
+                SwitchSetting(
+                    QuestVrPatchEnabledSetting(currentGameId, patch.id, patch.enabled),
+                    context.getString(R.string.quest_vr_patch_enabled),
+                    about
+                )
+            )
+            for (setting in patch.settings) {
+                val title =
+                    if (setting.unit.isEmpty()) setting.label else "${setting.label} (${setting.unit})"
+                when (setting.type) {
+                    "bool" -> sl.add(
+                        SwitchSetting(
+                            QuestVrPatchBooleanSetting(
+                                currentGameId,
+                                patch.id,
+                                setting.name,
+                                setting.value != 0.0f,
+                                setting.defaultValue != 0.0f
+                            ),
+                            title,
+                            setting.description
+                        )
+                    )
+
+                    else -> {
+                        // A choice is the index of its option (Android's choice rows need string
+                        // resources): the description lists the options.
+                        val description = if (setting.type == "choice") {
+                            setting.options.mapIndexed { i, option -> "$i: $option" }
+                                .joinToString(", ")
+                        } else {
+                            setting.description
+                        }
+                        val step = if (setting.step > 0.0f) {
+                            setting.step
+                        } else {
+                            (setting.max - setting.min) / 100.0f
+                        }
+                        sl.add(
+                            FloatSliderSetting(
+                                QuestVrPatchFloatSetting(
+                                    currentGameId,
+                                    patch.id,
+                                    setting.name,
+                                    setting.value,
+                                    setting.defaultValue
+                                ),
+                                title,
+                                description,
+                                setting.min,
+                                setting.max,
+                                "",
+                                step,
+                                step < 1.0f
+                            )
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun addQuestGameVrCameraSettings(sl: ArrayList<SettingsItem>) {

@@ -413,6 +413,7 @@ class SettingsFragment : Fragment(), SettingsFragmentView {
             titles[MenuTag.QUEST_VR_CONFIG_HACKS] = R.string.quest_vr_hacks
             titles[MenuTag.QUEST_VR_CONFIG_PASSTHROUGH] = R.string.quest_vr_passthrough
             titles[MenuTag.QUEST_VR_CONFIG_DEBUG] = R.string.quest_vr_debug
+            titles[MenuTag.QUEST_VR_CONFIG_PATCHES] = R.string.quest_vr_patches
             titles[MenuTag.QUEST_HIDE_OBJECTS] = R.string.quest_hide_objects
             titles[MenuTag.QUEST_SHADER_OVERRIDES] = R.string.quest_shader_overrides
             titles[MenuTag.QUEST_ELEMENTS_GROUP_OVERRIDES] = R.string.quest_elements_group_overrides

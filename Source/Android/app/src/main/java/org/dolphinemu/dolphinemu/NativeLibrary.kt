@@ -431,6 +431,36 @@ object NativeLibrary {
     external fun IsUninitialized(): Boolean
 
     /**
+     * The game's VR game patches as a JSON array (see QuestVrPatches). A revision below 0 is
+     * unknown.
+     */
+    @JvmStatic
+    external fun GetVRPatches(gameId: String, revision: Int): String
+
+    /**
+     * Enables or disables a VR game patch for the game (saved; applied at once in a running game).
+     */
+    @JvmStatic
+    external fun SetVRPatchEnabled(gameId: String, patchId: String, enabled: Boolean): Boolean
+
+    /**
+     * Sets a VR game patch setting for the game (saved; applied at once in a running game).
+     */
+    @JvmStatic
+    external fun SetVRPatchSetting(
+        gameId: String,
+        patchId: String,
+        name: String,
+        value: Double
+    ): Boolean
+
+    /**
+     * Restarts the running game's VR game patches from their files.
+     */
+    @JvmStatic
+    external fun ReloadVRPatches()
+
+    /**
      * Re-initializes software JitBlock profiling data.
      */
     @JvmStatic
