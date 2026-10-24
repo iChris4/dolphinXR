@@ -48,8 +48,7 @@ bool CheckLowMemory(ScriptContext* context, const char* function, u32 address, u
   const auto inside = [&](u32 block, u64 block_size) {
     return block_size != 0 && start >= Physical(block) && end <= Physical(block) + block_size;
   };
-  const ScriptEnvironment* env = context->env;
-  if (env && inside(env->scratch_base, env->scratch_size))
+  if (inside(context->scratch_base, context->scratch_size))
     return true;
   for (const AddressRange& range : context->manifest.reserve)
   {
@@ -57,9 +56,9 @@ bool CheckLowMemory(ScriptContext* context, const char* function, u32 address, u
       return true;
   }
   const std::string scratch =
-      env && env->scratch_size != 0 ?
-          fmt::format("its scratch memory {:08X}-{:08X}", env->scratch_base,
-                      static_cast<u64>(env->scratch_base) + env->scratch_size) :
+      context->scratch_size != 0 ?
+          fmt::format("its scratch memory {:08X}-{:08X}", context->scratch_base,
+                      static_cast<u64>(context->scratch_base) + context->scratch_size) :
           std::string("its scratch memory (none)");
   context->text = fmt::format("mem.{}: {:08X}-{:08X} is in low memory (OS globals, exception "
                               "vectors, Gecko code handler), outside {} and its reserve ranges",
@@ -500,11 +499,13 @@ void RegisterMemBindings(lua_State* L)
       {nullptr, nullptr},
   };
   luaL_newlib(L, FUNCTIONS);
-  const ScriptContext* context = GetContext(L);
+  ScriptContext* context = GetContext(L);
   const ScriptEnvironment* env = context->env;
-  lua_pushinteger(L, env ? env->scratch_base : 0);
+  context->scratch_base = env ? env->scratch_base : 0;
+  context->scratch_size = env ? env->scratch_size : 0;
+  lua_pushinteger(L, context->scratch_base);
   lua_setfield(L, -2, "scratch");
-  lua_pushinteger(L, env ? env->scratch_size : 0);
+  lua_pushinteger(L, context->scratch_size);
   lua_setfield(L, -2, "scratch_size");
   lua_setglobal(L, "mem");
 }

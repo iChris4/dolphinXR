@@ -43,6 +43,10 @@ struct ScriptContext
   // Set while a patch function runs.
   const ScriptEnvironment* env = nullptr;
 
+  // The scratch block of the load (mem.scratch); the environments of later calls carry none.
+  u32 scratch_base = 0;
+  u32 scratch_size = 0;
+
   // Budget of the running call.
   u64 instructions = 0;
   u64 deadline_us = 0;

@@ -350,6 +350,18 @@ TEST(VRPatch, GuardsLowMemory)
   EXPECT_NE(error_of("mem.write_vec3(mem.scratch + 0xF8, vec3(1, 2, 3))"), "");
   EXPECT_NE(error_of("mem.ensure_patches({{0x80002E00, 0x60000000}})"), "");
   EXPECT_NE(error_of("mem.write_u8(0xC0003000, 0)"), "");  // the uncached mirror
+
+  // The manager gives the scratch block only to the load; later calls get none, and the scratch
+  // stays writable.
+  Harness h;
+  PatchScript script("calls");
+  ASSERT_TRUE(h.Load(script, "function on_frame() assert(mem.write_u32(mem.scratch, 7)) end"))
+      << script.Error();
+  ScriptEnvironment call_env = h.env;
+  call_env.scratch_base = 0;
+  call_env.scratch_size = 0;
+  EXPECT_TRUE(script.Call(Hook::OnFrame, call_env)) << script.Error();
+  EXPECT_EQ(h.memory.Get32(0x80002F00), 7u);
 }
 
 TEST(VRPatch, NoMemoryMeansNil)
