@@ -389,6 +389,17 @@ public:
   // Returns true if the texture bound to the given stage is an EFB copy (not an XFB copy),
   // reporting its native dimensions for the VR effect-buffer heuristic.
   bool IsBoundEfbCopy(u32 stage, u32* native_width, u32* native_height) const;
+  // Where the texture bound to a stage comes from, for the VR agent's captures (a VR patch can
+  // then change the texture in emulated RAM).
+  struct BoundTextureSource
+  {
+    u32 address = 0;
+    u32 width = 0;
+    u32 height = 0;
+    TextureFormat format = TextureFormat::I4;
+    bool efb_copy = false;
+  };
+  std::optional<BoundTextureSource> GetBoundTextureSource(u32 stage) const;
   // Fullscreen override opt-in: repair a one-layer texture which was partially updated from a
   // same-address stereo EFB copy, then rebind the promoted texture for the current draw.
   bool ApplyVRPreserveStereoEFBFix(u32 stage);

@@ -121,6 +121,17 @@ struct DrawRecord
   u64 gs_family = 0;
   // Bound texture hashes per stage (0 = none), as Texture Element overrides match them.
   std::array<u64, 8> textures{};
+  // Where each bound texture is in emulated RAM, its native size and TextureFormat, for patches
+  // that change a texture in memory.
+  struct TextureSource
+  {
+    u32 address = 0;
+    u16 width = 0;
+    u16 height = 0;
+    u8 format = 0;
+    bool efb_copy = false;
+  };
+  std::array<TextureSource, 8> texture_sources{};
   u32 index_count = 0;
   bool color_update = false;
   bool alpha_update = false;

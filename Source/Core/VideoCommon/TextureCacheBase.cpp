@@ -1443,6 +1443,20 @@ bool TextureCacheBase::IsBoundEfbCopy(u32 stage, u32* native_width, u32* native_
   return true;
 }
 
+std::optional<TextureCacheBase::BoundTextureSource>
+TextureCacheBase::GetBoundTextureSource(u32 stage) const
+{
+  if (stage >= m_bound_textures.size() || !m_bound_textures[stage])
+    return std::nullopt;
+
+  const RcTcacheEntry& entry = m_bound_textures[stage];
+  return BoundTextureSource{.address = entry->addr,
+                            .width = entry->native_width,
+                            .height = entry->native_height,
+                            .format = entry->format.texfmt,
+                            .efb_copy = entry->is_efb_copy};
+}
+
 bool TextureCacheBase::ApplyVRPreserveStereoEFBFix(u32 stage)
 {
   if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || stage >= m_bound_textures.size() ||

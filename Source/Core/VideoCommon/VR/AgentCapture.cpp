@@ -579,8 +579,12 @@ std::string FormatDrawDetails(const DrawRecord& draw)
                       draw.ps_family, draw.gs_family);
   for (size_t i = 0; i < draw.textures.size(); ++i)
   {
-    if (draw.textures[i] != 0)
-      text += fmt::format("Texture {}: {:016x}\n", i, draw.textures[i]);
+    if (draw.textures[i] == 0)
+      continue;
+    const DrawRecord::TextureSource& source = draw.texture_sources[i];
+    text += fmt::format("Texture {}: {:016x} ({}x{} {:n}{} at {:08x})\n", i, draw.textures[i],
+                        source.width, source.height, static_cast<TextureFormat>(source.format),
+                        source.efb_copy ? " EFB copy" : "", source.address);
   }
   static constexpr std::array<const char*, 4> primitive_names = {"points", "lines", "triangles",
                                                                  "triangle strip"};

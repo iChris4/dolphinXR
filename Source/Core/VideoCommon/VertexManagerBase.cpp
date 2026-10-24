@@ -1542,7 +1542,21 @@ void VertexManagerBase::Flush()
                 vs_family, ps_family, gs_family, tex_hashes, m_index_generator.GetIndexLen(),
                 m_current_primitive_type);
             if (agent_record)
+            {
               agent_record->projection_load = static_cast<s32>(projection_load);
+              for (u32 i = 0; i < 8; i++)
+              {
+                const auto source =
+                    tex_hashes[i] != 0 ? g_texture_cache->GetBoundTextureSource(i) : std::nullopt;
+                if (!source)
+                  continue;
+                agent_record->texture_sources[i] = {.address = source->address,
+                                                    .width = static_cast<u16>(source->width),
+                                                    .height = static_cast<u16>(source->height),
+                                                    .format = static_cast<u8>(source->format),
+                                                    .efb_copy = source->efb_copy};
+              }
+            }
           }
 #endif
 
