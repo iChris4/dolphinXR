@@ -9,6 +9,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <string_view>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -251,9 +252,15 @@ ToolResult EnablePatch(const ToolArgs& args)
   if (!VRPatch::SetPatchEnabled(GameId(), id, enabled))
     throw ToolError("The user's GameSettingsVR file could not be written.");
   ApplyChanges();
-  return ToolResult::Text(
-      fmt::format("{} {} for {} (saved in GameSettingsVR/{}.ini [VRPatch]).\n{}", id,
-                  enabled ? "enabled" : "disabled", GameId(), GameId(), StatusAndLog(id, 10)));
+  // A live source runs whether the patch is enabled or not.
+  const std::string_view live =
+      !enabled && VRPatch::HasSessionSource(id) ?
+          " Its live source from set_vr_patch_source still runs: discard_vr_patch_source stops "
+          "it." :
+          "";
+  return ToolResult::Text(fmt::format(
+      "{} {} for {} (saved in GameSettingsVR/{}.ini [VRPatch]).{}\n{}", id,
+      enabled ? "enabled" : "disabled", GameId(), GameId(), live, StatusAndLog(id, 10)));
 }
 
 ToolResult SetSetting(const ToolArgs& args)
