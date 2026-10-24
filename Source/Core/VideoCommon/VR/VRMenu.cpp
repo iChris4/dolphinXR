@@ -14,6 +14,7 @@
 #include "Common/Config/Config.h"
 #include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
+#include "Common/MsgHandler.h"
 #include "Common/Timer.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "Core/ConfigManager.h"
@@ -22,6 +23,7 @@
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/OnScreenUI.h"
 #include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRAlerts.h"
 #include "VideoCommon/VR/VRMenuTabs.h"
 #include "VideoCommon/VR/VRPanelMath.h"
 #include "VideoCommon/VideoConfig.h"
@@ -372,6 +374,8 @@ void VRMenu::DrawMenu(VRMenuContext& context)
   if (ImGui::Button("Close"))
     manager->RequestMenuOpen(false);
 
+  DrawAlerts();
+
   if (ImGui::BeginTabBar("##tabs"))
   {
     for (auto& tab : m_tabs)
@@ -397,6 +401,38 @@ void VRMenu::DrawMenu(VRMenuContext& context)
     ImGui::TextDisabled("Trigger: select    Thumbstick: scroll    Left Menu: close");
 
   ImGui::End();
+}
+
+// Alerts raised during the session (VRAlerts), which the desktop and Android dialogs would show
+// where the headset does not.
+void VRMenu::DrawAlerts()
+{
+  const std::vector<HeadsetAlert> alerts = GetHeadsetAlerts();
+  if (alerts.empty())
+    return;
+  ImGui::Separator();
+  for (const HeadsetAlert& alert : alerts)
+  {
+    ImGui::PushID(static_cast<int>(alert.id));
+    const ImVec4 color = alert.style == Common::MsgType::Warning ? ImVec4(1.0f, 0.75f, 0.3f, 1.0f) :
+                                                                   ImVec4(1.0f, 0.45f, 0.45f, 1.0f);
+    ImGui::TextColored(color, "%s", alert.caption.empty() ? "Alert" : alert.caption.c_str());
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(alert.text.c_str());
+    ImGui::PopTextWrapPos();
+    if (alert.answered_yes)
+      ImGui::TextDisabled("Answered Yes: the emulation continued.");
+    if (ImGui::Button("OK"))
+      DismissHeadsetAlert(alert.id);
+    ImGui::SameLine();
+    if (ImGui::Button("Ignore for this session"))
+    {
+      Common::SetEnableAlert(false);
+      DismissAllHeadsetAlerts();
+    }
+    ImGui::PopID();
+  }
+  ImGui::Separator();
 }
 
 void VRMenu::OnPresent(VideoCommon::OnScreenUI* osd)

@@ -75,6 +75,7 @@
 #ifdef ENABLE_VR
 #include "Core/AgentServer/AgentServer.h"
 #include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRAlerts.h"
 #include "VideoCommon/VR/VRTextInput.h"
 #if defined(HAS_VULKAN)
 #include "VideoCommon/VR/OpenXRUtilitySession.h"
@@ -234,6 +235,12 @@ std::unique_ptr<GBAHostInterface> Host_CreateGBAHost(std::weak_ptr<HW::GBA::Core
 static bool MsgAlert(const char* caption, const char* text, bool yes_no, Common::MsgType style)
 {
   __android_log_print(ANDROID_LOG_ERROR, DOLPHIN_TAG, "[NativeLibrary] Alert: %s", text);
+
+#ifdef ENABLE_VR
+  // In the headset the dialog is not visible, and it would block this thread until answered.
+  if (VR::ShowAlertInHeadset(caption, text, yes_no, style))
+    return true;
+#endif
 
   JNIEnv* env = IDCache::GetEnvForThread();
 

@@ -47,9 +47,19 @@
 #include "UICommon/CommandLineParse.h"
 #include "UICommon/UICommon.h"
 
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/VRAlerts.h"
+#endif
+
 static bool QtMsgAlertHandler(const char* caption, const char* text, bool yes_no,
                               Common::MsgType style)
 {
+#ifdef ENABLE_VR
+  // In the headset the dialog is not visible, and it would block this thread until answered.
+  if (VR::ShowAlertInHeadset(caption, text, yes_no, style))
+    return true;
+#endif
+
   const bool called_from_cpu_thread = Core::IsCPUThread();
   const bool called_from_gpu_thread = Core::IsGPUThread();
 

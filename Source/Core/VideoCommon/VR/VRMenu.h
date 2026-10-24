@@ -68,6 +68,7 @@ private:
   bool InitializeContext();
   void FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot);
   void DrawMenu(VRMenuContext& context);
+  void DrawAlerts();
   void DrawPointers() const;
 
   ImGuiContext* m_context = nullptr;

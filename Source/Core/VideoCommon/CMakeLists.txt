@@ -322,6 +322,8 @@ if(ENABLE_VR)
     VR/AgentVideoJobs.h
     VR/OpenXRManager.cpp
     VR/OpenXRManager.h
+    VR/VRAlerts.cpp
+    VR/VRAlerts.h
     VR/VRMenu.cpp
     VR/VRMenu.h
     VR/VRMenuActions.cpp
