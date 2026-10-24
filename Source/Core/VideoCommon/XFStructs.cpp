@@ -136,6 +136,7 @@ static void XFRegWritten(Core::System& system, XFStateManager& xf_state_manager,
       g_vertex_manager->Flush();
       xf_state_manager.SetProjectionChanged();
       system.GetGeometryShaderManager().SetProjectionChanged();
+      g_vertex_manager->OnProjectionLoaded();
       break;
 
     case XFMEM_SETNUMTEXGENS:  // GXSetNumTexGens

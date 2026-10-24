@@ -494,6 +494,12 @@ std::string FormatDrawRow(const DrawRecord& draw)
   std::string handling = GetHandlingName(draw.handling);
   if (draw.handling_source != HandlingSource::None)
     handling += fmt::format("({})", GetHandlingSourceName(draw.handling_source));
+  if (!draw.metroid_layer.empty())
+  {
+    handling += fmt::format(
+        " [{}{}]", draw.metroid_layer,
+        draw.projection_load >= 0 ? fmt::format(" load {}", draw.projection_load) : std::string());
+  }
 
   std::string depth_blend = draw.ztest ? "zt" : "";
   if (draw.zupdate)
@@ -590,6 +596,14 @@ std::string FormatDrawDetails(const DrawRecord& draw)
                       draw.handling_source != HandlingSource::None ?
                           fmt::format(" (from {})", GetHandlingSourceName(draw.handling_source)) :
                           "");
+  if (!draw.metroid_layer.empty())
+  {
+    text +=
+        fmt::format("Metroid layer: {}{}\n", draw.metroid_layer,
+                    draw.projection_load >= 0 ?
+                        fmt::format(" (projection load {} of the frame)", draw.projection_load) :
+                        std::string());
+  }
   if (draw.element_depth >= 0.0f)
     text += fmt::format("Element depth: {}\n", draw.element_depth);
   if (draw.units_per_meter > 0.0f)
@@ -617,10 +631,13 @@ std::string FormatCopyRow(const CopyRecord& copy)
   const char* destination = copy.to_texture && copy.to_ram ? "texture and RAM" :
                             copy.to_texture                ? "texture only" :
                                                              "RAM only";
-  return fmt::format("f{} {}: EFB {}{} -> texture {} ({}x{} {:n}, {} at {:08x})", copy.frame, after,
-                     copy.depth ? "depth " : "", source,
+  return fmt::format("f{} {}: EFB {}{} -> texture {} ({}x{} {:n}, {} at {:08x}){}", copy.frame,
+                     after, copy.depth ? "depth " : "", source,
                      copy.texture != 0 ? fmt::format("{:016x}", copy.texture) : std::string("-"),
                      copy.width, copy.height, static_cast<TextureFormat>(copy.format), destination,
-                     copy.address);
+                     copy.address,
+                     copy.ram_moved ? fmt::format("; RAM copy read at {},{}, where the head looks",
+                                                  copy.ram_left, copy.ram_top) :
+                                      std::string());
 }
 }  // namespace VR::AgentCapture

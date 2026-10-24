@@ -132,6 +132,10 @@ struct DrawRecord
   SkipReason skip = SkipReason::None;
   u8 handling = NO_HANDLING;
   HandlingSource handling_source = HandlingSource::None;
+  // Built-in Metroid Prime profiles: the classifier's layer (its INI name; empty for other
+  // games) and, for the profiles classified per projection load, the load's number in the frame.
+  std::string_view metroid_layer;
+  s32 projection_load = -1;
   bool pink = false;
   // Drawn in a stereo VR session (StereoMode::OpenXR); the VR route means nothing otherwise.
   bool stereo = true;
@@ -181,6 +185,10 @@ struct CopyRecord
   s32 src_top = 0;
   s32 src_right = 0;
   s32 src_bottom = 0;
+  // Where VR moved the RAM copy's source (Metroid Prime 2's scan blocks), when it did.
+  bool ram_moved = false;
+  s32 ram_left = 0;
+  s32 ram_top = 0;
   // Size of the copy in texels, its RAM address and TextureFormat.
   u32 width = 0;
   u32 height = 0;

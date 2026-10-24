@@ -21,6 +21,7 @@
 class AbstractShader;
 class DataReader;
 class GeometryShaderManager;
+enum class MetroidElementLayer;
 enum class MetroidElementProfile;
 class NativeVertexFormat;
 class PixelShaderManager;
@@ -189,6 +190,17 @@ public:
   // Call at the end of a frame.
   void OnEndFrame();
 
+  // Called when the game writes the projection (XF registers). The Metroid Prime 2 GC profile
+  // counts these loads, as Hydra's rules do.
+  void OnProjectionLoaded() { m_projection_load_pending = true; }
+
+  // The projection of the last perspective draw of the 3D scene: rendered stereo from the
+  // head, not head-locked or moved to a screen. Recorded for the Metroid Prime 2 GC profile only.
+  const std::optional<std::array<float, 6>>& GetVRSceneProjection() const
+  {
+    return m_vr_scene_projection;
+  }
+
 protected:
   // When utility uniforms are used, the GX uniforms need to be re-written afterwards.
   static void InvalidateConstants();
@@ -296,6 +308,12 @@ private:
   MetroidElementProfile m_metroid_profile{};  // == MetroidElementProfile::None until resolved
   std::string m_metroid_game_id;              // Cached alongside m_metroid_profile
   bool m_metroid_profile_resolved = false;
+  // Projection loads that draws used this frame (Hydra's debug_projNum), and the Metroid layer
+  // of the current load for the profiles classified once per load.
+  bool m_projection_load_pending = false;
+  u32 m_frame_projection_loads = 0;
+  std::optional<MetroidElementLayer> m_metroid_load_layer;
+  std::optional<std::array<float, 6>> m_vr_scene_projection;
   bool m_unflushed_efb_copy = false;
   std::vector<u32> m_cpu_accesses_this_frame;
   std::vector<u32> m_scheduled_command_buffer_kicks;

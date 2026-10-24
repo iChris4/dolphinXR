@@ -207,6 +207,14 @@ bool IsMetroidPrime1Profile(MetroidElementProfile profile)
          profile == MetroidElementProfile::Prime1Wii;
 }
 
+// Hydra's rules number a frame's projection loads, not its draws, and classify each load once.
+// Only Prime 2 GC is classified that way so far: the other profiles were tuned against a
+// classification per draw (the Prime 1 3D HUD and its scanner mask) and need their own tests.
+bool ClassifiesPerProjectionLoad(MetroidElementProfile profile)
+{
+  return profile == MetroidElementProfile::Prime2GC;
+}
+
 MetroidHydraHudSettings GetMetroidHydraHudSettings(MetroidElementProfile profile,
                                                    MetroidElementLayer layer,
                                                    std::string_view game_id)
@@ -372,8 +380,25 @@ bool IsMetroidPrime1ScannerPreviewMask(const ShaderHunter::RuntimeElementSignatu
          signature.zfunc == 3 && signature.blend_color_update && signature.blend_alpha_update;
 }
 
-MetroidLayerBehavior GetMetroidLayerBehavior(MetroidElementLayer layer)
+MetroidLayerBehavior GetMetroidLayerBehavior(MetroidElementProfile profile,
+                                             MetroidElementLayer layer)
 {
+  // Hydra's Prime 2 values: the scan visor's highlighter and darkening cover the view and its
+  // reticle stays with the head; only the scan box is hidden.
+  if (ClassifiesPerProjectionLoad(profile))
+  {
+    switch (layer)
+    {
+    case MetroidElementLayer::ScanDarken:
+    case MetroidElementLayer::ScanHighlighter:
+      return {.handling = ShaderHunter::HandlingType::Fullscreen};
+    case MetroidElementLayer::ScanReticle:
+      return {.handling = ShaderHunter::HandlingType::HeadLocked};
+    default:
+      break;
+    }
+  }
+
   switch (layer)
   {
   case MetroidElementLayer::EFBCopy:
@@ -1250,6 +1275,13 @@ void VertexManagerBase::Flush()
       }
     }
   }
+  // A projection load is counted by the first draw that uses it, culled or not, where Hydra's
+  // SetConstants counted it. (XFStateManager's flag cannot tell: CPU culling consumes it.)
+  if (std::exchange(m_projection_load_pending, false))
+  {
+    ++m_frame_projection_loads;
+    m_metroid_load_layer.reset();
+  }
   vertex_shader_manager.SetConstants(texture_names, xf_state_manager);
   if (!bpmem.genMode.zfreeze)
   {
@@ -1501,10 +1533,35 @@ void VertexManagerBase::Flush()
             if (metroid_profile_active)
             {
               metroid_profile = GetCachedMetroidProfile();
-              metroid_metrics =
-                  BuildMetroidProjectionMetrics(xfmem, m_draw_counter + m_vr_culled_flushes);
-              metroid_layer =
-                  GetMetroidElementClassifier().Classify(metroid_profile, metroid_metrics);
+              if (ClassifiesPerProjectionLoad(metroid_profile))
+              {
+                // Hydra classified a projection when a draw first used it, with the number of
+                // loads before it in the frame, and kept the layer for the draws that followed.
+                metroid_metrics = BuildMetroidProjectionMetrics(
+                    xfmem, m_frame_projection_loads > 0 ? m_frame_projection_loads - 1 : 0);
+                if (!m_metroid_load_layer)
+                {
+                  m_metroid_load_layer =
+                      GetMetroidElementClassifier().Classify(metroid_profile, metroid_metrics);
+                }
+                metroid_layer = *m_metroid_load_layer;
+              }
+              else
+              {
+                metroid_metrics =
+                    BuildMetroidProjectionMetrics(xfmem, m_draw_counter + m_vr_culled_flushes);
+                metroid_layer =
+                    GetMetroidElementClassifier().Classify(metroid_profile, metroid_metrics);
+              }
+#ifdef ENABLE_VR
+              if (agent_record) [[unlikely]]
+              {
+                agent_record->metroid_layer = MetroidElementLayerToININame(metroid_layer);
+                if (ClassifiesPerProjectionLoad(metroid_profile))
+                  agent_record->projection_load =
+                      static_cast<s32>(metroid_metrics.projection_sequence);
+              }
+#endif
               if (IsMetroidPrime1Profile(metroid_profile) &&
                   IsMetroidPrime1ScannerPreviewMask(draw_signature))
               {
@@ -1579,7 +1636,7 @@ void VertexManagerBase::Flush()
             elements_skip = element_overrides.skip;
 
           if (!hunter_skip && !elements_skip && metroid_profile_active)
-            elements_skip = GetMetroidLayerBehavior(metroid_layer).skip;
+            elements_skip = GetMetroidLayerBehavior(metroid_profile, metroid_layer).skip;
 
           if (!hunter_skip && !elements_skip && hunter_has_overrides)
             hunter_skip = hunter.ShouldSkipByOverride(vs_hash, ps_hash, gs_hash);
@@ -1698,7 +1755,7 @@ void VertexManagerBase::Flush()
             }
             if (handling == ShaderHunter::HandlingType::Skip && metroid_profile_active)
             {
-              handling = GetMetroidLayerBehavior(metroid_layer).handling;
+              handling = GetMetroidLayerBehavior(metroid_profile, metroid_layer).handling;
               handling_source = 4;
             }
             if (handling == ShaderHunter::HandlingType::Skip && uses_mp2_dark_copy)
@@ -1711,6 +1768,12 @@ void VertexManagerBase::Flush()
             {
               handling = ShaderHunter::HandlingType::Fullscreen;
               handling_source = 4;
+            }
+            // The scene's projection, which TextureCacheBase needs to aim Prime 2's scan copies.
+            if (handling == ShaderHunter::HandlingType::Skip && metroid_metrics.perspective &&
+                ClassifiesPerProjectionLoad(metroid_profile))
+            {
+              m_vr_scene_projection = xfmem.projection.rawProjection;
             }
 
 #ifdef ENABLE_VR
@@ -2590,6 +2653,7 @@ void VertexManagerBase::OnEndFrame()
   UpdateVRCullPolicy();
   m_draw_counter = 0;
   m_vr_culled_flushes = 0;
+  m_frame_projection_loads = 0;
   m_last_efb_copy_draw_counter = 0;
   m_scheduled_command_buffer_kicks.clear();
 

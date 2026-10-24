@@ -143,6 +143,8 @@ private:
     bool cinematic = false;
     bool menu = false;
     bool after_cursor = false;
+    // Prime 2: the scan box was just classified; the next world projection is the reticle.
+    bool after_scan_box = false;
     int wide_count = 0;
     int normal_count = 0;
     int helmet_index = 4;

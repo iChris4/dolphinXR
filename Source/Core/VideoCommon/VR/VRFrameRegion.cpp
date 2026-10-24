@@ -405,6 +405,46 @@ float CalculateVRPaneReferenceW(float model_origin_view_z, float projection_z,
   return 1.0f;
 }
 
+std::array<float, 2> MapGameNDCToEyeNDC(const std::array<float, 6>& game_projection,
+                                        const VREyeTangents& eye, float x, float y)
+{
+  // LoadProjectionMatrix puts raw[1] and raw[3] in the z column and -z in w, so the game's
+  // NDC is raw[0] * tan - raw[1]. The eye's is GetEyeProjectionRows' asymmetric frustum.
+  const float tan_x = (x + game_projection[1]) / game_projection[0];
+  const float tan_y = (y + game_projection[3]) / game_projection[2];
+  return {2.0f * (tan_x - eye.left) / (eye.right - eye.left) - 1.0f,
+          2.0f * (tan_y - eye.down) / (eye.up - eye.down) - 1.0f};
+}
+
+MathUtil::Rectangle<int> MapVRGazeCopyRectangle(const MathUtil::Rectangle<int>& rect,
+                                                const VRFrameRegion& frame,
+                                                const std::array<float, 6>& game_projection,
+                                                const VREyeTangents& eye)
+{
+  if (!frame.valid || rect.GetWidth() > frame.width || rect.GetHeight() > frame.height ||
+      game_projection[0] == 0.0f || game_projection[2] == 0.0f || eye.right <= eye.left ||
+      eye.up <= eye.down)
+  {
+    return rect;
+  }
+
+  const float center_x = (rect.left + rect.right) * 0.5f;
+  const float center_y = (rect.top + rect.bottom) * 0.5f;
+  const auto [eye_x, eye_y] =
+      MapGameNDCToEyeNDC(game_projection, eye, 2.0f * (center_x - frame.left) / frame.width - 1.0f,
+                         1.0f - 2.0f * (center_y - frame.top) / frame.height);
+  if (!std::isfinite(eye_x) || !std::isfinite(eye_y))
+    return rect;
+
+  const int dx = std::clamp(
+      static_cast<int>(std::lround(frame.left + (eye_x + 1.0f) * 0.5f * frame.width - center_x)),
+      frame.left - rect.left, frame.left + frame.width - rect.right);
+  const int dy = std::clamp(
+      static_cast<int>(std::lround(frame.top + (1.0f - eye_y) * 0.5f * frame.height - center_y)),
+      frame.top - rect.top, frame.top + frame.height - rect.bottom);
+  return {rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy};
+}
+
 const char* GetVRViewportClassName(VRViewportClass vclass)
 {
   switch (vclass)

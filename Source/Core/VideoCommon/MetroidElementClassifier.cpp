@@ -5,10 +5,11 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <string>
+#include <utility>
 
 namespace
 {
@@ -256,6 +257,7 @@ void MetroidElementClassifier::State::ResetFrame()
   wide_count = 0;
   normal_count = 0;
   after_cursor = false;
+  after_scan_box = false;
   has_thermal_effect = false;
   menu = false;
 }
@@ -780,14 +782,16 @@ MetroidElementClassifier::ClassifyPrime2Perspective(State& state, const RoundedM
     state.cinematic = false;
     ++state.normal_count;
     state.map_screen = false;
+    // The scan reticle is the world projection loaded right after the scan box. (Hydra took the
+    // second world load, which holds in the light world only: the dark world loads more first.)
+    if (std::exchange(state.after_scan_box, false))
+      return MetroidElementLayer::ScanReticle;
     switch (state.normal_count)
     {
     case 1:
       state.morphball_active = false;
       return MetroidElementLayer::World;
     case 2:
-      if (state.scan_visor)
-        return MetroidElementLayer::ScanReticle;
       if (state.dark_visor)
         return MetroidElementLayer::UnknownWorld;
       return MetroidElementLayer::Reticle;
@@ -911,9 +915,11 @@ MetroidElementLayer MetroidElementClassifier::ClassifyPrime2Ortho(State& state,
       return MetroidElementLayer::ScanDarken;
     return MetroidElementLayer::ScreenOverlay;
   }
-  if ((m.layer == 4 || m.layer == 5 || m.layer == 6) && m.l == -32000 &&
+  // Hydra's loads 4 to 6 are the light world's; in the dark world the box comes later.
+  if ((m.layer == 4 || m.layer == 5 || m.layer == 6 || state.scan_visor) && m.l == -32000 &&
       Near(m.n, -100, 20) && Near(m.f, 100, 20))
   {
+    state.after_scan_box = true;
     return MetroidElementLayer::ScanBox;
   }
   if (m.layer == 3 && m.l == 0 && (m.t == 22400 || m.t == 26400) && m.r == 32000 &&

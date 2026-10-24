@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
 
 #include "VideoCommon/VR/VRFrameRegion.h"
@@ -288,4 +289,76 @@ TEST(VRFrameRegion, ScreenPaneReferenceUsesProjectionForPerVertexMatrixDraws)
   const float starfox_projection_w = starfox_far * starfox_projection_z;
   EXPECT_NEAR(VR::CalculateVRPaneReferenceW(0.0f, starfox_projection_z, starfox_projection_w),
               std::sqrt(starfox_near * starfox_far), 0.001f);
+}
+
+namespace
+{
+float TanDegrees(float degrees)
+{
+  return std::tan(degrees * 3.14159265f / 180.0f);
+}
+
+// Metroid Prime 2's world projection (hfov 73.27, vfov 55) as raw XF values.
+std::array<float, 6> Prime2WorldProjection()
+{
+  return {
+      1.0f / TanDegrees(73.27f / 2.0f), 0.0f, 1.0f / TanDegrees(55.0f / 2.0f), 0.0f, -1.0f, -0.2f};
+}
+
+// A left eye that sees farther to the left and down than to the right and up, like the PSVR2's.
+VR::VREyeTangents AsymmetricLeftEye()
+{
+  return {.left = -TanDegrees(52.0f),
+          .right = TanDegrees(42.0f),
+          .up = TanDegrees(48.0f),
+          .down = -TanDegrees(52.0f)};
+}
+}  // namespace
+
+TEST(VRFrameRegion, GazeMappingGoesThroughBothProjections)
+{
+  const std::array<float, 6> game = Prime2WorldProjection();
+
+  // An eye with the game's own FOV sees the game's screen unchanged.
+  const VR::VREyeTangents same{.left = -TanDegrees(73.27f / 2.0f),
+                               .right = TanDegrees(73.27f / 2.0f),
+                               .up = TanDegrees(27.5f),
+                               .down = -TanDegrees(27.5f)};
+  const auto unchanged = VR::MapGameNDCToEyeNDC(game, same, 0.3f, -0.2f);
+  EXPECT_NEAR(unchanged[0], 0.3f, 1e-5f);
+  EXPECT_NEAR(unchanged[1], -0.2f, 1e-5f);
+
+  // Straight ahead is right of and above the asymmetric eye's image centre.
+  const auto center = VR::MapGameNDCToEyeNDC(game, AsymmetricLeftEye(), 0.0f, 0.0f);
+  EXPECT_NEAR(center[0], 0.17407f, 1e-4f);
+  EXPECT_NEAR(center[1], 0.07083f, 1e-4f);
+  const auto off_center = VR::MapGameNDCToEyeNDC(game, AsymmetricLeftEye(), 0.5f, 0.25f);
+  EXPECT_NEAR(off_center[0], 0.51513f, 1e-4f);
+  EXPECT_NEAR(off_center[1], 0.17971f, 1e-4f);
+}
+
+// Echoes copies a 32x64 block at the centre of its 640x448 scene to find the object under the
+// scan reticle; in the left eye's image that direction is 56 pixels right and 16 up.
+TEST(VRFrameRegion, GazeCopyRectangleMovesToStraightAhead)
+{
+  const VR::VRFrameRegion frame{.left = 0, .top = 0, .width = 640, .height = 448, .valid = true};
+  const MathUtil::Rectangle<int> block{304, 192, 336, 256};
+
+  EXPECT_EQ(VR::MapVRGazeCopyRectangle(block, frame, Prime2WorldProjection(), AsymmetricLeftEye()),
+            (MathUtil::Rectangle<int>{360, 176, 392, 240}));
+
+  // It stays inside the frame.
+  const VR::VREyeTangents far_left{.left = -TanDegrees(80.0f),
+                                   .right = TanDegrees(5.0f),
+                                   .up = TanDegrees(45.0f),
+                                   .down = -TanDegrees(45.0f)};
+  const MathUtil::Rectangle<int> clamped =
+      VR::MapVRGazeCopyRectangle(block, frame, Prime2WorldProjection(), far_left);
+  EXPECT_EQ(clamped.right, 640);
+  EXPECT_EQ(clamped.GetWidth(), 32);
+
+  // Unknown frame: unchanged.
+  EXPECT_EQ(VR::MapVRGazeCopyRectangle(block, VR::VRFrameRegion{}, Prime2WorldProjection(),
+                                       AsymmetricLeftEye()),
+            block);
 }

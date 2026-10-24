@@ -15,6 +15,8 @@
 
 #include <array>
 
+#include "Common/MathUtil.h"
+
 struct Viewport;
 
 namespace VR
@@ -111,6 +113,29 @@ std::array<float, 4> CalculateVRPaneClip(int scissor_left, int scissor_top, int 
 // geometric centre of the projection's near/far range as a stable positive fallback.
 float CalculateVRPaneReferenceW(float model_origin_view_z, float projection_z,
                                 float projection_w);
+
+// An eye's field of view as the tangents of its angles (left and down negative), from OpenXR.
+struct VREyeTangents
+{
+  float left = 0.0f;
+  float right = 0.0f;
+  float up = 0.0f;
+  float down = 0.0f;
+};
+
+// Where a point of the game's screen lands in an eye's image when the game camera looks where
+// the head looks: through the game's perspective projection (raw XF values) to a direction, then
+// through the eye's FOV. Both points in normalized device coordinates, Y up.
+std::array<float, 2> MapGameNDCToEyeNDC(const std::array<float, 6>& game_projection,
+                                        const VREyeTangents& eye, float x, float y);
+
+// An EFB copy rectangle (native EFB pixels) moved by MapGameNDCToEyeNDC: its centre goes where
+// the eye's image shows the direction the game's screen shows there. It keeps its size and stays
+// inside the frame; unchanged when the frame or the projections are unusable.
+MathUtil::Rectangle<int> MapVRGazeCopyRectangle(const MathUtil::Rectangle<int>& rect,
+                                                const VRFrameRegion& frame,
+                                                const std::array<float, 6>& game_projection,
+                                                const VREyeTangents& eye);
 
 const char* GetVRViewportClassName(VRViewportClass vclass);
 }  // namespace VR

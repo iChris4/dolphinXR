@@ -64,6 +64,8 @@
 #include "VideoCommon/VideoConfig.h"
 #ifdef ENABLE_VR
 #include "VideoCommon/VR/AgentCapture.h"
+#include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRFrameRegion.h"
 #endif
 
 static const u64 TEXHASH_INVALID = 0;
@@ -125,6 +127,48 @@ static bool IsMetroidPrime3Wii()
   const std::string& game_id = SConfig::GetInstance().GetGameID();
   return game_id.starts_with("RM3");
 }
+
+#ifdef ENABLE_VR
+// Metroid Prime 2 GC finds the object under its scan reticle by copying a small block at the
+// centre of the EFB to RAM (color and depth) and reading it back. In VR the EFB holds the left
+// eye's wider and off-centre view, so its centre is not where the user looks: objects were
+// scanned only when the head pointed to their right. Read the block where the eye's image shows
+// the direction straight ahead of the head, where the head-locked HUD shows the reticle.
+static std::optional<MathUtil::Rectangle<int>>
+GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
+{
+  if (resolved_data.is_xfb || g_ActiveConfig.stereo_mode != StereoMode::OpenXR ||
+      g_ActiveConfig.vr_flat_screen || !IsMetroidPrime2GC() || !VR::g_openxr ||
+      !VR::g_openxr->IsSessionRunning())
+  {
+    return std::nullopt;
+  }
+  const std::optional<std::array<float, 6>>& projection = g_vertex_manager->GetVRSceneProjection();
+  const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
+  if (!projection || !frame.valid)
+    return std::nullopt;
+
+  // Only blocks centred on the screen and smaller than half of it: the reticle's.
+  const MathUtil::Rectangle<int>& rect = resolved_data.source_data.src_rect;
+  if (std::abs(rect.left + rect.right - 2 * frame.left - frame.width) > 4 ||
+      std::abs(rect.top + rect.bottom - 2 * frame.top - frame.height) > 4 ||
+      rect.GetWidth() * 2 > frame.width || rect.GetHeight() * 2 > frame.height)
+  {
+    return std::nullopt;
+  }
+
+  // The RAM copy reads the EFB's first layer: the left eye.
+  const XrFovf& fov = VR::g_openxr->GetRenderedEyeViews()[0].fov;
+  const VR::VREyeTangents eye{.left = std::tan(fov.angleLeft),
+                              .right = std::tan(fov.angleRight),
+                              .up = std::tan(fov.angleUp),
+                              .down = std::tan(fov.angleDown)};
+  const MathUtil::Rectangle<int> moved = VR::MapVRGazeCopyRectangle(rect, frame, *projection, eye);
+  if (moved == rect)
+    return std::nullopt;
+  return moved;
+}
+#endif
 
 static bool IsMetroidVulkanPaletteFixGame()
 {
@@ -2723,6 +2767,9 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
 
   if (resolved_data.copy_to_ram)
   {
+#ifdef ENABLE_VR
+    resolved_data.source_data.vr_ram_src_rect = GetVRGazeRamCopyRect(resolved_data);
+#endif
     const bool defer_write = g_ActiveConfig.bDeferEFBCopies;
     CopyRenderTargetToRam(entry, g_framebuffer_manager.get(), dst, resolved_data, defer_write);
   }
@@ -2769,6 +2816,9 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
         .src_top = source.src_rect.top,
         .src_right = source.src_rect.right,
         .src_bottom = source.src_rect.bottom,
+        .ram_moved = source.vr_ram_src_rect.has_value(),
+        .ram_left = source.vr_ram_src_rect ? source.vr_ram_src_rect->left : 0,
+        .ram_top = source.vr_ram_src_rect ? source.vr_ram_src_rect->top : 0,
         .width = resolved_data.memory_width,
         .height = resolved_data.memory_height,
         .address = source.dest_address,
@@ -3982,7 +4032,8 @@ void TextureCacheBase::CopyRenderTargetToRam(RcTcacheEntry& entry,
         resolved_data.source_data.gamma != 1.0);
     CopyEFB(staging_texture.get(), frame_buffer_manager, format, resolved_data.memory_width,
             resolved_data.bytes_per_row, resolved_data.num_blocks_y,
-            resolved_data.source_data.dest_stride, resolved_data.source_data.src_rect,
+            resolved_data.source_data.dest_stride,
+            resolved_data.source_data.vr_ram_src_rect.value_or(resolved_data.source_data.src_rect),
             resolved_data.source_data.half_scale, resolved_data.linear_filter,
             resolved_data.source_data.y_scale, resolved_data.source_data.gamma,
             resolved_data.source_data.clamp_top, resolved_data.source_data.clamp_bottom,
