@@ -3,8 +3,8 @@
 
 // The shipped arm cannon patches against fake memory: Metroid Prime
 // (Data/Sys/VRPatches/GM8E01/arm-cannon.lua: its hooks, its arming, and its cannon basis compared
-// with PrimedGun's math) and Metroid Prime 2: Echoes (G2ME01: its hook, its cave and the pose it
-// feeds the cave).
+// with PrimedGun's math), Metroid Prime 2: Echoes (G2ME01) and Metroid Prime 3: Corruption
+// (RM3E01): their hook, their cave and the pose they feed the cave.
 
 #include <gtest/gtest.h>
 
@@ -463,6 +463,160 @@ TEST(EchoesArmCannonPatch, RefusesOtherCode)
   ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
   EXPECT_EQ(game.memory.Get32(ECHOES_HOOK), 0x60000000u);
   EXPECT_EQ(game.memory.Get32(ECHOES_CAVE), 0u);
+  bool warned = false;
+  for (const LogLine& line : script.TakeLog())
+    warned |= line.level == 1 && line.text.find("not installed") != std::string::npos;
+  EXPECT_TRUE(warned);
+}
+
+// ---- Metroid Prime 3: Corruption ----
+
+namespace
+{
+constexpr u32 CORRUPTION_SCRATCH = 0x80002DF0;
+constexpr u32 CORRUPTION_SCRATCH_SIZE = 0x200;
+constexpr u32 CORRUPTION_CAVE = CORRUPTION_SCRATCH + 0x40;
+constexpr u32 CORRUPTION_GUARD = CORRUPTION_SCRATCH + 0x30;
+constexpr u32 CORRUPTION_CAMERA_XF = CORRUPTION_SCRATCH + 0x34;
+constexpr u32 CORRUPTION_HOOK = 0x8018748C;
+constexpr u32 CORRUPTION_HOOK_ORIGINAL = 0xC0010208;  // lfs f0, 0x208(r1)
+constexpr u32 CORRUPTION_GAME = 0x805C4F70;
+constexpr u32 CORRUPTION_STATE = 0x80A475E0;
+constexpr u32 CORRUPTION_PLAYER = 0x80B82FE0;
+constexpr u32 CORRUPTION_GUN = 0x80B888E0;
+constexpr u32 CORRUPTION_CAMERA = 0x80AFBBA0;
+
+struct CorruptionGame
+{
+  CorruptionGame()
+  {
+    memory.Write32(CORRUPTION_HOOK, CORRUPTION_HOOK_ORIGINAL);
+    // The state manager -> the player, standing, and its gun.
+    memory.Write32(CORRUPTION_GAME + 0x28, CORRUPTION_STATE);
+    memory.Write32(CORRUPTION_STATE + 0x2184, CORRUPTION_PLAYER);
+    memory.Write32(CORRUPTION_PLAYER + 0x358, 0);
+    memory.Write32(CORRUPTION_PLAYER + 0x3AD8, CORRUPTION_GUN);
+    // The camera: [[[game + 0x38] + 0x34] + 0x20].
+    memory.Write32(CORRUPTION_GAME + 0x38, 0x80AFB3A0);
+    memory.Write32(0x80AFB3A0 + 0x34, 0x80B9CA80);
+    memory.Write32(0x80B9CA80 + 0x20, CORRUPTION_CAMERA);
+
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "RM3E01";
+    env.is_wii = true;
+    env.scratch_base = CORRUPTION_SCRATCH;
+    env.scratch_size = CORRUPTION_SCRATCH_SIZE;
+    env.units_per_meter = 1.5;
+  }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+};
+
+std::string ReadCorruptionPatch()
+{
+  std::string source;
+  File::ReadFileToString(File::GetSysDirectory() + VRPATCHES_DIR "/RM3E01/arm-cannon.lua", source);
+  return source;
+}
+}  // namespace
+
+TEST(CorruptionArmCannonPatch, ManifestIsValid)
+{
+  const std::string source = ReadCorruptionPatch();
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/RM3E01/arm-cannon.lua is missing";
+  const auto read = ReadManifest(source, "arm-cannon");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"RM3E01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, CORRUPTION_SCRATCH_SIZE);
+  EXPECT_TRUE(manifest.reserve.empty());  // its cave is in its scratch memory
+  // The profile's Controller Anchor of the cannon (off by default) would move it twice.
+  ASSERT_EQ(manifest.conflicts.size(), 1u);
+  EXPECT_EQ(manifest.conflicts[0].name, "Element Draw 111");
+}
+
+TEST(CorruptionArmCannonPatch, HooksTracksAndRestores)
+{
+  CorruptionGame game;
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadCorruptionPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+
+  // A branch to the cave, which ends with the replaced instruction and the way back, inside the
+  // scratch memory.
+  Memory& m = game.memory;
+  EXPECT_EQ(m.Get32(CORRUPTION_HOOK), Branch(CORRUPTION_HOOK, CORRUPTION_CAVE, false));
+  EXPECT_EQ(m.Get32(CORRUPTION_CAVE), 0x3D608000u);  // lis r11, 0x8000
+  u32 back = 0;
+  for (u32 a = CORRUPTION_CAVE; a < CORRUPTION_SCRATCH + CORRUPTION_SCRATCH_SIZE; a += 4)
+  {
+    if (m.Get32(a) == Branch(a, CORRUPTION_HOOK + 4, false))
+    {
+      back = a;
+      break;
+    }
+  }
+  ASSERT_NE(back, 0u) << "the cave's branch back is not inside the scratch memory";
+  EXPECT_EQ(m.Get32(back - 4), CORRUPTION_HOOK_ORIGINAL);
+  // Not armed before a hand is tracked.
+  EXPECT_EQ(m.Get32(CORRUPTION_GUARD), 0u);
+
+  // The right hand, pitched up and turned a little, seen from the game camera.
+  HandInput& hand = game.input.hands[1];
+  hand.connected = true;
+  const Quat rotation =
+      Mul(Quat{0, std::sin(0.2f), 0, std::cos(0.2f)}, Quat{std::sin(0.15f), 0, 0, std::cos(0.15f)});
+  hand.view = {true, {0.2f, -0.3f, -0.4f}, {rotation.x, rotation.y, rotation.z, rotation.w}};
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  // Armed for the cannon updater's r28 (gun + 0x4D8), with the camera's transform to read.
+  EXPECT_EQ(m.Get32(CORRUPTION_GUARD), CORRUPTION_GUN + 0x4D8);
+  EXPECT_EQ(m.Get32(CORRUPTION_CAMERA_XF), CORRUPTION_CAMERA + 0x3C);
+
+  // The basis: the controller's right, aim (-Z) and up axes as columns, in the camera's axes.
+  const Vec3 right = GameAxes(Rotate(rotation, {1, 0, 0}));
+  const Vec3 forward = GameAxes(Rotate(rotation, {0, 0, -1}));
+  const Vec3 up = GameAxes(Rotate(rotation, {0, 1, 0}));
+  for (u32 row = 0; row < 3; ++row)
+  {
+    EXPECT_NEAR(m.GetF32(CORRUPTION_SCRATCH + row * 12 + 0), right[row], 1e-4f) << row;
+    EXPECT_NEAR(m.GetF32(CORRUPTION_SCRATCH + row * 12 + 4), forward[row], 1e-4f) << row;
+    EXPECT_NEAR(m.GetF32(CORRUPTION_SCRATCH + row * 12 + 8), up[row], 1e-4f) << row;
+  }
+  // The offset from the camera: the hand in game units plus the model offset (8 cm back along
+  // the aim); the game draws the cannon at its transform.
+  const Vec3 position = GameAxes({0.2f, -0.3f, -0.4f});
+  for (u32 i = 0; i < 3; ++i)
+  {
+    EXPECT_NEAR(m.GetF32(CORRUPTION_SCRATCH + 0x24 + i * 4),
+                position[i] * 1.5f - forward[i] * 0.08f * 1.5f, 1e-4f)
+        << i;
+  }
+
+  // Morph ball: the patch stops feeding the cannon.
+  m.Write32(CORRUPTION_PLAYER + 0x358, 1);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(CORRUPTION_GUARD), 0u);
+
+  // Disabled: the game's code is back.
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(CORRUPTION_HOOK), CORRUPTION_HOOK_ORIGINAL);
+}
+
+TEST(CorruptionArmCannonPatch, RefusesOtherCode)
+{
+  CorruptionGame game;
+  game.memory.Write32(CORRUPTION_HOOK, 0x60000000);  // not Corruption NTSC-U code
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadCorruptionPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(CORRUPTION_HOOK), 0x60000000u);
+  EXPECT_EQ(game.memory.Get32(CORRUPTION_CAVE), 0u);
   bool warned = false;
   for (const LogLine& line : script.TakeLog())
     warned |= line.level == 1 && line.text.find("not installed") != std::string::npos;
