@@ -1,9 +1,11 @@
--- Metroid Prime (NTSC-U, revision 0): the arm cannon follows a VR controller.
+-- Metroid Prime (NTSC-U, revisions 0 and 2): the arm cannon follows a VR controller.
 --
 -- A DolphinXR VR game patch, ported from PrimedGun's arm cannon tracking (PrimedGun, created by
 -- Nobbie, GPL-2.0-or-later: Source/Core/Core/PrimedGun/NativeRuntime.cpp UpdateCannonTracking and
 -- PoseToPrimeMatrix, and the cannon hooks of PrimedGunBuiltinPatches.inc). The tracking math, the
--- game addresses and the hook points are PrimedGun's. The code caves are rewritten for this engine:
+-- 1.00 addresses and the hook points are PrimedGun's. The 1.02 hooks are the same code, found in
+-- that executable by its instructions; its state manager and cannon position come from PrimeHack's
+-- tables, and its player fields sit 0x10 further. The code caves are rewritten for this engine:
 -- they live in the patch's scratch memory (so the game's Gecko codes keep working), only write
 -- while the cannon is tracked, and use only volatile registers that carry no arguments.
 --
@@ -12,11 +14,10 @@
 patch = {
   title = "Arm cannon follows the controller",
   author = "Nobbie (PrimedGun), ported to DolphinXR",
-  version = "1.0",
+  version = "1.1",
   description = "The arm cannon is aimed and placed by your VR controller, and shots leave it "
-    .. "where it points. For Metroid Prime NTSC-U 1.00.",
+    .. "where it points. For Metroid Prime NTSC-U 1.00 and 1.02.",
   games = {"GM8E01"},
-  revision = 0,
   scratch = 0x230,
   conflicts = {texture = {"Cannon"}},
   settings = {
@@ -52,27 +53,54 @@ patch = {
   },
 }
 
--- ---- The game (Metroid Prime NTSC-U 1.00) ----
+-- ---- The game (Metroid Prime NTSC-U) ----
 
-local STATE_MANAGER = 0x8045A1A8
-local PLAYER = STATE_MANAGER + 0x84C       -- CPlayer*
-local CAMERA_MANAGER = STATE_MANAGER + 0x86C
-local OBJECT_LIST = STATE_MANAGER + 0x810
-local GUN_POSITION = 0x8045BCE8            -- the first-person cannon position (3 floats)
-local PLAYER_GUN = 0x490                   -- CPlayer -> CPlayerGun*
+-- Per disc revision. The hooks (PrimedGun's): the instruction after the game rebuilds the
+-- cannon's transform, the cannon model's render function, and the six calls that create a beam's
+-- projectile. The player: its camera and morph ball states, its CPlayerGun*, the cannon's
+-- visibility (1 when drawn) and holster state (2 when out).
+local REVISIONS = {
+  [0] = {state_manager = 0x8045A1A8, gun_position = 0x8045BCE8, player_offset = 0,
+         rotation_hook = 0x80040FEC, model_hook = 0x80041A8C, projectile_function = 0x801BB888,
+         projectile_calls = {0x800DF8DC, 0x800DF008, 0x800DF038, 0x800E1240, 0x8018C950,
+                             0x8018C988}},
+  [2] = {state_manager = 0x8045B208, gun_position = 0x8045CD48, player_offset = 0x10,
+         rotation_hook = 0x800412D8, model_hook = 0x80041D78, projectile_function = 0x801BC0A8,
+         projectile_calls = {0x800DFE60, 0x800DF58C, 0x800DF5BC, 0x800E17C4, 0x8018D134,
+                             0x8018D16C}},
+}
+
+local STATE_MANAGER, PLAYER, CAMERA_MANAGER, OBJECT_LIST, GUN_POSITION
+local PLAYER_CAMERA_STATE, PLAYER_MORPH_STATE, PLAYER_GUN, PLAYER_GUN_ALPHA, PLAYER_HOLSTER
+local ROTATION_HOOK, MODEL_HOOK, PROJECTILE_FUNCTION, PROJECTILE_CALLS
+local ROTATION_HOOK_ORIGINAL = 0x807C0740  -- lwz r3, 0x740(r28)
 local GUN_WORLD_XF = 0x4A8                 -- CPlayerGun transforms (3x4)
 local GUN_LOCAL_XF = 0x4D8
 local GUN_XF = 0x3E8
 local BASE_MODEL_FORWARD = -0.080          -- PrimedGun's model offset, meters
 
--- The hooks (PrimedGun's): the instruction after the game rebuilds the cannon's transform, the
--- cannon model's render function, and the six calls that create a beam's projectile.
-local ROTATION_HOOK = 0x80040FEC
-local ROTATION_HOOK_ORIGINAL = 0x807C0740  -- lwz r3, 0x740(r28)
-local MODEL_HOOK = 0x80041A8C               -- stwu r1, ... (the function's first instruction)
-local PROJECTILE_FUNCTION = 0x801BB888
-local PROJECTILE_CALLS = {0x800DF8DC, 0x800DF008, 0x800DF038, 0x800E1240, 0x8018C950,
-                          0x8018C988}
+-- The addresses of the running disc revision; false when there are none.
+local function select_revision()
+  local r = REVISIONS[game.revision()]
+  if not r then
+    return false
+  end
+  STATE_MANAGER = r.state_manager
+  PLAYER = STATE_MANAGER + 0x84C       -- CPlayer*
+  CAMERA_MANAGER = STATE_MANAGER + 0x86C
+  OBJECT_LIST = STATE_MANAGER + 0x810
+  GUN_POSITION = r.gun_position        -- the first-person cannon position (3 floats)
+  PLAYER_CAMERA_STATE = 0x2F4 + r.player_offset
+  PLAYER_MORPH_STATE = 0x2F8 + r.player_offset
+  PLAYER_GUN = 0x490 + r.player_offset
+  PLAYER_GUN_ALPHA = 0x494 + r.player_offset
+  PLAYER_HOLSTER = 0x498 + r.player_offset
+  ROTATION_HOOK = r.rotation_hook
+  MODEL_HOOK = r.model_hook            -- stwu r1, ... (the function's first instruction)
+  PROJECTILE_FUNCTION = r.projectile_function
+  PROJECTILE_CALLS = r.projectile_calls
+  return true
+end
 
 -- ---- Scratch memory (mem.scratch) ----
 
@@ -184,10 +212,13 @@ local function find_model_original()
 end
 
 local function check_game_code()
+  if not ROTATION_HOOK then
+    return "no addresses for Metroid Prime revision " .. game.revision() .. " (1.00 and 1.02 have)"
+  end
   local rotation = mem.u32(ROTATION_HOOK)
   if rotation ~= ROTATION_HOOK_ORIGINAL and not branch_target(ROTATION_HOOK, rotation or 0) then
     return "unexpected code at " .. mem.hex(ROTATION_HOOK) .. " (" .. mem.hex(rotation) ..
-      "): is this Metroid Prime NTSC-U 1.00?"
+      "): is this Metroid Prime NTSC-U 1.00 or 1.02?"
   end
   model_original = model_original or find_model_original()
   if not model_original then
@@ -233,6 +264,9 @@ end
 local function uninstall()
   mem.write_u32(GUARD, 0)
   installed = false
+  if not ROTATION_HOOK then
+    return
+  end
   if branch_target(ROTATION_HOOK, mem.u32(ROTATION_HOOK) or 0) then
     mem.write_code(ROTATION_HOOK, ROTATION_HOOK_ORIGINAL)
   end
@@ -301,8 +335,9 @@ local function looks_like_transform(address)
 end
 
 local function looks_valid_player(player)
-  local camera_state, morph_state = mem.u32(player + 0x2F4), mem.u32(player + 0x2F8)
-  local gun_alpha, holster = mem.f32(player + 0x494), mem.u32(player + 0x498)
+  local camera_state = mem.u32(player + PLAYER_CAMERA_STATE)
+  local morph_state = mem.u32(player + PLAYER_MORPH_STATE)
+  local gun_alpha, holster = mem.f32(player + PLAYER_GUN_ALPHA), mem.u32(player + PLAYER_HOLSTER)
   -- First person, not morphed, the cannon drawn and out (PrimedGun: PlayerIsFirstPersonGunReady).
   return camera_state == 0 and morph_state == 0 and gun_alpha ~= nil and gun_alpha >= 0.95 and
          holster == 2
@@ -411,6 +446,7 @@ end
 
 function on_load()
   mem.write_u32(GUARD, 0)
+  select_revision()
   install()
 end
 
@@ -419,6 +455,7 @@ function on_state_loaded()
   mem.write_u32(GUARD, 0)
   tracking = false
   has_smoothed = false
+  select_revision()
   install()
 end
 

@@ -77,14 +77,40 @@ private:
 };
 
 constexpr u32 SCRATCH = 0x80002DC0;
-constexpr u32 ROTATION_HOOK = 0x80040FEC;
-constexpr u32 MODEL_HOOK = 0x80041A8C;
 constexpr u32 MODEL_ORIGINAL = 0x9421FFD0;  // stwu r1, -0x30(r1)
-constexpr u32 PROJECTILE_FUNCTION = 0x801BB888;
-constexpr std::array<u32, 6> PROJECTILE_CALLS = {0x800DF8DC, 0x800DF008, 0x800DF038,
-                                                 0x800E1240, 0x8018C950, 0x8018C988};
-constexpr u32 STATE_MANAGER = 0x8045A1A8;
 constexpr u32 PLAYER = 0x80500000;
+
+// The addresses of a disc revision.
+struct Revision
+{
+  u16 revision;
+  u32 rotation_hook;
+  u32 model_hook;
+  u32 projectile_function;
+  std::array<u32, 6> projectile_calls;
+  u32 state_manager;
+  u32 gun_position;
+  u32 player_offset;  // added to the 1.00 player fields
+};
+
+constexpr Revision PRIME_100 = {
+    0,
+    0x80040FEC,
+    0x80041A8C,
+    0x801BB888,
+    {0x800DF8DC, 0x800DF008, 0x800DF038, 0x800E1240, 0x8018C950, 0x8018C988},
+    0x8045A1A8,
+    0x8045BCE8,
+    0};
+constexpr Revision PRIME_102 = {
+    2,
+    0x800412D8,
+    0x80041D78,
+    0x801BC0A8,
+    {0x800DFE60, 0x800DF58C, 0x800DF5BC, 0x800E17C4, 0x8018D134, 0x8018D16C},
+    0x8045B208,
+    0x8045CD48,
+    0x10};
 constexpr u32 GUN = 0x80600000;
 constexpr u32 CAMERA = 0x80720000;
 constexpr float PI = 3.14159265358979f;
@@ -130,32 +156,34 @@ std::array<float, 9> PrimedGunBasis(Quat q, float yaw_deg, float rx, float ry, f
 
 struct Game
 {
-  Game()
+  explicit Game(const Revision& revision = PRIME_100) : rev(revision)
   {
-    memory.Write32(ROTATION_HOOK, 0x807C0740);
-    memory.Write32(MODEL_HOOK, MODEL_ORIGINAL);
-    for (const u32 call : PROJECTILE_CALLS)
-      memory.Write32(call, Branch(call, PROJECTILE_FUNCTION, true));
+    memory.Write32(rev.rotation_hook, 0x807C0740);
+    memory.Write32(rev.model_hook, MODEL_ORIGINAL);
+    for (const u32 call : rev.projectile_calls)
+      memory.Write32(call, Branch(call, rev.projectile_function, true));
     // The player, ready to shoot in first person, and its cannon.
-    memory.Write32(STATE_MANAGER + 0x84C, PLAYER);
-    memory.Write32(PLAYER + 0x2F4, 0);
-    memory.Write32(PLAYER + 0x2F8, 0);
-    memory.SetF32(PLAYER + 0x494, 1.0f);
-    memory.Write32(PLAYER + 0x498, 2);
-    memory.Write32(PLAYER + 0x490, GUN);
+    const u32 player = PLAYER + rev.player_offset;
+    memory.Write32(rev.state_manager + 0x84C, PLAYER);
+    memory.Write32(player + 0x2F4, 0);
+    memory.Write32(player + 0x2F8, 0);
+    memory.SetF32(player + 0x494, 1.0f);
+    memory.Write32(player + 0x498, 2);
+    memory.Write32(player + 0x490, GUN);
     const std::array<float, 12> identity = {1, 0, 0, 5, 0, 1, 0, 6, 0, 0, 1, 7};
     memory.SetMatrix(GUN + 0x4A8, identity);
     memory.SetMatrix(GUN + 0x4D8, identity);
     // The camera manager -> camera uid 5 -> the camera in the object list.
-    memory.Write32(STATE_MANAGER + 0x86C, 0x80700000);
+    memory.Write32(rev.state_manager + 0x86C, 0x80700000);
     memory.Write32(0x80700000, 0x00050000);
-    memory.Write32(STATE_MANAGER + 0x810, 0x80710000);
+    memory.Write32(rev.state_manager + 0x810, 0x80710000);
     memory.Write32(0x80710000 + 5 * 8 + 4, CAMERA);
     SetCameraYaw(30);
 
     env.memory = &memory;
     env.input = &input;
     env.game_id = "GM8E01";
+    env.revision = rev.revision;
     env.scratch_base = SCRATCH;
     env.scratch_size = 0x230;
     env.units_per_meter = 1.5;
@@ -167,6 +195,7 @@ struct Game
     memory.SetMatrix(CAMERA + 0x34, {c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0});
   }
 
+  Revision rev;
   Memory memory;
   VRInputFrame input;
   ScriptEnvironment env;
@@ -188,16 +217,23 @@ TEST(ArmCannonPatch, ManifestIsValid)
   ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
   const Manifest& manifest = std::get<Manifest>(read);
   EXPECT_EQ(manifest.games, std::vector<std::string>{"GM8E01"});
-  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_FALSE(manifest.revision);  // 1.00 and 1.02, from its own table
   EXPECT_GE(manifest.scratch_bytes, 0x230u);
   EXPECT_TRUE(manifest.reserve.empty());  // its caves are in its scratch memory
   ASSERT_EQ(manifest.conflicts.size(), 1u);
   EXPECT_EQ(manifest.conflicts[0].name, "Cannon");
 }
 
-TEST(ArmCannonPatch, HooksTracksAndRestores)
+namespace
 {
-  Game game;
+void ExpectHooksTracksAndRestores(const Revision& rev)
+{
+  Game game(rev);
+  const u32 ROTATION_HOOK = rev.rotation_hook;
+  const u32 MODEL_HOOK = rev.model_hook;
+  const u32 PROJECTILE_FUNCTION = rev.projectile_function;
+  const auto& PROJECTILE_CALLS = rev.projectile_calls;
+  const u32 PLAYER_FIELDS = PLAYER + rev.player_offset;
   PatchScript script("arm-cannon");
   ASSERT_TRUE(script.Load(ReadPatch(), game.env)) << script.Error();
   ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
@@ -234,18 +270,18 @@ TEST(ArmCannonPatch, HooksTracksAndRestores)
   for (size_t i = 0; i < 9; ++i)
     EXPECT_NEAR(m.GetF32(SCRATCH + static_cast<u32>(i) * 4), expected[i], 1e-4f) << i;
   // The position, camera-local in game units: (x, -z, y) * 1.5.
-  EXPECT_NEAR(m.GetF32(0x8045BCE8), 0.3f, 1e-5f);
-  EXPECT_NEAR(m.GetF32(0x8045BCEC), 0.6f, 1e-5f);
-  EXPECT_NEAR(m.GetF32(0x8045BCF0), -0.45f, 1e-5f);
+  EXPECT_NEAR(m.GetF32(rev.gun_position), 0.3f, 1e-5f);
+  EXPECT_NEAR(m.GetF32(rev.gun_position + 4), 0.6f, 1e-5f);
+  EXPECT_NEAR(m.GetF32(rev.gun_position + 8), -0.45f, 1e-5f);
   // The model offset: the basis times (0, -0.08, 0) * 1.5.
   EXPECT_NEAR(m.GetF32(SCRATCH + 0x40), expected[1] * -0.12f, 1e-5f);
   EXPECT_NEAR(m.GetF32(SCRATCH + 0x44), expected[4] * -0.12f, 1e-5f);
 
   // Morph ball: the patch stops feeding the cannon.
-  m.Write32(PLAYER + 0x2F8, 1);
+  m.Write32(PLAYER_FIELDS + 0x2F8, 1);
   ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
   EXPECT_EQ(m.Get32(SCRATCH + 0x38), 0u);
-  m.Write32(PLAYER + 0x2F8, 0);
+  m.Write32(PLAYER_FIELDS + 0x2F8, 0);
 
   // A setting turns the beam hooks off.
   const Manifest& manifest = script.GetManifest();
@@ -260,10 +296,41 @@ TEST(ArmCannonPatch, HooksTracksAndRestores)
   EXPECT_EQ(m.Get32(MODEL_HOOK), MODEL_ORIGINAL);
   EXPECT_EQ(m.Get32(SCRATCH + 0x38), 0u);
 }
+}  // namespace
+
+TEST(ArmCannonPatch, HooksTracksAndRestores)
+{
+  ExpectHooksTracksAndRestores(PRIME_100);
+}
+
+TEST(ArmCannonPatch, HooksTracksAndRestoresOn102)
+{
+  ExpectHooksTracksAndRestores(PRIME_102);
+}
+
+TEST(ArmCannonPatch, UnknownRevisionIsNotHooked)
+{
+  // Metroid Prime 1.01: its code has not been searched.
+  Revision rev = PRIME_100;
+  rev.revision = 1;
+  Game game(rev);
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(PRIME_100.rotation_hook), 0x807C0740u);
+  bool warned = false;
+  for (const LogLine& line : script.TakeLog())
+    warned |= line.level == 1 && line.text.find("no addresses") != std::string::npos;
+  EXPECT_TRUE(warned);
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+}
 
 TEST(ArmCannonPatch, RefusesOtherCode)
 {
   Game game;
+  const u32 ROTATION_HOOK = PRIME_100.rotation_hook;
+  const u32 MODEL_HOOK = PRIME_100.model_hook;
   game.memory.Write32(ROTATION_HOOK, 0x60000000);  // not Metroid Prime 1.00 code
   PatchScript script("arm-cannon");
   ASSERT_TRUE(script.Load(ReadPatch(), game.env)) << script.Error();
@@ -279,6 +346,8 @@ TEST(ArmCannonPatch, ReinstallsOverAnotherScratchAddress)
 {
   // A savestate made while the patch had its caves at another address.
   Game game;
+  const u32 ROTATION_HOOK = PRIME_100.rotation_hook;
+  const u32 MODEL_HOOK = PRIME_100.model_hook;
   constexpr u32 OLD = 0x80002C00;
   game.memory.Write32(ROTATION_HOOK, Branch(ROTATION_HOOK, OLD + 0xA0, false));
   game.memory.Write32(MODEL_HOOK, Branch(MODEL_HOOK, OLD + 0x140, false));
