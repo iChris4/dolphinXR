@@ -182,11 +182,28 @@ std::string FormatDoc(OverrideKind kind)
         "sig_ortho_left/right/top/bottom (x100), sig_vp_x/y (viewport center), sig_vp_w/h "
         "(half size), sig_sc_l/t/r/b (scissor), sig_alpha (8 hex), sig_ztest, sig_zupdate, "
         "sig_zfunc, sig_blend_color, sig_blend_alpha, sig_layer=0.\n"
+        "sig_use_load=1 with sig_load_min=<n> / sig_load_max=<n, -1 = no limit>: the draw's "
+        "projection load, the number of projection loads its frame used before its own (list_draws "
+        "prints it as L<n>); for games that draw several elements with the same projection, told "
+        "apart by their order. Loads shift when a frame draws more (a visor effect), so prefer "
+        "projection, render state, textures and flags.\n"
+        "Order: an entry with handling=skip that matches always wins; otherwise the first matching "
+        "entry in file order gives the handling. When two entries can match the same draw, give "
+        "the general one condition=<flag> condition_mode=deactivate.\n"
         "Elements only: handling=screen_pane keeps a perspective sub-region (picture-in-picture) "
         "on the virtual screen with depth: screen_pane_depth=game|vr|flat, "
         "screen_pane_reference_depth=<game W>, screen_pane_depth_strength=<0..1>; "
         "preserve_stereo_efb=1 (fullscreen effects reading a stereo EFB copy); clear_efb=1 with "
-        "clear_efb_min/clear_efb_max (EFB copy widths) clears the EFB after the element.\n{}",
+        "clear_efb_min/clear_efb_max (EFB copy widths) clears the EFB after the element.\n"
+        "Elements only, with handling=headlocked: a HUD drawn in perspective can keep its 3D "
+        "shape in front of the head with headlocked_mode=perspective (default flat); hud_scale="
+        "<multiplier of the units per meter>; hud_width/hud_height (head-locked projection scale, "
+        "default 1) and hud_right/hud_up (shift, default 0); hud_anchor=1 makes the draw a depth "
+        "anchor of the 3D HUD (all its models share the farthest anchor's depth, which keeps their "
+        "relative depth) when its origin's view z is within hud_anchor_z_min..hud_anchor_z_max "
+        "(negative, default unbounded); hud_self_center=1 places it at its own depth (a radar); "
+        "hud_context=default|combat|menu keeps a reference depth per context. get_draw prints "
+        "what a draw got.\n{}",
         HANDLINGS_DOC);
   case OverrideKind::Texture:
     return fmt::format(

@@ -4,6 +4,7 @@
 // vr.*: the VR controllers and headset (raw functions; the prelude wraps the poses into objects).
 // See ScriptContext.h for the rules a binding follows.
 
+#include <cctype>
 #include <cstring>
 
 #include "Common/Config/Config.h"
@@ -266,6 +267,48 @@ int VRSettingSet(lua_State* L)
     return luaL_error(L, "%s", context->text.c_str());
   return 0;
 }
+
+// Raises or lowers one of the patch's override flags. False for an invalid name.
+bool SetFlag(ScriptContext* context, const char* name, bool active)
+{
+  const size_t length = std::strlen(name);
+  if (length == 0 || length > 64)
+    return false;
+  for (size_t i = 0; i < length; ++i)
+  {
+    const unsigned char c = static_cast<unsigned char>(name[i]);
+    if (!std::isalnum(c) && c != '_' && c != '.' && c != '-')
+      return false;
+  }
+  const bool changed =
+      active ? context->flags.insert(name).second : context->flags.erase(name) != 0;
+  if (changed)
+    ++context->flags_generation;
+  return true;
+}
+
+// vr.set_flag(name[, active]): raises an override flag (lowers it with false). Override entries
+// condition on it like on the flags draws raise (condition=<name>); it stays until lowered.
+int VRSetFlag(lua_State* L)
+{
+  const char* name = luaL_checkstring(L, 1);
+  const bool active = lua_isnoneornil(L, 2) || lua_toboolean(L, 2);
+  if (!SetFlag(GetContext(L), name, active))
+    return luaL_argerror(L, 1, "a flag name is 1 to 64 letters, digits, '_', '.' or '-'");
+  return 0;
+}
+
+// vr.clear_flags(): lowers every flag of the patch.
+int VRClearFlags(lua_State* L)
+{
+  ScriptContext* context = GetContext(L);
+  if (!context->flags.empty())
+  {
+    context->flags.clear();
+    ++context->flags_generation;
+  }
+  return 0;
+}
 }  // namespace
 
 void RegisterVRBindings(lua_State* L)
@@ -284,6 +327,8 @@ void RegisterVRBindings(lua_State* L)
       {"haptic", VRHaptic},
       {"setting", VRSettingGet},
       {"set_setting", VRSettingSet},
+      {"set_flag", VRSetFlag},
+      {"clear_flags", VRClearFlags},
       {nullptr, nullptr},
   };
   luaL_newlib(L, FUNCTIONS);

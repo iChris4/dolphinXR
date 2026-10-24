@@ -3,9 +3,10 @@
 
 #pragma once
 
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -90,6 +91,34 @@ public:
     float roll_deg = 0.0f;
   };
 
+  // HeadLocked handling: how an entry places its draws in front of the head. Shared transport
+  // type, like CameraAnchorParams. The defaults are plain head-locked: the game's 2D screen in
+  // front of the head.
+  struct HeadLockedParams
+  {
+    // Perspective draws keep their 3D shape: their view-space geometry is placed in front of the
+    // head (a 3D HUD) instead of being flattened onto the head-locked screen.
+    bool perspective = false;
+    // Units per meter of the draw: the global value times this (0 = unchanged).
+    float scale = 0.0f;
+    // Scale and shift of the head-locked projection (1, 1, 0, 0 = unchanged).
+    float width = 1.0f;
+    float height = 1.0f;
+    float right = 0.0f;
+    float up = 0.0f;
+    // A 3D HUD's models share one reference depth per frame, which keeps their relative depth.
+    // Anchors give it: the farthest anchor origin (view z, negative) within the range wins.
+    bool anchor = false;
+    float anchor_z_min = -std::numeric_limits<float>::infinity();
+    float anchor_z_max = std::numeric_limits<float>::infinity();
+    // Placed at its own origin's depth instead of the shared one (a radar or minimap whose
+    // geometry spans a large depth).
+    bool self_center = false;
+    // The reference depth is kept per context (0 default, 1 combat, 2 menu), so menu models do
+    // not inherit the combat HUD's depth.
+    int context = 0;
+  };
+
   enum class HuntingOption
   {
     Skip = 0,
@@ -127,7 +156,14 @@ public:
     bool use_viewport = false;
     bool use_scissor = false;
     bool use_render_state = false;
+    bool use_load = false;
     int ortho_layer = 0;
+    // The draw's projection load: how many projection loads its frame used before its own
+    // (Hydra's debug_projNum). An entry with use_load matches loads load_min to load_max
+    // (-1: no upper bound).
+    int projection_load = 0;
+    int load_min = 0;
+    int load_max = -1;
     int viewport_x = 0;
     int viewport_y = 0;
     int viewport_width = 0;
@@ -310,6 +346,8 @@ public:
   void RegisterFlags(u64 vs_hash, u64 ps_hash, u64 gs_hash);
   void RegisterExternalFlag(const std::string& flag_name);
   bool IsFlagActive(const std::string& flag_name) const;
+  // The flags VR game patches raise, as the overrides see them this frame (video thread).
+  std::vector<std::string> GetActivePatchFlags() const;
   // Video-thread snapshot for OSD display.
   struct FlagStatus
   {
@@ -440,6 +478,11 @@ private:
   std::vector<FlagRule> m_flag_rules;  // flag activation rules
   std::unordered_set<std::string> m_flags_seen_this_frame; // flags seen in current frame
   std::unordered_map<std::string, int> m_flag_age;        // flag → 0 if active (from previous frame)
+  // Flags raised by VR game patches (VR::PatchFlags), taken in OnFrameEnd when they change. Not
+  // cleared by ApplyOverrideList: the patch, not the lists, owns them.
+  std::unordered_set<std::string> m_patch_flags;
+  u64 m_patch_flags_generation = 0;
+  bool IsFlagActiveLocked(const std::string& flag_name) const;
 
   // Debug logging: log override matches once per unique draw combo per frame
   bool m_debug_logging = false;

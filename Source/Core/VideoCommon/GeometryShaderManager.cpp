@@ -29,10 +29,7 @@ static constexpr int LINE_PT_TEX_OFFSETS[8] = {0, 16, 8, 4, 2, 1, 1, 1};
 
 namespace
 {
-static constexpr float METROID_PERSPECTIVE_HUD_FORWARD_OFFSET = 1.0f;
-static constexpr int METROID_HUD_REFERENCE_CONTEXT_COMBAT = 1;
-static constexpr float METROID_COMBAT_HUD_REFERENCE_FAR_Z = -28.5f;
-static constexpr float METROID_COMBAT_HUD_REFERENCE_NEAR_Z = -18.0f;
+static constexpr float PERSPECTIVE_HUD_FORWARD_OFFSET = 1.0f;
 
 struct PerspectiveHudTransform
 {
@@ -88,17 +85,6 @@ bool IsFinite(float value)
   return std::isfinite(value);
 }
 
-bool IsMetroidHudStableReferenceAllowed(int context, float reference_view_z)
-{
-  if (context != METROID_HUD_REFERENCE_CONTEXT_COMBAT)
-    return true;
-
-  // Prime 1 combat HUD body anchors sit around -20 in normal combat and can move toward -27 for
-  // visor-specific HUD projections.  Grappling-hook arm/attachment draws are classified as HUD
-  // anchors too, but sit around -32 and must not replace the shared combat HUD body depth.
-  return reference_view_z >= METROID_COMBAT_HUD_REFERENCE_FAR_Z &&
-         reference_view_z <= METROID_COMBAT_HUD_REFERENCE_NEAR_Z;
-}
 
 PerspectiveHudTransform CalculatePerspectiveHudTransform(const Projection::Raw& projection,
                                                          float units_per_meter,
@@ -157,8 +143,7 @@ PerspectiveHudTransform CalculatePerspectiveHudTransform(const Projection::Raw& 
   // This decouples the sliders (Distance = forward placement, Size = scale).  The earlier
   // `scale[2] * zobj - distance` coupled them and assumed the model sat at view-z == -zobj;
   // a plain -distance assumed view-z == 0.  Neither held, so the HUD floated too far away.
-  result.position[2] = result.scale[2] * (zobj + METROID_PERSPECTIVE_HUD_FORWARD_OFFSET) -
-                       result.distance;
+  result.position[2] = result.scale[2] * (zobj + PERSPECTIVE_HUD_FORWARD_OFFSET) - result.distance;
   result.origin_z = result.scale[2] * reference_view_z + result.position[2];
   result.ref_minus_one_z = result.scale[2] * (reference_view_z - 1.0f) + result.position[2];
   result.ref_plus_one_z = result.scale[2] * (reference_view_z + 1.0f) + result.position[2];
@@ -266,12 +251,16 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         const float headlocked_projection_scale_y = vr_headlocked_projection_scale_y;
         const float headlocked_projection_offset_x = vr_headlocked_projection_offset_x;
         const float headlocked_projection_offset_y = vr_headlocked_projection_offset_y;
-        const bool metroid_hud_self_center = vr_metroid_hud_self_center;
-        vr_metroid_hud_self_center = false;  // consume
-        const bool metroid_hud_anchor_candidate = vr_metroid_hud_anchor_candidate;
-        vr_metroid_hud_anchor_candidate = false;  // consume
-        const int metroid_hud_reference_context = vr_metroid_hud_reference_context;
-        vr_metroid_hud_reference_context = 0;  // consume
+        const bool hud_self_center = vr_hud_self_center;
+        vr_hud_self_center = false;  // consume
+        const bool hud_anchor_candidate = vr_hud_anchor_candidate;
+        vr_hud_anchor_candidate = false;  // consume
+        const float hud_anchor_z_min = vr_hud_anchor_z_min;
+        vr_hud_anchor_z_min = -std::numeric_limits<float>::infinity();  // consume
+        const float hud_anchor_z_max = vr_hud_anchor_z_max;
+        vr_hud_anchor_z_max = std::numeric_limits<float>::infinity();  // consume
+        const int hud_reference_context = vr_hud_reference_context;
+        vr_hud_reference_context = 0;  // consume
         vr_headlocked_projection_scale_x = 1.0f;
         vr_headlocked_projection_scale_y = 1.0f;
         vr_headlocked_projection_offset_x = 0.0f;
@@ -496,35 +485,35 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         {
           // Model origin's view-space z (position-matrix translation).
           const float reference_view_z = vertex_shader_manager.constants.posnormalmatrix[2][3];
-          // The radar/minimap (METROID_VISOR_RADAR_HINT / METROID_RADAR_DOT) is a flat overlay whose
+          // A radar or minimap (hud_self_center, Metroid Prime's radar) is a flat overlay whose
           // blip geometry spans a large depth.  Under the SHARED scene transform that spread clips
-          // behind the camera and the whole minimap vanishes at low HUD distances.  Self-centre it on
-          // its own origin depth (its own, smaller scale — the pre-shared-reference behaviour) so it
-          // stays at `distance` and visible.  Coherent 3D content (Samus + hook, beam boxes) keeps the
-          // shared reference so its relative depth survives.
-          // (The radar/minimap draws are NOT classified as a RADAR layer in practice — combat-visor
-          // logs show them under METROID_SCAN_TEXT — so the depth-outlier check below is what
+          // behind the camera and the whole minimap vanishes at low HUD distances.  Self-centre it
+          // on its own origin depth (its own, smaller scale — the pre-shared-reference behaviour)
+          // so it stays at `distance` and visible.  Coherent 3D content (Samus + hook, beam boxes)
+          // keeps the shared reference so its relative depth survives. (Metroid Prime's combat
+          // radar draws share the HUD body's projection, so the depth-outlier check below is what
           // actually catches them.  The flag is kept as a cheap explicit opt-out.)
-          const bool self_center_layer = metroid_hud_self_center;
+          const bool self_center_layer = hud_self_center;
           const bool valid_reference =
               std::isfinite(reference_view_z) && reference_view_z < 0.0f;
-          if (metroid_hud_anchor_candidate && !self_center_layer && valid_reference)
+          if (hud_anchor_candidate && !self_center_layer && valid_reference)
           {
             // Pick the farthest stable HUD-body origin seen this frame as the anchor for the next
             // frame. Free-aim adds/moves nearer reticle pieces, but those are not anchor candidates
-            // and cannot pull the whole 3D HUD plane toward the camera.
-            const bool stable_reference_allowed = IsMetroidHudStableReferenceAllowed(
-                metroid_hud_reference_context, reference_view_z);
+            // and cannot pull the whole 3D HUD plane toward the camera. The entry's depth range
+            // keeps out anchors that sit elsewhere (Prime 1's grappling-hook arm, around -32).
+            const bool stable_reference_allowed =
+                reference_view_z >= hud_anchor_z_min && reference_view_z <= hud_anchor_z_max;
             const bool replace_candidate =
                 stable_reference_allowed &&
                 (!m_vr_hud_frame_anchor_candidate_valid ||
-                 metroid_hud_reference_context != m_vr_hud_frame_anchor_candidate_context ||
+                 hud_reference_context != m_vr_hud_frame_anchor_candidate_context ||
                  reference_view_z < m_vr_hud_frame_anchor_candidate_z);
             if (replace_candidate)
             {
               m_vr_hud_frame_anchor_candidate_z = reference_view_z;
               m_vr_hud_frame_anchor_candidate_valid = true;
-              m_vr_hud_frame_anchor_candidate_context = metroid_hud_reference_context;
+              m_vr_hud_frame_anchor_candidate_context = hud_reference_context;
             }
           }
           // Reuse ONE shared reference for all coherent -3 draws in this frame, so every Prime
@@ -534,22 +523,22 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           // the first coherent draw only until a stable anchor is promoted at the frame boundary.
           const bool stable_reference_matches =
               m_vr_hud_stable_reference_valid &&
-              m_vr_hud_stable_reference_context == metroid_hud_reference_context;
+              m_vr_hud_stable_reference_context == hud_reference_context;
           if ((!m_vr_hud_shared_reference_valid ||
-               m_vr_hud_shared_reference_context != metroid_hud_reference_context) &&
+               m_vr_hud_shared_reference_context != hud_reference_context) &&
               !self_center_layer)
           {
             if (stable_reference_matches)
             {
               m_vr_hud_shared_reference_z = m_vr_hud_stable_reference_z;
               m_vr_hud_shared_reference_valid = true;
-              m_vr_hud_shared_reference_context = metroid_hud_reference_context;
+              m_vr_hud_shared_reference_context = hud_reference_context;
             }
             else if (valid_reference)
             {
               m_vr_hud_shared_reference_z = reference_view_z;
               m_vr_hud_shared_reference_valid = true;
-              m_vr_hud_shared_reference_context = metroid_hud_reference_context;
+              m_vr_hud_shared_reference_context = hud_reference_context;
             }
           }
           const float shared_reference_z =
@@ -763,13 +752,11 @@ void GeometryShaderManager::InvalidateVRHeadPose()
   m_vr_pose_needs_refresh = true;
   if (m_vr_hud_frame_anchor_candidate_valid)
   {
-    const bool stable_reference_allowed = IsMetroidHudStableReferenceAllowed(
-        m_vr_hud_frame_anchor_candidate_context, m_vr_hud_frame_anchor_candidate_z);
+    // The candidate already passed its entry's anchor depth range when it was chosen.
     const bool accept_candidate =
-        stable_reference_allowed &&
-        (!m_vr_hud_stable_reference_valid ||
-         m_vr_hud_frame_anchor_candidate_context != m_vr_hud_stable_reference_context ||
-         m_vr_hud_frame_anchor_candidate_z < m_vr_hud_stable_reference_z);
+        !m_vr_hud_stable_reference_valid ||
+        m_vr_hud_frame_anchor_candidate_context != m_vr_hud_stable_reference_context ||
+        m_vr_hud_frame_anchor_candidate_z < m_vr_hud_stable_reference_z;
     // Within one HUD context, keep the farthest allowed stable body anchor so free-aim cannot pull
     // the whole 3D HUD toward the camera.  Across contexts, such as combat HUD -> pause/map UI,
     // replace the stable reference so menu models do not inherit the combat HUD depth.

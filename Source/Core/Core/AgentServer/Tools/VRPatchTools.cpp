@@ -93,6 +93,8 @@ std::string DescribePatch(const VRPatch::PatchInfo& info, bool details)
                         info.max_us, info.memory_bytes / 1024);
     if (info.scratch_size != 0)
       text += fmt::format(", scratch {:08X} ({} bytes)", info.scratch_base, info.scratch_size);
+    if (!info.flags.empty())
+      text += fmt::format("\n    raises the flags {}", fmt::join(info.flags, ", "));
   }
   if (!details || !info.manifest)
     return text;

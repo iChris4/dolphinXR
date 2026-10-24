@@ -10,6 +10,7 @@
 #include <map>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include "Common/StringUtil.h"
 #include "Core/AgentServer/AgentServer.h"
@@ -194,6 +195,16 @@ std::string SummarizeCapture(const CapturedFrame& frame)
   text += "Viewport classes: " + join(by_class) + "\n";
   text += "VR routes: " + join(by_route) + "\n";
   text += "Override handlings: " + join(by_handling) + "\n";
+  // What condition= entries saw: the flags VR game patches raised, per frame when they changed.
+  for (size_t f = 0; f < frame.patch_flags.size(); ++f)
+  {
+    if (f > 0 && frame.patch_flags[f] == frame.patch_flags[f - 1])
+      continue;
+    text += fmt::format("Patch flags{}: {}\n", frame.frames > 1 ? fmt::format(" from f{}", f) : "",
+                        frame.patch_flags[f].empty() ?
+                            std::string("none") :
+                            fmt::format("{}", fmt::join(frame.patch_flags[f], ", ")));
+  }
 
   std::vector<std::pair<u64, ShaderUse>> top(by_ps.begin(), by_ps.end());
   std::sort(top.begin(), top.end(),
@@ -375,6 +386,11 @@ std::string ElementsStub(const DrawRecord& draw)
   }
   text += "sig_use_projection=0\nsig_use_projection_type=1\nsig_use_layer=0\n"
           "sig_use_viewport=1\nsig_use_scissor=1\nsig_use_render_state=0\nsig_layer=0\n";
+  if (draw.projection_load >= 0)
+  {
+    text += fmt::format("sig_use_load=0\nsig_load_min={}\nsig_load_max={}\n", draw.projection_load,
+                        draw.projection_load);
+  }
   text +=
       fmt::format("sig_vp_x={}\nsig_vp_y={}\nsig_vp_w={}\nsig_vp_h={}\n",
                   std::lround(draw.viewport_x), std::lround(draw.viewport_y),

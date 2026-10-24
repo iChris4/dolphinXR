@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "Common/CommonTypes.h"
+#include "VideoCommon/ShaderHunter.h"
 
 // Video-thread side of the agent server (Core/AgentServer): eye screenshots, the per-frame draw
 // capture (what "Debug Log Draws" logs, structured and for one frame), and the draw preview
@@ -132,10 +133,13 @@ struct DrawRecord
   SkipReason skip = SkipReason::None;
   u8 handling = NO_HANDLING;
   HandlingSource handling_source = HandlingSource::None;
-  // Built-in Metroid Prime profiles: the classifier's layer (its INI name; empty for other
-  // games) and, for the profiles classified per projection load, the load's number in the frame.
+  // Built-in Metroid Prime profiles: the classifier's layer (its INI name; empty for other games).
   std::string_view metroid_layer;
+  // The projection load the draw uses: how many projection loads the frame used before its own
+  // (what sig_use_load matches). -1 when unknown.
   s32 projection_load = -1;
+  // HeadLocked handling: the head-locked HUD parameters it got (unset = plain head-locked).
+  std::optional<ShaderHunter::HeadLockedParams> headlocked;
   bool pink = false;
   // Drawn in a stereo VR session (StereoMode::OpenXR); the VR route means nothing otherwise.
   bool stereo = true;
@@ -218,6 +222,8 @@ struct CapturedFrame
   u32 head_culled = 0;
   // "Launch games in VR" off: the override pass, and so the capture, does not run.
   bool flat_mode = false;
+  // Per frame: the override flags VR game patches raised (what condition= entries saw).
+  std::vector<std::vector<std::string>> patch_flags;
 };
 
 namespace detail
@@ -322,6 +328,8 @@ const char* GetSkipReasonName(SkipReason reason);
 const char* GetHandlingSourceName(HandlingSource source);
 // How the draw is routed in VR: "stereo 3D", "virtual screen", "fullscreen", "head-locked"...
 std::string DescribeRoute(const DrawRecord& draw);
+// "3d s30 0.79x0.79 anchor -28.5..-18 ctx1": an entry's head-locked HUD parameters in short.
+std::string FormatHeadLockedParams(const ShaderHunter::HeadLockedParams& hud);
 // One compact line per draw for list tables.
 std::string FormatDrawRow(const DrawRecord& draw);
 // Every field, one per line.

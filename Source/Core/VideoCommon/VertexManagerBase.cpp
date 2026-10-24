@@ -87,11 +87,13 @@ struct MetroidHydraHudSettings
 };
 
 ShaderHunter::RuntimeElementSignature BuildRuntimeElementSignature(const XFMemory& xf_memory,
-                                                                   const BPMemory& bp_memory)
+                                                                   const BPMemory& bp_memory,
+                                                                   u32 projection_load)
 {
   ShaderHunter::RuntimeElementSignature signature;
   signature.valid = true;
   signature.perspective = xf_memory.projection.type == ProjectionType::Perspective;
+  signature.projection_load = static_cast<int>(projection_load);
 
   const float* projection = xf_memory.projection.rawProjection.data();
   if (signature.perspective)
@@ -365,6 +367,39 @@ bool IsMetroidPrime1CombatHudAnchorCandidate(MetroidElementLayer layer, float re
   return hud_context == METROID_HUD_CONTEXT_COMBAT && layer == MetroidElementLayer::ScanText &&
          std::isfinite(reference_view_z) && reference_view_z >= -22.0f &&
          reference_view_z <= -18.0f;
+}
+
+// Hydra's head-locked HUD values for a draw's Metroid layer, as an entry would give them.
+std::optional<ShaderHunter::HeadLockedParams>
+GetMetroidHudParams(MetroidElementProfile profile, MetroidElementLayer layer,
+                    std::string_view game_id, int hud_context, float reference_view_z)
+{
+  const MetroidHydraHudSettings hydra = GetMetroidHydraHudSettings(profile, layer, game_id);
+  if (!hydra.enabled)
+    return std::nullopt;
+
+  ShaderHunter::HeadLockedParams hud;
+  hud.perspective = hydra.perspective_hud;
+  hud.scale = hydra.scale;
+  hud.width = hydra.width;
+  hud.height = hydra.height;
+  hud.right = hydra.right;
+  hud.up = hydra.up;
+  // Radar/minimap layers self-centre on their own origin depth.
+  hud.self_center = MetroidElementLayerToININame(layer).find("RADAR") != std::string_view::npos;
+  hud.anchor = hydra.perspective_hud &&
+               (IsMetroidPerspectiveHudAnchorLayer(layer) ||
+                IsMetroidPrime1CombatHudAnchorCandidate(layer, reference_view_z, hud_context));
+  hud.context = hud_context;
+  // Prime 1 combat HUD body anchors sit around -20 in normal combat and can move toward -27 for
+  // visor-specific HUD projections. Grappling-hook arm/attachment draws are anchors too, but sit
+  // around -32 and must not replace the shared combat HUD body depth.
+  if (hud_context == METROID_HUD_CONTEXT_COMBAT)
+  {
+    hud.anchor_z_min = -28.5f;
+    hud.anchor_z_max = -18.0f;
+  }
+  return hud;
 }
 
 bool IsMetroidPrime1ScannerPreviewMask(const ShaderHunter::RuntimeElementSignature& signature)
@@ -1483,10 +1518,13 @@ void VertexManagerBase::Flush()
             }
           }
 
+          // The projection load this draw uses (counted above, zero-based in the frame).
+          const u32 projection_load =
+              m_frame_projection_loads > 0 ? m_frame_projection_loads - 1 : 0;
           ShaderHunter::RuntimeElementSignature draw_signature{};
           if (hunter_enabled || elements_runtime_active)
           {
-            draw_signature = BuildRuntimeElementSignature(xfmem, bpmem);
+            draw_signature = BuildRuntimeElementSignature(xfmem, bpmem, projection_load);
             if (hunter_enabled)
               hunter.SetCurrentDrawSignature(draw_signature);
           }
@@ -1505,6 +1543,8 @@ void VertexManagerBase::Flush()
                 m_draw_counter, m_draw_counter + m_vr_culled_flushes + 1, vs_hash, ps_hash, gs_hash,
                 vs_family, ps_family, gs_family, tex_hashes, m_index_generator.GetIndexLen(),
                 m_current_primitive_type);
+            if (agent_record)
+              agent_record->projection_load = static_cast<s32>(projection_load);
           }
 #endif
 
@@ -1537,8 +1577,7 @@ void VertexManagerBase::Flush()
               {
                 // Hydra classified a projection when a draw first used it, with the number of
                 // loads before it in the frame, and kept the layer for the draws that followed.
-                metroid_metrics = BuildMetroidProjectionMetrics(
-                    xfmem, m_frame_projection_loads > 0 ? m_frame_projection_loads - 1 : 0);
+                metroid_metrics = BuildMetroidProjectionMetrics(xfmem, projection_load);
                 if (!m_metroid_load_layer)
                 {
                   m_metroid_load_layer =
@@ -1555,12 +1594,7 @@ void VertexManagerBase::Flush()
               }
 #ifdef ENABLE_VR
               if (agent_record) [[unlikely]]
-              {
                 agent_record->metroid_layer = MetroidElementLayerToININame(metroid_layer);
-                if (ClassifiesPerProjectionLoad(metroid_profile))
-                  agent_record->projection_load =
-                      static_cast<s32>(metroid_metrics.projection_sequence);
-              }
 #endif
               if (IsMetroidPrime1Profile(metroid_profile) &&
                   IsMetroidPrime1ScannerPreviewMask(draw_signature))
@@ -1689,10 +1723,7 @@ void VertexManagerBase::Flush()
             float passthrough_opacity = 0.0f;
             ElementsGroupManager::CameraAnchorParams anchor_params;
             ElementsGroupManager::ControllerAnchorParams controller_anchor_params;
-            const MetroidHydraHudSettings metroid_hydra_hud =
-                metroid_profile_active ?
-                    GetMetroidHydraHudSettings(metroid_profile, metroid_layer, m_metroid_game_id) :
-                    MetroidHydraHudSettings{};
+            std::optional<ShaderHunter::HeadLockedParams> headlocked_params;
 
             if (elements_has_overrides)
             {
@@ -1715,6 +1746,7 @@ void VertexManagerBase::Flush()
               passthrough_opacity = element_overrides.passthrough_opacity;
               anchor_params = element_overrides.camera_anchor;
               controller_anchor_params = element_overrides.controller_anchor;
+              headlocked_params = element_overrides.headlocked;
             }
             else if (hunter_has_overrides)
             {
@@ -1846,13 +1878,10 @@ void VertexManagerBase::Flush()
             }
             else if (handling == ShaderHunter::HandlingType::HeadLocked)
             {
-              const bool perspective_metroid_hud =
-                  metroid_hydra_hud.perspective_hud && metroid_metrics.perspective;
-              geometry_shader_manager.vr_stereo_override = perspective_metroid_hud ? -3.0f : -2.0f;
-              if (metroid_hydra_hud.enabled)
+              // The entry's head-locked HUD parameters, else Hydra's values for the draw's
+              // Metroid layer (until the Metroid profiles carry them in their entries).
+              if (!headlocked_params && metroid_profile_active)
               {
-                const auto& pnm = vertex_shader_manager.constants.posnormalmatrix;
-                const float metroid_hud_ref_z = pnm[2][3];
                 int metroid_hud_context = METROID_HUD_CONTEXT_DEFAULT;
                 if (IsMetroidPrime1Profile(metroid_profile))
                 {
@@ -1861,35 +1890,37 @@ void VertexManagerBase::Flush()
                   else if (m_metroid_prime1_combat_context_seen)
                     metroid_hud_context = METROID_HUD_CONTEXT_COMBAT;
                 }
-                // Radar/minimap layers self-centre on their own origin depth in the -3 path
-                // (consumed and reset by GeometryShaderManager::SetConstants).
-                const std::string_view layer_name = MetroidElementLayerToININame(metroid_layer);
-                geometry_shader_manager.vr_metroid_hud_self_center =
-                    layer_name.find("RADAR") != std::string_view::npos;
-                geometry_shader_manager.vr_metroid_hud_anchor_candidate =
-                    perspective_metroid_hud &&
-                    (IsMetroidPerspectiveHudAnchorLayer(metroid_layer) ||
-                     IsMetroidPrime1CombatHudAnchorCandidate(metroid_layer, metroid_hud_ref_z,
-                                                             metroid_hud_context));
-                geometry_shader_manager.vr_metroid_hud_reference_context = metroid_hud_context;
+                headlocked_params = GetMetroidHudParams(
+                    metroid_profile, metroid_layer, m_metroid_game_id, metroid_hud_context,
+                    vertex_shader_manager.constants.posnormalmatrix[2][3]);
               }
+              const ShaderHunter::HeadLockedParams hud =
+                  headlocked_params.value_or(ShaderHunter::HeadLockedParams{});
+              geometry_shader_manager.vr_stereo_override =
+                  hud.perspective && xfmem.projection.type == ProjectionType::Perspective ? -3.0f :
+                                                                                            -2.0f;
+              // The 3D HUD's reference depth (consumed and reset by
+              // GeometryShaderManager::SetConstants).
+              geometry_shader_manager.vr_hud_self_center = hud.self_center;
+              geometry_shader_manager.vr_hud_anchor_candidate = hud.anchor;
+              geometry_shader_manager.vr_hud_anchor_z_min = hud.anchor_z_min;
+              geometry_shader_manager.vr_hud_anchor_z_max = hud.anchor_z_max;
+              geometry_shader_manager.vr_hud_reference_context = hud.context;
               if (element_depth >= 0.0f)
                 geometry_shader_manager.vr_element_depth_override = element_depth;
-              if (metroid_hydra_hud.enabled)
+              if (hud.scale > 0.0f)
               {
-                if (metroid_hydra_hud.scale > 0.0f)
-                {
-                  geometry_shader_manager.vr_units_per_meter_override =
-                      g_ActiveConfig.vr_units_per_meter * metroid_hydra_hud.scale;
-                }
-                geometry_shader_manager.vr_headlocked_projection_scale_x =
-                    metroid_hydra_hud.width;
-                geometry_shader_manager.vr_headlocked_projection_scale_y =
-                    metroid_hydra_hud.height;
-                geometry_shader_manager.vr_headlocked_projection_offset_x =
-                    metroid_hydra_hud.right;
-                geometry_shader_manager.vr_headlocked_projection_offset_y = metroid_hydra_hud.up;
+                geometry_shader_manager.vr_units_per_meter_override =
+                    g_ActiveConfig.vr_units_per_meter * hud.scale;
               }
+              geometry_shader_manager.vr_headlocked_projection_scale_x = hud.width;
+              geometry_shader_manager.vr_headlocked_projection_scale_y = hud.height;
+              geometry_shader_manager.vr_headlocked_projection_offset_x = hud.right;
+              geometry_shader_manager.vr_headlocked_projection_offset_y = hud.up;
+#ifdef ENABLE_VR
+              if (agent_record) [[unlikely]]
+                agent_record->headlocked = headlocked_params;
+#endif
             }
             else if (handling == ShaderHunter::HandlingType::UnitsPerMeter)
             {

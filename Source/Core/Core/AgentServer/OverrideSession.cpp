@@ -52,6 +52,13 @@ std::string DescribeSignature(const ShaderHunter::RuntimeElementSignature& s)
     parts.push_back("render state");
   if (s.use_layer)
     parts.push_back("layer");
+  if (s.use_load)
+  {
+    parts.push_back(s.load_max < 0 ? fmt::format("projection load {}+", s.load_min) :
+                    s.load_min == s.load_max ?
+                                     fmt::format("projection load {}", s.load_min) :
+                                     fmt::format("projection loads {}-{}", s.load_min, s.load_max));
+  }
   if (parts.empty())
     return "matches every draw";
   std::string text;

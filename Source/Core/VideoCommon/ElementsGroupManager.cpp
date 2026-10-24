@@ -4,6 +4,7 @@
 #include "VideoCommon/ElementsGroupManager.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <fstream>
@@ -11,6 +12,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 #include <fmt/format.h>
 
@@ -137,6 +139,12 @@ bool ParseRuntimeElementSignatureField(ShaderHunter::RuntimeElementSignature* si
     signature->use_scissor = (value == "1" || value == "true");
   else if (key == "sig_use_render_state")
     signature->use_render_state = (value == "1" || value == "true");
+  else if (key == "sig_use_load")
+    signature->use_load = (value == "1" || value == "true");
+  else if (key == "sig_load_min")
+    signature->load_min = ParseGroupedInt(value);
+  else if (key == "sig_load_max")
+    signature->load_max = ParseGroupedInt(value);
   else if (key == "sig_layer")
     signature->ortho_layer = ParseGroupedInt(value);
   else if (key == "sig_vp_x")
@@ -193,6 +201,13 @@ void SaveRuntimeElementSignature(std::ostringstream& out,
   out << prefix << "sig_use_viewport=" << (sig.use_viewport ? 1 : 0) << "\n";
   out << prefix << "sig_use_scissor=" << (sig.use_scissor ? 1 : 0) << "\n";
   out << prefix << "sig_use_render_state=" << (sig.use_render_state ? 1 : 0) << "\n";
+  // Only when used, so that files saved before the key existed are rewritten unchanged.
+  if (sig.use_load)
+  {
+    out << prefix << "sig_use_load=1\n";
+    out << prefix << "sig_load_min=" << sig.load_min << "\n";
+    out << prefix << "sig_load_max=" << sig.load_max << "\n";
+  }
   out << prefix << "sig_layer=" << sig.ortho_layer << "\n";
   out << prefix << "sig_vp_x=" << sig.viewport_x << "\n";
   out << prefix << "sig_vp_y=" << sig.viewport_y << "\n";
@@ -208,6 +223,67 @@ void SaveRuntimeElementSignature(std::ostringstream& out,
   out << prefix << "sig_zfunc=" << sig.zfunc << "\n";
   out << prefix << "sig_blend_color=" << (sig.blend_color_update ? 1 : 0) << "\n";
   out << prefix << "sig_blend_alpha=" << (sig.blend_alpha_update ? 1 : 0) << "\n";
+}
+
+constexpr std::array<std::string_view, 3> HUD_CONTEXT_NAMES = {"default", "combat", "menu"};
+
+// headlocked_mode=flat|perspective and the hud_* keys of a HeadLocked entry.
+void ParseHeadLockedKey(ShaderHunter::HeadLockedParams* hud, const std::string& key,
+                        const std::string& value)
+{
+  const bool on = value == "1" || value == "true";
+  if (key == "headlocked_mode")
+    hud->perspective = value == "perspective";
+  else if (key == "hud_scale")
+    hud->scale = std::stof(value);
+  else if (key == "hud_width")
+    hud->width = std::stof(value);
+  else if (key == "hud_height")
+    hud->height = std::stof(value);
+  else if (key == "hud_right")
+    hud->right = std::stof(value);
+  else if (key == "hud_up")
+    hud->up = std::stof(value);
+  else if (key == "hud_anchor")
+    hud->anchor = on;
+  else if (key == "hud_anchor_z_min")
+    hud->anchor_z_min = std::stof(value);
+  else if (key == "hud_anchor_z_max")
+    hud->anchor_z_max = std::stof(value);
+  else if (key == "hud_self_center")
+    hud->self_center = on;
+  else if (key == "hud_context")
+  {
+    const auto name = std::ranges::find(HUD_CONTEXT_NAMES, value);
+    hud->context = name != HUD_CONTEXT_NAMES.end() ?
+                       static_cast<int>(name - HUD_CONTEXT_NAMES.begin()) :
+                       std::clamp(ParseGroupedInt(value), 0, 2);
+  }
+}
+
+void SaveHeadLockedKeys(std::ostringstream& out, const ShaderHunter::HeadLockedParams& hud)
+{
+  out << "headlocked_mode=" << (hud.perspective ? "perspective" : "flat") << "\n";
+  if (hud.scale > 0.0f)
+    out << "hud_scale=" << hud.scale << "\n";
+  if (hud.width != 1.0f)
+    out << "hud_width=" << hud.width << "\n";
+  if (hud.height != 1.0f)
+    out << "hud_height=" << hud.height << "\n";
+  if (hud.right != 0.0f)
+    out << "hud_right=" << hud.right << "\n";
+  if (hud.up != 0.0f)
+    out << "hud_up=" << hud.up << "\n";
+  if (hud.anchor)
+    out << "hud_anchor=1\n";
+  if (std::isfinite(hud.anchor_z_min))
+    out << "hud_anchor_z_min=" << hud.anchor_z_min << "\n";
+  if (std::isfinite(hud.anchor_z_max))
+    out << "hud_anchor_z_max=" << hud.anchor_z_max << "\n";
+  if (hud.self_center)
+    out << "hud_self_center=1\n";
+  if (hud.context > 0 && hud.context < static_cast<int>(HUD_CONTEXT_NAMES.size()))
+    out << "hud_context=" << HUD_CONTEXT_NAMES[hud.context] << "\n";
 }
 
 std::vector<u64> ParseTextureHashList(const std::string& value)
@@ -777,6 +853,12 @@ LoadElementGroupOverridesFromINIFile(const std::string& path)
       current.screen_pane_depth_strength = std::clamp(std::stof(value), 0.0f, 1.0f);
     else if (key == "passthrough_opacity")
       current.passthrough_opacity = std::clamp(std::stof(value), 0.0f, 1.0f);
+    else if (key == "headlocked_mode" || key.starts_with("hud_"))
+    {
+      if (!current.headlocked)
+        current.headlocked.emplace();
+      ParseHeadLockedKey(&*current.headlocked, key, value);
+    }
     else if (key == "anchor_right")
       current.anchor_right = std::stof(value);
     else if (key == "anchor_up")
@@ -1009,6 +1091,8 @@ void ElementsGroupManager::SaveOverridesToINI(const std::string& game_id,
     }
     if (entry.handling == HandlingType::Passthrough)
       out << "passthrough_opacity=" << entry.passthrough_opacity << "\n";
+    if (entry.handling == HandlingType::HeadLocked && entry.headlocked)
+      SaveHeadLockedKeys(out, *entry.headlocked);
     if (entry.handling == HandlingType::CameraAnchor)
     {
       if (entry.anchor_right != 0.0f)
@@ -2007,30 +2091,41 @@ ElementsGroupManager::HandlingType ElementsGroupManager::GetOverrideHandling(
 
 ElementsGroupManager::HandlingType
 ElementsGroupManager::GetOverrideHandlingLocked(const DrawRecord& draw,
-                                                bool* out_preserve_stereo_efb) const
+                                                bool* out_preserve_stereo_efb,
+                                                const ElementGroupOverride** out_entry) const
 {
   if (out_preserve_stereo_efb)
     *out_preserve_stereo_efb = false;
 
+  const ElementGroupOverride* entry = FindHandlingOverrideLocked(draw);
+  if (out_entry)
+    *out_entry = entry;
+  if (!entry)
+    return HandlingType::Skip;
+  if (out_preserve_stereo_efb)
+  {
+    *out_preserve_stereo_efb =
+        entry->handling == HandlingType::Fullscreen && entry->preserve_stereo_efb;
+  }
+  if (ShaderHunter::GetInstance().IsDebugLogging())
+  {
+    INFO_LOG_FMT(VIDEO, "ElementsGroup match(handling): '{}' draw#{} handling={}", entry->name,
+                 draw.draw_index + 1, static_cast<int>(entry->handling));
+  }
+  return entry->handling;
+}
+
+const ElementsGroupManager::ElementGroupOverride*
+ElementsGroupManager::FindHandlingOverrideLocked(const DrawRecord& draw) const
+{
   for (const auto& entry : m_overrides)
   {
     if (entry.handling == HandlingType::Skip || entry.handling == HandlingType::Flag)
       continue;
     if (DoesEntryMatch(entry, draw, true))
-    {
-      const bool preserve_stereo_efb =
-          entry.handling == HandlingType::Fullscreen && entry.preserve_stereo_efb;
-      if (out_preserve_stereo_efb)
-        *out_preserve_stereo_efb = preserve_stereo_efb;
-      if (ShaderHunter::GetInstance().IsDebugLogging())
-      {
-        INFO_LOG_FMT(VIDEO, "ElementsGroup match(handling): '{}' draw#{} handling={}", entry.name,
-                     draw.draw_index + 1, static_cast<int>(entry.handling));
-      }
-      return entry.handling;
-    }
+      return &entry;
   }
-  return HandlingType::Skip;
+  return nullptr;
 }
 
 ElementsGroupManager::ScreenPaneDepthMode
@@ -2221,7 +2316,8 @@ ElementsGroupManager::DrawResolution ElementsGroupManager::ResolveOverrides(cons
   result.skip = ShouldSkipByOverrideLocked(draw);
   if (!result.skip)
   {
-    result.handling = GetOverrideHandlingLocked(draw, &result.preserve_stereo_efb);
+    const ElementGroupOverride* handling_entry = nullptr;
+    result.handling = GetOverrideHandlingLocked(draw, &result.preserve_stereo_efb, &handling_entry);
     switch (result.handling)
     {
     case HandlingType::ScreenPane:
@@ -2233,8 +2329,11 @@ ElementsGroupManager::DrawResolution ElementsGroupManager::ResolveOverrides(cons
         result.screen_pane_depth_strength = entry->screen_pane_depth_strength;
       }
       break;
-    case HandlingType::Screen:
     case HandlingType::HeadLocked:
+      result.headlocked = handling_entry->headlocked;
+      result.element_depth = GetOverrideElementDepthLocked(draw);
+      break;
+    case HandlingType::Screen:
       result.element_depth = GetOverrideElementDepthLocked(draw);
       break;
     case HandlingType::UnitsPerMeter:

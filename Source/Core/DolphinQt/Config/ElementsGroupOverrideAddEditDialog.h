@@ -114,6 +114,10 @@ private:
   QCheckBox* m_runtime_use_viewport_check = nullptr;
   QCheckBox* m_runtime_use_scissor_check = nullptr;
   QCheckBox* m_runtime_use_render_state_check = nullptr;
+  QCheckBox* m_runtime_use_load_check = nullptr;
+  QLabel* m_runtime_load_label = nullptr;
+  QSpinBox* m_runtime_load_min_spin = nullptr;
+  QSpinBox* m_runtime_load_max_spin = nullptr;
   QCheckBox* m_clear_efb_check = nullptr;
   QLabel* m_clear_efb_min_label = nullptr;
   QSpinBox* m_clear_efb_min_spin = nullptr;

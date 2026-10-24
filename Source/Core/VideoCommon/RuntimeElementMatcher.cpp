@@ -9,7 +9,8 @@ bool HasActiveGroups(const ShaderHunter::RuntimeElementSignature& signature)
 {
   return signature.valid &&
          (signature.use_projection || signature.use_projection_type || signature.use_layer ||
-          signature.use_viewport || signature.use_scissor || signature.use_render_state);
+          signature.use_viewport || signature.use_scissor || signature.use_render_state ||
+          signature.use_load);
 }
 
 bool Matches(const ShaderHunter::RuntimeElementSignature& pattern,
@@ -60,6 +61,15 @@ bool Matches(const ShaderHunter::RuntimeElementSignature& pattern,
       return false;
     if (pattern.ortho_layer != candidate.ortho_layer)
       return false;
+  }
+
+  if (pattern.use_load)
+  {
+    if (candidate.projection_load < pattern.load_min ||
+        (pattern.load_max >= 0 && candidate.projection_load > pattern.load_max))
+    {
+      return false;
+    }
   }
 
   if (pattern.use_viewport)

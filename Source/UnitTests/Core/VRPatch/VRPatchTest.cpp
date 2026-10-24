@@ -6,6 +6,7 @@
 #include <bit>
 #include <cmath>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <variant>
@@ -579,6 +580,43 @@ TEST(VRPatch, HoldsControllerInput)
   EXPECT_EQ(value("Buttons", "A"), -100.0);
   EXPECT_EQ(value("Main Stick", "X"), -100.0);
   EXPECT_EQ(value("Triggers", "L"), 1.0);
+}
+
+TEST(VRPatch, RaisesOverrideFlags)
+{
+  Harness h;
+  PatchScript script("flags");
+  ASSERT_TRUE(h.Load(script, R"(
+    patch = {title = "F", settings = {{name = "visor", default = 2, min = 0, max = 3}}}
+    function on_frame()
+      vr.set_flag("mp_visor_scan", settings.visor == 2)
+      vr.set_flag("mp_paused")
+    end
+    function on_unload() vr.clear_flags() end
+    function on_load() vr.set_flag("no spaces") end
+  )")) << script.Error();
+  using Flags = std::set<std::string>;
+  EXPECT_TRUE(script.GetFlags().empty());
+
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(script.GetFlags(), (Flags{"mp_paused", "mp_visor_scan"}));
+  const u64 generation = script.GetFlagsGeneration();
+
+  // Setting the same flags again changes nothing.
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(script.GetFlagsGeneration(), generation);
+
+  // False lowers a flag.
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("visor"), 0));
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(script.GetFlags(), (Flags{"mp_paused"}));
+  EXPECT_NE(script.GetFlagsGeneration(), generation);
+
+  EXPECT_TRUE(script.Call(Hook::OnUnload, h.env)) << script.Error();
+  EXPECT_TRUE(script.GetFlags().empty());
+
+  EXPECT_FALSE(script.Call(Hook::OnLoad, h.env));
+  EXPECT_NE(script.Error().find("flag name"), std::string::npos) << script.Error();
 }
 
 TEST(VRPatch, ValidatesIds)

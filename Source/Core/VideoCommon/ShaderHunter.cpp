@@ -21,6 +21,7 @@
 #include "VideoCommon/PixelShaderGen.h"
 #include "VideoCommon/ShaderGenCommon.h"
 #include "VideoCommon/VR/OverrideSuppression.h"
+#include "VideoCommon/VR/PatchFlags.h"
 #include "VideoCommon/VertexShaderGen.h"
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
@@ -346,6 +347,29 @@ void ShaderHunter::OnFrameEnd()
   for (const auto& flag : m_flags_seen_this_frame)
     m_flag_age[flag] = 0;
   m_flags_seen_this_frame.clear();
+
+  // Flags raised by VR game patches (the game's state read from memory): the published set,
+  // active until the patch lowers them. Kept apart from the draw flags, which list re-applies
+  // clear.
+  const u64 patch_flags_generation = VR::PatchFlags::GetGeneration();
+  if (patch_flags_generation != m_patch_flags_generation)
+  {
+    m_patch_flags_generation = patch_flags_generation;
+    std::unordered_set<std::string> flags;
+    for (std::string& flag : VR::PatchFlags::Snapshot())
+      flags.insert(std::move(flag));
+    for (const auto& flag : flags)
+    {
+      if (!m_patch_flags.contains(flag))
+        INFO_LOG_FMT(VIDEO, "ShaderHunter: Flag '{}' raised by a VR patch", flag);
+    }
+    for (const auto& flag : m_patch_flags)
+    {
+      if (!flags.contains(flag))
+        INFO_LOG_FMT(VIDEO, "ShaderHunter: Flag '{}' lowered by a VR patch", flag);
+    }
+    m_patch_flags = std::move(flags);
+  }
 
   // Clear debug logging per-frame dedup set
   m_debug_logged_combos.clear();
@@ -1725,7 +1749,19 @@ bool ShaderHunter::IsFlagActive(const std::string& flag_name) const
   std::lock_guard lock(m_mutex);
   if (flag_name.empty())
     return false;
-  return m_flag_age.find(flag_name) != m_flag_age.end();
+  return IsFlagActiveLocked(flag_name);
+}
+
+bool ShaderHunter::IsFlagActiveLocked(const std::string& flag_name) const
+{
+  return m_flag_age.contains(flag_name) || m_patch_flags.contains(flag_name);
+}
+
+std::vector<std::string> ShaderHunter::GetActivePatchFlags() const
+{
+  std::vector<std::string> flags(m_patch_flags.begin(), m_patch_flags.end());
+  std::ranges::sort(flags);
+  return flags;
 }
 
 std::vector<ShaderHunter::FlagStatus> ShaderHunter::GetFlagStatusesForOSD() const
@@ -1738,6 +1774,7 @@ std::vector<ShaderHunter::FlagStatus> ShaderHunter::GetFlagStatusesForOSD() cons
   }
   for (const auto& [flag_name, _] : m_flag_age)
     known_flags.insert(flag_name);
+  known_flags.insert(m_patch_flags.begin(), m_patch_flags.end());
   for (const auto& ovr : m_overrides)
   {
     if (!ovr.condition_flag.empty())
@@ -1750,7 +1787,7 @@ std::vector<ShaderHunter::FlagStatus> ShaderHunter::GetFlagStatusesForOSD() cons
   {
     FlagStatus status;
     status.flag_name = flag_name;
-    status.is_active = m_flag_age.find(flag_name) != m_flag_age.end() ||
+    status.is_active = IsFlagActiveLocked(flag_name) ||
                        m_flags_seen_this_frame.find(flag_name) != m_flags_seen_this_frame.end();
 
     std::unordered_set<std::string> seen_names;
@@ -1814,7 +1851,7 @@ bool ShaderHunter::IsConditionFlagMatch(const ConditionalOverride& cond) const
   if (cond.condition_flag.empty())
     return true;
 
-  const bool is_active = m_flag_age.count(cond.condition_flag) > 0;
+  const bool is_active = IsFlagActiveLocked(cond.condition_flag);
   return cond.condition_inverted ? !is_active : is_active;
 }
 

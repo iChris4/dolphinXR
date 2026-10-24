@@ -862,6 +862,16 @@ std::vector<SettingRequest> PatchScript::TakeSettingRequests()
   return std::exchange(m_context->setting_requests, {});
 }
 
+const std::set<std::string>& PatchScript::GetFlags() const
+{
+  return m_context->flags;
+}
+
+u64 PatchScript::GetFlagsGeneration() const
+{
+  return m_context->flags_generation;
+}
+
 size_t PatchScript::GetMemoryUsed() const
 {
   return m_context->memory_used;

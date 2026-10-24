@@ -13,6 +13,7 @@
 
 #include <array>
 #include <map>
+#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -70,6 +71,10 @@ struct ScriptContext
 
   std::vector<SettingRequest> setting_requests;
   std::map<std::string, std::string> requested_settings;
+
+  // Override flags raised with vr.set_flag (VR::PatchFlags).
+  std::set<std::string> flags;
+  u64 flags_generation = 0;
 };
 
 ScriptContext* GetContext(lua_State* L);

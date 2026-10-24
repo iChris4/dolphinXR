@@ -71,6 +71,12 @@ QString FormatRuntimeElementSummary(const ShaderHunter::RuntimeElementSignature&
                  .arg(sig.ortho_bottom_x100 / 100.0, 0, 'f', 2);
     parts << QObject::tr("Layer: %1").arg(sig.ortho_layer);
   }
+  if (sig.use_load)
+  {
+    parts << (sig.load_max < 0 ?
+                  QObject::tr("Projection Loads: %1 and later").arg(sig.load_min) :
+                  QObject::tr("Projection Loads: %1 to %2").arg(sig.load_min).arg(sig.load_max));
+  }
 
   parts << QObject::tr("Viewport: %1,%2 %3x%4")
                .arg(sig.viewport_x)
@@ -463,6 +469,17 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
   m_runtime_use_viewport_check = new QCheckBox(tr("Viewport"));
   m_runtime_use_scissor_check = new QCheckBox(tr("Scissor"));
   m_runtime_use_render_state_check = new QCheckBox(tr("Render State"));
+  m_runtime_use_load_check = new QCheckBox(tr("Projection Load"));
+  m_runtime_use_load_check->setToolTip(
+      tr("Match the draw's projection load: how many projections its frame loaded before its "
+         "own. For elements drawn with the same projection as others, told apart by their "
+         "order in the frame."));
+  m_runtime_load_label = new QLabel(tr("Projection Loads:"));
+  m_runtime_load_min_spin = new QSpinBox;
+  m_runtime_load_min_spin->setRange(0, 9999);
+  m_runtime_load_max_spin = new QSpinBox;
+  m_runtime_load_max_spin->setRange(-1, 9999);
+  m_runtime_load_max_spin->setSpecialValueText(tr("No limit"));
 
   m_clear_efb_check = new QCheckBox(tr("Clear EFB Copy"));
   m_clear_efb_check->setToolTip(
@@ -555,12 +572,20 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
   runtime_group_row->addWidget(m_runtime_use_viewport_check);
   runtime_group_row->addWidget(m_runtime_use_scissor_check);
   runtime_group_row->addWidget(m_runtime_use_render_state_check);
+  runtime_group_row->addWidget(m_runtime_use_load_check);
+  auto* runtime_load_row = new QHBoxLayout;
+  runtime_load_row->addWidget(m_runtime_load_label);
+  runtime_load_row->addWidget(m_runtime_load_min_spin);
+  runtime_load_row->addWidget(new QLabel(tr("to")));
+  runtime_load_row->addWidget(m_runtime_load_max_spin);
+  runtime_load_row->addStretch();
 
   auto* layout = new QVBoxLayout(this);
   layout->addLayout(form);
   layout->addWidget(m_capture_seed_button);
   layout->addWidget(m_runtime_element_summary_label);
   layout->addLayout(runtime_group_row);
+  layout->addLayout(runtime_load_row);
   auto* selected_match_buttons = new QHBoxLayout;
   selected_match_buttons->addWidget(m_add_current_match_button);
   selected_match_buttons->addWidget(m_remove_selected_match_button);
@@ -595,9 +620,10 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
   connect(m_selected_match_list, &QListWidget::itemSelectionChanged, this, [this]() {
     m_remove_selected_match_button->setEnabled(!m_selected_match_list->selectedItems().empty());
   });
-  for (QCheckBox* checkbox : {m_runtime_use_projection_check, m_runtime_use_projection_type_check,
-                              m_runtime_use_layer_check, m_runtime_use_viewport_check,
-                              m_runtime_use_scissor_check, m_runtime_use_render_state_check})
+  for (QCheckBox* checkbox :
+       {m_runtime_use_projection_check, m_runtime_use_projection_type_check,
+        m_runtime_use_layer_check, m_runtime_use_viewport_check, m_runtime_use_scissor_check,
+        m_runtime_use_render_state_check, m_runtime_use_load_check})
   {
     connect(checkbox, &QCheckBox::toggled, this, [this]() {
       m_runtime_element.use_projection = m_runtime_use_projection_check->isChecked();
@@ -606,6 +632,15 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
       m_runtime_element.use_viewport = m_runtime_use_viewport_check->isChecked();
       m_runtime_element.use_scissor = m_runtime_use_scissor_check->isChecked();
       m_runtime_element.use_render_state = m_runtime_use_render_state_check->isChecked();
+      m_runtime_element.use_load = m_runtime_use_load_check->isChecked();
+      RefreshRuntimeElementSummary();
+    });
+  }
+  for (QSpinBox* spin : {m_runtime_load_min_spin, m_runtime_load_max_spin})
+  {
+    connect(spin, &QSpinBox::valueChanged, this, [this]() {
+      m_runtime_element.load_min = m_runtime_load_min_spin->value();
+      m_runtime_element.load_max = m_runtime_load_max_spin->value();
       RefreshRuntimeElementSummary();
     });
   }
@@ -921,6 +956,8 @@ void ElementsGroupOverrideAddEditDialog::RefreshRuntimeElementSummary()
     groups << tr("Scissor");
   if (m_runtime_element.use_render_state)
     groups << tr("Render State");
+  if (m_runtime_element.use_load)
+    groups << tr("Projection Load");
 
   summary += tr("\nActive Groups: %1")
                  .arg(groups.isEmpty() ? tr("(none)") : groups.join(QStringLiteral(", ")));
@@ -932,12 +969,21 @@ void ElementsGroupOverrideAddEditDialog::RefreshRuntimeElementSummary()
   const QSignalBlocker viewport_blocker(m_runtime_use_viewport_check);
   const QSignalBlocker scissor_blocker(m_runtime_use_scissor_check);
   const QSignalBlocker render_blocker(m_runtime_use_render_state_check);
+  const QSignalBlocker load_blocker(m_runtime_use_load_check);
+  const QSignalBlocker load_min_blocker(m_runtime_load_min_spin);
+  const QSignalBlocker load_max_blocker(m_runtime_load_max_spin);
   m_runtime_use_projection_check->setChecked(m_runtime_element.use_projection);
   m_runtime_use_projection_type_check->setChecked(m_runtime_element.use_projection_type);
   m_runtime_use_layer_check->setChecked(m_runtime_element.use_layer);
   m_runtime_use_viewport_check->setChecked(m_runtime_element.use_viewport);
   m_runtime_use_scissor_check->setChecked(m_runtime_element.use_scissor);
   m_runtime_use_render_state_check->setChecked(m_runtime_element.use_render_state);
+  m_runtime_use_load_check->setChecked(m_runtime_element.use_load);
+  m_runtime_load_min_spin->setValue(m_runtime_element.load_min);
+  m_runtime_load_max_spin->setValue(m_runtime_element.load_max);
+  m_runtime_load_label->setEnabled(m_runtime_element.use_load);
+  m_runtime_load_min_spin->setEnabled(m_runtime_element.use_load);
+  m_runtime_load_max_spin->setEnabled(m_runtime_element.use_load);
 }
 
 void ElementsGroupOverrideAddEditDialog::RefreshHandlingUi()
@@ -1049,6 +1095,10 @@ void ElementsGroupOverrideAddEditDialog::RefreshMatchKindUi()
   m_runtime_use_viewport_check->setVisible(!profile_layer);
   m_runtime_use_scissor_check->setVisible(!profile_layer);
   m_runtime_use_render_state_check->setVisible(!profile_layer);
+  m_runtime_use_load_check->setVisible(!profile_layer);
+  m_runtime_load_label->setVisible(!profile_layer);
+  m_runtime_load_min_spin->setVisible(!profile_layer);
+  m_runtime_load_max_spin->setVisible(!profile_layer);
   m_selected_match_mode_combo->setVisible(!profile_layer);
   m_selected_match_list->setVisible(!profile_layer);
   m_add_current_match_button->setVisible(!profile_layer);
@@ -1077,6 +1127,9 @@ void ElementsGroupOverrideAddEditDialog::CaptureCurrentSeed()
   }
 
   m_runtime_element = status.seed_signature;
+  // The captured draw's own load, ready if the user ticks Projection Load.
+  m_runtime_element.load_min = m_runtime_element.projection_load;
+  m_runtime_element.load_max = m_runtime_element.projection_load;
   RefreshRuntimeElementSummary();
 }
 
@@ -1196,7 +1249,8 @@ void ElementsGroupOverrideAddEditDialog::OnAccept()
   if (result.match_kind == ElementsGroupManager::MatchKind::RuntimeSignature &&
       !result.runtime_element.use_projection && !result.runtime_element.use_projection_type &&
       !result.runtime_element.use_layer && !result.runtime_element.use_viewport &&
-      !result.runtime_element.use_scissor && !result.runtime_element.use_render_state)
+      !result.runtime_element.use_scissor && !result.runtime_element.use_render_state &&
+      !result.runtime_element.use_load)
   {
     QMessageBox::warning(this, tr("Elements Group Override"),
                          tr("Enable at least one runtime signature group."));

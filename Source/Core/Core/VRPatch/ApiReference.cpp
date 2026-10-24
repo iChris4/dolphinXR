@@ -105,6 +105,10 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
   vr.units_per_meter()   -- the profile's world scale (game units per meter)
   vr.haptic(hand, amplitude 0-1 [, seconds])
   vr.setting(key) -> string; vr.set_setting(key, value)   -- the [Graphics.VR] keys, this session
+  vr.set_flag(name [, active]); vr.clear_flags()   -- override flags (condition=<name> in the
+      game's Shader, Elements and Texture overrides): raised until lowered with false or the
+      patch stops; the overrides see a change from the next video frame. Names: 1 to 64 letters,
+      digits, '_', '.', '-'. For the game's state read from memory (a visor, a menu).
 
 pad / wiimote / nunchuk (emulated controllers, port 1-4; held until changed or released, under the
 agent's press_input; names as in Dolphin's controller settings, "Group/Control" when ambiguous)

@@ -236,7 +236,10 @@ void OnEndFrame(u32 head_culled_draws, bool flat_mode)
     s_current->head_culled += head_culled_draws;
     s_current->flat_mode = flat_mode;
     if (++s_current->frames < s_current_target_frames)
+    {
+      s_current->patch_flags.push_back(ShaderHunter::GetInstance().GetActivePatchFlags());
       return;
+    }
 
     std::shared_ptr<const CapturedFrame> done(s_current.release());
     detail::s_capturing = false;
@@ -250,6 +253,8 @@ void OnEndFrame(u32 head_culled_draws, bool flat_mode)
     s_current->id = s_pending_capture_id;
     s_current_target_frames = s_pending_capture_frames;
     s_current->draws.reserve(std::min<size_t>(2048 * s_current_target_frames, 16384));
+    // The ShaderHunter took the patch flags for the coming frame just before this.
+    s_current->patch_flags.push_back(ShaderHunter::GetInstance().GetActivePatchFlags());
     s_pending_capture_id = 0;
     detail::s_capturing = true;
   }
@@ -449,6 +454,28 @@ std::string DescribeRoute(const DrawRecord& draw)
   return "screen pane";
 }
 
+std::string FormatHeadLockedParams(const ShaderHunter::HeadLockedParams& hud)
+{
+  std::string text = hud.perspective ? "3d" : "flat";
+  if (hud.scale > 0.0f)
+    text += fmt::format(" s{:g}", hud.scale);
+  if (hud.width != 1.0f || hud.height != 1.0f)
+    text += fmt::format(" {:g}x{:g}", hud.width, hud.height);
+  if (hud.right != 0.0f || hud.up != 0.0f)
+    text += fmt::format(" +{:g},{:g}", hud.right, hud.up);
+  if (hud.anchor)
+  {
+    text += " anchor";
+    if (std::isfinite(hud.anchor_z_min) || std::isfinite(hud.anchor_z_max))
+      text += fmt::format(" {:g}..{:g}", hud.anchor_z_min, hud.anchor_z_max);
+  }
+  if (hud.self_center)
+    text += " self-centre";
+  if (hud.context != 0)
+    text += fmt::format(" ctx{}", hud.context);
+  return text;
+}
+
 // -0 prints as "-0"; the projection math produces it for zero edges.
 static float WithoutNegativeZero(float value)
 {
@@ -483,6 +510,8 @@ std::string FormatDrawRow(const DrawRecord& draw)
   {
     projection = fmt::format("O x {:.4g}..{:.4g} y {:.4g}..{:.4g}", p[0], p[1], p[2], p[3]);
   }
+  if (draw.projection_load >= 0)
+    projection += fmt::format(" L{}", draw.projection_load);
 
   std::string textures;
   for (const u64 texture : draw.textures)
@@ -495,11 +524,9 @@ std::string FormatDrawRow(const DrawRecord& draw)
   if (draw.handling_source != HandlingSource::None)
     handling += fmt::format("({})", GetHandlingSourceName(draw.handling_source));
   if (!draw.metroid_layer.empty())
-  {
-    handling += fmt::format(
-        " [{}{}]", draw.metroid_layer,
-        draw.projection_load >= 0 ? fmt::format(" load {}", draw.projection_load) : std::string());
-  }
+    handling += fmt::format(" [{}]", draw.metroid_layer);
+  if (draw.headlocked)
+    handling += fmt::format(" {{{}}}", FormatHeadLockedParams(*draw.headlocked));
 
   std::string depth_blend = draw.ztest ? "zt" : "";
   if (draw.zupdate)
@@ -536,6 +563,11 @@ std::string FormatDrawDetails(const DrawRecord& draw)
     text += fmt::format("Projection: orthographic left {:.1f} right {:.1f} top {:.1f} bottom "
                         "{:.1f} near {:.4g} far {:.4g}\n",
                         p[0], p[1], p[2], p[3], p[4], p[5]);
+  }
+  if (draw.projection_load >= 0)
+  {
+    text += fmt::format("Projection load: {} (loads before it in the frame; sig_use_load)\n",
+                        draw.projection_load);
   }
   text += fmt::format("Viewport: center {:.1f},{:.1f} half size {:.1f}x{:.1f} ({})\n",
                       draw.viewport_x, draw.viewport_y, draw.viewport_wd, draw.viewport_ht,
@@ -597,12 +629,19 @@ std::string FormatDrawDetails(const DrawRecord& draw)
                           fmt::format(" (from {})", GetHandlingSourceName(draw.handling_source)) :
                           "");
   if (!draw.metroid_layer.empty())
+    text += fmt::format("Metroid layer: {}\n", draw.metroid_layer);
+  if (draw.headlocked)
   {
-    text +=
-        fmt::format("Metroid layer: {}{}\n", draw.metroid_layer,
-                    draw.projection_load >= 0 ?
-                        fmt::format(" (projection load {} of the frame)", draw.projection_load) :
-                        std::string());
+    const ShaderHunter::HeadLockedParams& hud = *draw.headlocked;
+    text += fmt::format(
+        "Head-locked HUD: {}, units per meter x{}, projection {}x{} shifted {},{}{}{}, context "
+        "{}\n",
+        hud.perspective ? "3D (headlocked_mode=perspective)" : "flat",
+        hud.scale > 0.0f ? hud.scale : 1.0f, hud.width, hud.height, hud.right, hud.up,
+        hud.anchor ? fmt::format(", depth anchor (origin view z {} to {})", hud.anchor_z_min,
+                                 hud.anchor_z_max) :
+                     std::string(),
+        hud.self_center ? ", self-centred" : "", hud.context);
   }
   if (draw.element_depth >= 0.0f)
     text += fmt::format("Element depth: {}\n", draw.element_depth);

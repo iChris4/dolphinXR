@@ -132,6 +132,8 @@ public:
     float screen_pane_reference_depth = -1.0f;
     float screen_pane_depth_strength = 1.0f;
     float passthrough_opacity = 0.0f;  // Passthrough handling: element opacity (0 = fully camera)
+    // HeadLocked handling: the hud_* / headlocked_mode keys; unset = plain head-locked.
+    std::optional<ShaderHunter::HeadLockedParams> headlocked;
     // CameraAnchor handling: camera-space offset from the anchor element's origin (meters,
     // right/up/forward, converted with units-per-meter and mapped to view-space axes at capture
     // time) and whether to hide the anchor element itself (e.g. the head mesh in first person).
@@ -299,6 +301,8 @@ public:
     float passthrough_opacity = 0.0f;
     CameraAnchorParams camera_anchor;
     ControllerAnchorParams controller_anchor;
+    // HeadLocked handling: the parameters of the entry that chose it, when it has any.
+    std::optional<ShaderHunter::HeadLockedParams> headlocked;
   };
   DrawResolution ResolveOverrides(const DrawRecord& draw);
 
@@ -329,8 +333,11 @@ private:
   bool DoesTextureFilterPass(const DrawRecord& draw, const ElementGroupOverride& entry) const;
 
   bool ShouldSkipByOverrideLocked(const DrawRecord& draw) const;
-  HandlingType GetOverrideHandlingLocked(const DrawRecord& draw,
-                                         bool* out_preserve_stereo_efb) const;
+  HandlingType GetOverrideHandlingLocked(const DrawRecord& draw, bool* out_preserve_stereo_efb,
+                                         const ElementGroupOverride** out_entry = nullptr) const;
+  // The entry that gives the draw its handling: the first enabled, matching entry that is not a
+  // Skip or a Flag. nullptr when none matches.
+  const ElementGroupOverride* FindHandlingOverrideLocked(const DrawRecord& draw) const;
   // The first enabled ScreenPane override matching the draw, or nullptr. *out_group_id is its
   // index + 1 (0 when none matches).
   const ElementGroupOverride* FindScreenPaneOverrideLocked(const DrawRecord& draw,

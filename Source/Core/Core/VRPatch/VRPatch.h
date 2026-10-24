@@ -83,6 +83,8 @@ struct PatchInfo
   double average_us = 0;
   double max_us = 0;
   size_t memory_bytes = 0;
+  // The override flags it raises (vr.set_flag).
+  std::vector<std::string> flags;
 };
 
 // The patches found for the game (Sys and User folders, live agent sources), sorted by id.

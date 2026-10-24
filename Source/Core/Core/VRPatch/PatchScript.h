@@ -8,6 +8,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -139,6 +140,9 @@ public:
   u64 GetPadHoldsGeneration() const;
   // Requests made by vr.set_setting since the last call.
   std::vector<SettingRequest> TakeSettingRequests();
+  // The override flags raised with vr.set_flag, and a counter that changes with them.
+  const std::set<std::string>& GetFlags() const;
+  u64 GetFlagsGeneration() const;
 
   size_t GetMemoryUsed() const;
   // Microseconds the last call took.

@@ -40,6 +40,7 @@
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/VRSettingsTable.h"
 #include "VideoCommon/VR/OverrideSuppression.h"
+#include "VideoCommon/VR/PatchFlags.h"
 
 namespace VRPatch
 {
@@ -257,6 +258,7 @@ struct Published
   double max_us = 0;
   size_t memory_bytes = 0;
   std::deque<LogLine> log;
+  std::vector<std::string> flags;
 };
 
 struct Command
@@ -304,6 +306,8 @@ public:
   u64 pad_signature = 0;
   std::set<std::pair<PadDevice, u8>> attach_failures;
   EmulatedPadResolver pad_resolver;
+  // The flags published to VR::PatchFlags: a signature of the patches' flag generations.
+  u64 flags_signature = 0;
 };
 
 Manager& GetManager()
@@ -373,6 +377,9 @@ void Publish(const RunningPatch& patch)
   published.average_us = patch.average_us;
   published.max_us = patch.max_us;
   published.memory_bytes = patch.script ? patch.script->GetMemoryUsed() : 0;
+  published.flags.clear();
+  if (patch.script)
+    published.flags.assign(patch.script->GetFlags().begin(), patch.script->GetFlags().end());
 }
 
 void PublishStopped(const std::string& id, PatchState state, std::string status)
@@ -570,6 +577,30 @@ void UpdatePadHolds()
     AI::Hold(AI::Layer::Patch, ToAgentDevice(target.first), target.second, controls);
   }
   m.pad_holds = std::move(holds);
+}
+
+// Publishes the flags the running patches raise (vr.set_flag) for the override managers.
+void UpdatePatchFlags()
+{
+  Manager& m = GetManager();
+  u64 signature = 0;
+  for (const auto& patch : m.patches)
+  {
+    if (patch->script && patch->state == PatchState::Running)
+      signature = signature * 31 + patch->script->GetFlagsGeneration() + 1;
+  }
+  signature = signature * 31 + m.patches.size();
+  if (signature == m.flags_signature)
+    return;
+  m.flags_signature = signature;
+
+  std::vector<std::string> flags;
+  for (const auto& patch : m.patches)
+  {
+    if (patch->script && patch->state == PatchState::Running)
+      flags.insert(flags.end(), patch->script->GetFlags().begin(), patch->script->GetFlags().end());
+  }
+  VR::PatchFlags::Set(std::move(flags));
 }
 
 void ApplySettingRequests(RunningPatch& patch)
@@ -995,6 +1026,7 @@ void RunHooks(const ScriptEnvironment& env, bool frame_hooks)
   }
   DropStopped();
   UpdatePadHolds();
+  UpdatePatchFlags();
 }
 
 void HandleBlockReason(Core::System& system, const ScriptEnvironment& env)
@@ -1011,6 +1043,7 @@ void HandleBlockReason(Core::System& system, const ScriptEnvironment& env)
     m.patches.clear();
     UpdateSharedState();
     UpdatePadHolds();
+    UpdatePatchFlags();
     return;
   }
   Queue({Command::Type::SyncAll, {}, true});
@@ -1067,6 +1100,7 @@ void RunFrame(const Core::CPUThreadGuard& guard)
   {
     // The last patch stopped: its controller holds go.
     UpdatePadHolds();
+    UpdatePatchFlags();
   }
   std::lock_guard lock(m.mutex);
   m.has_work.store(!m.patches.empty() || !m.commands.empty(), std::memory_order_release);
@@ -1091,6 +1125,8 @@ void OnGameUnloaded(const Core::CPUThreadGuard* guard)
     AgentServer::AgentInput::Detach(AgentServer::AgentInput::Layer::Patch);
   Gecko::SetVRPatchRegion({});
   VR::OverrideSuppression::Set({});
+  VR::PatchFlags::Set({});
+  m.flags_signature = 0;
   std::lock_guard lock(m.mutex);
   m.game_running = false;
   m.commands.clear();
@@ -1188,6 +1224,7 @@ std::vector<PatchInfo> ListPatches(const std::string& game_id, std::optional<u16
       info.average_us = it->second.average_us;
       info.max_us = it->second.max_us;
       info.memory_bytes = it->second.memory_bytes;
+      info.flags = it->second.flags;
     }
     else if (info.enabled)
     {

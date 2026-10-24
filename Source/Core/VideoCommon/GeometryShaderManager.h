@@ -118,21 +118,24 @@ public:
   // Per-draw UPM override from shader overrides (-1 = use global setting).
   float vr_units_per_meter_override = -1.0f;
 
-  // Per-draw headlocked projection tuning for Hydra-style HUD layers.
+  // Per-draw headlocked projection tuning (an entry's hud_width/height/right/up).
   float vr_headlocked_projection_scale_x = 1.0f;
   float vr_headlocked_projection_scale_y = 1.0f;
   float vr_headlocked_projection_offset_x = 0.0f;
   float vr_headlocked_projection_offset_y = 0.0f;
 
-  // Set by VertexManagerBase for the current -3 (perspective HUD) draw: true for radar/minimap
-  // layers that must self-centre on their own origin depth instead of the shared per-frame
-  // reference (see SetConstants).
-  bool vr_metroid_hud_self_center = false;
+  // Set by VertexManagerBase for the current -3 (perspective HUD) draw from its entry
+  // (ShaderHunter::HeadLockedParams): a radar or minimap that self-centres on its own origin
+  // depth instead of the shared per-frame reference (see SetConstants).
+  bool vr_hud_self_center = false;
 
-  // Set by VertexManagerBase for stable Metroid perspective-HUD body layers.  Transient combat
-  // reticle/menu pieces can move during free-aim and must not become the shared depth anchor.
-  bool vr_metroid_hud_anchor_candidate = false;
-  int vr_metroid_hud_reference_context = 0;
+  // A stable perspective-HUD body piece that may give the shared reference depth when its
+  // origin's view z is within [vr_hud_anchor_z_min, vr_hud_anchor_z_max]. Transient reticle or
+  // menu pieces move during free-aim and must not become the anchor.
+  bool vr_hud_anchor_candidate = false;
+  float vr_hud_anchor_z_min = -std::numeric_limits<float>::infinity();
+  float vr_hud_anchor_z_max = std::numeric_limits<float>::infinity();
+  int vr_hud_reference_context = 0;
 
 private:
   // OpenXR projection rows for one world scale, all built from the same pose.
