@@ -75,6 +75,7 @@ private:
   ConfigBool* m_nonblocking_perf_queries = nullptr;
   ConfigBool* m_ortho_scissor_fix = nullptr;
   ConfigBool* m_layered_palette_conversion_path = nullptr;
+  ConfigBool* m_gaze_ram_copies = nullptr;
   ConfigChoiceMap<OpenXRMirrorView>* m_mirror_view = nullptr;
   ConfigChoiceMap<int>* m_forced_vbi_frequency = nullptr;
   ConfigSlider* m_clear_efb_slider = nullptr;

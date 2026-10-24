@@ -257,6 +257,12 @@ private:
       if (touched)
         touched->Add(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX.GetLocation());
     }
+    MenuWidgets::Checkbox(
+        "Screen Read-Backs Follow the Gaze",
+        "Some games find what is under their reticle by reading back a small block at the centre "
+        "of the screen (Metroid Prime 2's scan visor). This reads it where you look straight "
+        "ahead instead of at the left eye's image centre. Turn it on per game.",
+        Config::GFX_VR_GAZE_RAM_COPIES, touched);
   }
 
   static void DrawRendering(MenuWidgets::TouchedKeys* touched)

@@ -1801,9 +1801,9 @@ void VertexManagerBase::Flush()
               handling = ShaderHunter::HandlingType::Fullscreen;
               handling_source = 4;
             }
-            // The scene's projection, which TextureCacheBase needs to aim Prime 2's scan copies.
-            if (handling == ShaderHunter::HandlingType::Skip && metroid_metrics.perspective &&
-                ClassifiesPerProjectionLoad(metroid_profile))
+            // The scene's projection, which TextureCacheBase needs to aim GazeRamCopies.
+            if (handling == ShaderHunter::HandlingType::Skip && g_ActiveConfig.vr_gaze_ram_copies &&
+                xfmem.projection.type == ProjectionType::Perspective)
             {
               m_vr_scene_projection = xfmem.projection.rawProjection;
             }

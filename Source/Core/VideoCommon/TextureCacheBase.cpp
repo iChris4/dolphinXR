@@ -129,16 +129,17 @@ static bool IsMetroidPrime3Wii()
 }
 
 #ifdef ENABLE_VR
-// Metroid Prime 2 GC finds the object under its scan reticle by copying a small block at the
-// centre of the EFB to RAM (color and depth) and reading it back. In VR the EFB holds the left
-// eye's wider and off-centre view, so its centre is not where the user looks: objects were
-// scanned only when the head pointed to their right. Read the block where the eye's image shows
-// the direction straight ahead of the head, where the head-locked HUD shows the reticle.
+// GazeRamCopies: some games find the object under their reticle by copying a small block at the
+// centre of the EFB to RAM and reading it back (Metroid Prime 2 GC's scan visor: colour and
+// depth). In VR the EFB holds the left eye's wider and off-centre view, so its centre is not where
+// the user looks: objects were scanned only when the head pointed to their right. Read the block
+// where the eye's image shows the direction straight ahead of the head, where a head-locked HUD
+// shows the reticle.
 static std::optional<MathUtil::Rectangle<int>>
 GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
 {
   if (resolved_data.is_xfb || g_ActiveConfig.stereo_mode != StereoMode::OpenXR ||
-      g_ActiveConfig.vr_flat_screen || !IsMetroidPrime2GC() || !VR::g_openxr ||
+      g_ActiveConfig.vr_flat_screen || !g_ActiveConfig.vr_gaze_ram_copies || !VR::g_openxr ||
       !VR::g_openxr->IsSessionRunning())
   {
     return std::nullopt;

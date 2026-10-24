@@ -292,6 +292,10 @@ extern const Info<bool> GFX_VR_DETECT_SKYBOX;
 extern const Info<bool> GFX_VR_SKIP_BACKGROUND_FILL;
 extern const Info<bool> GFX_VR_METROID_THERMAL_VISOR_FIX;
 extern const Info<bool> GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX;
+// EFB copies to RAM of small blocks centred on the screen are read where the head looks, not at
+// the left eye's image centre: games that find what is under their reticle by reading the screen
+// back (Metroid Prime 2's scan visor). Per game.
+extern const Info<bool> GFX_VR_GAZE_RAM_COPIES;
 extern const Info<bool> GFX_VR_PASSTHROUGH;
 // Passthrough around the flat screen. On by default; the in-game VR menu changes it for the
 // session only, and turning the flat screen off from the menu resets it.

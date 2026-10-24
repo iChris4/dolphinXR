@@ -286,6 +286,7 @@ const Info<bool> GFX_VR_METROID_THERMAL_VISOR_FIX{
     {System::GFX, "VR", "MetroidThermalVisorFix"}, true};
 const Info<bool> GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX{
     {System::GFX, "VR", "MetroidD3DThermalPaletteFix"}, true};
+const Info<bool> GFX_VR_GAZE_RAM_COPIES{{System::GFX, "VR", "GazeRamCopies"}, false};
 const Info<bool> GFX_VR_PASSTHROUGH{{System::GFX, "VR", "Passthrough"}, false};
 const Info<bool> GFX_VR_FLAT_SCREEN_PASSTHROUGH{{System::GFX, "VR", "FlatScreenPassthrough"}, true};
 const Info<bool> GFX_VR_PASSTHROUGH_REMOVE_BLACK_BG{

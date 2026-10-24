@@ -195,7 +195,7 @@ public:
   void OnProjectionLoaded() { m_projection_load_pending = true; }
 
   // The projection of the last perspective draw of the 3D scene: rendered stereo from the
-  // head, not head-locked or moved to a screen. Recorded for the Metroid Prime 2 GC profile only.
+  // head, not head-locked or moved to a screen. Recorded only with GazeRamCopies.
   const std::optional<std::array<float, 6>>& GetVRSceneProjection() const
   {
     return m_vr_scene_projection;

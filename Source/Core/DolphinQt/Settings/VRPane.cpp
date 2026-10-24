@@ -488,6 +488,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
             update_layered_palette_conversion_path(checked);
           });
   update_layered_palette_conversion_path(m_layered_palette_conversion_path->isChecked());
+  m_gaze_ram_copies =
+      new ConfigBool(tr("Screen Read-Backs Follow the Gaze"), Config::GFX_VR_GAZE_RAM_COPIES);
 
   hacks_group_layout->addWidget(m_use_vulkan_multiview);
   hacks_group_layout->addWidget(m_dont_clear_screen);
@@ -503,6 +505,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hacks_group_layout->addWidget(m_detect_skybox);
   hacks_group_layout->addWidget(m_skip_background_fill);
   hacks_group_layout->addWidget(m_layered_palette_conversion_path);
+  hacks_group_layout->addWidget(m_gaze_ram_copies);
   hack_layout->addWidget(hacks_group);
   hack_layout->addWidget(framerate_group);
 
@@ -815,6 +818,13 @@ void VRPane::AddDescriptions()
       "<br><br>This only changes palette conversion for Metroid Prime thermal-sized stereo EFB "
       "copies. It does not change normal game shaders, X-Ray handling, or non-Metroid games."
       "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
+  static constexpr char TR_GAZE_RAM_COPIES_DESCRIPTION[] = QT_TR_NOOP(
+      "Some games find what is under their reticle by copying a small block at the centre of the "
+      "screen to memory and reading it back, such as Metroid Prime 2's scan visor. In VR the "
+      "screen they copy is the left eye's wider view, whose centre is not where you look."
+      "<br><br>This reads such centred blocks where the headset looks straight ahead instead, "
+      "where a head-locked HUD shows the reticle. Turn it on per game."
+      "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static constexpr char TR_VR_GAMMA_DESCRIPTION[] = QT_TR_NOOP(
       "Adjusts gamma correction for VR eye output."
       "<br><br>1.0 = no correction (default). 2.2 = standard sRGB gamma. "
@@ -893,6 +903,7 @@ void VRPane::AddDescriptions()
   m_ortho_scissor_fix->SetDescription(tr(TR_ORTHO_SCISSOR_FIX_DESCRIPTION));
   m_detect_skybox->SetDescription(tr(TR_DETECT_SKYBOX_DESCRIPTION));
   m_skip_background_fill->SetDescription(tr(TR_SKIP_BACKGROUND_FILL_DESCRIPTION));
+  m_gaze_ram_copies->SetDescription(tr(TR_GAZE_RAM_COPIES_DESCRIPTION));
   m_layered_palette_conversion_path->SetDescription(
       tr(TR_LAYERED_PALETTE_CONVERSION_PATH_DESCRIPTION));
   m_vr_gamma->SetDescription(tr(TR_VR_GAMMA_DESCRIPTION));
@@ -1038,6 +1049,8 @@ void VRPane::ResetGeneralSettings()
                            Config::GFX_VR_METROID_THERMAL_VISOR_FIX.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX,
                            Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_GAZE_RAM_COPIES,
+                           Config::GFX_VR_GAZE_RAM_COPIES.GetDefaultValue());
 
   // Advanced tab
   Config::SetBaseOrCurrent(Config::GFX_VR_USE_VULKAN_MULTIVIEW,

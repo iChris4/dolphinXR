@@ -278,6 +278,7 @@ void VideoConfig::Refresh()
   vr_metroid_thermal_visor_fix = Config::Get(Config::GFX_VR_METROID_THERMAL_VISOR_FIX);
   vr_metroid_d3d_thermal_palette_fix =
       Config::Get(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX);
+  vr_gaze_ram_copies = Config::Get(Config::GFX_VR_GAZE_RAM_COPIES);
   vr_passthrough = Config::Get(Config::GFX_VR_PASSTHROUGH);
   vr_flat_screen_passthrough = Config::Get(Config::GFX_VR_FLAT_SCREEN_PASSTHROUGH);
   vr_passthrough_remove_black_bg = Config::Get(Config::GFX_VR_PASSTHROUGH_REMOVE_BLACK_BG);

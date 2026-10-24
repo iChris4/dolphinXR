@@ -309,6 +309,8 @@ void VRConfigWidget::CreateWidgets()
       make_bool(tr("Skip Background Fill"), Config::GFX_VR_SKIP_BACKGROUND_FILL));
   hacks_group_layout->addWidget(
       make_bool(tr("Layered Palette Conversion Path"), Config::GFX_VR_METROID_THERMAL_VISOR_FIX));
+  hacks_group_layout->addWidget(
+      make_bool(tr("Screen Read-Backs Follow the Gaze"), Config::GFX_VR_GAZE_RAM_COPIES));
 
   auto* framerate_group = new QGroupBox(tr("Framerate"));
   auto* framerate_layout = new QGridLayout(framerate_group);

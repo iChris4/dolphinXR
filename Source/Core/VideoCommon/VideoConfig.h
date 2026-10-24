@@ -428,6 +428,8 @@ struct VideoConfig final
   bool vr_detect_skybox = false;     // Treat objects drawn at camera origin (0,0,0) as skyboxes
   bool vr_metroid_thermal_visor_fix = false;  // Preserve thermal EFB copy layers for MP1 Vulkan
   bool vr_metroid_d3d_thermal_palette_fix = false;  // Layered MP1 thermal palette conversion on D3D11
+  // Centred EFB copies to RAM read where the head looks (GFX_VR_GAZE_RAM_COPIES).
+  bool vr_gaze_ram_copies = false;
   bool vr_passthrough = false;  // Show the headset camera feed behind unrendered (transparent) areas
   // Show the headset camera feed around the flat screen (GFX_VR_FLAT_SCREEN_PASSTHROUGH).
   bool vr_flat_screen_passthrough = true;

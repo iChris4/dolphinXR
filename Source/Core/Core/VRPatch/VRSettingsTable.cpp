@@ -82,6 +82,7 @@ const std::vector<VRSetting>& GetVRSettings()
       Entry(Config::GFX_VR_SKIP_BACKGROUND_FILL),
       Entry(Config::GFX_VR_METROID_THERMAL_VISOR_FIX),
       Entry(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX),
+      Entry(Config::GFX_VR_GAZE_RAM_COPIES, "centred RAM copies read where the head looks"),
       Entry(Config::GFX_VR_CLEAR_EFB_COPIES, "EFB copy width threshold, 0 = off"),
       Entry(Config::GFX_VR_GAMMA),
       Entry(Config::GFX_VR_USE_VULKAN_MULTIVIEW, "restart the game"),
