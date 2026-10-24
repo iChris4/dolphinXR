@@ -13,7 +13,11 @@ if(ENABLE_VR)
   if(NOT MSVC)
     target_compile_options(AgentServerTest PRIVATE -fexceptions)
   endif()
-  add_dolphin_test(VRPatchTest VRPatch/ArmCannonPatchTest.cpp VRPatch/VRPatchTest.cpp)
+  add_dolphin_test(VRPatchTest
+    VRPatch/ArmCannonPatchTest.cpp
+    VRPatch/MetroidStatePatchTest.cpp
+    VRPatch/VRPatchTest.cpp
+  )
 endif()
 add_dolphin_test(PageFaultTest PageFaultTest.cpp)
 add_dolphin_test(CoreTimingTest CoreTimingTest.cpp)
