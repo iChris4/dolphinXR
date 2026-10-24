@@ -7,6 +7,8 @@
 #include <cmath>
 #include <optional>
 
+#include <fmt/format.h>
+
 #include "Core/VRPatch/MemoryAccess.h"
 #include "Core/VRPatch/ScriptContext.h"
 
@@ -17,10 +19,52 @@ namespace
 constexpr int MAX_FLOATS = 64;
 constexpr lua_Integer MAX_WORDS = 4096;
 
+// Low memory (physical 0 to 0x3100) holds the OS globals, the exception vectors and the Gecko code
+// handler with its code list. A patch writes there only inside its scratch memory and its
+// manifest's reserve ranges: a cave longer than its scratch ran past 0x80003000 into the OS
+// globals, and the game died in __OSUnhandledException a few frames later.
+constexpr u64 LOW_MEMORY_END = 0x3100;
+
 MemoryAccess* Memory(lua_State* L)
 {
   const ScriptContext* context = GetContext(L);
   return context->env ? context->env->memory : nullptr;
+}
+
+// The physical address of a cached (0x8...) or uncached (0xC...) one.
+u64 Physical(u32 address)
+{
+  return address & 0x3FFFFFFF;
+}
+
+// False, with the message in context->text, when a write of `size` bytes at `address` would touch
+// low memory outside the patch's own blocks. Raise the error from the binding after it returns.
+bool CheckLowMemory(ScriptContext* context, const char* function, u32 address, u64 size)
+{
+  const u64 start = Physical(address);
+  const u64 end = start + size;
+  if (address < 0x80000000 || start >= LOW_MEMORY_END)
+    return true;
+  const auto inside = [&](u32 block, u64 block_size) {
+    return block_size != 0 && start >= Physical(block) && end <= Physical(block) + block_size;
+  };
+  const ScriptEnvironment* env = context->env;
+  if (env && inside(env->scratch_base, env->scratch_size))
+    return true;
+  for (const AddressRange& range : context->manifest.reserve)
+  {
+    if (range.end > range.start && inside(range.start, range.end - range.start))
+      return true;
+  }
+  const std::string scratch =
+      env && env->scratch_size != 0 ?
+          fmt::format("its scratch memory {:08X}-{:08X}", env->scratch_base,
+                      static_cast<u64>(env->scratch_base) + env->scratch_size) :
+          std::string("its scratch memory (none)");
+  context->text = fmt::format("mem.{}: {:08X}-{:08X} is in low memory (OS globals, exception "
+                              "vectors, Gecko code handler), outside {} and its reserve ranges",
+                              function, address, static_cast<u64>(address) + size, scratch);
+  return false;
 }
 
 u32 CheckAddress(lua_State* L, int arg)
@@ -153,8 +197,14 @@ int MemF32s(lua_State* L)
 template <int Bytes>
 int MemWrite(lua_State* L)
 {
+  static constexpr const char* NAME = Bytes == 1 ? "write_u8" :
+                                      Bytes == 2 ? "write_u16" :
+                                                   "write_u32";
   const u32 address = CheckAddress(L, 1);
   const u64 value = CheckWord(L, 2);
+  ScriptContext* context = GetContext(L);
+  if (!CheckLowMemory(context, NAME, address, Bytes))
+    return luaL_error(L, "%s", context->text.c_str());
   MemoryAccess* memory = Memory(L);
   bool ok = false;
   if (memory)
@@ -174,6 +224,9 @@ int MemWriteF32(lua_State* L)
 {
   const u32 address = CheckAddress(L, 1);
   const double value = luaL_checknumber(L, 2);
+  ScriptContext* context = GetContext(L);
+  if (!CheckLowMemory(context, "write_f32", address, 4))
+    return luaL_error(L, "%s", context->text.c_str());
   if (!std::isfinite(value) || !std::isfinite(static_cast<float>(value)))
   {
     WarnNonFinite(L);
@@ -190,6 +243,9 @@ int MemWriteF64(lua_State* L)
 {
   const u32 address = CheckAddress(L, 1);
   const double value = luaL_checknumber(L, 2);
+  ScriptContext* context = GetContext(L);
+  if (!CheckLowMemory(context, "write_f64", address, 8))
+    return luaL_error(L, "%s", context->text.c_str());
   if (!std::isfinite(value))
   {
     WarnNonFinite(L);
@@ -220,6 +276,9 @@ int MemWriteF32s(lua_State* L)
       return 1;
     }
   }
+  ScriptContext* context = GetContext(L);
+  if (!CheckLowMemory(context, "write_f32s", address, static_cast<u64>(count) * 4))
+    return luaL_error(L, "%s", context->text.c_str());
   MemoryAccess* memory = Memory(L);
   bool ok = memory != nullptr && memory->IsRAM(address, static_cast<u32>(count) * 4);
   for (int i = 0; ok && i < count; ++i)
@@ -386,8 +445,11 @@ int MemWriteCode(lua_State* L)
 {
   const u32 address = CheckAddress(L, 1);
   CheckWords(L, 2);
+  ScriptContext* context = GetContext(L);
+  if (!CheckLowMemory(context, "write_code", address, context->words.size() * 4))
+    return luaL_error(L, "%s", context->text.c_str());
   MemoryAccess* memory = Memory(L);
-  const int written = memory ? WriteCode(*memory, address, GetContext(L)->words, false) : -1;
+  const int written = memory ? WriteCode(*memory, address, context->words, false) : -1;
   lua_pushboolean(L, written >= 0);
   return 1;
 }
@@ -398,8 +460,11 @@ int MemEnsureCode(lua_State* L)
 {
   const u32 address = CheckAddress(L, 1);
   CheckWords(L, 2);
+  ScriptContext* context = GetContext(L);
+  if (!CheckLowMemory(context, "ensure_code", address, context->words.size() * 4))
+    return luaL_error(L, "%s", context->text.c_str());
   MemoryAccess* memory = Memory(L);
-  const int written = memory ? WriteCode(*memory, address, GetContext(L)->words, true) : -1;
+  const int written = memory ? WriteCode(*memory, address, context->words, true) : -1;
   if (written < 0)
     lua_pushnil(L);
   else

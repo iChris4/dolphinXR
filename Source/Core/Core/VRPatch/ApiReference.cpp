@@ -31,7 +31,8 @@ patch = {
     {name = "beams", type = "bool", default = true, description = "..."},
   },
   scratch = 0x100,             -- bytes of free memory for the patch: mem.scratch (16-aligned)
-  reserve = {{0x80002300, 0x80002400}},  -- fixed addresses it writes (caves), for conflict checks
+  reserve = {{0x80002300, 0x80002400}},  -- fixed addresses it writes (caves): conflict checks, and
+                                          -- the low memory it may write besides its scratch
   gecko = {"C2xxxxxx 00000002", "..."},  -- Gecko lines installed while the patch runs
   conflicts = {texture = {"Cannon"}},     -- VR overrides (shader/elements/texture names) turned
                                           -- off while it runs (a visual anchor it replaces)
@@ -69,6 +70,9 @@ mem (emulated memory, big-endian, RAM only; reads return nil when the address is
   mem.ensure_patches({{address, word}, ...}) -> changed
   mem.scratch, mem.scratch_size   -- the patch's scratch block (0 when the manifest asks none)
   mem.hex(value) -> "8045A1A8"
+  A write below 0x80003100 (the OS globals, exception vectors and Gecko code handler; also through
+  0xC0000000) is an error unless it is inside mem.scratch .. mem.scratch + mem.scratch_size or a
+  reserve range: check that an assembled cave fits its scratch before writing it.
 
 asm
   asm.assemble(text, base) -> {words} or nil, error   -- Gekko assembly, extended mnemonics,

@@ -229,14 +229,14 @@ TEST(VRPatch, StopsRunawayCalls)
   limits.max_milliseconds = 20;
   PatchScript script("loop", limits);
   ASSERT_TRUE(h.Load(script, "n = 0\nfunction on_frame() n = n + 1 while true do end end\n"
-                             "function on_unload() mem.write_u32(0x80001000, n) end"))
+                             "function on_unload() mem.write_u32(0x80010000, n) end"))
       << script.Error();
   EXPECT_FALSE(script.Call(Hook::OnFrame, h.env));
   EXPECT_NE(script.Error().find("too long"), std::string::npos) << script.Error();
   // The state stays usable after an abort.
   EXPECT_FALSE(script.Call(Hook::OnFrame, h.env));
   EXPECT_TRUE(script.Call(Hook::OnUnload, h.env)) << script.Error();
-  EXPECT_EQ(h.memory.Get32(0x80001000), 2u);
+  EXPECT_EQ(h.memory.Get32(0x80010000), 2u);
 }
 
 TEST(VRPatch, CapsMemory)
@@ -319,6 +319,39 @@ TEST(VRPatch, WritesCode)
   EXPECT_EQ(h.memory.invalidations[1], std::make_pair(0x80040010u, 4u));
 }
 
+TEST(VRPatch, GuardsLowMemory)
+{
+  // Low memory (OS globals, exception vectors, Gecko code handler) takes writes only in the
+  // patch's scratch memory (80002F00-80003000 here) and its reserve ranges.
+  const auto error_of = [](const std::string& body) {
+    Harness h;
+    PatchScript script("low");
+    EXPECT_TRUE(h.Load(script, "patch = {title = 'Low', reserve = {{0x80001800, 0x80001810}}}\n"
+                               "function on_frame()\n" +
+                                   body + "\nend"))
+        << script.Error();
+    return script.Call(Hook::OnFrame, h.env) ? std::string() : script.Error();
+  };
+  EXPECT_EQ(error_of("assert(mem.write_u32(mem.scratch + 0xFC, 1))"), "");
+  EXPECT_EQ(error_of("assert(mem.write_mat34(mem.scratch + 0xC0, mat34.identity()))"), "");
+  EXPECT_EQ(error_of("assert(mem.ensure_code(0x80001800, {0x60000000, 0x60000000}))"), "");
+  EXPECT_EQ(error_of("assert(mem.write_code(0x80004000, 0x60000000))"), "");
+
+  // A cave that does not fit its scratch: the error names the range, the scratch and the line.
+  const std::string over = error_of("mem.ensure_code(mem.scratch + 0xF8, {0, 0, 0})");
+  EXPECT_NE(over.find("mem.ensure_code: 80002FF8-80003004 is in low memory"), std::string::npos)
+      << over;
+  EXPECT_NE(over.find("80002F00-80003000"), std::string::npos) << over;
+  EXPECT_NE(over.find("low.lua:3:"), std::string::npos) << over;
+
+  EXPECT_NE(error_of("mem.write_u32(0x800030E4, 0)"), "");            // OS globals
+  EXPECT_NE(error_of("mem.write_code(0x80000300, 0x4C000064)"), "");  // an exception vector
+  EXPECT_NE(error_of("mem.write_f32s(0x8000180C, 1, 2)"), "");        // past the reserve range
+  EXPECT_NE(error_of("mem.write_vec3(mem.scratch + 0xF8, vec3(1, 2, 3))"), "");
+  EXPECT_NE(error_of("mem.ensure_patches({{0x80002E00, 0x60000000}})"), "");
+  EXPECT_NE(error_of("mem.write_u8(0xC0003000, 0)"), "");  // the uncached mirror
+}
+
 TEST(VRPatch, NoMemoryMeansNil)
 {
   Harness h;
@@ -326,8 +359,8 @@ TEST(VRPatch, NoMemoryMeansNil)
   PatchScript script("nomem");
   ASSERT_TRUE(h.Load(script, R"(
     function on_unload()
-      assert(mem.u32(0x80001000) == nil and mem.write_u32(0x80001000, 1) == false)
-      assert(mem.ensure_code(0x80001000, 0) == nil and mem.mat34(0x80001000) == nil)
+      assert(mem.u32(0x80010000) == nil and mem.write_u32(0x80010000, 1) == false)
+      assert(mem.ensure_code(0x80010000, 0) == nil and mem.mat34(0x80010000) == nil)
     end
   )")) << script.Error();
   EXPECT_TRUE(script.Call(Hook::OnUnload, h.env)) << script.Error();
@@ -450,27 +483,27 @@ TEST(VRPatch, SettingsAndHooks)
     changes = 0
     function on_setting_changed(name, value)
       changes = changes + 1
-      mem.write_u32(0x80001000, changes)
+      mem.write_u32(0x80010000, changes)
       if name == "on" then assert(value == true) end
     end
     function on_frame()
-      mem.write_f32(0x80001004, settings.pitch)
-      mem.write_u32(0x80001008, settings.on and 1 or 0)
+      mem.write_f32(0x80010004, settings.pitch)
+      mem.write_u32(0x80010008, settings.on and 1 or 0)
     end
   )")) << script.Error();
   ASSERT_TRUE(script.HasSettingChangedHook());
   EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
-  EXPECT_EQ(h.memory.GetF32(0x80001004), 5.0f);
-  EXPECT_EQ(h.memory.Get32(0x80001008), 0u);
+  EXPECT_EQ(h.memory.GetF32(0x80010004), 5.0f);
+  EXPECT_EQ(h.memory.Get32(0x80010008), 0u);
 
   const Manifest& manifest = script.GetManifest();
   ASSERT_TRUE(script.SetSettingValue(*manifest.FindSetting("pitch"), 50));  // clamped to 10
   ASSERT_TRUE(script.SetSettingValue(*manifest.FindSetting("on"), 1));
   EXPECT_TRUE(script.CallSettingChanged("on", 1, h.env)) << script.Error();
   EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
-  EXPECT_EQ(h.memory.GetF32(0x80001004), 10.0f);
-  EXPECT_EQ(h.memory.Get32(0x80001008), 1u);
-  EXPECT_EQ(h.memory.Get32(0x80001000), 1u);
+  EXPECT_EQ(h.memory.GetF32(0x80010004), 10.0f);
+  EXPECT_EQ(h.memory.Get32(0x80010008), 1u);
+  EXPECT_EQ(h.memory.Get32(0x80010000), 1u);
 }
 
 TEST(VRPatch, LogsAreRateLimited)
