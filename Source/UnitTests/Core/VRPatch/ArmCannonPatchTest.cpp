@@ -432,6 +432,18 @@ TEST(EchoesArmCannonPatch, HooksTracksAndRestores)
         << i;
   }
 
+  // PrimedGun's smoothing: a small move keeps 0.24 of the previous offset...
+  const float first_x = m.GetF32(ECHOES_SCRATCH + 0x24);
+  hand.view.position = {0.3f, -0.3f, -0.4f};
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  const float target_x = 0.3f * 1.25f - root[0] - forward[0] * 0.08f * 1.25f;
+  EXPECT_NEAR(m.GetF32(ECHOES_SCRATCH + 0x24), first_x * 0.24f + target_x * 0.76f, 1e-4f);
+  // ...and a jump of more than 2 game units is taken as is.
+  hand.view.position = {3.0f, -0.3f, -0.4f};
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_NEAR(m.GetF32(ECHOES_SCRATCH + 0x24), 3.0f * 1.25f - root[0] - forward[0] * 0.08f * 1.25f,
+              1e-4f);
+
   // Morph ball: the patch stops feeding the cannon.
   m.Write32(ECHOES_PLAYER + 0x38C, 1);
   ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();

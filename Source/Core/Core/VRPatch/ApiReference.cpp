@@ -93,6 +93,8 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
                                              flat-screen mode. Use "view" to place an object in
                                              the hand.
   vr.hand_in_head_space(hand [, kind]) -> pose relative to the head
+  vr.raw_pose(hand | "head" [, kind]) -> valid, px, py, pz, qx, qy, qz, qw   -- the same as plain
+                                             numbers (valid false when there is none): no tables
   vr.button(hand, name) -> bool   -- primary (A/X), secondary (B/Y), button_3, button_4, menu,
                                      shoulder, trigger, squeeze (grip), thumbstick (click)
   vr.axis(hand, name) -> number   -- trigger, squeeze, squeeze_force, thumbstick_x, thumbstick_y
@@ -119,7 +121,11 @@ settings.<name>                   -- the current setting values
 )";
 
 constexpr std::string_view MATH = R"(
-Math (pure Lua, globals)
+Math (pure Lua, globals). Each vec3, quat, mat33, mat34 or pose is a table: fine in on_load or
+for an occasional value, but a few dozen per field keep the garbage collector busy on the Quest.
+In on_frame prefer plain numbers: vr.raw_pose, mem.f32s, mem.write_f32s, tables reused in place
+(the arm cannon patches of GM8E01 and G2ME01 do; that took them from about 180 to 60 us per field
+on a Quest 3).
   vec3(x, y, z): + - * (scalar or per component) / unary -, :dot :cross :length :distance
     :normalized :copy :unpack; vec3.lerp(a, b, t), vec3.zero()
   quat(x, y, z, w): q * q, q * v (rotates), :conjugate :inverse :normalized :angle_to(q)

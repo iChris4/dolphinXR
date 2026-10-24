@@ -72,7 +72,7 @@ Workflow 6: VR control patch (a game object follows the VR controller, motion co
 7. Write the patch: patch = {title, games = {"<GameID>"}, settings (calibration offsets, the hand, switches), scratch, reserve (the fixed addresses it writes), conflicts (a Controller Anchor override that already moves the same object, which would move it twice)}. set_vr_patch_source id=<name> source=<file> runs it live and returns load errors and the log; get_vr_patch_log shows what log() wrote. Gate everything on the game's state (valid pointers, gameplay rather than menus) and write nothing when a pointer is nil.
 8. When the user confirms in the headset: save_vr_patch (User/VRPatches/<GameID>/<id>.lua, enabled for the game). That file is what users share. set_vr_patch_setting tunes the calibration.
 - Fixed addresses in the Gecko code handler's region (0x80001800-0x80003000) cannot be used together with the game's Gecko codes: prefer the scratch memory, which the engine allocates there without conflict. Writes below 0x80003100 outside the scratch and the manifest's reserve ranges are errors (past the scratch are the OS globals): assert that an assembled cave fits mem.scratch_size.
-- Patches run on the CPU thread at every field: keep on_frame small (list_vr_patches shows the time per field). Quest CPUs are slower.
+- Patches run on the CPU thread at every field: keep on_frame small (list_vr_patches shows the time per field). Quest CPUs are several times slower: in on_frame use plain numbers (vr.raw_pose, mem.f32s, mem.write_f32s) rather than the vec3/quat/mat34 objects, which are tables that the garbage collector must free.
 - A savestate made while a patch ran contains its code caves: load it with the patch enabled.
 
 Controller input

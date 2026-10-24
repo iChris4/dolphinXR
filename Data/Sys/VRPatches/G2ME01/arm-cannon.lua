@@ -58,7 +58,7 @@ local PLAYER_GUN = 0xEBC               -- CPlayerGun*
 -- Where the game draws the cannon model from the gun transform's origin, in the camera's axes
 -- (+X right, +Y forward, +Z up; it does not turn with the gun), game units: the patch moves the
 -- transform by minus this, so the model's origin is at the hand.
-local GUN_ROOT = vec3(0.25, 0.30, -0.35)
+local GUN_ROOT_X, GUN_ROOT_Y, GUN_ROOT_Z = 0.25, 0.30, -0.35
 local BASE_MODEL_FORWARD = -0.080      -- PrimedGun's model offset, meters
 
 -- The function that builds the gun's transform (r27 = the gun) ends by copying the finished
@@ -153,45 +153,61 @@ end
 
 -- ---- Tracking ----
 
--- OpenXR view axes (+X right, +Y up, -Z forward) to the game's camera axes (+X right,
--- +Y forward, +Z up).
-function to_game_basis(rotation)
-  local q = rotation * quat.axis_y(settings.yaw) * quat.axis_x(settings.pitch) *
-            quat.axis_z(settings.roll)
-  local r = mat33.from_quat(q)
-  return mat33(r:get(0, 0), -r:get(0, 2), r:get(0, 1),
-               -r:get(2, 0), r:get(2, 2), -r:get(2, 1),
-               r:get(1, 0), -r:get(1, 2), r:get(1, 1))
+-- The per-field code uses plain numbers, not the math objects: each vec3, quat or mat34 is a Lua
+-- table, and a few dozen of them per field kept the Quest's garbage collector busy (pauses up to
+-- about 1 ms in this CPU-bound game).
+local sin, cos, rad = math.sin, math.cos, math.rad
+local raw_pose, write_f32s = vr.raw_pose, mem.write_f32s
+
+-- The Hamilton product a * b of two quaternions (x, y, z, w).
+local function qmul(ax, ay, az, aw, bx, by, bz, bw)
+  return aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+         aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz
 end
 
-function to_game_offset(position, scale)
-  return vec3((position.x + settings.offset_x) * scale,
-              -(position.z + settings.offset_z) * scale,
-              (position.y + settings.offset_y) * scale)
+-- PrimedGun's smoothing of the hand pose: the basis (row-major) then the offset, in place. Each
+-- field keeps settings.smoothing of the previous pose, unless the offset jumped by more than SNAP
+-- game units.
+local SNAP = 2.0
+local target = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+local smoothed = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+local has_smoothed = false
+
+local function smooth(keep)
+  local t, s = target, smoothed
+  local dx, dy, dz = t[10] - s[10], t[11] - s[11], t[12] - s[12]
+  if not has_smoothed or keep <= 0 or dx * dx + dy * dy + dz * dz > SNAP * SNAP then
+    for i = 1, 12 do s[i] = t[i] end
+  else
+    for i = 1, 12 do s[i] = s[i] * keep + t[i] * (1 - keep) end
+  end
+  has_smoothed = true
 end
 
-local smooth = smoother(0.24, 2.0)
 local tracking = false
 
 local function stop_tracking()
   if tracking then
     mem.write_u32(GUARD, 0)
-    smooth:reset()
+    has_smoothed = false
     tracking = false
   end
 end
 
+-- The controller's pose seen from the game camera (OpenXR view space: +X right, +Y up,
+-- -Z forward, meters), or the test pose.
 local function hand_pose()
   if settings.test_pitch ~= 0 then
-    return pose(vec3(0.2, -0.25, -0.35), quat.axis_x(settings.test_pitch))
+    local h = rad(settings.test_pitch) * 0.5
+    return true, 0.2, -0.25, -0.35, sin(h), 0, 0, cos(h)
   end
-  return vr.hand(settings.hand, "view")
+  return raw_pose(settings.hand, "view")
 end
 
 local function track()
-  local hand = hand_pose()
+  local ok, px, py, pz, qx, qy, qz, qw = hand_pose()
   local player = mem.ptr(PLAYER)
-  if not hand or not player or mem.u32(player + PLAYER_CAMERA_STATE) ~= 0 or
+  if not ok or not player or mem.u32(player + PLAYER_CAMERA_STATE) ~= 0 or
      mem.u32(player + PLAYER_BALL_STATE) ~= 0 then
     stop_tracking()
     return
@@ -202,20 +218,39 @@ local function track()
     return
   end
 
+  -- The rotation with the offsets (yaw, pitch, roll in the hand's axes), from OpenXR's view axes
+  -- (+X right, +Y up, -Z forward) to the game camera's (+X right, +Y forward, +Z up).
+  local h = rad(settings.yaw) * 0.5
+  local x, y, z, w = qmul(qx, qy, qz, qw, 0, sin(h), 0, cos(h))
+  h = rad(settings.pitch) * 0.5
+  x, y, z, w = qmul(x, y, z, w, sin(h), 0, 0, cos(h))
+  h = rad(settings.roll) * 0.5
+  x, y, z, w = qmul(x, y, z, w, 0, 0, sin(h), cos(h))
+  local t = target
+  t[1], t[2], t[3] = 1 - 2 * (y * y + z * z), -2 * (x * z + y * w), 2 * (x * y - z * w)
+  t[4], t[5], t[6] = -2 * (x * z - y * w), 1 - 2 * (x * x + y * y), -2 * (y * z + x * w)
+  t[7], t[8], t[9] = 2 * (x * y + z * w), -2 * (y * z - x * w), 1 - 2 * (x * x + z * z)
+  -- The position in the camera's axes, game units, with the calibration offsets (meters: x right,
+  -- y up, z back).
   local scale = vr.units_per_meter() * settings.scale
-  smooth.keep = settings.smoothing
-  local m = smooth:update(mat34.from_basis(to_game_basis(hand.rot),
-                                           to_game_offset(hand.pos, scale)))
-  local basis = m:basis()
-  if settings.hand == 0 then
-    -- The left hand mirrors the cannon.
-    basis = mat33(-basis:get(0, 0), basis:get(0, 1), basis:get(0, 2),
-                  -basis:get(1, 0), basis:get(1, 1), basis:get(1, 2),
-                  -basis:get(2, 0), basis:get(2, 1), basis:get(2, 2))
-  end
-  local offset = m:translation() - GUN_ROOT +
-    basis * vec3(settings.model_x, BASE_MODEL_FORWARD + settings.model_y, settings.model_z) * scale
-  if not mem.write_mat33(BASIS, basis) or not mem.write_vec3(OFFSET, offset) then
+  t[10] = (px + settings.offset_x) * scale
+  t[11] = -(pz + settings.offset_z) * scale
+  t[12] = (py + settings.offset_y) * scale
+  smooth(settings.smoothing)
+
+  local s = smoothed
+  local b00, b01, b02, b10, b11, b12, b20, b21, b22 = s[1], s[2], s[3], s[4], s[5], s[6], s[7],
+                                                      s[8], s[9]
+  -- The left hand mirrors the cannon.
+  if settings.hand == 0 then b00, b10, b20 = -b00, -b10, -b20 end
+  -- The offset of the transform: the hand, minus where the game draws the model from it, plus the
+  -- model offset along the cannon.
+  local mx, my, mz = settings.model_x * scale, (BASE_MODEL_FORWARD + settings.model_y) * scale,
+                     settings.model_z * scale
+  if not write_f32s(BASIS, b00, b01, b02, b10, b11, b12, b20, b21, b22) or
+     not write_f32s(OFFSET, s[10] - GUN_ROOT_X + b00 * mx + b01 * my + b02 * mz,
+                    s[11] - GUN_ROOT_Y + b10 * mx + b11 * my + b12 * mz,
+                    s[12] - GUN_ROOT_Z + b20 * mx + b21 * my + b22 * mz) then
     stop_tracking()
     return
   end
@@ -234,7 +269,7 @@ end
 function on_state_loaded()
   mem.write_u32(GUARD, 0)
   tracking = false
-  smooth:reset()
+  has_smoothed = false
   install()
 end
 

@@ -271,25 +271,33 @@ local function camera_yaw()
   return math.deg(math.atan(m01, m00))
 end
 
--- The OpenXR rotation (view space, +Y up, -Z forward) as Prime's world basis (+Z up, +Y forward),
--- turned to the camera's yaw, with the local rotation offsets (PrimedGun: PoseToPrimeMatrix).
-function to_prime_basis(rotation, yaw_delta)
-  local q = quat.axis_y(yaw_delta) * rotation
-  local offset = quat.axis_y(settings.yaw) * quat.axis_x(settings.pitch) * quat.axis_z(settings.roll)
-  local r = mat33.from_quat(q * offset)
-  return mat33(-r[1], r[3], -r[2],
-               r[7], -r[9], r[8],
-               r[4], -r[6], r[5])
+-- From here on the per-field code uses plain numbers, not the math objects: each vec3, quat or
+-- mat34 is a Lua table, and a few dozen of them per field kept the Quest's garbage collector busy
+-- (pauses up to about 1 ms).
+local sin, cos, rad, sqrt, abs = math.sin, math.cos, math.rad, math.sqrt, math.abs
+local raw_pose, f32s, write_f32s = vr.raw_pose, mem.f32s, mem.write_f32s
+
+-- The Hamilton product a * b of two quaternions (x, y, z, w).
+local function qmul(ax, ay, az, aw, bx, by, bz, bw)
+  return aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+         aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz
 end
 
--- The view-space position as Prime's camera-local offset (+X right, +Y forward, +Z up), in game
--- units, with the calibration offsets (meters: x right, y up, z back). PrimedGun also turns its
--- offsets by the camera's yaw; they stay camera-local here, like the position they add to (all
--- default to 0, so the default placement is PrimedGun's).
-function to_prime_position(position, scale)
-  return vec3((position.x + settings.offset_x) * scale,
-              -(position.z + settings.offset_z) * scale,
-              (position.y + settings.offset_y) * scale)
+-- PrimedGun's test for a live game transform at `address` (12 floats): finite, rows of length
+-- 0.5 to 1.5, pairwise |dot| at most 0.25.
+local function looks_like_transform(address)
+  local a, b, c, t0, d, e, f, t1, g, h, i, t2 = f32s(address, 12)
+  if a == nil then return false end
+  -- v - v is 0 for a finite number and NaN for NaN or infinity.
+  if (a - a) + (b - b) + (c - c) + (t0 - t0) + (d - d) + (e - e) + (f - f) + (t1 - t1) +
+     (g - g) + (h - h) + (i - i) + (t2 - t2) ~= 0 then
+    return false
+  end
+  local l0, l1, l2 = sqrt(a * a + b * b + c * c), sqrt(d * d + e * e + f * f),
+                     sqrt(g * g + h * h + i * i)
+  if l0 < 0.5 or l0 > 1.5 or l1 < 0.5 or l1 > 1.5 or l2 < 0.5 or l2 > 1.5 then return false end
+  return abs(a * d + b * e + c * f) <= 0.25 and abs(a * g + b * h + c * i) <= 0.25 and
+         abs(d * g + e * h + f * i) <= 0.25
 end
 
 local function looks_valid_player(player)
@@ -300,65 +308,97 @@ local function looks_valid_player(player)
          holster == 2
 end
 
-local smooth = smoother(0.24, 2.0)
+-- PrimedGun's smoothing of the cannon pose: the basis (row-major) then the position, in place.
+-- Each field keeps settings.smoothing of the previous pose, unless the position jumped by more
+-- than SNAP game units.
+local SNAP = 2.0
+local target = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+local smoothed = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+local has_smoothed = false
+
+local function smooth(keep)
+  local t, s = target, smoothed
+  local dx, dy, dz = t[10] - s[10], t[11] - s[11], t[12] - s[12]
+  if not has_smoothed or keep <= 0 or dx * dx + dy * dy + dz * dz > SNAP * SNAP then
+    for i = 1, 12 do s[i] = t[i] end
+  else
+    for i = 1, 12 do s[i] = s[i] * keep + t[i] * (1 - keep) end
+  end
+  has_smoothed = true
+end
+
 local tracking = false
 
 local function stop_tracking()
   if tracking then
     mem.write_u32(GUARD, 0)
-    mem.write_f32s(MODEL_OFFSET, 0, 0, 0)
-    smooth:reset()
+    write_f32s(MODEL_OFFSET, 0, 0, 0)
+    has_smoothed = false
     tracking = false
   end
 end
 
--- The controller's pose seen from the game camera, or a test pose on a flat screen.
+-- The controller's pose seen from the game camera (OpenXR view space: +X right, +Y up,
+-- -Z forward, meters), or a test pose on a flat screen.
 local function hand_pose()
-  local hand = vr.hand(settings.hand, "view")
-  if hand then return hand end
+  local ok, px, py, pz, qx, qy, qz, qw = raw_pose(settings.hand, "view")
+  if ok then return true, px, py, pz, qx, qy, qz, qw end
   if settings.test_pitch ~= 0 then
-    return pose(vec3(0.2, -0.25, -0.35), quat.axis_x(settings.test_pitch))
+    local h = rad(settings.test_pitch) * 0.5
+    return true, 0.2, -0.25, -0.35, sin(h), 0, 0, cos(h)
   end
-  return nil
+  return false
 end
 
 local function track()
-  local hand = hand_pose()
+  local ok, px, py, pz, qx, qy, qz, qw = hand_pose()
   local player = mem.ptr(PLAYER)
-  if not hand or not player or not looks_valid_player(player) then
+  if not ok or not player or not looks_valid_player(player) then
     stop_tracking()
     return
   end
   local gun = mem.u32(player + PLAYER_GUN)
-  if not gun or gun < 0x80000000 then
-    stop_tracking()
-    return
-  end
-  local world, local_xf = mem.mat34(gun + GUN_WORLD_XF), mem.mat34(gun + GUN_LOCAL_XF)
-  if not world or not local_xf or not world:looks_like_transform() or
-     not local_xf:looks_like_transform() then
+  if not gun or gun < 0x80000000 or not looks_like_transform(gun + GUN_WORLD_XF) or
+     not looks_like_transform(gun + GUN_LOCAL_XF) then
     stop_tracking()
     return
   end
 
-  local yaw = camera_yaw() or 180
-  local yaw_delta = -wrap180(yaw + 180)
+  -- PrimedGun's PoseToPrimeMatrix: the rotation turned to the camera's yaw, then the rotation
+  -- offsets (yaw, pitch, roll in the hand's axes), as Prime's world basis (+Z up, +Y forward).
+  local h = rad(-wrap180((camera_yaw() or 180) + 180)) * 0.5
+  local x, y, z, w = qmul(0, sin(h), 0, cos(h), qx, qy, qz, qw)
+  h = rad(settings.yaw) * 0.5
+  x, y, z, w = qmul(x, y, z, w, 0, sin(h), 0, cos(h))
+  h = rad(settings.pitch) * 0.5
+  x, y, z, w = qmul(x, y, z, w, sin(h), 0, 0, cos(h))
+  h = rad(settings.roll) * 0.5
+  x, y, z, w = qmul(x, y, z, w, 0, 0, sin(h), cos(h))
+  local t = target
+  t[1], t[2], t[3] = -(1 - 2 * (y * y + z * z)), 2 * (x * z + y * w), -2 * (x * y - z * w)
+  t[4], t[5], t[6] = 2 * (x * z - y * w), -(1 - 2 * (x * x + y * y)), 2 * (y * z + x * w)
+  t[7], t[8], t[9] = 2 * (x * y + z * w), -2 * (y * z - x * w), 1 - 2 * (x * x + z * z)
+  -- The position as Prime's camera-local offset (+X right, +Y forward, +Z up), in game units,
+  -- with the calibration offsets (meters: x right, y up, z back). PrimedGun also turns its
+  -- offsets by the camera's yaw; they stay camera-local here, like the position they add to (all
+  -- default to 0, so the default placement is PrimedGun's).
   local scale = vr.units_per_meter() * settings.scale
-  smooth.keep = settings.smoothing
-  local m = smooth:update(mat34.from_basis(to_prime_basis(hand.rot, yaw_delta),
-                                           to_prime_position(hand.pos, scale)))
+  t[10] = (px + settings.offset_x) * scale
+  t[11] = -(pz + settings.offset_z) * scale
+  t[12] = (py + settings.offset_y) * scale
+  smooth(settings.smoothing)
 
   -- The model's basis: the left hand mirrors the cannon.
-  local basis = m:basis()
-  if settings.hand == 0 then
-    basis = mat33(-basis[1], basis[2], basis[3], -basis[4], basis[5], basis[6],
-                  -basis[7], basis[8], basis[9])
-  end
-  local model_offset = basis * vec3(settings.model_x * scale,
-                                    (BASE_MODEL_FORWARD + settings.model_y) * scale,
-                                    settings.model_z * scale)
-  if not mem.write_mat33(BASIS, basis) or not mem.write_vec3(GUN_POSITION, m:translation()) or
-     not mem.write_vec3(MODEL_OFFSET, model_offset) then
+  local s = smoothed
+  local b00, b01, b02, b10, b11, b12, b20, b21, b22 = s[1], s[2], s[3], s[4], s[5], s[6], s[7],
+                                                      s[8], s[9]
+  if settings.hand == 0 then b00, b10, b20 = -b00, -b10, -b20 end
+  local mx, my, mz = settings.model_x * scale, (BASE_MODEL_FORWARD + settings.model_y) * scale,
+                     settings.model_z * scale
+  if not write_f32s(BASIS, b00, b01, b02, b10, b11, b12, b20, b21, b22) or
+     not write_f32s(GUN_POSITION, s[10], s[11], s[12]) or
+     not write_f32s(MODEL_OFFSET, b00 * mx + b01 * my + b02 * mz, b10 * mx + b11 * my + b12 * mz,
+                    b20 * mx + b21 * my + b22 * mz) then
     stop_tracking()
     return
   end
@@ -378,7 +418,7 @@ function on_state_loaded()
   -- The loaded RAM may have other code (or none) at the hooks, and a stale guard.
   mem.write_u32(GUARD, 0)
   tracking = false
-  smooth:reset()
+  has_smoothed = false
   install()
 end
 
