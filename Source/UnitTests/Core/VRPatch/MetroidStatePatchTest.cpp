@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 // The shipped Metroid Prime state patches (Data/Sys/VRPatches/<id>/metroid-state.lua) against fake
-// memory: the override flags they raise for the Sys profiles' entries.
+// memory: the override flags they raise for the Sys profiles' entries. Also Echoes' view patches:
+// no morph ball bars, no scan box highlight, smooth scan lines.
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <map>
 #include <set>
 #include <string>
+#include <string_view>
 
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
@@ -30,18 +33,20 @@ public:
   std::optional<u16> Read16(u32 a) const override { return Read<u16>(a); }
   std::optional<u32> Read32(u32 a) const override { return Read<u32>(a); }
   std::optional<u64> Read64(u32 a) const override { return Read<u64>(a); }
-  bool Write8(u32 a, u8 v) override { return Fail(); }
-  bool Write16(u32 a, u16 v) override { return Fail(); }
-  bool Write32(u32 a, u32 v) override { return Fail(); }
-  bool Write64(u32 a, u64 v) override { return Fail(); }
+  bool Write8(u32 a, u8 v) override { return Write<u8>(a, v); }
+  bool Write16(u32 a, u16 v) override { return Write<u16>(a, v); }
+  bool Write32(u32 a, u32 v) override { return Write<u32>(a, v); }
+  bool Write64(u32 a, u64 v) override { return Write<u64>(a, v); }
   void InvalidateCode(u32, u32) override {}
 
-  // The game's side: the patches only read.
+  // The game's side, not counted as a patch write.
   void Set32(u32 address, u32 value)
   {
     for (u32 i = 0; i < 4; ++i)
       bytes[address + i] = static_cast<u8>(value >> (8 * (3 - i)));
   }
+  u32 Get32(u32 address) const { return Read32(address).value_or(0); }
+  // Whether a patch wrote.
   bool wrote = false;
 
 private:
@@ -58,22 +63,40 @@ private:
     }
     return static_cast<T>(value);
   }
-  bool Fail()
+  template <typename T>
+  bool Write(u32 address, T value)
   {
+    if (!IsRAM(address, sizeof(T)))
+      return false;
     wrote = true;
-    return false;
+    for (u32 i = 0; i < sizeof(T); ++i)
+      bytes[address + i] = static_cast<u8>(static_cast<u64>(value) >> (8 * (sizeof(T) - 1 - i)));
+    return true;
   }
   std::map<u32, u8> bytes;
 };
 
 using Flags = std::set<std::string>;
 
-std::string ReadStatePatch(const std::string& game_id)
+std::string ReadPatch(const std::string& game_id, const std::string& id)
 {
   std::string source;
-  File::ReadFileToString(
-      File::GetSysDirectory() + VRPATCHES_DIR "/" + game_id + "/metroid-state.lua", source);
+  File::ReadFileToString(File::GetSysDirectory() + VRPATCHES_DIR "/" + game_id + "/" + id + ".lua",
+                         source);
   return source;
+}
+
+std::string ReadStatePatch(const std::string& game_id)
+{
+  return ReadPatch(game_id, "metroid-state");
+}
+
+bool Warned(PatchScript& script, std::string_view text)
+{
+  bool warned = false;
+  for (const LogLine& line : script.TakeLog())
+    warned |= line.level == 1 && line.text.find(text) != std::string::npos;
+  return warned;
 }
 }  // namespace
 
@@ -170,4 +193,162 @@ TEST(EchoesStatePatch, RaisesTheGameState)
   EXPECT_FALSE(game.memory.wrote);
   for (const LogLine& line : script.TakeLog())
     EXPECT_NE(line.level, 1) << line.text;
+}
+
+// ---- Echoes: no bars in morph ball ----
+
+namespace
+{
+constexpr u32 BARS_SITE = 0x8003AF60;
+constexpr u32 BARS_ORIGINAL = 0xC3FB11E8;     // lfs f31, 0x11E8(r27)
+constexpr u32 BARS_FULL_HEIGHT = 0xC3E28ED4;  // lfs f31, -0x712C(r2)
+constexpr u32 ECHOES_ONE = 0x804223C0 - 0x712C;
+}  // namespace
+
+TEST(EchoesNoMorphBallBarsPatch, LoadsFullHeightAndRestores)
+{
+  EchoesGame game;
+  game.memory.Set32(BARS_SITE, BARS_ORIGINAL);
+  game.memory.Set32(ECHOES_ONE, 0x3F800000);
+  PatchScript script("no-morph-ball-bars");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "no-morph-ball-bars"), game.env)) << script.Error();
+  EXPECT_EQ(script.GetManifest().games, std::vector<std::string>{"G2ME01"});
+  EXPECT_EQ(script.GetManifest().scratch_bytes, 0u);
+
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(BARS_SITE), BARS_FULL_HEIGHT);
+  // A savestate made without the patch.
+  game.memory.Set32(BARS_SITE, BARS_ORIGINAL);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(BARS_SITE), BARS_FULL_HEIGHT);
+  EXPECT_FALSE(Warned(script, ""));
+
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(BARS_SITE), BARS_ORIGINAL);
+}
+
+TEST(EchoesNoMorphBallBarsPatch, RefusesOtherCode)
+{
+  EchoesGame game;
+  game.memory.Set32(BARS_SITE, 0x60000000);  // not Echoes NTSC-U code
+  game.memory.Set32(ECHOES_ONE, 0x3F800000);
+  PatchScript script("no-morph-ball-bars");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "no-morph-ball-bars"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(BARS_SITE), 0x60000000u);
+  EXPECT_TRUE(Warned(script, "not installed"));
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(BARS_SITE), 0x60000000u);
+}
+
+// ---- Echoes: smooth scan lines ----
+
+namespace
+{
+constexpr u32 LINES_TEXTURE = 0x806FE5A0;
+using TextureWords = std::array<u32, 8>;
+constexpr TextureWords LINES = {0xFFFFFFFF, 0xFFFFFFFF, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, 0, 0};
+
+void SetTexture(Memory& memory, const TextureWords& words)
+{
+  for (u32 i = 0; i < words.size(); ++i)
+    memory.Set32(LINES_TEXTURE + i * 4, words[i]);
+}
+
+TextureWords GetTexture(const Memory& memory)
+{
+  TextureWords words;
+  for (u32 i = 0; i < words.size(); ++i)
+    words[i] = memory.Get32(LINES_TEXTURE + i * 4);
+  return words;
+}
+
+TextureWords Filled(u32 word)
+{
+  TextureWords words;
+  words.fill(word);
+  return words;
+}
+}  // namespace
+
+TEST(EchoesSmoothScanLinesPatch, FillsAndRestores)
+{
+  EchoesGame game;
+  SetTexture(game.memory, LINES);
+  PatchScript script("smooth-scan-lines");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "smooth-scan-lines"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  // The lines' average.
+  EXPECT_EQ(GetTexture(game.memory), Filled(0x88888888));
+
+  const Manifest& manifest = script.GetManifest();
+  ASSERT_TRUE(script.SetSettingValue(*manifest.FindSetting("level"), 3));
+  ASSERT_TRUE(script.CallSettingChanged("level", 3, game.env)) << script.Error();
+  EXPECT_EQ(GetTexture(game.memory), Filled(0x33333333));
+
+  // A savestate load brings the lines back.
+  SetTexture(game.memory, LINES);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(GetTexture(game.memory), Filled(0x33333333));
+  EXPECT_FALSE(Warned(script, ""));
+
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(GetTexture(game.memory), LINES);
+}
+
+TEST(EchoesSmoothScanLinesPatch, LeavesOtherDataAlone)
+{
+  EchoesGame game;
+  const TextureWords other = {1, 2, 3, 4, 5, 6, 7, 8};
+  SetTexture(game.memory, other);
+  PatchScript script("smooth-scan-lines");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "smooth-scan-lines"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(GetTexture(game.memory), other);
+  EXPECT_TRUE(Warned(script, "not applied"));
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(GetTexture(game.memory), other);
+}
+
+// ---- Echoes: no scan box highlight ----
+
+namespace
+{
+constexpr u32 BOX_SITE = 0x80266348;
+constexpr u32 BOX_ORIGINAL = 0x48057651;  // bl 0x802BD998: begins the box's strip
+constexpr u32 BOX_SKIP = 0x48000080;      // b 0x802663C8
+constexpr u32 BOX_END_CALL = 0x802663C4;
+constexpr u32 BOX_END_ORIGINAL = 0x480575D1;
+}  // namespace
+
+TEST(EchoesNoScanBoxHighlightPatch, SkipsTheBoxStripAndRestores)
+{
+  EchoesGame game;
+  game.memory.Set32(BOX_SITE, BOX_ORIGINAL);
+  game.memory.Set32(BOX_END_CALL, BOX_END_ORIGINAL);
+  PatchScript script("no-scan-box-highlight");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "no-scan-box-highlight"), game.env))
+      << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(BOX_SITE), BOX_SKIP);
+  game.memory.Set32(BOX_SITE, BOX_ORIGINAL);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(BOX_SITE), BOX_SKIP);
+  EXPECT_FALSE(Warned(script, ""));
+
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(BOX_SITE), BOX_ORIGINAL);
+}
+
+TEST(EchoesNoScanBoxHighlightPatch, RefusesOtherCode)
+{
+  EchoesGame game;
+  game.memory.Set32(BOX_SITE, BOX_ORIGINAL);
+  game.memory.Set32(BOX_END_CALL, 0x60000000);  // another layout
+  PatchScript script("no-scan-box-highlight");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "no-scan-box-highlight"), game.env))
+      << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(BOX_SITE), BOX_ORIGINAL);
+  EXPECT_TRUE(Warned(script, "not installed"));
 }
