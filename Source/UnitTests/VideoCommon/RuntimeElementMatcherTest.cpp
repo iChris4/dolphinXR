@@ -76,6 +76,21 @@ TEST(RuntimeElementMatcher, NonProjectionGroupsRemainExact)
   EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, candidate));
 }
 
+TEST(RuntimeElementMatcher, AlphaWriteCanBeIgnored)
+{
+  auto pattern = MakePerspectiveSignature();
+  auto candidate = pattern;
+  candidate.blend_alpha_update = false;
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, candidate));
+
+  pattern.any_alpha_update = true;
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, candidate));
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, pattern));
+  // The rest of the render state still has to match.
+  candidate.zfunc = 7;
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, candidate));
+}
+
 TEST(RuntimeElementMatcher, ProjectionLoadMatchesItsRange)
 {
   const auto exact = MakeLoadPattern(4, 4);

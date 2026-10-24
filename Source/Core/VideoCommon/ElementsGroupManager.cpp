@@ -175,6 +175,8 @@ bool ParseRuntimeElementSignatureField(ShaderHunter::RuntimeElementSignature* si
     signature->blend_color_update = (value == "1" || value == "true");
   else if (key == "sig_blend_alpha")
     signature->blend_alpha_update = (value == "1" || value == "true");
+  else if (key == "sig_any_alpha_write")
+    signature->any_alpha_update = (value == "1" || value == "true");
   else
     return false;
 
@@ -223,6 +225,8 @@ void SaveRuntimeElementSignature(std::ostringstream& out,
   out << prefix << "sig_zfunc=" << sig.zfunc << "\n";
   out << prefix << "sig_blend_color=" << (sig.blend_color_update ? 1 : 0) << "\n";
   out << prefix << "sig_blend_alpha=" << (sig.blend_alpha_update ? 1 : 0) << "\n";
+  if (sig.any_alpha_update)
+    out << prefix << "sig_any_alpha_write=1\n";
 }
 
 constexpr std::array<std::string_view, 3> HUD_CONTEXT_NAMES = {"default", "combat", "menu"};
@@ -418,6 +422,7 @@ size_t ComputeRuntimeElementKey(const ShaderHunter::RuntimeElementSignature& sig
   HashCombineValue(seed, sig.zfunc);
   HashCombineValue(seed, sig.blend_color_update);
   HashCombineValue(seed, sig.blend_alpha_update);
+  HashCombineValue(seed, sig.any_alpha_update);
   HashCombineValue(seed, texture_excluded);
   for (const u64 texture_hash : texture_hashes)
     HashCombineValue(seed, texture_hash);
@@ -448,18 +453,17 @@ bool SignaturesEqual(const ShaderHunter::RuntimeElementSignature& lhs,
          lhs.perspective_near_x1000 == rhs.perspective_near_x1000 &&
          lhs.perspective_far_x100 == rhs.perspective_far_x100 &&
          lhs.ortho_left_x100 == rhs.ortho_left_x100 &&
-         lhs.ortho_right_x100 == rhs.ortho_right_x100 &&
-         lhs.ortho_top_x100 == rhs.ortho_top_x100 &&
-         lhs.ortho_bottom_x100 == rhs.ortho_bottom_x100 &&
-         lhs.ortho_layer == rhs.ortho_layer && lhs.viewport_x == rhs.viewport_x &&
-         lhs.viewport_y == rhs.viewport_y && lhs.viewport_width == rhs.viewport_width &&
-         lhs.viewport_height == rhs.viewport_height &&
+         lhs.ortho_right_x100 == rhs.ortho_right_x100 && lhs.ortho_top_x100 == rhs.ortho_top_x100 &&
+         lhs.ortho_bottom_x100 == rhs.ortho_bottom_x100 && lhs.ortho_layer == rhs.ortho_layer &&
+         lhs.viewport_x == rhs.viewport_x && lhs.viewport_y == rhs.viewport_y &&
+         lhs.viewport_width == rhs.viewport_width && lhs.viewport_height == rhs.viewport_height &&
          lhs.scissor_left == rhs.scissor_left && lhs.scissor_top == rhs.scissor_top &&
          lhs.scissor_right == rhs.scissor_right && lhs.scissor_bottom == rhs.scissor_bottom &&
          lhs.alpha_test_hex == rhs.alpha_test_hex && lhs.ztest == rhs.ztest &&
          lhs.zupdate == rhs.zupdate && lhs.zfunc == rhs.zfunc &&
          lhs.blend_color_update == rhs.blend_color_update &&
-         lhs.blend_alpha_update == rhs.blend_alpha_update;
+         lhs.blend_alpha_update == rhs.blend_alpha_update &&
+         lhs.any_alpha_update == rhs.any_alpha_update;
 }
 
 bool StableSubMatchSignaturesEqual(const ElementsGroupManager::StableSubMatchSignature& lhs,

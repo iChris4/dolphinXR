@@ -76,11 +76,13 @@ TEST(ElementsOverrideKeys, SavesLoadAndHudKeys)
   const auto parsed = ElementsGroupManager::LoadOverridesFromINIFile(
       WriteTemp(std::string("[ElementsGroupOverride]\n") + HUD_BODY));
   ASSERT_EQ(parsed.size(), 1u);
+  ElementsGroupManager::ElementGroupOverride body = parsed[0];
+  body.runtime_element.any_alpha_update = true;
   ElementsGroupManager::ElementGroupOverride plain = parsed[0];
   plain.name = "Plain";
   plain.headlocked.reset();
   plain.runtime_element.use_load = false;
-  ElementsGroupManager::SaveOverridesToINI("KEYS1", {parsed[0], plain});
+  ElementsGroupManager::SaveOverridesToINI("KEYS1", {body, plain});
   std::string text;
   File::ReadFileToString(File::GetUserPath(D_GAMESETTINGSVR_IDX) + "KEYS1.ini", text);
   const auto saved = ElementsGroupManager::LoadOverridesFromINI("KEYS1");
@@ -96,11 +98,14 @@ TEST(ElementsOverrideKeys, SavesLoadAndHudKeys)
   EXPECT_FLOAT_EQ(saved[0].headlocked->scale, 30.0f);
   EXPECT_FLOAT_EQ(saved[0].headlocked->anchor_z_min, -28.5f);
   EXPECT_EQ(saved[0].headlocked->context, 1);
+  EXPECT_TRUE(saved[0].runtime_element.any_alpha_update);
   // An entry without the keys is saved without them, as before they existed.
   EXPECT_FALSE(saved[1].headlocked);
   EXPECT_FALSE(saved[1].runtime_element.use_load);
+  EXPECT_FALSE(saved[1].runtime_element.any_alpha_update);
   EXPECT_EQ(text.find("sig_use_load"), text.rfind("sig_use_load"));
   EXPECT_EQ(text.find("headlocked_mode"), text.rfind("headlocked_mode"));
+  EXPECT_EQ(text.find("sig_any_alpha_write"), text.rfind("sig_any_alpha_write"));
 }
 
 // The entry that gives the draw its handling supplies the HUD parameters, and the projection load

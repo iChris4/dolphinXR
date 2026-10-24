@@ -94,7 +94,9 @@ QString FormatRuntimeElementSummary(const ShaderHunter::RuntimeElementSignature&
                .arg(sig.zupdate ? QObject::tr("on") : QObject::tr("off"))
                .arg(sig.zfunc)
                .arg(sig.blend_color_update ? QObject::tr("col") : QObject::tr("-"))
-               .arg(sig.blend_alpha_update ? QObject::tr("alpha") : QObject::tr("-"));
+               .arg(sig.any_alpha_update   ? QObject::tr("any alpha") :
+                    sig.blend_alpha_update ? QObject::tr("alpha") :
+                                             QObject::tr("-"));
 
   return parts.join(QStringLiteral("\n"));
 }

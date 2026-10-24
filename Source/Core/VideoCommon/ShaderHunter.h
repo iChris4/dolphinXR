@@ -178,6 +178,9 @@ public:
     int zfunc = 0;
     bool blend_color_update = false;
     bool blend_alpha_update = false;
+    // Pattern only: the render state matches whatever the draw's alpha write, for games that
+    // turn it off in some scenes (Metroid Prime 2's dark world).
+    bool any_alpha_update = false;
   };
 
   struct HighlightedDraw

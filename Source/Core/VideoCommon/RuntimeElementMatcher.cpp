@@ -99,7 +99,7 @@ bool Matches(const ShaderHunter::RuntimeElementSignature& pattern,
     if (pattern.alpha_test_hex != candidate.alpha_test_hex || pattern.ztest != candidate.ztest ||
         pattern.zupdate != candidate.zupdate || pattern.zfunc != candidate.zfunc ||
         pattern.blend_color_update != candidate.blend_color_update ||
-        pattern.blend_alpha_update != candidate.blend_alpha_update)
+        (!pattern.any_alpha_update && pattern.blend_alpha_update != candidate.blend_alpha_update))
     {
       return false;
     }
