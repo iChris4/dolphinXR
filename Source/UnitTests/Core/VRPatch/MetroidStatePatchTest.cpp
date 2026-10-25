@@ -705,11 +705,11 @@ TEST(CorruptionStickTurnPatch, TurnsWithTheThumbstickAndRestores)
   EXPECT_EQ(m.Get32(back - 4), TURN_CONTROL_ORIGINAL);
 
   // Right past the dead zone (0.2): turn right at half speed, for the player's control mapper;
-  // look up and down read 0.
+  // look up and down stay the game's (the pointer's edges tilt the camera).
   game.input.hands[1].thumbstick_x = 0.6f;
   frame();
   EXPECT_EQ(m.Get32(TURN_SCRATCH), CORRUPTION_PLAYER + 0x35C4);
-  EXPECT_EQ(m.Get32(TURN_SCRATCH + 4), 1u);
+  EXPECT_EQ(m.Get32(TURN_SCRATCH + 4), 0u);
   EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 8), 0.0f, 1e-6f);
   EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 0xC), 0.5f, 1e-5f);
   EXPECT_EQ(script.GetFlags(), Flags{"rm3_hide_crosshair"});
@@ -760,6 +760,50 @@ TEST(CorruptionStickTurnPatch, TurnsWithTheThumbstickAndRestores)
   // Disabled: the game's code is back.
   ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
   EXPECT_EQ(m.Get32(TURN_CONTROL), TURN_CONTROL_ORIGINAL);
+}
+
+// In first person the VR view removes the game camera's pitch, named by the camera matrix's
+// forward up component, and the pointer's edges tilt the camera with the pointer kept on the
+// screen; on a menu the camera goes back to level.
+TEST(CorruptionStickTurnPatch, RemovesTheCameraPitchFromTheView)
+{
+  TurnGame game;
+  Memory& m = game.memory;
+  constexpr u32 CAMERA = 0x80AFBBA0;
+  m.Set32(0x805C4FA8, 0x80AFB3A0);
+  m.Set32(0x80AFB3A0 + 0x34, 0x80B9CA80);
+  m.Set32(0x80B9CA80 + 0x20, CAMERA);
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+
+  frame();
+  EXPECT_EQ(script.GetCameraPitchSource(), CAMERA + 0x3C + 0x24);
+  EXPECT_EQ(m.Get32(TURN_SCRATCH + 4), 0u);
+  EXPECT_TRUE(script.KeepsPointerOnScreen());
+
+  // The map: back to level, and the pointer as usual.
+  m.Set32(CORRUPTION_PLAYER + 0x77C, std::bit_cast<u32>(0.5f));
+  game.SetMenu(1);
+  frame();
+  EXPECT_EQ(GetF32(m, CORRUPTION_PLAYER + 0x77C), 0.0f);
+  EXPECT_FALSE(script.KeepsPointerOnScreen());
+  game.SetMenu(0);
+
+  // The morph ball's third-person camera is shown as it is.
+  game.SetBall(1);
+  frame();
+  EXPECT_FALSE(script.GetCameraPitchSource());
+  EXPECT_FALSE(script.KeepsPointerOnScreen());
+  game.SetBall(0);
+
+  // Edges that do nothing: look up and down read 0; the pitch is still removed.
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("edge_tilt"), 0));
+  frame();
+  EXPECT_EQ(m.Get32(TURN_SCRATCH + 4), 1u);
+  EXPECT_EQ(script.GetCameraPitchSource(), CAMERA + 0x3C + 0x24);
+  EXPECT_FALSE(script.KeepsPointerOnScreen());
 }
 
 TEST(CorruptionStickTurnPatch, RefusesOtherCode)

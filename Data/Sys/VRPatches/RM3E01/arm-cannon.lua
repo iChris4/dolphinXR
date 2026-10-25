@@ -10,12 +10,12 @@
 patch = {
   title = "Arm cannon follows the controller",
   author = "DolphinXR, after PrimedGun (Nobbie), with PrimeHack's addresses",
-  version = "1.0",
+  version = "1.1",
   description = "The arm cannon is aimed and placed by your VR controller, and shots and missiles "
     .. "leave it where it points. For Metroid Prime 3: Corruption NTSC-U (Wii).",
   games = {"RM3E01"},
   revision = 0,
-  scratch = 0x200,
+  scratch = 0x280,
   -- A Controller Anchor of the cannon draws in the profile (off by default) would move it twice.
   conflicts = {elements = {"Element Draw 111"}},
   settings = {
@@ -79,7 +79,10 @@ local BASIS = S + 0x00    -- 3x3 row-major: the hand's rotation in the camera's 
 local OFFSET = S + 0x24   -- 3 floats: the hand's position from the camera, its axes, game units
 local GUARD = S + 0x30    -- gun + 0x4D8 (r28) when the pose is for that gun; 0 = not tracked
 local CAMERA = S + 0x34   -- the camera's transform (3x4)
-local CAVE = S + 0x40
+local LEVEL = S + 0x38    -- 1: from the camera's level frame (the VR view removes its pitch)
+local ONE = S + 0x3C      -- 1.0
+local LEVEL_XF = S + 0x40 -- the camera's level frame (3x4), written by the cave
+local CAVE = S + 0x70
 
 local function load_address(register, address)
   local hi = (address >> 16) & 0xFFFF
@@ -91,9 +94,28 @@ end
 -- When the gun is tracked: rotation = the camera's rotation * BASIS, position = the camera's
 -- position + its rotation * OFFSET, written where the game is about to take them; then the
 -- replaced instruction.
+--
+-- With LEVEL set (stick-turn lets the game tilt its camera and the VR view removes that pitch),
+-- the camera's level frame takes the camera's place: its right axis (horizontal, as a pitch turns
+-- about it), the horizontal forward (up x right) and world up, at the camera's position. The hand
+-- is then given in that frame ("level_view"), so the cannon stays in the hand whatever the
+-- camera's pitch in the frame the game draws.
 local function cave_words()
   local t = {load_address("r11", S), "lwz r12, 0x30(r11)\ncmplw r12, r28\nbne done\n",
-             "lwz r12, 0x34(r11)\n"}
+             "lwz r12, 0x38(r11)\ncmpwi r12, 0\nlwz r12, 0x34(r11)\nbeq rotate\n",
+             "lfs f1, 0x0(r12)\nlfs f2, 0x10(r12)\nfneg f3, f2\nlfs f5, 0x3C(r11)\n",
+             "fsubs f4, f5, f5\n"}
+  -- Rows of the level frame: (rx, -ry, 0), (ry, rx, 0), (0, 0, 1), then the camera's position.
+  local rows = {{"f1", "f3", "f4"}, {"f2", "f1", "f4"}, {"f4", "f4", "f5"}}
+  for row = 0, 2 do
+    local o = row * 0x10
+    for col = 0, 2 do
+      t[#t + 1] = string.format("stfs %s, 0x%X(r11)\n", rows[row + 1][col + 1],
+                                0x40 + o + col * 4)
+    end
+    t[#t + 1] = string.format("lfs f6, 0x%X(r12)\nstfs f6, 0x%X(r11)\n", o + 0xC, 0x4C + o)
+  end
+  t[#t + 1] = "addi r12, r11, 0x40\nrotate:\n"
   for i = 0, 8 do
     t[#t + 1] = string.format("lfs f%d, 0x%X(r11)\n", i + 1, i * 4)
   end
@@ -147,6 +169,7 @@ local function install()
     return
   end
   cave = cave or cave_words()
+  mem.write_f32(ONE, 1.0)
   local changed = mem.ensure_code(CAVE, cave)
   changed = mem.ensure_code(HOOK, asm.branch(HOOK, CAVE)) or changed
   if changed then log("hook installed, cave at", mem.hex(CAVE)) end
@@ -201,18 +224,20 @@ local function stop_tracking()
   end
 end
 
--- The controller's pose seen from the game camera (OpenXR view space: +X right, +Y up,
--- -Z forward, meters), or the test pose.
-local function hand_pose()
+-- The controller's pose seen from the game camera, or from its level frame when the VR view
+-- removes the camera's pitch (OpenXR view space: +X right, +Y up, -Z forward, meters), or the
+-- test pose.
+local function hand_pose(level)
   if settings.test_pitch ~= 0 then
     local h = rad(settings.test_pitch) * 0.5
     return true, 0.2, -0.25, -0.35, sin(h), 0, 0, cos(h)
   end
-  return raw_pose(settings.hand, "view")
+  return raw_pose(settings.hand, level and "level_view" or "view")
 end
 
 local function track()
-  local ok, px, py, pz, qx, qy, qz, qw = hand_pose()
+  local level = vr.camera_pitch_source() ~= nil
+  local ok, px, py, pz, qx, qy, qz, qw = hand_pose(level)
   local player = mem.ptr(STATE, STATE_PLAYER)
   if not ok or not player or mem.u32(player + PLAYER_BALL_STATE) ~= 0 then
     stop_tracking()
@@ -257,7 +282,8 @@ local function track()
      not write_f32s(OFFSET, s[10] + b00 * mx + b01 * my + b02 * mz,
                     s[11] + b10 * mx + b11 * my + b12 * mz,
                     s[12] + b20 * mx + b21 * my + b22 * mz) or
-     not mem.write_u32(CAMERA, camera + ACTOR_XF) then
+     not mem.write_u32(CAMERA, camera + ACTOR_XF) or
+     not mem.write_u32(LEVEL, level and 1 or 0) then
     stop_tracking()
     return
   end

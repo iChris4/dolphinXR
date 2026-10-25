@@ -19,6 +19,7 @@
 #include "Common/FileUtil.h"
 #include "Core/VRPatch/MemoryAccess.h"
 #include "Core/VRPatch/PatchScript.h"
+#include "VideoCommon/VR/CameraPitch.h"
 
 using namespace VRPatch;
 
@@ -573,11 +574,12 @@ TEST(EchoesArmCannonPatch, RefusesOtherCode)
 
 namespace
 {
-constexpr u32 CORRUPTION_SCRATCH = 0x80002DF0;
-constexpr u32 CORRUPTION_SCRATCH_SIZE = 0x200;
-constexpr u32 CORRUPTION_CAVE = CORRUPTION_SCRATCH + 0x40;
+constexpr u32 CORRUPTION_SCRATCH = 0x80002D70;
+constexpr u32 CORRUPTION_SCRATCH_SIZE = 0x280;
+constexpr u32 CORRUPTION_CAVE = CORRUPTION_SCRATCH + 0x70;
 constexpr u32 CORRUPTION_GUARD = CORRUPTION_SCRATCH + 0x30;
 constexpr u32 CORRUPTION_CAMERA_XF = CORRUPTION_SCRATCH + 0x34;
+constexpr u32 CORRUPTION_LEVEL = CORRUPTION_SCRATCH + 0x38;
 constexpr u32 CORRUPTION_HOOK = 0x8018748C;
 constexpr u32 CORRUPTION_HOOK_ORIGINAL = 0xC0010208;  // lfs f0, 0x208(r1)
 constexpr u32 CORRUPTION_GAME = 0x805C4F70;
@@ -674,9 +676,11 @@ TEST(CorruptionArmCannonPatch, HooksTracksAndRestores)
       Mul(Quat{0, std::sin(0.2f), 0, std::cos(0.2f)}, Quat{std::sin(0.15f), 0, 0, std::cos(0.15f)});
   hand.view = {true, {0.2f, -0.3f, -0.4f}, {rotation.x, rotation.y, rotation.z, rotation.w}};
   ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
-  // Armed for the cannon updater's r28 (gun + 0x4D8), with the camera's transform to read.
+  // Armed for the cannon updater's r28 (gun + 0x4D8), with the camera's transform to read, as
+  // it is (no camera pitch removed from the VR view).
   EXPECT_EQ(m.Get32(CORRUPTION_GUARD), CORRUPTION_GUN + 0x4D8);
   EXPECT_EQ(m.Get32(CORRUPTION_CAMERA_XF), CORRUPTION_CAMERA + 0x3C);
+  EXPECT_EQ(m.Get32(CORRUPTION_LEVEL), 0u);
 
   // The basis: the controller's right, aim (-Z) and up axes as columns, in the camera's axes.
   const Vec3 right = GameAxes(Rotate(rotation, {1, 0, 0}));
@@ -697,6 +701,17 @@ TEST(CorruptionArmCannonPatch, HooksTracksAndRestores)
                 position[i] * 1.5f - forward[i] * 0.08f * 1.5f, 1e-4f)
         << i;
   }
+
+  // When the VR view removes the camera's pitch (stick-turn), the hand comes from the camera's
+  // level frame and the cave uses that frame.
+  hand.level_view = {true, {0.2f, -0.3f, -0.4f}, {0, 0, 0, 1}};
+  VR::CameraPitch::SetSource(CORRUPTION_CAMERA + 0x60);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  VR::CameraPitch::SetSource(std::nullopt);
+  EXPECT_EQ(m.Get32(CORRUPTION_LEVEL), 1u);
+  EXPECT_NEAR(m.GetF32(CORRUPTION_SCRATCH + 0x3C), 1.0f, 1e-6f);
+  // The level pose (no rotation): the basis tends to identity (smoothing keeps 0.24 of the last).
+  EXPECT_GT(m.GetF32(CORRUPTION_SCRATCH + 0), 0.9f);
 
   // Morph ball: the patch stops feeding the cannon.
   m.Write32(CORRUPTION_PLAYER + 0x358, 1);

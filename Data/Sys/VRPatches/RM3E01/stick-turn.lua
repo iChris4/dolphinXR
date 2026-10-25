@@ -12,6 +12,22 @@
 -- The game's own turning (acceleration, damping, morph ball and lock-on rules) does the rest, and
 -- the pointer still aims, scans and drives the menus.
 --
+-- Pointing at the top or bottom of the screen tilts Prime 3's camera, which is how the pointer
+-- reaches a grapple point or a scan target above or below the view. The patch leaves that to the
+-- game, but names the camera matrix's pitch to the VR view, which removes it from each frame: the
+-- world stays where the head looks, and the game's screen, with the pointer and the 2D draws on
+-- it, moves up or down instead. On the map, the pause screens and dialogs the camera goes back to
+-- level, so they are shown in front.
+--
+-- Prime 3 stops reading the pointer while the Wii Remote points more than about 45 degrees up,
+-- and keeps tilting the camera the way the cursor last was; it also turns on its own once the
+-- remote loses the sensor bar. Aiming at the top of the virtual screen, all the more once it has
+-- moved up with the tilt, reached both, and the camera went up on its own while the pointer did
+-- nothing. While the edges tilt the camera, the patch keeps the VR pointer on the screen
+-- (vr.keep_pointer_on_screen): an aim past an edge holds it at that edge, and the remote's tilt
+-- stays within what aiming at a TV gives, so the game tilts while the aim is past the edge and
+-- stops as soon as it comes back.
+--
 -- The stock OpenXR Wii Remote profile puts the Wii Remote's - (hold: the visor menu) and + (hold:
 -- hypermode) on the right thumbstick's X axis. While playing, the patch moves them to other
 -- buttons (settings); on the map and pause screens, the thumbstick has them back (zoom). Its up
@@ -25,10 +41,12 @@ local BUTTONS = {"Keep my bindings", "Right grip", "Right B", "Right thumbstick 
 patch = {
   title = "Turn with the right thumbstick",
   author = "DolphinXR",
-  version = "1.0",
+  version = "1.1",
   description = "Turns left and right with the right thumbstick instead of pointing at the edges "
-    .. "of the screen, and keeps the view level (look up and down with your head). The pointer "
-    .. "still aims, scans and drives the menus. For Metroid Prime 3: Corruption NTSC-U (Wii).",
+    .. "of the screen, and keeps the view level (look up and down with your head): pointing at "
+    .. "the top or bottom edge tilts the game's camera, which moves the pointer's screen instead "
+    .. "of your view. The pointer still aims, scans and drives the menus. For Metroid Prime 3: "
+    .. "Corruption NTSC-U (Wii).",
   games = {"RM3E01"},
   revision = 0,
   scratch = 0x80,
@@ -37,8 +55,12 @@ patch = {
      description = "The game's turn speed at full thumbstick (1: as when pointing at the edge)."},
     {name = "deadzone", label = "Thumbstick dead zone", default = 0.2, min = 0, max = 0.6,
      step = 0.05},
-    {name = "level", label = "Keep the view level", type = "bool", default = true,
-     description = "Pointing at the top or bottom of the screen no longer tilts the view."},
+    {name = "edge_tilt", label = "The pointer's edges tilt the camera", type = "bool",
+     default = true,
+     description = "Pointing at the top or bottom of the screen tilts the game's camera, as on "
+       .. "the Wii, so the pointer reaches what is above or below. Your view stays level: the "
+       .. "screen the pointer moves on goes up or down, and aiming past its edge keeps the pointer "
+       .. "at that edge. Off: those edges do nothing."},
     {name = "hide_crosshair", label = "Hide the crosshair", type = "bool", default = true,
      description = "The green crosshair drawn under the pointer (the profile's \"Crosshair\" "
        .. "entry)."},
@@ -60,6 +82,11 @@ local STATE_MANAGER = 0x805C4F98     -- -> the state manager (PrimeHack: state_m
 local MENU_STATE = STATE_MANAGER + 0x32C   -- 1: the map, 3: the solar system map
 local POINTER_DIALOG = 0x805C70C7    -- byte: the pointer drives a dialog or a menu
 local PLAYER_CONTROLS = 0x35C4       -- player -> its control mapper
+local PLAYER_BALL = 0x358            -- 0: not morphed
+local PLAYER_PITCH = 0x77C           -- the look pitch, radians, + up
+local PLAYER_CAMERA = 0x3C2C         -- 1: first person
+local CAMERA_CHAIN = {0x805C4FA8, 0x34, 0x20}  -- -> the camera actor (as in arm-cannon.lua)
+local CAMERA_PITCH_SINE = 0x3C + 0x24          -- its transform's forward up component (row 2, col 1)
 local CONTROL = 0x80061BA8           -- zz_80061ba8: a control's value (r3 mapper, r4 control)
 local CONTROL_ORIGINAL = 0x9421FFC0  -- stwu sp, -0x40(sp)
 
@@ -201,7 +228,26 @@ local write_f32s, write_u32, u32, u8 = mem.write_f32s, mem.write_u32, mem.u32, m
 local function stop()
   write_u32(GUARD, 0)
   vr.set_flag("rm3_hide_crosshair", false)
+  vr.set_camera_pitch_source(nil)
+  vr.keep_pointer_on_screen(false)
   release_buttons()
+end
+
+-- The flat screen mode shows the game camera as it is.
+local flat_screen = false
+
+-- While the camera is the first-person one, the VR view removes its pitch (also while a lock-on
+-- or a grapple swing aims it). On the map, the pause screens and dialogs the camera goes back to
+-- level (the game eases it), so they are in front. While playing, the edges' tilt keeps the
+-- pointer on the screen.
+local function level_view(player, playing)
+  if game.field() % 60 == 0 then flat_screen = vr.setting("FlatScreen") == "True" end
+  local first_person = u32(player + PLAYER_CAMERA) == 1 and u32(player + PLAYER_BALL) == 0
+  vr.keep_pointer_on_screen(settings.edge_tilt and first_person and playing)
+  local camera = first_person and not flat_screen and
+                 mem.ptr(CAMERA_CHAIN[1], CAMERA_CHAIN[2], CAMERA_CHAIN[3])
+  vr.set_camera_pitch_source(camera and camera + CAMERA_PITCH_SINE or nil)
+  if camera and not playing then mem.write_f32(player + PLAYER_PITCH, 0) end
 end
 
 local function stick_x()
@@ -216,6 +262,7 @@ end
 
 function on_load()
   write_u32(GUARD, 0)
+  flat_screen = vr.setting("FlatScreen") == "True"
   install()
 end
 
@@ -237,7 +284,7 @@ function on_frame()
 
   local x = stick_x() * settings.speed
   write_f32s(LEFT, math.max(-x, 0), math.max(x, 0), 0)
-  write_u32(LEVEL, settings.level and 1 or 0)
+  write_u32(LEVEL, settings.edge_tilt and 0 or 1)
   -- Last: arms the cave for this player.
   write_u32(GUARD, player + PLAYER_CONTROLS)
 
@@ -249,6 +296,7 @@ function on_frame()
     raw_x, raw_y = vr.axis("right", "thumbstick_x") or 0, vr.axis("right", "thumbstick_y") or 0
   end
   guard_up_down(playing and x ~= 0 and math.abs(raw_x) >= math.abs(raw_y))
+  level_view(player, playing)
 end
 
 function on_unload()
