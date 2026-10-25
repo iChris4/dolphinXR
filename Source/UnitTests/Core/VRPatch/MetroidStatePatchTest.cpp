@@ -773,3 +773,92 @@ TEST(CorruptionStickTurnPatch, RefusesOtherCode)
   EXPECT_EQ(game.memory.Get32(TURN_CAVE), 0u);
   EXPECT_TRUE(Warned(script, "not installed"));
 }
+
+// ---- Corruption: change visors next to the head ----
+
+namespace
+{
+std::string ReadVisorPatch()
+{
+  return ReadPatch("RM3E01", "visor-gesture");
+}
+
+u32 Visor(const Memory& memory)
+{
+  return memory.Get32(CORRUPTION_POWERUPS + 0x34);
+}
+}  // namespace
+
+TEST(CorruptionVisorGesturePatch, ManifestIsValid)
+{
+  const std::string source = ReadVisorPatch();
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/RM3E01/visor-gesture.lua is missing";
+  const auto read = ReadManifest(source, "visor-gesture");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"RM3E01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, 0u);
+}
+
+TEST(CorruptionVisorGesturePatch, PicksVisorsNextToTheHead)
+{
+  TurnGame game;
+  Memory& m = game.memory;
+  // Every visor owned but the X-ray visor.
+  for (u32 id = 0x0B; id <= 0x0D; ++id)
+    m.Set32(CORRUPTION_POWERUPS + id * 12 + 0x58, 1);
+  game.input.head = {true, {0.0f, 1.6f, 0.0f}};
+  HandInput& hand = game.input.hands[0];
+  hand.connected = true;
+  hand.aim = {true, {0.6f, 1.2f, -0.4f}};  // away from the head
+  PatchScript script("visor-gesture");
+  ASSERT_TRUE(script.Load(ReadVisorPatch(), game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+
+  // Away from the head the thumbstick walks as usual.
+  hand.thumbstick_x = -1.0f;
+  frame();
+  EXPECT_EQ(Visor(m), 0u);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+
+  // Next to the head: left picks the scan visor, the Nunchuk stick held at the centre.
+  hand.aim = {true, {0.12f, 1.55f, -0.05f}};
+  frame();
+  EXPECT_EQ(Visor(m), 1u);
+  const PadHolds& holds = script.GetPadHolds();
+  EXPECT_EQ(holds.size(), 2u);
+  EXPECT_EQ(holds.count(PadHoldKey{PadDevice::Attachment, u8{0}, "Stick", "X"}), 1u);
+  // Held there: no repeat. Back to the centre, then up: the command visor.
+  game.SetVisor(0);
+  frame();
+  EXPECT_EQ(Visor(m), 0u);
+  hand.thumbstick_x = 0.0f;
+  frame();
+  hand.thumbstick_y = 0.9f;
+  frame();
+  EXPECT_EQ(Visor(m), 2u);
+  // Right: the X-ray visor is not owned.
+  hand.thumbstick_y = 0.0f;
+  frame();
+  hand.thumbstick_x = 0.9f;
+  frame();
+  EXPECT_EQ(Visor(m), 2u);
+  // Down: back to the combat visor.
+  hand.thumbstick_x = 0.0f;
+  frame();
+  hand.thumbstick_y = -0.9f;
+  frame();
+  EXPECT_EQ(Visor(m), 0u);
+
+  // On the map nothing changes and the stick is the user's again.
+  hand.thumbstick_y = 0.0f;
+  frame();
+  game.SetMenu(1);
+  hand.thumbstick_x = -1.0f;
+  frame();
+  EXPECT_EQ(Visor(m), 0u);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+}
