@@ -26,8 +26,13 @@ enum class PrimitiveType : u32;
 // - A HUD drawn in perspective at the camera has no translation either (Rogue Leader's cockpit
 //   gauges, 6 near planes away), while a sky is far: the closest vertex must be this many near
 //   planes away (Metroid Prime's sky starts at 43, Rogue Leader's at 200, SSX 3's at about 100).
+// - Once a sky is drawn, the objects drawn with it, at the camera and with the same projection
+//   load, are part of it from fewer near planes: Metroid Prime 3 draws a planet's atmosphere
+//   around the camera after its sky, 13 near planes away (Norion from the gunship, from the
+//   GFS Olympus and in the intro), and it floated in front of the planet the sky put at infinity.
 constexpr float VR_SKYBOX_MAX_RELATIVE_TRANSLATION = 1.0e-3f;
 constexpr float VR_SKYBOX_MIN_NEAR_PLANES = 20.0f;
+constexpr float VR_SKYBOX_MIN_NEAR_PLANES_AFTER_SKY = 10.0f;
 
 inline float SkyboxTranslationLength(const float* matrix)
 {
@@ -50,10 +55,14 @@ inline bool IsSkyboxCandidate(const float* matrix, float near_z)
   return !IsIdentityRotation(matrix) && SkyboxTranslationLength(matrix) <= near_z;
 }
 
-// The full test, with the distance of the draw's closest vertex from the camera.
-inline bool IsSkyboxDraw(const float* matrix, float min_distance, float near_z)
+// The full test, with the distance of the draw's closest vertex from the camera. after_sky: a sky
+// was drawn earlier in the frame with the same projection load.
+inline bool IsSkyboxDraw(const float* matrix, float min_distance, float near_z,
+                         bool after_sky = false)
 {
-  return IsSkyboxCandidate(matrix, near_z) && min_distance >= VR_SKYBOX_MIN_NEAR_PLANES * near_z &&
+  const float min_near_planes =
+      after_sky ? VR_SKYBOX_MIN_NEAR_PLANES_AFTER_SKY : VR_SKYBOX_MIN_NEAR_PLANES;
+  return IsSkyboxCandidate(matrix, near_z) && min_distance >= min_near_planes * near_z &&
          SkyboxTranslationLength(matrix) <= VR_SKYBOX_MAX_RELATIVE_TRANSLATION * min_distance;
 }
 

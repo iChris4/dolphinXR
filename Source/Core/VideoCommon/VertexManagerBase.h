@@ -312,6 +312,8 @@ private:
   // of the current load for the profiles classified once per load.
   bool m_projection_load_pending = false;
   u32 m_frame_projection_loads = 0;
+  // The projection load of the last draw Detect Skybox made a sky in this frame.
+  std::optional<u32> m_vr_sky_projection_load;
   std::optional<MetroidElementLayer> m_metroid_load_layer;
   std::optional<std::array<float, 6>> m_vr_scene_projection;
   bool m_unflushed_efb_copy = false;

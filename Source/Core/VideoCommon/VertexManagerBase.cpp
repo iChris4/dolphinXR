@@ -1111,7 +1111,7 @@ static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool age
 
 // Detect Skybox's verdict for the draw being flushed (IsSkyboxDraw). The vertices are read only
 // for the few draws whose matrix passes IsSkyboxCandidate.
-static bool DetectVRSkybox(const DrawDepthSource& draw_depth)
+static bool DetectVRSkybox(const DrawDepthSource& draw_depth, bool after_sky)
 {
   if (!g_ActiveConfig.vr_detect_skybox || g_ActiveConfig.stereo_mode != StereoMode::OpenXR ||
       xfmem.projection.type != ProjectionType::Perspective)
@@ -1127,7 +1127,7 @@ static bool DetectVRSkybox(const DrawDepthSource& draw_depth)
   if (!IsSkyboxCandidate(matrix, near_z))
     return false;
   const DrawDistanceRange& distance = draw_depth.GetDistance();
-  return distance.valid && IsSkyboxDraw(matrix, distance.min, near_z);
+  return distance.valid && IsSkyboxDraw(matrix, distance.min, near_z, after_sky);
 }
 #endif
 
@@ -2260,7 +2260,13 @@ void VertexManagerBase::Flush()
         }
 
 #ifdef ENABLE_VR
-        geometry_shader_manager.vr_skybox_draw = DetectVRSkybox(draw_depth);
+        {
+          const u32 load = m_frame_projection_loads > 0 ? m_frame_projection_loads - 1 : 0;
+          geometry_shader_manager.vr_skybox_draw =
+              DetectVRSkybox(draw_depth, m_vr_sky_projection_load == load);
+          if (geometry_shader_manager.vr_skybox_draw)
+            m_vr_sky_projection_load = load;
+        }
         if (agent_record) [[unlikely]]
         {
           FinishAgentDrawRecord(agent_record, agent_preview_skip, background_fill_skip, hunter_skip,
@@ -2695,6 +2701,7 @@ void VertexManagerBase::OnEndFrame()
   m_draw_counter = 0;
   m_vr_culled_flushes = 0;
   m_frame_projection_loads = 0;
+  m_vr_sky_projection_load.reset();
   m_last_efb_copy_draw_counter = 0;
   m_scheduled_command_buffer_kicks.clear();
 

@@ -49,6 +49,18 @@ TEST(VRSkybox, AHudAtTheCameraIsNot)
   EXPECT_FALSE(IsSky(0.0f, 0.0f, 0.0f, VR_SKYBOX_MIN_NEAR_PLANES * 0.2f * 0.99f, 0.2f));
 }
 
+TEST(VRSkybox, ObjectsAtTheCameraAfterASkyArePartOfIt)
+{
+  // Metroid Prime 3: a planet's atmosphere drawn around the camera after the sky, with its
+  // projection load, 2.642 units away with a 0.2 near plane (13.2 near planes).
+  EXPECT_FALSE(IsSky(0.0f, 0.0f, 0.0f, 2.642f, 0.2f));
+  EXPECT_TRUE(IsSkyboxDraw(Matrix(0.0f, 0.0f, 0.0f).data(), 2.642f, 0.2f, true));
+  // Rogue Leader's cockpit gauges stay out even after its sky.
+  EXPECT_FALSE(IsSkyboxDraw(Matrix(0.0f, 0.0f, 0.0f).data(), 0.64f, 0.1f, true));
+  // And an object away from the camera is still not a sky.
+  EXPECT_FALSE(IsSkyboxDraw(Matrix(0.0f, -0.71f, 3.2f).data(), 2.0f, 0.1f, true));
+}
+
 TEST(VRSkybox, ObjectsAwayFromTheCameraAreNot)
 {
   // Rogue Leader's ship in front of the camera.
