@@ -262,12 +262,16 @@ ToolResult ReadMemory(const ToolArgs& args)
 
   Core::CPUThreadGuard guard(GetSystem());
   std::string text = fmt::format("{} at {}:\n", format, DescribeAddress(address));
+  picojson::object structured;
+  structured["address"] = JsonNumber(address);
+  structured["format"] = JsonString(format);
   if (format == "string")
   {
     const auto value = PowerPC::MMU::HostTryReadString(guard, address, count);
     if (!value)
       throw ToolError("The address is not readable.");
-    return ToolResult::Text(text + "\"" + value->value + "\"");
+    structured["value"] = JsonString(value->value);
+    return ToolResult::Text(text + "\"" + value->value + "\"").SetStructured(std::move(structured));
   }
 
   const u32 size = format == "u8"                       ? 1 :
@@ -280,37 +284,55 @@ ToolResult ReadMemory(const ToolArgs& args)
     throw ToolError("format is u8, u16, u32, s32, u64, f32, f64 or string.");
   }
   const u32 per_line = size == 1 ? 16 : size == 2 ? 8 : 4;
+  picojson::array values;
   for (u32 i = 0; i < count; ++i)
   {
     const u32 at = address + i * size;
     if (i % per_line == 0)
       text += fmt::format("{}{:08X}:", i == 0 ? "" : "\n", at);
     std::string value = "??";
+    picojson::value json;  // null: not readable
     if (size == 1)
     {
       if (const auto v = PowerPC::MMU::HostTryRead<u8>(guard, at))
+      {
         value = fmt::format("{:02X}", v->value);
+        json = JsonNumber(v->value);
+      }
     }
     else if (size == 2)
     {
       if (const auto v = PowerPC::MMU::HostTryRead<u16>(guard, at))
+      {
         value = fmt::format("{:04X}", v->value);
+        json = JsonNumber(v->value);
+      }
     }
     else if (size == 8)
     {
       if (const auto v = PowerPC::MMU::HostTryRead<u64>(guard, at))
-        value = format == "f64" ? fmt::format("{}", std::bit_cast<double>(v->value)) :
-                                  fmt::format("{:016X}", v->value);
+      {
+        const double as_double = std::bit_cast<double>(v->value);
+        value = format == "f64" ? fmt::format("{}", as_double) : fmt::format("{:016X}", v->value);
+        // A u64 does not fit a JSON number exactly: hex string.
+        json = format == "f64" ? JsonFloat(as_double) : JsonString(value);
+      }
     }
     else if (const auto v = PowerPC::MMU::HostTryRead<u32>(guard, at))
     {
-      value = format == "f32" ? fmt::format("{}", std::bit_cast<float>(v->value)) :
+      const float as_float = std::bit_cast<float>(v->value);
+      value = format == "f32" ? fmt::format("{}", as_float) :
               format == "s32" ? fmt::format("{}", static_cast<s32>(v->value)) :
                                 fmt::format("{:08X}", v->value);
+      json = format == "f32" ? JsonFloat(as_float) :
+             format == "s32" ? JsonNumber(static_cast<s32>(v->value)) :
+                               JsonNumber(v->value);
     }
     text += " " + value;
+    values.push_back(std::move(json));
   }
-  return ToolResult::Text(std::move(text));
+  structured["values"] = picojson::value(std::move(values));
+  return ToolResult::Text(std::move(text)).SetStructured(std::move(structured));
 }
 
 // write_memory with type f32 / f64: `floats` is a list of numbers.
@@ -444,6 +466,31 @@ ToolResult ListBreakpoints(const ToolArgs&)
   return ToolResult::Text(text.empty() ? "No breakpoints or watchpoints." : text);
 }
 
+// The registers as a structured result: the special registers, gpr (32 numbers) and fpr (32
+// [ps0, ps1] pairs, at full precision).
+picojson::object RegistersJson()
+{
+  const auto& ppc = GetSystem().GetPPCState();
+  picojson::object object;
+  object["pc"] = picojson::value(AddressJson(ppc.pc));
+  object["lr"] = picojson::value(AddressJson(LR(ppc)));
+  object["ctr"] = JsonNumber(CTR(ppc));
+  object["cr"] = JsonNumber(ppc.cr.Get());
+  object["msr"] = JsonNumber(ppc.msr.Hex);
+  object["xer"] = JsonNumber(ppc.GetXER().Hex);
+  picojson::array gpr;
+  picojson::array fpr;
+  for (int i = 0; i < 32; ++i)
+  {
+    gpr.push_back(JsonNumber(ppc.gpr[i]));
+    fpr.push_back(picojson::value(
+        picojson::array{JsonFloat(ppc.ps[i].PS0AsDouble()), JsonFloat(ppc.ps[i].PS1AsDouble())}));
+  }
+  object["gpr"] = picojson::value(std::move(gpr));
+  object["fpr"] = picojson::value(std::move(fpr));
+  return object;
+}
+
 std::string DescribeRegisters()
 {
   const auto& ppc = GetSystem().GetPPCState();
@@ -462,10 +509,18 @@ ToolResult WaitForBreak(const ToolArgs& args)
   RequireGame();
   const auto timeout =
       std::chrono::milliseconds(std::clamp<s64>(args.GetInt("timeout_ms", 10000), 100, 120000));
+  picojson::object structured;
   if (!WaitUntil(IsPaused, timeout))
-    return ToolResult::Text("No breakpoint was hit in time (emulation is still running).");
+  {
+    structured["paused"] = JsonBool(false);
+    return ToolResult::Text("No breakpoint was hit in time (emulation is still running).")
+        .SetStructured(std::move(structured));
+  }
   Core::CPUThreadGuard guard(GetSystem());
-  return ToolResult::Text("Paused at a breakpoint (or by the user).\n" + DescribeRegisters());
+  structured["paused"] = JsonBool(true);
+  structured["registers"] = picojson::value(RegistersJson());
+  return ToolResult::Text("Paused at a breakpoint (or by the user).\n" + DescribeRegisters())
+      .SetStructured(std::move(structured));
 }
 
 ToolResult GetRegisters(const ToolArgs&)
@@ -474,7 +529,7 @@ ToolResult GetRegisters(const ToolArgs&)
   if (!IsPaused())
     throw ToolError("Pause first (or wait_for_break): registers change constantly while running.");
   Core::CPUThreadGuard guard(GetSystem());
-  return ToolResult::Text(DescribeRegisters());
+  return ToolResult::Text(DescribeRegisters()).SetStructured(RegistersJson());
 }
 
 ToolResult GetCallstack(const ToolArgs&)
@@ -487,9 +542,19 @@ ToolResult GetCallstack(const ToolArgs&)
   if (!Dolphin_Debugger::GetCallstack(guard, stack))
     throw ToolError("The call stack is not available here.");
   std::string text;
+  picojson::array frames;
   for (const auto& entry : stack)
-    text += fmt::format("{:08X} {}\n", entry.vAddress, StripWhitespace(entry.Name));
-  return ToolResult::Text(std::move(text));
+  {
+    const std::string name(StripWhitespace(entry.Name));
+    text += fmt::format("{:08X} {}\n", entry.vAddress, name);
+    picojson::object frame;
+    frame["address"] = JsonNumber(entry.vAddress);
+    frame["name"] = JsonString(name);
+    frames.push_back(picojson::value(std::move(frame)));
+  }
+  picojson::object structured;
+  structured["frames"] = picojson::value(std::move(frames));
+  return ToolResult::Text(std::move(text)).SetStructured(std::move(structured));
 }
 
 ToolResult StepInstruction(const ToolArgs& args)
@@ -507,9 +572,13 @@ ToolResult StepInstruction(const ToolArgs& args)
       throw ToolError("The step did not complete.");
   }
   Core::CPUThreadGuard guard(GetSystem());
+  picojson::object structured;
+  structured["stepped"] = JsonNumber(count);
+  structured["registers"] = picojson::value(RegistersJson());
   return ToolResult::Text(fmt::format("Stepped {} instruction(s).\n{}\n{}", count,
                                       FormatInstructionLine(guard, GetSystem().GetPPCState().pc),
-                                      DescribeRegisters()));
+                                      DescribeRegisters()))
+      .SetStructured(std::move(structured));
 }
 
 ToolResult SetWatchpoint(const ToolArgs& args)
@@ -657,14 +726,30 @@ std::string ModuleOfAddress(u32 address)
   return fmt::format("{} (REL {})", module.name, module.id);
 }
 
-std::string DescribeAddress(u32 address)
+std::string SymbolAt(u32 address)
 {
   const Common::Symbol* symbol = GetSystem().GetPPCSymbolDB().GetSymbolFromAddr(address);
   if (!symbol)
-    return fmt::format("{:08X}", address);
+    return {};
   if (symbol->address == address)
-    return fmt::format("{:08X} ({})", address, SymbolName(*symbol));
-  return fmt::format("{:08X} ({}+0x{:X})", address, SymbolName(*symbol), address - symbol->address);
+    return std::string(SymbolName(*symbol));
+  return fmt::format("{}+0x{:X}", SymbolName(*symbol), address - symbol->address);
+}
+
+std::string DescribeAddress(u32 address)
+{
+  const std::string symbol = SymbolAt(address);
+  return symbol.empty() ? fmt::format("{:08X}", address) :
+                          fmt::format("{:08X} ({})", address, symbol);
+}
+
+picojson::object AddressJson(u32 address)
+{
+  picojson::object object;
+  object["address"] = JsonNumber(address);
+  if (std::string symbol = SymbolAt(address); !symbol.empty())
+    object["symbol"] = JsonString(std::move(symbol));
+  return object;
 }
 
 std::string EnsureSymbols()
@@ -774,7 +859,11 @@ void RegisterMemoryTools(ToolRegistry& registry, Server& server)
   registry.Add(
       {.name = "read_memory",
        .title = "Read memory",
-       .description = "Reads emulated memory (effective addresses, e.g. 0x80xxxxxx).",
+       .description =
+           "Reads emulated memory (effective addresses, e.g. 0x80xxxxxx). structuredContent: "
+           "{address, format, values: [numbers; floats at full precision, NaN/infinity as "
+           "strings, u64 as hex strings, null where unreadable]} or {address, format, value} for "
+           "a string.",
        .input_schema = Schema()
                            .Hex("address", "Start address.")
                            .String("format", "Default u32.",
@@ -840,14 +929,17 @@ void RegisterMemoryTools(ToolRegistry& registry, Server& server)
       {.name = "wait_for_break",
        .title = "Wait for a breakpoint",
        .description = "Waits until emulation pauses on a breakpoint or watchpoint and "
-                      "returns the registers.",
+                      "returns the registers. structuredContent: {paused, registers} (registers "
+                      "as get_registers).",
        .input_schema = Schema().Integer("timeout_ms", "Default 10000.", 100, 120000).Build(),
        .read_only = true,
        .handler = WaitForBreak});
 
   registry.Add({.name = "get_registers",
                 .title = "CPU registers",
-                .description = "PowerPC registers (paused only).",
+                .description = "PowerPC registers (paused only). structuredContent: {pc, lr "
+                               "({address, symbol}), ctr, cr, msr, xer, gpr: [32 numbers], fpr: "
+                               "[32 [ps0, ps1]]}.",
                 .input_schema = Schema().Build(),
                 .read_only = true,
                 .idempotent = true,
@@ -855,7 +947,8 @@ void RegisterMemoryTools(ToolRegistry& registry, Server& server)
 
   registry.Add({.name = "get_callstack",
                 .title = "Call stack",
-                .description = "The PowerPC call stack (paused only).",
+                .description = "The PowerPC call stack (paused only). structuredContent: "
+                               "{frames: [{address, name}]}.",
                 .input_schema = Schema().Build(),
                 .read_only = true,
                 .idempotent = true,
@@ -863,7 +956,8 @@ void RegisterMemoryTools(ToolRegistry& registry, Server& server)
 
   registry.Add({.name = "step_instruction",
                 .title = "Step instructions",
-                .description = "Executes single instructions while paused.",
+                .description = "Executes single instructions while paused. "
+                               "structuredContent: {stepped, registers}.",
                 .input_schema = Schema().Integer("count", "Default 1.", 1, 1000).Build(),
                 .handler = StepInstruction});
 

@@ -13,6 +13,8 @@
 #include <string_view>
 #include <vector>
 
+#include <picojson.h>
+
 #include "Common/CommonTypes.h"
 
 namespace Common
@@ -69,6 +71,10 @@ void ApplyCPUThreadConfig();
 u32 ResolveCodeAddress(const ToolArgs& args);
 // "0x80123456 (FunctionName+0x10)".
 std::string DescribeAddress(u32 address);
+// The symbol and offset of an address ("zz_8000b04c_+0x48"), or "" when no symbol covers it.
+std::string SymbolAt(u32 address);
+// An address in a structured result: {"address": number, "symbol": "..."} (no symbol: omitted).
+picojson::object AddressJson(u32 address);
 // "_Main.plf (REL 1)" when the address is inside a REL module the game loaded, else "".
 std::string ModuleOfAddress(u32 address);
 // The symbol's name without what the signature database appends after a tab (library and object

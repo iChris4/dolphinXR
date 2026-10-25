@@ -342,6 +342,15 @@ ToolResult& ToolResult::AddImagePng(std::span<const u8> png)
   return *this;
 }
 
+picojson::value JsonFloat(double value)
+{
+  if (std::isnan(value))
+    return JsonString("nan");
+  if (std::isinf(value))
+    return JsonString(value > 0 ? "inf" : "-inf");
+  return JsonNumber(value);
+}
+
 ToolResult& ToolResult::SetStructured(picojson::object object)
 {
   structured = std::move(object);

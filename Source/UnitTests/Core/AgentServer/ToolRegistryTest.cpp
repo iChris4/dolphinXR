@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
@@ -86,6 +88,25 @@ TEST(AgentTools, Base64RoundTrip)
   EXPECT_EQ(Base64Decode(encoded), text);
   EXPECT_EQ(Base64Decode("ZWNobw=="), "echo");
   EXPECT_EQ(Base64Decode("!!!"), std::nullopt);
+}
+
+TEST(AgentTools, StructuredResultsCarryGameFloats)
+{
+  // JSON has no NaN or infinity, and picojson throws on them: they become strings.
+  EXPECT_EQ(JsonFloat(0.25).get<double>(), 0.25);
+  EXPECT_EQ(JsonFloat(std::numeric_limits<double>::quiet_NaN()).get<std::string>(), "nan");
+  EXPECT_EQ(JsonFloat(std::numeric_limits<double>::infinity()).get<std::string>(), "inf");
+  EXPECT_EQ(JsonFloat(-std::numeric_limits<double>::infinity()).get<std::string>(), "-inf");
+
+  picojson::object structured;
+  structured["values"] = picojson::value(
+      picojson::array{JsonNumber(0x80972780u), JsonFloat(std::nan("")), picojson::value()});
+  const picojson::object json =
+      ToolResult::Text("text").SetStructured(std::move(structured)).ToJson();
+  const std::string serialized = picojson::value(json).serialize();
+  EXPECT_NE(serialized.find(R"("structuredContent":{"values":[2157389696,"nan",null]})"),
+            std::string::npos)
+      << serialized;
 }
 
 TEST(AgentPatchTemplates, BuildsActionReplayLines)

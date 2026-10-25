@@ -9,6 +9,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -673,7 +674,49 @@ ToolResult TraceFunction(const ToolArgs& args)
                         hit.kind == Tracepoints::HitKind::Entry ? "entry " : "return", hit.pc,
                         hit.lr, hit.gpr[0], hit.gpr[1], hit.gpr[2], hit.gpr[3], hit.field);
   }
-  return ToolResult::Text(std::move(text));
+
+  // Every count, most frequent first, and the first 200 hits.
+  const auto counts_json = [](const std::map<u32, size_t>& counts, const char* key,
+                              bool addresses) {
+    std::vector<std::pair<u32, size_t>> sorted(counts.begin(), counts.end());
+    std::sort(sorted.begin(), sorted.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    picojson::array array;
+    for (const auto& [value, count] : sorted)
+    {
+      picojson::object entry = addresses ? AddressJson(value) : picojson::object{};
+      if (!addresses)
+        entry[key] = JsonNumber(value);
+      entry["count"] = JsonNumber(static_cast<double>(count));
+      array.push_back(picojson::value(std::move(entry)));
+    }
+    return picojson::value(std::move(array));
+  };
+  picojson::object structured = AddressJson(address);
+  structured["calls"] = JsonNumber(static_cast<double>(entries));
+  structured["fields"] = JsonNumber(static_cast<double>(fields));
+  structured["stopped_at_max_hits"] = JsonBool(hits.size() >= max_hits);
+  structured["return_sites"] = JsonNumber(static_cast<double>(points.size() - 1));
+  structured["callers"] = counts_json(callers, "address", true);
+  structured["r3_at_entry"] = counts_json(entry_r3, "value", false);
+  structured["r3_at_return"] = counts_json(return_r3, "value", false);
+  picojson::array hit_array;
+  for (size_t i = 0; i < std::min<size_t>(hits.size(), 200); ++i)
+  {
+    const Tracepoints::Hit& hit = hits[i];
+    picojson::object entry;
+    entry["kind"] = JsonString(hit.kind == Tracepoints::HitKind::Entry ? "entry" : "return");
+    entry["pc"] = JsonNumber(hit.pc);
+    entry["lr"] = JsonNumber(hit.lr);
+    entry["r3"] = JsonNumber(hit.gpr[0]);
+    entry["r4"] = JsonNumber(hit.gpr[1]);
+    entry["r5"] = JsonNumber(hit.gpr[2]);
+    entry["r6"] = JsonNumber(hit.gpr[3]);
+    entry["field"] = JsonNumber(static_cast<double>(hit.field));
+    hit_array.push_back(picojson::value(std::move(entry)));
+  }
+  structured["hits"] = picojson::value(std::move(hit_array));
+  return ToolResult::Text(std::move(text)).SetStructured(std::move(structured));
 }
 
 ToolResult TraceMemory(const ToolArgs& args)
@@ -736,16 +779,35 @@ ToolResult TraceMemory(const ToolArgs& args)
                                  address, address + size - 1, fields,
                                  hits.size() >= max_hits ? " (stopped at max_hits)" : "");
   text += "By instruction (read/write, count, values seen):\n";
+  picojson::array instructions;
   for (const auto& [key, access] : by_pc)
   {
     std::string values;
+    picojson::array value_array;
     for (const u64 value : access.values)
+    {
       values += fmt::format(" {:X}", value);
+      // Up to 8 bytes: a hex string, which a JSON number would not hold exactly.
+      value_array.push_back(JsonString(fmt::format("{:X}", value)));
+    }
+    const double per_field = fields ? static_cast<double>(access.count) / fields : 0.0;
     text += fmt::format("  {} {} x{} ({:.2f}/field):{}\n", DescribeAddress(key.first),
-                        key.second ? "write" : "read ", access.count,
-                        fields ? static_cast<double>(access.count) / fields : 0.0, values);
+                        key.second ? "write" : "read ", access.count, per_field, values);
+    picojson::object entry = AddressJson(key.first);
+    entry["kind"] = JsonString(key.second ? "write" : "read");
+    entry["count"] = JsonNumber(static_cast<double>(access.count));
+    entry["per_field"] = JsonNumber(per_field);
+    entry["values"] = picojson::value(std::move(value_array));
+    instructions.push_back(picojson::value(std::move(entry)));
   }
-  return ToolResult::Text(std::move(text));
+  picojson::object structured;
+  structured["address"] = JsonNumber(address);
+  structured["size"] = JsonNumber(size);
+  structured["fields"] = JsonNumber(static_cast<double>(fields));
+  structured["accesses"] = JsonNumber(static_cast<double>(hits.size()));
+  structured["stopped_at_max_hits"] = JsonBool(hits.size() >= max_hits);
+  structured["instructions"] = picojson::value(std::move(instructions));
+  return ToolResult::Text(std::move(text)).SetStructured(std::move(structured));
 }
 
 ToolResult MeasureFrameRate(const ToolArgs& args)
@@ -846,6 +908,7 @@ ToolResult WatchMemory(const ToolArgs& args)
                            fmt::format("{:X}", value);
   };
   std::string text = fmt::format("{} fields sampled.\n", samples->rows.size());
+  picojson::array address_array;
   for (size_t a = 0; a < addresses.size(); ++a)
   {
     std::vector<u32> series;
@@ -867,8 +930,26 @@ ToolResult WatchMemory(const ToolArgs& args)
     for (size_t i = 0; i < std::min<size_t>(series.size(), 24); ++i)
       text += " " + format_value(series[i]);
     text += "\n";
+
+    picojson::object entry;
+    entry["address"] = JsonNumber(static_cast<double>(addresses[a]));
+    entry["pattern"] = JsonString(pattern);
+    entry["changes"] = JsonNumber(static_cast<double>(changes));
+    entry["distinct"] = JsonNumber(static_cast<double>(distinct.size()));
+    picojson::array values;
+    for (const u32 value : series)
+    {
+      // 0xFFFFFFFF is what an unreadable address gives (as in the text).
+      values.push_back(type == "f32" ? JsonFloat(std::bit_cast<float>(value)) : JsonNumber(value));
+    }
+    entry["values"] = picojson::value(std::move(values));
+    address_array.push_back(picojson::value(std::move(entry)));
   }
-  return ToolResult::Text(std::move(text));
+  picojson::object structured;
+  structured["fields"] = JsonNumber(static_cast<double>(samples->rows.size()));
+  structured["type"] = JsonString(type);
+  structured["addresses"] = picojson::value(std::move(address_array));
+  return ToolResult::Text(std::move(text)).SetStructured(std::move(structured));
 }
 
 // The agent's cheat search session.
@@ -959,6 +1040,9 @@ ToolResult CheatSearch(const ToolArgs& args)
   const size_t page_size =
       static_cast<size_t>(std::clamp<s64>(args.GetInt("page_size", 50), 1, 200));
   std::string text = fmt::format("{} candidate address(es).", count);
+  picojson::object structured;
+  structured["candidates"] = JsonNumber(static_cast<double>(count));
+  picojson::array results;
   if (count > 0 && count <= 5000)
   {
     // Refresh the shown values.
@@ -972,8 +1056,14 @@ ToolResult CheatSearch(const ToolArgs& args)
     text += " Address = current value:\n";
     for (size_t i = 0; i < view->GetResultCount(); ++i)
     {
-      text += fmt::format("  {}: {}\n", DescribeAddress(view->GetResultAddress(i)),
-                          view->GetResultValueAsString(i, false));
+      const std::string value = view->GetResultValueAsString(i, false);
+      text += fmt::format("  {}: {}\n", DescribeAddress(view->GetResultAddress(i)), value);
+      picojson::object entry = AddressJson(view->GetResultAddress(i));
+      char* end = nullptr;
+      const double number = std::strtod(value.c_str(), &end);
+      entry["value"] =
+          end && *end == '\0' && !value.empty() ? JsonFloat(number) : JsonString(value);
+      results.push_back(picojson::value(std::move(entry)));
     }
   }
   else if (count > 5000)
@@ -981,7 +1071,8 @@ ToolResult CheatSearch(const ToolArgs& args)
     text += " Narrow it down with more searches (change the game state between searches, or "
             "use filter=previous with compare=equal to keep the values that did not change).";
   }
-  return ToolResult::Text(std::move(text));
+  structured["results"] = picojson::value(std::move(results));
+  return ToolResult::Text(std::move(text)).SetStructured(std::move(structured));
 }
 
 ToolResult TestMemoryWrite(const ToolArgs& args)
@@ -1292,7 +1383,10 @@ void RegisterExperimentTools(ToolRegistry& registry, Server& server)
        .description =
            "Records each call of a function over some frames without stopping the game: calls "
            "per field, callers, r3 at entry and at return (a bool-like return points to a test "
-           "such as a visibility check).",
+           "such as a visibility check). structuredContent: {address, symbol, calls, fields, "
+           "stopped_at_max_hits, return_sites, callers: [{address, symbol, count}], "
+           "r3_at_entry and r3_at_return: [{value, count}], hits: [{kind, pc, lr, r3, r4, r5, "
+           "r6, field}] (the first 200)}.",
        .input_schema =
            Schema()
                .Hex("address", "Function address.")
@@ -1310,7 +1404,9 @@ void RegisterExperimentTools(ToolRegistry& registry, Server& server)
        .description =
            "Records which instructions read or write an address over some frames, with the "
            "values, without stopping the game. Finds the code behind a variable from "
-           "cheat_search (e.g. the frame interval for a 60fps code).",
+           "cheat_search (e.g. the frame interval for a 60fps code). structuredContent: "
+           "{address, size, fields, accesses, stopped_at_max_hits, instructions: [{address, "
+           "symbol, kind, count, per_field, values: [hex strings]}]}.",
        .input_schema = Schema()
                            .Hex("address", "Address.")
                            .Integer("size", "Bytes (default 4).", 1, 0x1000)
@@ -1384,7 +1480,9 @@ void RegisterExperimentTools(ToolRegistry& registry, Server& server)
   registry.Add({.name = "watch_memory",
                 .title = "Sample memory each field",
                 .description = "Reads up to 16 addresses at every VI field and summarizes each "
-                               "(constant, counts up by 1 each field, changes...).",
+                               "(constant, counts up by 1 each field, changes...). "
+                               "structuredContent: {fields, type, addresses: [{address, "
+                               "pattern, changes, distinct, values: [every sample]}]}.",
                 .input_schema = Schema()
                                     .HexArray("addresses", "Addresses.")
                                     .String("type", "Default u32.", {"u8", "u16", "u32", "f32"})
@@ -1400,7 +1498,9 @@ void RegisterExperimentTools(ToolRegistry& registry, Server& server)
        .description =
            "Dolphin's cheat search: action=new starts a search over RAM (with a first filter), "
            "next filters the candidates against a value or against their previous values, "
-           "results lists them with current values. Change the game state between searches.",
+           "results lists them with current values. Change the game state between searches. "
+           "structuredContent: {candidates, results: [{address, symbol, value}]} (the shown "
+           "page).",
        .input_schema = Schema()
                            .String("action", "Default next.", {"new", "next", "results"})
                            .String("data_type", "For new; default u32.",

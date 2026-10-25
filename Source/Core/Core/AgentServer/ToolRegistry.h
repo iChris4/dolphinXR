@@ -157,4 +157,7 @@ inline picojson::value JsonBool(bool value)
 {
   return picojson::value(value);
 }
+// A float from the game: JSON has no NaN or infinity (picojson throws on them), so those become
+// the strings "nan", "inf" and "-inf".
+picojson::value JsonFloat(double value);
 }  // namespace AgentServer
