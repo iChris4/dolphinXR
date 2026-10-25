@@ -274,6 +274,21 @@ static XrQuaternionf MultiplyQuaternions(const XrQuaternionf& a, const XrQuatern
           a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
 }
 
+static XrVector3f RotateVector(const XrQuaternionf& q, const XrVector3f& v)
+{
+  // v + 2w(u x v) + 2u x (u x v), u = (x, y, z).
+  const float tx = 2.0f * (q.y * v.z - q.z * v.y);
+  const float ty = 2.0f * (q.z * v.x - q.x * v.z);
+  const float tz = 2.0f * (q.x * v.y - q.y * v.x);
+  return {v.x + q.w * tx + (q.y * tz - q.z * ty), v.y + q.w * ty + (q.z * tx - q.x * tz),
+          v.z + q.w * tz + (q.x * ty - q.y * tx)};
+}
+
+static bool IsZeroQuaternion(const XrQuaternionf& q)
+{
+  return q.x == 0.0f && q.y == 0.0f && q.z == 0.0f && q.w == 0.0f;
+}
+
 static void CopyOpenXRName(char* dst, size_t dst_size, std::string_view src)
 {
   std::memset(dst, 0, dst_size);
@@ -1387,6 +1402,7 @@ void OpenXRManager::DestroySession()
   {
     std::lock_guard lock(m_input_head_pose_mutex);
     m_input_head_pose = {};
+    m_input_head_center = {};
   }
   m_rendered_eye_views = {};
   m_submitted_eye_views = {};
@@ -2758,6 +2774,18 @@ void OpenXRManager::UpdateInputActions()
     locate_space_state(m_aim_spaces[hand], display_time, &controller.aim_pose, nullptr);
     locate_space_state(m_grip_spaces[hand], input_time, &controller.grip_pose,
                        &controller.grip_velocity);
+    // The agent's hand (SetAgentPose): still, one pose for the aim, the grip and the pointer.
+    const std::optional<XrPosef> agent_hand = GetAgentHandPose(hand);
+    if (agent_hand)
+    {
+      controller.aim_pose.valid = true;
+      controller.aim_pose.position = {agent_hand->position.x, agent_hand->position.y,
+                                      agent_hand->position.z};
+      controller.aim_pose.orientation = {agent_hand->orientation.x, agent_hand->orientation.y,
+                                         agent_hand->orientation.z, agent_hand->orientation.w};
+      controller.grip_pose = controller.aim_pose;
+      controller.grip_velocity = {.linear_valid = true, .angular_valid = true};
+    }
     // For VR game patches: the display-time aim seen from the game camera, like the Controller
     // Anchor (a patch writes game memory that is rendered at about that time).
     ComputeViewPose(controller.aim_pose, &controller.view_pose);
@@ -2768,7 +2796,7 @@ void OpenXRManager::UpdateInputActions()
     // Controller Anchor, which must match the rendered frame.
     Common::VR::OpenXRPoseState input_aim;
     locate_space_state(m_aim_spaces[hand], input_time, &input_aim, nullptr);
-    controller.pointer_pose = input_aim.valid ? input_aim : controller.aim_pose;
+    controller.pointer_pose = input_aim.valid && !agent_hand ? input_aim : controller.aim_pose;
     ComputeVirtualScreenHit(controller.pointer_pose, &controller.screen_hit);
 
     controller.trigger_button = trigger_click || controller.trigger_value > 0.5f;
@@ -3309,10 +3337,16 @@ bool OpenXRManager::LocateViews()
     m_eye_views[i].pose = m_views[i].pose;
     m_eye_views[i].fov = m_views[i].fov;
   }
+  ApplyAgentHeadPose();
   ++m_pose_generation;
   {
     std::lock_guard lock(m_input_head_pose_mutex);
     m_input_head_pose = m_eye_views[0].pose;
+    m_input_head_center.orientation = m_eye_views[0].pose.orientation;
+    m_input_head_center.position = {
+        0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x),
+        0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y),
+        0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z)};
   }
 
   // Diagnostic: log raw xrLocateViews output every ~2 seconds.  We want to know if the
@@ -3391,6 +3425,102 @@ std::array<float, 3> OpenXRManager::GetAgentLookOffset() const
   return {m_agent_look_yaw_deg.load(std::memory_order_relaxed),
           m_agent_look_pitch_deg.load(std::memory_order_relaxed),
           m_agent_look_roll_deg.load(std::memory_order_relaxed)};
+}
+
+void OpenXRManager::SetAgentPose(AgentPoseTarget target, std::optional<AgentPose> pose)
+{
+  std::lock_guard lock(m_agent_pose_mutex);
+  m_agent_poses[static_cast<size_t>(target)] = pose;
+  m_agent_poses_active.store(
+      std::ranges::any_of(m_agent_poses, [](const auto& p) { return p.has_value(); }),
+      std::memory_order_release);
+}
+
+std::optional<OpenXRManager::AgentPose> OpenXRManager::GetAgentPose(AgentPoseTarget target) const
+{
+  std::lock_guard lock(m_agent_pose_mutex);
+  return m_agent_poses[static_cast<size_t>(target)];
+}
+
+namespace
+{
+// Yaw (positive turns right, about +Y), then pitch (positive looks up, about +X), then roll:
+// Ry(-yaw) * Rx(pitch) * Rz(roll), as the look offset.
+XrQuaternionf AgentRotation(const OpenXRManager::AgentPose& pose)
+{
+  constexpr float HALF_DEG_TO_RAD = 0.5f * 0.01745329252f;
+  const float y = -pose.yaw_deg * HALF_DEG_TO_RAD;
+  const float p = pose.pitch_deg * HALF_DEG_TO_RAD;
+  const float r = pose.roll_deg * HALF_DEG_TO_RAD;
+  const XrQuaternionf yaw = {0.0f, std::sin(y), 0.0f, std::cos(y)};
+  const XrQuaternionf pitch = {std::sin(p), 0.0f, 0.0f, std::cos(p)};
+  const XrQuaternionf roll = {0.0f, 0.0f, std::sin(r), std::cos(r)};
+  return MultiplyQuaternions(MultiplyQuaternions(yaw, pitch), roll);
+}
+}  // namespace
+
+void OpenXRManager::ApplyAgentHeadPose()
+{
+  if (!m_agent_poses_active.load(std::memory_order_acquire))
+    return;
+  const std::optional<AgentPose> head = GetAgentPose(AgentPoseTarget::Head);
+  if (!head)
+    return;
+
+  // The tracked head: the eyes' centre and the left eye's orientation, or no rotation and a
+  // 64 mm IPD when nothing is tracked. The eyes keep their offsets and rotations from it.
+  const XrPosef left = m_eye_views[0].pose;
+  const XrPosef right = m_eye_views[1].pose;
+  const bool tracked = !IsZeroQuaternion(left.orientation);
+  const XrQuaternionf tracked_rotation =
+      tracked ? left.orientation : XrQuaternionf{0.0f, 0.0f, 0.0f, 1.0f};
+  const XrVector3f center = {0.5f * (left.position.x + right.position.x),
+                             0.5f * (left.position.y + right.position.y),
+                             0.5f * (left.position.z + right.position.z)};
+  const XrQuaternionf inverse = {-tracked_rotation.x, -tracked_rotation.y, -tracked_rotation.z,
+                                 tracked_rotation.w};
+  const XrQuaternionf rotation = AgentRotation(*head);
+  const XrVector3f home = m_home_set ? m_home_position : center;
+  const XrVector3f head_position = {home.x + head->position[0], home.y + head->position[1],
+                                    home.z + head->position[2]};
+  for (size_t eye = 0; eye < 2; ++eye)
+  {
+    XrPosef& pose = m_eye_views[eye].pose;
+    const XrVector3f offset =
+        tracked ? RotateVector(inverse, {pose.position.x - center.x, pose.position.y - center.y,
+                                         pose.position.z - center.z}) :
+                  XrVector3f{eye == 0 ? -0.032f : 0.032f, 0.0f, 0.0f};
+    const XrQuaternionf eye_rotation = tracked ? MultiplyQuaternions(inverse, pose.orientation) :
+                                                 XrQuaternionf{0.0f, 0.0f, 0.0f, 1.0f};
+    const XrVector3f turned = RotateVector(rotation, offset);
+    pose.position = {head_position.x + turned.x, head_position.y + turned.y,
+                     head_position.z + turned.z};
+    pose.orientation = MultiplyQuaternions(rotation, eye_rotation);
+  }
+}
+
+std::optional<XrPosef> OpenXRManager::GetAgentHandPose(size_t hand) const
+{
+  if (!m_agent_poses_active.load(std::memory_order_acquire))
+    return std::nullopt;
+  const std::optional<AgentPose> pose =
+      GetAgentPose(hand == 0 ? AgentPoseTarget::LeftHand : AgentPoseTarget::RightHand);
+  if (!pose)
+    return std::nullopt;
+  XrPosef head;
+  {
+    std::lock_guard lock(m_input_head_pose_mutex);
+    head = m_input_head_center;
+  }
+  if (IsZeroQuaternion(head.orientation))
+    head.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+  const XrVector3f offset =
+      RotateVector(head.orientation, {pose->position[0], pose->position[1], pose->position[2]});
+  XrPosef result;
+  result.orientation = MultiplyQuaternions(head.orientation, AgentRotation(*pose));
+  result.position = {head.position.x + offset.x, head.position.y + offset.y,
+                     head.position.z + offset.z};
+  return result;
 }
 
 void OpenXRManager::ResetFlatScreenAnchor()

@@ -179,6 +179,42 @@ void SetAgentSpeed(bool turbo, bool mute)
 
 namespace
 {
+using AgentPoseTarget = VR::OpenXRManager::AgentPoseTarget;
+
+std::optional<AgentPoseTarget> PoseTarget(const std::string& name)
+{
+  if (name == "head")
+    return AgentPoseTarget::Head;
+  if (name == "left")
+    return AgentPoseTarget::LeftHand;
+  if (name == "right")
+    return AgentPoseTarget::RightHand;
+  return std::nullopt;
+}
+
+const char* PoseTargetName(AgentPoseTarget target)
+{
+  switch (target)
+  {
+  case AgentPoseTarget::Head:
+    return "head";
+  case AgentPoseTarget::LeftHand:
+    return "left hand";
+  case AgentPoseTarget::RightHand:
+  default:
+    return "right hand";
+  }
+}
+
+std::string FormatAgentPose(AgentPoseTarget target, const VR::OpenXRManager::AgentPose& pose)
+{
+  return fmt::format("{}: yaw {:.1f}, pitch {:.1f}, roll {:.1f} degrees, at ({:.2f}, {:.2f}, "
+                     "{:.2f}) m {}",
+                     PoseTargetName(target), pose.yaw_deg, pose.pitch_deg, pose.roll_deg,
+                     pose.position[0], pose.position[1], pose.position[2],
+                     target == AgentPoseTarget::Head ? "from home" : "from the head");
+}
+
 ToolResult GetStatus(const ToolArgs&)
 {
   auto& system = GetSystem();
@@ -205,6 +241,12 @@ ToolResult GetStatus(const ToolArgs&)
       const auto look = VR::g_openxr->GetAgentLookOffset();
       text += fmt::format("\nAgent look offset: yaw {:.1f}, pitch {:.1f}, roll {:.1f} degrees.",
                           look[0], look[1], look[2]);
+      for (const AgentPoseTarget target :
+           {AgentPoseTarget::Head, AgentPoseTarget::LeftHand, AgentPoseTarget::RightHand})
+      {
+        if (const auto pose = VR::g_openxr->GetAgentPose(target))
+          text += "\nAgent " + FormatAgentPose(target, *pose) + " (set_vr_pose).";
+      }
     }
     text += fmt::format("\nCheats {}, debugging mode {}.",
                         Config::AreCheatsEnabled() ? "enabled" : "disabled",
@@ -367,6 +409,62 @@ ToolResult ClearLookOffset(const ToolArgs& args)
   if (IsPaused() && args.GetBool("advance", true))
     AdvanceFrames(1);
   return ToolResult::Text("Look offset cleared.");
+}
+
+ToolResult SetVRPose(const ToolArgs& args)
+{
+  RequireVRSession();
+  const std::string name = args.GetString("target", "head");
+  const std::optional<AgentPoseTarget> target = PoseTarget(name);
+  if (!target)
+    throw ToolError("target is \"head\", \"left\" or \"right\".");
+  // A hand defaults to where a hand holds the arm cannon: 20 cm to the side, 25 cm below and
+  // 35 cm in front of the head.
+  const bool hand = *target != AgentPoseTarget::Head;
+  const double side = *target == AgentPoseTarget::LeftHand ? -0.2 : 0.2;
+  VR::OpenXRManager::AgentPose pose;
+  pose.yaw_deg = static_cast<float>(std::clamp(args.GetNumber("yaw_deg", 0.0), -180.0, 180.0));
+  pose.pitch_deg = static_cast<float>(std::clamp(args.GetNumber("pitch_deg", 0.0), -89.0, 89.0));
+  pose.roll_deg = static_cast<float>(std::clamp(args.GetNumber("roll_deg", 0.0), -180.0, 180.0));
+  pose.position = {
+      static_cast<float>(std::clamp(args.GetNumber("x", hand ? side : 0.0), -3.0, 3.0)),
+      static_cast<float>(std::clamp(args.GetNumber("y", hand ? -0.25 : 0.0), -3.0, 3.0)),
+      static_cast<float>(std::clamp(args.GetNumber("z", hand ? -0.35 : 0.0), -3.0, 3.0))};
+  VR::g_openxr->SetAgentPose(*target, pose);
+  std::string text = "Set the " + FormatAgentPose(*target, pose) + ".";
+  if (IsPaused() && args.GetBool("advance", true))
+  {
+    AdvanceFrames(1);
+    text += " Advanced one frame so the next screenshot shows it.";
+  }
+  return ToolResult::Text(std::move(text));
+}
+
+ToolResult ClearVRPose(const ToolArgs& args)
+{
+  RequireVRSession();
+  const std::string name = args.GetString("target", "all");
+  if (name == "all")
+  {
+    for (const AgentPoseTarget target :
+         {AgentPoseTarget::Head, AgentPoseTarget::LeftHand, AgentPoseTarget::RightHand})
+    {
+      VR::g_openxr->SetAgentPose(target, std::nullopt);
+    }
+  }
+  else
+  {
+    const std::optional<AgentPoseTarget> target = PoseTarget(name);
+    if (!target)
+      throw ToolError("target is \"head\", \"left\", \"right\" or \"all\".");
+    VR::g_openxr->SetAgentPose(*target, std::nullopt);
+  }
+  if (IsPaused() && args.GetBool("advance", true))
+    AdvanceFrames(1);
+  if (name == "all")
+    return ToolResult::Text("The tracked head and controllers are back.");
+  return ToolResult::Text(
+      fmt::format("The tracked {} is back.", name == "head" ? "head" : name + " controller"));
 }
 
 ToolResult SetSpeed(const ToolArgs& args)
@@ -626,6 +724,46 @@ void RegisterEmulationTools(ToolRegistry& registry, Server&)
            Schema().Boolean("advance", "When paused, step one frame (default true).").Build(),
        .idempotent = true,
        .handler = ClearLookOffset});
+
+  registry.Add(
+      {.name = "set_vr_pose",
+       .title = "Place the head or a hand",
+       .description =
+           "Replaces the tracked head or a controller with a pose of yours, as if the user held "
+           "it there, to test without the headset: the game is rendered from the head, VR "
+           "patches read the head and the hands, and a hand drives the Wii pointer, the "
+           "motion and the Controller Anchor (still, and connected even when the controller "
+           "is off). Unlike set_look_offset, the frame is submitted with the head: in the "
+           "headset the view stays where you look. Angles in degrees (positive yaw turns "
+           "right, positive pitch looks up). The head's position is in meters from the home "
+           "position (x right, y up, z back; default 0, 0, 0: the game camera); a hand's is "
+           "in the head's axes (default 0.2 to its side, -0.25, -0.35) and follows the head. "
+           "Stays until clear_vr_pose or the server stops; tell the user while it is set.",
+       .input_schema =
+           Schema()
+               .String("target", "head (default), left or right.", {"head", "left", "right"})
+               .Number("yaw_deg", "Degrees, -180 to 180 (default 0).")
+               .Number("pitch_deg", "Degrees, -89 to 89 (default 0).")
+               .Number("roll_deg", "Degrees, -180 to 180 (default 0).")
+               .Number("x", "Meters to the right.")
+               .Number("y", "Meters up.")
+               .Number("z", "Meters back (negative is forward).")
+               .Boolean("advance", "When paused, step one frame so it is drawn (default true).")
+               .Build(),
+       .handler = SetVRPose});
+
+  registry.Add(
+      {.name = "clear_vr_pose",
+       .title = "Give the head and hands back",
+       .description = "Removes poses set by set_vr_pose: the tracked head and controllers are "
+                      "used again.",
+       .input_schema = Schema()
+                           .String("target", "all (default), head, left or right.",
+                                   {"all", "head", "left", "right"})
+                           .Boolean("advance", "When paused, step one frame (default true).")
+                           .Build(),
+       .idempotent = true,
+       .handler = ClearVRPose});
 
   registry.Add({.name = "set_speed",
                 .title = "Turbo and mute",

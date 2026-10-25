@@ -201,7 +201,15 @@ void Server::Stop()
   // Leave nothing the agent changed behind: speed overrides, look offset, previews...
   SetSpeedOverrides(false, false);
   if (VR::g_openxr)
+  {
     VR::g_openxr->SetAgentLookOffset(0.0f, 0.0f, 0.0f);
+    for (const auto target :
+         {VR::OpenXRManager::AgentPoseTarget::Head, VR::OpenXRManager::AgentPoseTarget::LeftHand,
+          VR::OpenXRManager::AgentPoseTarget::RightHand})
+    {
+      VR::g_openxr->SetAgentPose(target, std::nullopt);
+    }
+  }
   {
     std::lock_guard lock(m_stopped_callbacks_mutex);
     for (const auto& callback : m_server_stopped_callbacks)

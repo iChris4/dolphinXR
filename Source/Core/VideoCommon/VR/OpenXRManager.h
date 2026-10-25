@@ -340,6 +340,30 @@ public:
   void SetAgentLookOffset(float yaw_deg, float pitch_deg, float roll_deg);
   std::array<float, 3> GetAgentLookOffset() const;
 
+  // Agent server: a head or a hand that replaces the tracked one, to test without wearing the
+  // headset. The head replaces the located views, so the game is rendered from it, the frame is
+  // submitted with it (in the headset the view stays where the agent looks) and VR patches read
+  // it. A hand replaces its controller's aim, grip and pointer poses (still and connected), held
+  // relative to the head, so the Wii pointer, the motion and the patches follow it. Angles in
+  // degrees, applied yaw then pitch then roll (positive yaw turns right, positive pitch looks up);
+  // the head's position in meters from the home position (+X right, +Y up, +Z back), a hand's in
+  // the head's axes. Any thread; used from the next located pose.
+  enum class AgentPoseTarget
+  {
+    Head,
+    LeftHand,
+    RightHand,
+  };
+  struct AgentPose
+  {
+    float yaw_deg = 0.0f;
+    float pitch_deg = 0.0f;
+    float roll_deg = 0.0f;
+    std::array<float, 3> position{};
+  };
+  void SetAgentPose(AgentPoseTarget target, std::optional<AgentPose> pose);
+  std::optional<AgentPose> GetAgentPose(AgentPoseTarget target) const;
+
   // ---- Flat mono panel (vr_flat_screen) ----
 
   // Aspect ratio (width / height) of the flat game panel. Set by the presenter each frame
@@ -930,8 +954,10 @@ private:
   std::array<XREyeView, 2> m_eye_views{};
   // Copy of m_eye_views[0].pose for UpdateInputActions, which runs on the pacing thread while
   // LocateViews rewrites m_eye_views on the video thread.
-  std::mutex m_input_head_pose_mutex;
+  mutable std::mutex m_input_head_pose_mutex;
   XrPosef m_input_head_pose{};
+  // The head's centre (between the eyes) with the left eye's orientation, for the agent's hands.
+  XrPosef m_input_head_center{};
   std::array<XREyeView, 2> m_rendered_eye_views{};
   std::array<XREyeView, 2> m_submitted_eye_views{};
 
@@ -961,6 +987,13 @@ private:
   std::atomic<float> m_agent_look_yaw_deg{0.0f};
   std::atomic<float> m_agent_look_pitch_deg{0.0f};
   std::atomic<float> m_agent_look_roll_deg{0.0f};
+
+  // SetAgentPose: the head, then the left and right hands.
+  void ApplyAgentHeadPose();
+  std::optional<XrPosef> GetAgentHandPose(size_t hand) const;
+  mutable std::mutex m_agent_pose_mutex;
+  std::array<std::optional<AgentPose>, 3> m_agent_poses;
+  std::atomic<bool> m_agent_poses_active{false};
 
   // Flat panel state. The anchor (head center + heading) is captured lazily on the video
   // thread and invalidated on recenter; the pose is rebuilt from it with the live screen
