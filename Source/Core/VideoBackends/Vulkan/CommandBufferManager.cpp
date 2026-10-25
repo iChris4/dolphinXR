@@ -16,11 +16,11 @@
 #include "Common/Thread.h"
 #include "Common/Timer.h"
 
-#include "Core/Core.h"
 #include "Core/Config/GraphicsSettings.h"
 
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/Constants.h"
+#include "VideoCommon/GPUDeviceLost.h"
 #include "VideoCommon/GPUWaitStats.h"
 #if defined(ANDROID) && defined(ENABLE_VR)
 #include "VideoCommon/VR/OpenXRManager.h"
@@ -945,7 +945,7 @@ void CommandBufferManager::HandleDeviceLost(std::string_view operation)
                 m_completed_fence_counter, static_cast<int>(m_last_present_result));
   if (g_vulkan_context)
     g_vulkan_context->LogDeviceFaultInfo();
-  Core::QueueHostJob([](Core::System& system) { Core::Stop(system); }, true);
+  VideoCommon::ReportGPUDeviceLost("Vulkan", operation);
 }
 
 void CommandBufferManager::DeferBufferViewDestruction(VkBufferView object)

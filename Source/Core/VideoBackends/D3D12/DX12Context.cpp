@@ -9,8 +9,11 @@
 #include <queue>
 #include <vector>
 
+#include <fmt/format.h>
+
 #include "Common/Assert.h"
 #include "Common/DynamicLibrary.h"
+#include "Common/HRWrap.h"
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
 #include "Common/Timer.h"
@@ -21,6 +24,7 @@
 #include "VideoBackends/D3D12/D3D12StreamBuffer.h"
 #include "VideoBackends/D3D12/DescriptorHeapManager.h"
 #include "VideoCommon/FramebufferManager.h"
+#include "VideoCommon/GPUDeviceLost.h"
 #include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/VideoConfig.h"
 
@@ -528,9 +532,17 @@ void DXContext::ExecuteCommandList(bool wait_for_completion)
 {
   CommandListResources& res = m_command_lists[m_current_command_list];
 
+  // A lost device takes no more work; the lists keep turning (their fences read as done).
+  if (CheckDeviceLost("ExecuteCommandList")) [[unlikely]]
+  {
+    MoveToNextCommandList();
+    return;
+  }
+
   // Close and queue command list.
   HRESULT hr = res.command_list->Close();
-  ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Failed to close command list: {}", DX12HRWrap(hr));
+  ASSERT_MSG(VIDEO, SUCCEEDED(hr) || CheckDeviceLost("Close"), "Failed to close command list: {}",
+             DX12HRWrap(hr));
   const std::array<ID3D12CommandList*, 1> execute_lists{res.command_list.Get()};
   m_command_queue->ExecuteCommandLists(static_cast<UINT>(execute_lists.size()),
                                        execute_lists.data());
@@ -538,11 +550,33 @@ void DXContext::ExecuteCommandList(bool wait_for_completion)
   // Update fence when GPU has completed.
   hr = m_command_queue->Signal(m_fence.Get(), m_current_fence_value);
 
-  ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Failed to signal fence: {}", DX12HRWrap(hr));
+  ASSERT_MSG(VIDEO, SUCCEEDED(hr) || CheckDeviceLost("Signal"), "Failed to signal fence: {}",
+             DX12HRWrap(hr));
 
   MoveToNextCommandList();
   if (wait_for_completion)
     WaitForFence(res.ready_fence_value);
+}
+
+bool DXContext::CheckDeviceLost(std::string_view operation)
+{
+  if (VideoCommon::IsGPUDeviceLost())
+    return true;
+  const HRESULT reason = m_device->GetDeviceRemovedReason();
+  if (reason == S_OK)
+    return false;
+  VideoCommon::ReportGPUDeviceLost("D3D12",
+                                   fmt::format("{} after {}", Common::HRWrap(reason), operation));
+  return true;
+}
+
+bool DXContext::RemoveDeviceForTesting()
+{
+  ComPtr<ID3D12Device5> device5;
+  if (FAILED(m_device.As(&device5)))
+    return false;
+  device5->RemoveDevice();
+  return true;
 }
 
 void DXContext::DeferResourceDestruction(ID3D12Resource* resource)
@@ -592,6 +626,9 @@ void DXContext::WaitForFence(u64 fence)
 
   // Try non-blocking check.
   m_completed_fence_value = m_fence->GetCompletedValue();
+  // A removed device's fences read all ones.
+  if (m_completed_fence_value == UINT64_MAX) [[unlikely]]
+    CheckDeviceLost("WaitForFence");
   if (m_completed_fence_value < fence)
   {
     // Fall back to event. Only this path blocks, so only it is reported as a GPU wait.

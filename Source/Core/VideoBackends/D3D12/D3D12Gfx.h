@@ -54,6 +54,7 @@ public:
 
   void Flush() override;
   void WaitForGPUIdle() override;
+  bool RemoveDeviceForTesting() override;
 
   void ClearRegion(const MathUtil::Rectangle<int>& target_rc, bool color_enable, bool alpha_enable,
                    bool z_enable, u32 color, u32 z) override;

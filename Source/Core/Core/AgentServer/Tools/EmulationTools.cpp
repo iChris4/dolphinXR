@@ -32,6 +32,7 @@
 #include "Core/NetPlayProto.h"
 #include "Core/State.h"
 #include "Core/System.h"
+#include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/PerformanceMetrics.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VideoConfig.h"
@@ -648,6 +649,17 @@ ToolResult ResetGame(const ToolArgs&)
                           "console (it must be running, not paused, to see it).");
 }
 
+ToolResult SimulateGPUDeviceLost(const ToolArgs&)
+{
+  RequireGame();
+  bool removed = false;
+  RunOnVideoThread([&removed] { removed = g_gfx && g_gfx->RemoveDeviceForTesting(); });
+  if (!removed)
+    throw ToolError("This video backend cannot lose its device on request (D3D12 can).");
+  return ToolResult::Text("The GPU device is lost, as after a driver reset: Dolphin should stop "
+                          "emulation and say so. Check get_status and the log.");
+}
+
 ToolResult QuitDolphin(const ToolArgs& args)
 {
   RequireNoNetPlay();
@@ -895,6 +907,16 @@ void RegisterEmulationTools(ToolRegistry& registry, Server&)
                 .input_schema = Schema().Build(),
                 .destructive = true,
                 .handler = ResetGame});
+
+  registry.Add({.name = "simulate_gpu_device_lost",
+                .title = "Lose the GPU device",
+                .description =
+                    "Loses the GPU device as a graphics driver reset does (D3D12 only), to test "
+                    "that Dolphin stops emulation cleanly and tells the user instead of crashing. "
+                    "Emulation cannot go on afterwards.",
+                .input_schema = Schema().Build(),
+                .destructive = true,
+                .handler = SimulateGPUDeviceLost});
 
   registry.Add(
       {.name = "quit_dolphin",

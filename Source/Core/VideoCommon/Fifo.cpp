@@ -34,6 +34,7 @@
 #include "VideoCommon/CommandProcessor.h"
 #include "VideoCommon/DataReader.h"
 #include "VideoCommon/FramebufferManager.h"
+#include "VideoCommon/GPUDeviceLost.h"
 #include "VideoCommon/OpcodeDecoding.h"
 #include "VideoCommon/VertexLoaderManager.h"
 #include "VideoCommon/TextureCacheBase.h"
@@ -48,6 +49,15 @@
 namespace Fifo
 {
 static constexpr int GPU_TIME_SLOT_SIZE = 1000;
+
+// Runs the commands in [read, write) and returns where it stopped. Once the GPU device is lost they
+// are dropped: nothing more may reach the backend, and emulation is stopping.
+static u8* RunOrDropFifo(u8* read, u8* write, u32* cycles)
+{
+  if (VideoCommon::IsGPUDeviceLost()) [[unlikely]]
+    return write;
+  return OpcodeDecoder::RunFifo(DataReader(read, write), cycles);
+}
 
 FifoManager::FifoManager(Core::System& system) : m_system{system}
 {
@@ -331,8 +341,7 @@ void FifoManager::RunGpuLoop()
           // See comment in SyncGPU
           if (write_ptr > seen_ptr)
           {
-            m_video_buffer_read_ptr =
-                OpcodeDecoder::RunFifo(DataReader(m_video_buffer_read_ptr, write_ptr), nullptr);
+            m_video_buffer_read_ptr = RunOrDropFifo(m_video_buffer_read_ptr, write_ptr, nullptr);
             m_video_buffer_seen_ptr = write_ptr;
           }
         }
@@ -369,8 +378,8 @@ void FifoManager::RunGpuLoop()
                        distance);
 
             u8* write_ptr = m_video_buffer_write_ptr;
-            m_video_buffer_read_ptr = OpcodeDecoder::RunFifo(
-                DataReader(m_video_buffer_read_ptr, write_ptr), &cyclesExecuted);
+            m_video_buffer_read_ptr =
+                RunOrDropFifo(m_video_buffer_read_ptr, write_ptr, &cyclesExecuted);
 
             fifo.CPReadPointer.store(readPtr, std::memory_order_relaxed);
             fifo.CPReadWriteDistance.fetch_sub(GPFifo::GATHER_PIPE_SIZE, std::memory_order_seq_cst);
@@ -409,6 +418,9 @@ void FifoManager::RunGpuLoop()
               m_sync_wakeup_event.Set();
           }
 
+          if (VideoCommon::IsGPUDeviceLost()) [[unlikely]]
+            return;
+
           // The fifo is empty and it's unlikely we will get any more work in the near future.
           // Make sure VertexManager finishes drawing any primitives it has stored in it's buffer.
           g_vertex_manager->Flush();
@@ -433,8 +445,9 @@ void FifoManager::FlushGpu()
 bool FifoManager::WantsPausedPresents() const
 {
 #ifdef ENABLE_VR
-  return g_presenter && g_ActiveConfig.VRSessionActive() && VR::g_openxr &&
-         VR::g_openxr->IsSessionRunning() && Core::GetState(m_system) == Core::State::Paused;
+  return g_presenter && !VideoCommon::IsGPUDeviceLost() && g_ActiveConfig.VRSessionActive() &&
+         VR::g_openxr && VR::g_openxr->IsSessionRunning() &&
+         Core::GetState(m_system) == Core::State::Paused;
 #else
   return false;
 #endif
@@ -533,8 +546,8 @@ int FifoManager::RunGpuOnCpu(int ticks)
       }
       ReadDataFromFifo(fifo.CPReadPointer.load(std::memory_order_relaxed));
       u32 cycles = 0;
-      m_video_buffer_read_ptr = OpcodeDecoder::RunFifo(
-          DataReader(m_video_buffer_read_ptr, m_video_buffer_write_ptr), &cycles);
+      m_video_buffer_read_ptr =
+          RunOrDropFifo(m_video_buffer_read_ptr, m_video_buffer_write_ptr, &cycles);
       available_ticks -= cycles;
     }
 

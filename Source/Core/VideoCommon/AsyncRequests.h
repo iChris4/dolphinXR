@@ -9,6 +9,7 @@
 
 #include "Common/Functional.h"
 #include "Common/SPSCQueue.h"
+#include "VideoCommon/GPUDeviceLost.h"
 
 struct EfbPokeData;
 class PointerWrap;
@@ -27,6 +28,9 @@ public:
   template <std::invocable<> F>
   void PushEvent(F&& callback)
   {
+    // A lost GPU device takes no more work (VideoCommon::ReportGPUDeviceLost).
+    if (VideoCommon::IsGPUDeviceLost())
+      return;
     if (m_passthrough)
     {
       std::invoke(std::forward<F>(callback));
@@ -39,6 +43,9 @@ public:
   template <std::invocable<> F>
   auto PushBlockingEvent(F&& callback) -> std::invoke_result_t<F>
   {
+    // A lost GPU device answers at once, with the default value (EFB peeks read 0).
+    if (VideoCommon::IsGPUDeviceLost())
+      return std::invoke_result_t<F>();
     if (m_passthrough)
       return std::invoke(std::forward<F>(callback));
 

@@ -174,6 +174,10 @@ public:
   virtual void Flush() {}
   virtual void WaitForGPUIdle() {}
 
+  // Loses the GPU device as a driver reset does, to test how Dolphin handles it. False when the
+  // backend cannot (D3D12 can: ID3D12Device5::RemoveDevice).
+  virtual bool RemoveDeviceForTesting() { return false; }
+
   // For opengl's glDrawBuffer
   virtual void SelectLeftBuffer() {}
   virtual void SelectRightBuffer() {}

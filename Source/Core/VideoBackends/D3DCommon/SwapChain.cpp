@@ -6,12 +6,15 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <fmt/format.h>
+
 #include "Common/Assert.h"
 #include "Common/CommonFuncs.h"
 #include "Common/HRWrap.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
 
+#include "VideoCommon/GPUDeviceLost.h"
 #include "VideoCommon/VideoConfig.h"
 
 static bool IsTearingSupported(IDXGIFactory2* dxgi_factory)
@@ -305,7 +308,10 @@ bool SwapChain::Present()
   HRESULT hr = m_swap_chain->Present(static_cast<UINT>(g_ActiveConfig.bVSyncActive), present_flags);
   if (FAILED(hr))
   {
-    WARN_LOG_FMT(VIDEO, "Swap chain present failed: {}", Common::HRWrap(hr));
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)
+      VideoCommon::ReportGPUDeviceLost("Direct3D", fmt::format("present: {}", Common::HRWrap(hr)));
+    else
+      WARN_LOG_FMT(VIDEO, "Swap chain present failed: {}", Common::HRWrap(hr));
     return false;
   }
 

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "Common/CommonTypes.h"
@@ -115,6 +116,13 @@ public:
 
   // Executes the current command list.
   void ExecuteCommandList(bool wait_for_completion);
+
+  // AbstractGfx::RemoveDeviceForTesting.
+  bool RemoveDeviceForTesting();
+
+  // Whether the device is lost (a driver reset); the first time, VideoCommon::ReportGPUDeviceLost
+  // with the removal reason and `operation`.
+  bool CheckDeviceLost(std::string_view operation);
 
   // Waits for a specific fence.
   void WaitForFence(u64 fence);

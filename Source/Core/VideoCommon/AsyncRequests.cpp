@@ -21,7 +21,8 @@ void AsyncRequests::PullEvents()
 
   // This is only called if the queue isn't empty.
   // So just flush the pipeline to get accurate results.
-  g_vertex_manager->Flush();
+  if (!VideoCommon::IsGPUDeviceLost())
+    g_vertex_manager->Flush();
 
   while (!m_queue.Empty())
   {

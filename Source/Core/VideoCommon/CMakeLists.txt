@@ -77,6 +77,8 @@ add_library(videocommon
   GeometryShaderGen.cpp
   GeometryShaderGen.h
   GeometryShaderManager.cpp
+  GPUDeviceLost.cpp
+  GPUDeviceLost.h
   GeometryShaderManager.h
   GPUWaitStats.cpp
   GPUWaitStats.h

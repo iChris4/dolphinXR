@@ -92,6 +92,7 @@
 #include "VideoCommon/AsyncRequests.h"
 #include "VideoCommon/Fifo.h"
 #include "VideoCommon/FrameDumper.h"
+#include "VideoCommon/GPUDeviceLost.h"
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/PerformanceMetrics.h"
 #include "VideoCommon/VideoBackendBase.h"
@@ -665,7 +666,15 @@ static void EmuThread(Core::System& system, std::unique_ptr<BootParameters> boot
   const auto video_guard = GetInitializedVideoGuard(system, wsi);
   if (!video_guard)
   {
-    PanicAlertFmt("Failed to initialize video backend!");
+    if (VideoCommon::WasGPUDeviceLostInThisProcess())
+    {
+      CriticalAlertFmtT("The video backend could not start: the GPU it lost earlier cannot be used "
+                        "again until Dolphin restarts. Close Dolphin and open it again.");
+    }
+    else
+    {
+      PanicAlertFmt("Failed to initialize video backend!");
+    }
     return;
   }
 
