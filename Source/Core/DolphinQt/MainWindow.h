@@ -110,6 +110,12 @@ private:
   // May ask for confirmation. Returns whether or not it actually stopped.
   bool RequestStop();
   void ForceStop();
+#ifdef ENABLE_VR
+  // The agent server's stop_game and quit_dolphin: nobody would answer the confirmation. `force`
+  // skips the Wii's power button shutdown, which a game that hangs never finishes.
+  void StopForAgent(bool force);
+  void QuitForAgent(bool force);
+#endif
   void Reset();
   void FrameAdvance();
   void StateLoad();
@@ -251,6 +257,9 @@ private:
   bool m_stop_confirm_showing = false;
   bool m_stop_requested = false;
   bool m_exit_requested = false;
+#ifdef ENABLE_VR
+  bool m_stop_without_confirmation = false;
+#endif
   bool m_fullscreen_requested = false;
   bool m_is_screensaver_inhibited = false;
   u32 m_state_slot = 1;

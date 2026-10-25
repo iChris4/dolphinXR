@@ -78,6 +78,26 @@ public:
   void SetGameCodesChangedCallback(std::function<void(const std::string& game_id)> callback);
   void NotifyGameCodesChanged(const std::string& game_id);
 
+  // What the frontend does for the lifecycle tools (stop_game, boot_game, restart_game,
+  // quit_dolphin): it owns the render window and the stop confirmation. The tools call the
+  // actions on the server thread; they queue the work on the UI thread and return. A frontend that
+  // sets none (Android) makes the tools say so.
+  struct FrontendActions
+  {
+    // Boots a file (disc image, executable or WAD) as the game list does.
+    std::function<void(const std::string& path)> boot;
+    // Stops emulation as the Stop button does, without asking. `force` skips the Wii's power
+    // button shutdown, which a game that hangs never finishes.
+    std::function<void(bool force)> stop;
+    // Stops emulation without asking, then closes Dolphin.
+    std::function<void(bool force)> quit;
+  };
+  void SetFrontendActions(FrontendActions actions);
+  FrontendActions GetFrontendActions() const;
+  // The file the frontend booted last (empty for a NAND title), for restart_game. Host thread.
+  void SetLastBootPath(std::string path);
+  std::string GetLastBootPath() const;
+
 private:
   Server();
   ~Server();
@@ -93,6 +113,10 @@ private:
 
   std::mutex m_game_codes_callback_mutex;
   std::function<void(const std::string& game_id)> m_game_codes_changed_callback;
+
+  mutable std::mutex m_frontend_mutex;
+  FrontendActions m_frontend_actions;
+  std::string m_last_boot_path;
 
   ToolRegistry m_registry;
   std::unique_ptr<McpServer> m_mcp;

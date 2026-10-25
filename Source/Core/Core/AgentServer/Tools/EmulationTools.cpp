@@ -1,7 +1,8 @@
 // Copyright 2026 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// Emulation control: status, pause/resume/frame advance, savestates, speed, synthetic head look.
+// Emulation control: status, pause/resume/frame advance, savestates, speed, synthetic head look,
+// and the game's lifecycle (stop, boot, restart, reset, quit).
 
 #include <algorithm>
 #include <filesystem>
@@ -26,6 +27,8 @@
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
+#include "Core/HW/ProcessorInterface.h"
+#include "Core/Movie.h"
 #include "Core/NetPlayProto.h"
 #include "Core/State.h"
 #include "Core/System.h"
@@ -376,6 +379,149 @@ ToolResult SetSpeed(const ToolArgs& args)
                                       "experiment is over.",
                                       turbo ? "on" : "off", mute ? "on" : "off"));
 }
+
+// ---- Lifecycle: stop, boot, restart, reset, quit ----
+
+constexpr auto STOP_TIMEOUT = 30s;
+constexpr auto BOOT_TIMEOUT = 120s;
+// Fields a booted game must run before boot_game returns (it is drawing by then).
+constexpr u64 BOOT_SETTLE_FIELDS = 60;
+
+Server::FrontendActions RequireFrontend()
+{
+  Server::FrontendActions actions = Server::GetInstance().GetFrontendActions();
+  if (!actions.boot || !actions.stop || !actions.quit)
+  {
+    throw ToolError("This Dolphin frontend cannot start, stop or close games for the agent (the "
+                    "desktop one can). Ask the user to do it.");
+  }
+  return actions;
+}
+
+void RequireNoNetPlay()
+{
+  if (NetPlay::IsNetPlayRunning())
+    throw ToolError("Refused during NetPlay: the other players would lose the session.");
+}
+
+std::chrono::milliseconds TimeoutArg(const ToolArgs& args, std::chrono::milliseconds fallback)
+{
+  return std::chrono::milliseconds(args.GetInt("timeout_ms", fallback.count()));
+}
+
+void StopAndWait(const Server::FrontendActions& actions, bool force,
+                 std::chrono::milliseconds timeout)
+{
+  auto& system = GetSystem();
+  INFO_LOG_FMT(OPENXR, "AgentServer: stopping emulation{}", force ? " (forced)" : "");
+  actions.stop(force);
+  if (WaitUntil([&] { return Core::IsUninitialized(system); }, timeout, 20ms))
+    return;
+  if (force)
+  {
+    throw ToolError("Emulation did not stop in time: Dolphin may be stuck. Ask the user to close "
+                    "it.");
+  }
+  throw ToolError("Emulation did not stop in time. A Wii game stops when it handles the power "
+                  "button, which a game that hangs never does: call stop_game with force=true.");
+}
+
+void BootAndWait(const Server::FrontendActions& actions, const std::string& path,
+                 std::chrono::milliseconds timeout)
+{
+  if (!File::Exists(path))
+    throw ToolError(fmt::format("{} does not exist.", path));
+  auto& system = GetSystem();
+  INFO_LOG_FMT(OPENXR, "AgentServer: booting {}", path);
+  actions.boot(path);
+  if (!WaitUntil([&] { return Core::IsRunning(system); }, timeout, 20ms))
+  {
+    throw ToolError("The game did not start in time. Dolphin may be showing a dialog (an NKit "
+                    "warning, an error): ask the user to look at its window.");
+  }
+  // Until it has run a second; a game that boots paused (the user's setting) is left paused.
+  const FrameCounters& counters = Server::GetInstance().GetFrameCounters();
+  const u64 start = counters.GetSnapshot().fields;
+  WaitUntil(
+      [&] {
+        return !Core::IsRunning(system) || IsPaused() ||
+               counters.GetSnapshot().fields >= start + BOOT_SETTLE_FIELDS;
+      },
+      timeout, 20ms);
+}
+
+ToolResult StopGame(const ToolArgs& args)
+{
+  if (Core::IsUninitialized(GetSystem()))
+    return ToolResult::Text("No game is running.");
+  RequireNoNetPlay();
+  const Server::FrontendActions actions = RequireFrontend();
+  StopAndWait(actions, args.GetBool("force", false), TimeoutArg(args, STOP_TIMEOUT));
+  return ToolResult::Text("Emulation stopped. The agent server keeps running; boot_game or "
+                          "restart_game starts a game again.");
+}
+
+ToolResult BootGame(const ToolArgs& args)
+{
+  if (!Core::IsUninitialized(GetSystem()))
+  {
+    throw ToolError(fmt::format("A game is running ({}): call stop_game first, or restart_game "
+                                "to boot the same game again.",
+                                SConfig::GetInstance().GetGameID()));
+  }
+  const Server::FrontendActions actions = RequireFrontend();
+  std::string path = args.GetString("path");
+  if (path.empty())
+    path = Server::GetInstance().GetLastBootPath();
+  if (path.empty())
+  {
+    throw ToolError("No game was booted from a file since Dolphin started: give the \"path\" of "
+                    "the game's file.");
+  }
+  BootAndWait(actions, path, TimeoutArg(args, BOOT_TIMEOUT));
+  return ToolResult::Text(fmt::format("Booted {}. {}", path, DescribeEmulationState()));
+}
+
+ToolResult RestartGame(const ToolArgs& args)
+{
+  if (Core::IsUninitialized(GetSystem()))
+    throw ToolError("No game is running: boot_game starts the file booted last.");
+  RequireNoNetPlay();
+  const Server::FrontendActions actions = RequireFrontend();
+  const std::string path = Server::GetInstance().GetLastBootPath();
+  if (path.empty())
+  {
+    throw ToolError("This game was not booted from a file (a NAND title or the Wii Menu): stop it "
+                    "with stop_game and ask the user to start it.");
+  }
+  const auto timeout = TimeoutArg(args, BOOT_TIMEOUT);
+  StopAndWait(actions, args.GetBool("force", false),
+              std::min<std::chrono::milliseconds>(timeout, STOP_TIMEOUT));
+  BootAndWait(actions, path, timeout);
+  return ToolResult::Text(fmt::format("Restarted {}. {}", path, DescribeEmulationState()));
+}
+
+ToolResult ResetGame(const ToolArgs&)
+{
+  RequireGame();
+  RequireNoNetPlay();
+  auto& system = GetSystem();
+  auto& movie = system.GetMovie();
+  if (movie.IsRecordingInput())
+    movie.SetReset(true);
+  system.GetProcessorInterface().ResetButton_Tap();
+  return ToolResult::Text("Pressed the console's Reset button: the game resets as it would on the "
+                          "console (it must be running, not paused, to see it).");
+}
+
+ToolResult QuitDolphin(const ToolArgs& args)
+{
+  RequireNoNetPlay();
+  const Server::FrontendActions actions = RequireFrontend();
+  actions.quit(args.GetBool("force", false));
+  return ToolResult::Text("Dolphin is closing: emulation stops first, and the agent server stops "
+                          "with Dolphin.");
+}
 }  // namespace
 
 void RegisterEmulationTools(ToolRegistry& registry, Server&)
@@ -491,5 +637,67 @@ void RegisterEmulationTools(ToolRegistry& registry, Server&)
                                     .Build(),
                 .idempotent = true,
                 .handler = SetSpeed});
+
+  registry.Add(
+      {.name = "stop_game",
+       .title = "Stop emulation",
+       .description =
+           "Stops the game as the Stop button does, without the confirmation prompt, and waits "
+           "until emulation is shut down. The server keeps running. Use it to recover a game "
+           "that froze; force=true skips the Wii's power button shutdown, which a frozen game "
+           "never finishes. Unsaved game progress is lost: make a savestate first when it "
+           "matters.",
+       .input_schema = Schema()
+                           .Boolean("force", "Stop at once (default false).")
+                           .Integer("timeout_ms", "Default 30000.", 1000, 120000)
+                           .Build(),
+       .destructive = true,
+       .idempotent = true,
+       .handler = StopGame});
+
+  registry.Add(
+      {.name = "boot_game",
+       .title = "Start a game",
+       .description =
+           "Boots a game file (disc image, executable or WAD) as the game list does, when no "
+           "game runs, and waits until it runs. Without a path, boots the file booted last. The "
+           "game starts from the beginning: load_state afterwards to go back to a savestate.",
+       .input_schema = Schema()
+                           .String("path", "The game's file. Default: the file booted last.")
+                           .Integer("timeout_ms", "Default 120000.", 5000, 600000)
+                           .Build(),
+       .handler = BootGame});
+
+  registry.Add(
+      {.name = "restart_game",
+       .title = "Restart the game",
+       .description =
+           "Stops the running game (as stop_game) and boots the same file again, then waits "
+           "until it runs: a clean start after a hang, or to apply settings read at boot. Load a "
+           "savestate afterwards to go back where you were.",
+       .input_schema = Schema()
+                           .Boolean("force", "Stop at once (default false).")
+                           .Integer("timeout_ms", "Default 120000.", 5000, 600000)
+                           .Build(),
+       .destructive = true,
+       .handler = RestartGame});
+
+  registry.Add({.name = "reset_game",
+                .title = "Press Reset",
+                .description = "Presses the console's Reset button: the game resets as it does "
+                               "on the console (often back to its title screen).",
+                .input_schema = Schema().Build(),
+                .destructive = true,
+                .handler = ResetGame});
+
+  registry.Add(
+      {.name = "quit_dolphin",
+       .title = "Close Dolphin",
+       .description = "Stops emulation without the confirmation prompt and closes Dolphin, and "
+                      "the agent server with it. Only when the user asked for it, or to end a "
+                      "session you started yourself.",
+       .input_schema = Schema().Boolean("force", "Stop the game at once (default false).").Build(),
+       .destructive = true,
+       .handler = QuitDolphin});
 }
 }  // namespace AgentServer

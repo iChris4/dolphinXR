@@ -283,6 +283,30 @@ void Server::NotifyGameCodesChanged(const std::string& game_id)
     m_game_codes_changed_callback(game_id);
 }
 
+void Server::SetFrontendActions(FrontendActions actions)
+{
+  std::lock_guard lock(m_frontend_mutex);
+  m_frontend_actions = std::move(actions);
+}
+
+Server::FrontendActions Server::GetFrontendActions() const
+{
+  std::lock_guard lock(m_frontend_mutex);
+  return m_frontend_actions;
+}
+
+void Server::SetLastBootPath(std::string path)
+{
+  std::lock_guard lock(m_frontend_mutex);
+  m_last_boot_path = std::move(path);
+}
+
+std::string Server::GetLastBootPath() const
+{
+  std::lock_guard lock(m_frontend_mutex);
+  return m_last_boot_path;
+}
+
 bool IsTurboOverrideActive()
 {
   return Server::GetInstance().IsTurboOverrideActive();

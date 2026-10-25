@@ -15,6 +15,7 @@
 #include <QMimeData>
 #include <QStackedWidget>
 #include <QStyleHints>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWindow>
 
@@ -290,6 +291,21 @@ MainWindow::MainWindow(Core::System& system, std::unique_ptr<BootParameters> boo
       Settings::Instance().NotifyGameCodesChanged(QString::fromStdString(game_id));
     });
   });
+  // The agent's boot, stop and quit tools (called on the server thread).
+  AgentServer::Server::FrontendActions agent_actions;
+  agent_actions.boot = [this](const std::string& path) {
+    QueueOnObject(this, [this, path] { StartGame(path, ScanForSecondDisc::Yes); });
+  };
+  agent_actions.stop = [this](bool force) {
+    QueueOnObject(this, [this, force] { StopForAgent(force); });
+  };
+  // After a moment, so the server sends its answer before Dolphin closes.
+  agent_actions.quit = [this](bool force) {
+    QueueOnObject(this, [this, force] {
+      QTimer::singleShot(300, this, [this, force] { QuitForAgent(force); });
+    });
+  };
+  AgentServer::Server::GetInstance().SetFrontendActions(std::move(agent_actions));
 #endif
 
 #ifdef USE_RETRO_ACHIEVEMENTS
@@ -368,6 +384,7 @@ MainWindow::~MainWindow()
 {
 #ifdef ENABLE_VR
   AgentServer::Server::GetInstance().SetGameCodesChangedCallback(nullptr);
+  AgentServer::Server::GetInstance().SetFrontendActions({});
   AgentServer::Server::GetInstance().Shutdown();
 #endif
 
@@ -1012,6 +1029,9 @@ bool MainWindow::RequestStop()
     FullScreen();
 
   bool confirm_on_stop = Config::Get(Config::MAIN_CONFIRM_ON_STOP);
+#ifdef ENABLE_VR
+  confirm_on_stop = confirm_on_stop && !m_stop_without_confirmation;
+#endif
 #ifdef RC_CLIENT_SUPPORTS_RAINTEGRATION
   confirm_on_stop = confirm_on_stop || AchievementManager::GetInstance().CheckForModifications();
 #endif  // RC_CLIENT_SUPPORTS_RAINTEGRATION
@@ -1115,6 +1135,28 @@ void MainWindow::ForceStop()
 {
   Core::Stop(m_system);
 }
+
+#ifdef ENABLE_VR
+void MainWindow::StopForAgent(bool force)
+{
+  if (force && !Core::IsUninitialized(m_system))
+  {
+    OnStopRecording();
+    ForceStop();
+    return;
+  }
+  m_stop_without_confirmation = true;
+  RequestStop();
+  m_stop_without_confirmation = false;
+}
+
+void MainWindow::QuitForAgent(bool force)
+{
+  // OnStopComplete closes Dolphin once emulation is shut down (at once when no game runs).
+  m_exit_requested = true;
+  StopForAgent(force);
+}
+#endif
 
 void MainWindow::Reset()
 {
@@ -1255,6 +1297,19 @@ void MainWindow::StartGame(std::unique_ptr<BootParameters>&& parameters)
 
   // We need the render widget before booting.
   ShowRenderWidget();
+
+#ifdef ENABLE_VR
+  // For the agent server's restart_game.
+  if (parameters)
+  {
+    std::string boot_path;
+    if (const auto* disc = std::get_if<BootParameters::Disc>(&parameters->parameters))
+      boot_path = disc->path;
+    else if (const auto* exe = std::get_if<BootParameters::Executable>(&parameters->parameters))
+      boot_path = exe->path;
+    AgentServer::Server::GetInstance().SetLastBootPath(std::move(boot_path));
+  }
+#endif
 
   // Boot up, show an error if it fails to load the game.
   if (!BootManager::BootCore(m_system, std::move(parameters),

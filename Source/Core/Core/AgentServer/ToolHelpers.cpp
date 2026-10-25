@@ -32,8 +32,9 @@ void RequireGame()
 {
   if (!Core::IsRunning(GetSystem()))
   {
-    throw ToolError("No game is running. Ask the user to start the game (with VR enabled) and "
-                    "call the tool again.");
+    throw ToolError("No game is running. Start one with boot_game (the file booted last, or a "
+                    "path), or ask the user to start it with VR enabled, then call the tool "
+                    "again.");
   }
 }
 
