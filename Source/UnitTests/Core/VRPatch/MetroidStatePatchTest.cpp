@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 // The shipped Metroid Prime state patches (Data/Sys/VRPatches/<id>/metroid-state.lua) against fake
-// memory: the override flags they raise for the Sys profiles' entries. Also Echoes' view patches:
-// no morph ball or cutscene bars, no scan box highlight, smooth scan lines.
+// memory: the override flags they raise for the Sys profiles' entries (Prime, Echoes, Corruption).
+// Also Echoes' view patches: no morph ball or cutscene bars, no scan box highlight, smooth scan
+// lines.
 
 #include <gtest/gtest.h>
 
@@ -505,4 +506,103 @@ TEST(PrimeStatePatch, UnknownRevisionRaisesNothing)
   ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
   EXPECT_EQ(script.GetFlags(), Flags{});
   EXPECT_TRUE(Warned(script, "unknown disc revision"));
+}
+
+// ---- Metroid Prime 3: Corruption ----
+
+namespace
+{
+constexpr u32 CORRUPTION_STATE_MANAGER_VAR = 0x805C4F98;
+constexpr u32 CORRUPTION_STATE_MANAGER = 0x80A14740;
+constexpr u32 CORRUPTION_PLAYER = 0x80B87CC0;
+constexpr u32 CORRUPTION_POWERUPS = 0x80C00000;
+
+struct CorruptionGame
+{
+  CorruptionGame()
+  {
+    // In play, first person, the combat visor.
+    memory.Set32(CORRUPTION_STATE_MANAGER_VAR, CORRUPTION_STATE_MANAGER);
+    memory.Set32(CORRUPTION_STATE_MANAGER + 0x2184, CORRUPTION_PLAYER);
+    memory.Set32(CORRUPTION_PLAYER + 0x35A0, CORRUPTION_POWERUPS);
+    SetVisor(0);
+    SetCamera(1);
+
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "RM3E01";
+  }
+
+  void SetVisor(u32 visor) { memory.Set32(CORRUPTION_POWERUPS + 0x34, visor); }
+  void SetMenu(u32 menu) { memory.Set32(CORRUPTION_STATE_MANAGER_VAR + 0x32C, menu); }
+  // The pointer dialog byte at 0x805C70C7.
+  void SetDialog(u8 dialog) { memory.Set32(0x805C70C4, dialog); }
+  void SetBall(u32 ball) { memory.Set32(CORRUPTION_PLAYER + 0x358, ball); }
+  void SetCamera(u32 camera) { memory.Set32(CORRUPTION_PLAYER + 0x3C2C, camera); }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+};
+}  // namespace
+
+TEST(CorruptionStatePatch, ManifestIsValid)
+{
+  const std::string source = ReadStatePatch("RM3E01");
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/RM3E01/metroid-state.lua is missing";
+  const auto read = ReadManifest(source, "metroid-state");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"RM3E01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, 0u);
+  EXPECT_TRUE(manifest.conflicts.empty());
+}
+
+TEST(CorruptionStatePatch, RaisesTheGameState)
+{
+  CorruptionGame game;
+  PatchScript script("metroid-state");
+  ASSERT_TRUE(script.Load(ReadStatePatch("RM3E01"), game.env)) << script.Error();
+  const auto frame = [&] {
+    EXPECT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+    return script.GetFlags();
+  };
+
+  EXPECT_EQ(frame(), Flags{"mp_visor_combat"});
+  game.SetVisor(1);
+  EXPECT_EQ(frame(), Flags{"mp_visor_scan"});
+  game.SetVisor(2);
+  EXPECT_EQ(frame(), Flags{"mp_visor_command"});
+  game.SetVisor(3);
+  EXPECT_EQ(frame(), Flags{"mp_visor_xray"});
+  game.SetVisor(0);
+
+  // The map and the solar system map, a pointer dialog: no visor while paused. The objective
+  // screen and the ship's landing cutscene use other menu states and are not pauses.
+  game.SetMenu(1);
+  EXPECT_EQ(frame(), Flags{"mp_paused"});
+  game.SetMenu(3);
+  EXPECT_EQ(frame(), Flags{"mp_paused"});
+  game.SetMenu(10);
+  EXPECT_EQ(frame(), Flags{"mp_visor_combat"});
+  game.SetMenu(0);
+  game.SetDialog(1);
+  EXPECT_EQ(frame(), Flags{"mp_paused"});
+  game.SetDialog(0);
+
+  game.SetBall(1);
+  EXPECT_EQ(frame(), (Flags{"mp_morphball", "mp_visor_combat"}));
+  game.SetBall(0);
+  game.SetCamera(4);  // a cutscene or a conversation
+  EXPECT_EQ(frame(), (Flags{"mp_cinematic", "mp_visor_combat"}));
+  game.SetCamera(1);
+
+  // The title screen: no player, the pointer drives the menus.
+  game.memory.Set32(CORRUPTION_STATE_MANAGER + 0x2184, 0);
+  EXPECT_EQ(frame(), Flags{});
+  game.SetDialog(1);
+  EXPECT_EQ(frame(), Flags{"mp_paused"});
+  EXPECT_FALSE(game.memory.wrote);
+  EXPECT_FALSE(Warned(script, ""));
 }
