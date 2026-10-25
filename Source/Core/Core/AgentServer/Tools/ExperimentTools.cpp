@@ -62,6 +62,7 @@ FrameCounters& Counters()
 bool WaitForXfbCopies(u64 target, std::chrono::milliseconds hang_timeout,
                       std::chrono::milliseconds total_timeout = 120s)
 {
+  MarkCallRunsEmulation();
   const auto deadline = std::chrono::steady_clock::now() + total_timeout;
   u64 last = Counters().GetSnapshot().xfb_copies;
   auto last_progress = std::chrono::steady_clock::now();
@@ -76,17 +77,21 @@ bool WaitForXfbCopies(u64 target, std::chrono::milliseconds hang_timeout,
       last = copies;
       last_progress = now;
     }
-    if (now - last_progress > hang_timeout || now > deadline || Server::GetInstance().IsStopping())
+    if (now - last_progress > hang_timeout || now > deadline ||
+        Server::GetInstance().IsStopping() || IsCallCancelled())
+    {
       return false;
+    }
     std::this_thread::sleep_for(2ms);
   }
 }
 
-// Runs emulation for `frames` XFB copies, then restores the pause state. Used by the profiling
-// and trace tools.
+// Runs emulation for `frames` XFB copies (less when the call is cancelled), then restores the
+// pause state. Used by the profiling and trace tools.
 void RunFrames(u32 frames, std::chrono::milliseconds hang_timeout,
                const std::function<bool()>& stop)
 {
+  MarkCallRunsEmulation();
   const bool was_paused = IsPaused();
   const u64 start = Counters().GetSnapshot().xfb_copies;
   ResumeEmulation();
@@ -104,8 +109,11 @@ void RunFrames(u32 frames, std::chrono::milliseconds hang_timeout,
       last = copies;
       last_progress = now;
     }
-    if (now - last_progress > hang_timeout || now > deadline || Server::GetInstance().IsStopping())
+    if (now - last_progress > hang_timeout || now > deadline ||
+        Server::GetInstance().IsStopping() || IsCallCancelled())
+    {
       break;
+    }
     std::this_thread::sleep_for(2ms);
   }
   if (was_paused)
@@ -316,6 +324,8 @@ ToolResult TestPatches(const ToolArgs& args)
     run({}, "baseline");
   for (const picojson::value& value : *candidates)
   {
+    if (IsCallCancelled())
+      break;
     if (!value.is<picojson::object>())
       throw ToolError("Each candidate is an object {address, template | words}.");
     PatchSpec patch = ParsePatch(value.get<picojson::object>());
@@ -331,10 +341,13 @@ ToolResult TestPatches(const ToolArgs& args)
   {
     const double delta =
         baseline_draws > 0 ? (row.result.draw_calls_avg / baseline_draws - 1) * 100 : 0;
-    text += fmt::format("{} | {} | {:.1f} ({}-{}) | {:+.0f}% | {:.0f} | {:.2f}\n", row.label,
-                        row.result.hung ? "HUNG" : "no", row.result.draw_calls_avg,
-                        row.result.draw_calls_min, row.result.draw_calls_max, delta,
-                        row.result.prims_avg, row.result.frames_per_field);
+    text +=
+        fmt::format("{} | {} | {:.1f} ({}-{}) | {:+.0f}% | {:.0f} | {:.2f}\n", row.label,
+                    row.result.hung      ? "HUNG" :
+                    row.result.cancelled ? "cancelled" :
+                                           "no",
+                    row.result.draw_calls_avg, row.result.draw_calls_min, row.result.draw_calls_max,
+                    delta, row.result.prims_avg, row.result.frames_per_field);
   }
 
   for (const Row& row : rows)
@@ -818,7 +831,7 @@ ToolResult MeasureFrameRate(const ToolArgs& args)
   const auto start = Counters().GetSnapshot();
   const auto start_time = std::chrono::steady_clock::now();
   ResumeEmulation();
-  WaitUntil([&] { return Counters().GetSnapshot().fields >= start.fields + fields; }, 60s);
+  WaitForEmulation([&] { return Counters().GetSnapshot().fields >= start.fields + fields; }, 60s);
   const auto end = Counters().GetSnapshot();
   const double seconds =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count();
@@ -892,7 +905,7 @@ ToolResult WatchMemory(const ToolArgs& args)
 
   const bool was_paused = IsPaused();
   ResumeEmulation();
-  WaitUntil(
+  WaitForEmulation(
       [&] {
         std::lock_guard lock(samples->mutex);
         return samples->rows.size() >= fields;
@@ -1205,6 +1218,7 @@ ExperimentResult RunExperiment(const ExperimentOptions& options,
 
   ExperimentResult result;
   const auto start_time = std::chrono::steady_clock::now();
+  MarkCallRunsEmulation();
   try
   {
     INFO_LOG_FMT(OPENXR, "AgentServer: experiment: pausing");
@@ -1232,6 +1246,10 @@ ExperimentResult RunExperiment(const ExperimentOptions& options,
                                       options.hang_timeout);
     }
     const auto measure_end = Counters().GetSnapshot();
+    // A cancelled run stopped early: the game did not hang.
+    result.cancelled = IsCallCancelled();
+    if (result.cancelled)
+      result.hung = false;
 
     const auto samples = Counters().GetSamplesAfter(measure_start.xfb_copies);
     if (!samples.empty())
@@ -1266,7 +1284,7 @@ ExperimentResult RunExperiment(const ExperimentOptions& options,
 
     INFO_LOG_FMT(OPENXR, "AgentServer: experiment: measured {} frames{}", result.xfb_copies,
                  result.hung ? " (hung)" : "");
-    if (options.screenshot && images && !result.hung)
+    if (options.screenshot && images && !result.hung && !result.cancelled)
     {
       try
       {
@@ -1321,6 +1339,11 @@ std::string FormatExperimentResult(const ExperimentResult& result)
     return fmt::format("HUNG: no new frame for the hang timeout (the game froze or stopped "
                        "drawing). {} frame(s) measured before. ({:.1f} s){}",
                        result.xfb_copies, result.seconds, alerts);
+  }
+  if (result.cancelled)
+  {
+    return fmt::format("CANCELLED: {} frame(s) measured before. ({:.1f} s){}", result.xfb_copies,
+                       result.seconds, alerts);
   }
   std::string text = fmt::format(
       "{} frames measured: draw calls avg {:.1f} (min {}, max {}), primitives avg {:.0f}, {:.2f} "

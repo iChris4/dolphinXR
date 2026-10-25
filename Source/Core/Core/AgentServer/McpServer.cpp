@@ -13,6 +13,7 @@
 
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
+#include "Core/AgentServer/CallGate.h"
 #include "Core/AgentServer/ToolRegistry.h"
 
 namespace AgentServer
@@ -151,6 +152,29 @@ std::optional<std::string> HostName(std::string_view host)
   }
   return std::string(name);
 }
+
+// Why a tool call was not run: another one holds the gate.
+std::string BusyText(const CallGate::RunningCall& busy, const ToolRegistry& registry)
+{
+  std::string anytime;
+  for (const ToolDef& tool : registry.GetTools())
+  {
+    if (tool.anytime)
+      anytime += (anytime.empty() ? "" : ", ") + tool.name;
+  }
+  if (busy.runs_emulation)
+  {
+    return fmt::format(
+        "Not run: {} is running ({:.1f} s) and lets emulation run. Tool calls run one at a time, "
+        "and one sent meanwhile is refused rather than run after it, when the game has moved "
+        "on. Call it again once {} has returned. To trace or read memory while a VR input is "
+        "held, hold it with set_vr_controls without frames first. These work meanwhile: {}.",
+        busy.tool, busy.seconds, busy.tool, anytime);
+  }
+  return fmt::format("Not run: {} has been running for {:.1f} s, and tool calls run one at a time. "
+                     "Call it again once it has returned. These work meanwhile: {}.",
+                     busy.tool, busy.seconds, anytime);
+}
 }  // namespace
 
 bool IsLoopbackHost(std::string_view host_header)
@@ -268,7 +292,18 @@ HttpResponse McpServer::Handle(const HttpRequest& request) const
   }
 
   if (is_notification)
+  {
+    // The client gave up on a request (its user interrupted it, or it timed out).
+    if (*method == "notifications/cancelled" && m_options.gate)
+    {
+      if (const auto request_id = params.find("requestId"); request_id != params.end())
+      {
+        const std::string serialized = request_id->second.serialize();
+        m_options.gate->Cancel(&serialized);
+      }
+    }
     return {.status = 202};
+  }
 
   const auto server_info = [this] {
     picojson::object info;
@@ -371,9 +406,18 @@ HttpResponse McpServer::Handle(const HttpRequest& request) const
         known += (known.empty() ? "" : ", ") + key;
     }
 
+    std::optional<CallGate::Ticket> ticket;
+    CallGate::RunningCall busy;
+    if (missing.empty() && m_options.gate && !tool->anytime)
+      ticket = m_options.gate->Enter(*name, id.serialize(), &busy);
+
     if (!missing.empty())
     {
       tool_result = ToolResult::Error(fmt::format("Missing required argument(s): {}", missing));
+    }
+    else if (m_options.gate && !tool->anytime && !ticket)
+    {
+      tool_result = ToolResult::Error(BusyText(busy, m_registry));
     }
     else
     {
@@ -391,6 +435,14 @@ HttpResponse McpServer::Handle(const HttpRequest& request) const
         tool_result = ToolResult::Error(fmt::format("Internal error: {}", e.what()));
       }
     }
+    if (ticket && ticket->WasCancelled())
+    {
+      tool_result.AddText(fmt::format("Note: this call was cancelled after {:.1f} s (cancel_tool, "
+                                      "stop_game, quit_dolphin or the client): what it reports "
+                                      "covers only the part that ran.",
+                                      ticket->GetSeconds()));
+    }
+    ticket.reset();
     if (!unknown.empty())
     {
       tool_result.AddText(fmt::format("Note: ignored unknown argument(s): {}. {} takes: {}.",

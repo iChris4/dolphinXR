@@ -11,6 +11,7 @@
 #include <string_view>
 
 #include "Common/CommonTypes.h"
+#include "Core/AgentServer/CallGate.h"
 
 namespace Core
 {
@@ -42,6 +43,10 @@ void RunOnHostThread(std::function<void()> job, std::chrono::milliseconds timeou
 // Polls `predicate` until it is true. False on timeout or when the server stops.
 bool WaitUntil(const std::function<bool()>& predicate, std::chrono::milliseconds timeout,
                std::chrono::milliseconds poll = 5ms);
+// The same for a wait on the running game (fields, a breakpoint, a capture): it marks the call as
+// one that runs emulation (MarkCallRunsEmulation), and is also false when the call is cancelled.
+bool WaitForEmulation(const std::function<bool()>& predicate, std::chrono::milliseconds timeout,
+                      std::chrono::milliseconds poll = 2ms);
 
 // A case-insensitive ECMAScript regex from a tool argument; nullopt when the pattern is empty. A
 // leading "(?i)", which ECMAScript lacks, is accepted. Throws ToolError for a bad pattern.
@@ -50,8 +55,8 @@ std::optional<std::regex> MakeToolRegex(std::string_view pattern);
 bool IsPaused();
 void PauseEmulation();
 void ResumeEmulation();
-// Steps `frames` presented frames, pausing first. Returns the frames stepped; throws ToolError when
-// a step does not finish in time.
+// Steps `frames` presented frames, pausing first. Returns the frames stepped, fewer when the call
+// is cancelled; throws ToolError when a step does not finish in time.
 u32 AdvanceFrames(u32 frames, std::chrono::milliseconds per_frame_timeout = FRAME_STEP_TIMEOUT);
 
 // The emulated frame state shown to the agent after most actions: state, game, counters.

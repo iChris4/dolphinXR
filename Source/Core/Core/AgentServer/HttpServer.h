@@ -66,9 +66,10 @@ HttpParseStatus ParseHttpRequest(std::string_view buffer, HttpRequest* out, size
 std::string SerializeHttpResponse(const HttpResponse& response, bool keep_alive);
 std::string_view GetHttpStatusText(int status);
 
-// A minimal HTTP/1.1 server on 127.0.0.1. Its thread accepts connections and serves the requests
-// of all of them one at a time, calling the handler on this thread: a slow handler delays the
-// other connections, which is what the agent server wants (tool calls are serialized).
+// A minimal HTTP/1.1 server on 127.0.0.1. Its thread accepts connections and reads requests; each
+// request is handled on a thread of its own, one at a time per connection, so a slow handler does
+// not hold up the other connections. The handler is called from several threads at once: the
+// agent server decides which tool calls may run together (CallGate).
 class HttpServer final
 {
 public:

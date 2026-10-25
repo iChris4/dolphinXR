@@ -99,6 +99,9 @@ struct ToolDef
   bool read_only = false;
   bool destructive = false;
   bool idempotent = false;
+  // Runs even while another call runs (CallGate): status, screenshots, the log and the recovery
+  // tools. Such a tool must be safe alongside any other one.
+  bool anytime = false;
   ToolHandler handler;
 };
 

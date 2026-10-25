@@ -141,6 +141,14 @@ bool WaitUntil(const std::function<bool()>& predicate, std::chrono::milliseconds
   return true;
 }
 
+bool WaitForEmulation(const std::function<bool()>& predicate, std::chrono::milliseconds timeout,
+                      std::chrono::milliseconds poll)
+{
+  MarkCallRunsEmulation();
+  return WaitUntil([&] { return IsCallCancelled() || predicate(); }, timeout, poll) &&
+         !IsCallCancelled();
+}
+
 bool IsPaused()
 {
   // While a thread holds a Core::CPUThreadGuard (Dolphin's debugger views take one to read
@@ -221,9 +229,14 @@ u32 AdvanceFrames(u32 frames, std::chrono::milliseconds per_frame_timeout)
     throw ToolError("Frame stepping is disabled in RetroAchievements hardcore mode.");
 
   PauseEmulation();
+  // One step is quick; more let the game run for a while.
+  if (frames > 1)
+    MarkCallRunsEmulation();
   auto& system = GetSystem();
   for (u32 i = 0; i < frames; ++i)
   {
+    if (IsCallCancelled())
+      return i;
     // DoFrameStep switches to Running at once and pauses again after the next presented frame.
     Core::DoFrameStep(system);
     if (!WaitUntil(IsPaused, per_frame_timeout, 1ms))

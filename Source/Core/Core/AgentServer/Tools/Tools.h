@@ -102,6 +102,8 @@ struct ExperimentOptions
 struct ExperimentResult
 {
   bool hung = false;
+  // The call was cancelled during the run (cancel_tool): the measure is partial.
+  bool cancelled = false;
   u32 xfb_copies = 0;
   double draw_calls_avg = 0;
   u32 draw_calls_min = 0;

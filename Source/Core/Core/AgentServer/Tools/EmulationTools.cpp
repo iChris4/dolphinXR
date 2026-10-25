@@ -266,11 +266,23 @@ ToolResult GetStatus(const ToolArgs&)
     structured["vps"] = JsonNumber(perf.GetVPS());
   }
 
-  const Server& server = Server::GetInstance();
+  Server& server = Server::GetInstance();
   if (server.IsTurboOverrideActive() || server.IsMuteOverrideActive())
   {
     text += fmt::format("\nAgent speed overrides: turbo {}, mute {}.",
                         server.IsTurboOverrideActive(), server.IsMuteOverrideActive());
+  }
+  if (const auto running = server.GetCallGate().GetRunning())
+  {
+    text += fmt::format("\nTool call running: {} for {:.1f} s{}{}.", running->tool,
+                        running->seconds, running->runs_emulation ? ", letting emulation run" : "",
+                        running->cancel_requested ? ", asked to stop" : "");
+    picojson::object call;
+    call["tool"] = JsonString(running->tool);
+    call["seconds"] = JsonNumber(running->seconds);
+    call["runs_emulation"] = JsonBool(running->runs_emulation);
+    call["cancel_requested"] = JsonBool(running->cancel_requested);
+    structured["running_call"] = picojson::value(std::move(call));
   }
   return ToolResult::Text(std::move(text)).SetStructured(std::move(structured));
 }
@@ -293,10 +305,10 @@ ToolResult AdvanceFramesTool(const ToolArgs& args)
   const auto timeout = std::chrono::milliseconds(
       std::clamp<s64>(args.GetInt("timeout_ms_per_frame", 3000), 100, 30000));
   const auto before = Server::GetInstance().GetFrameCounters().GetSnapshot();
-  AdvanceFrames(frames, timeout);
+  const u32 advanced = AdvanceFrames(frames, timeout);
   const auto& counters = Server::GetInstance().GetFrameCounters();
   const auto samples = counters.GetSamplesAfter(before.xfb_copies);
-  std::string text = fmt::format("Advanced {} frame(s); emulation is paused. ", frames);
+  std::string text = fmt::format("Advanced {} frame(s); emulation is paused. ", advanced);
   if (!samples.empty())
   {
     text += fmt::format("Last XFB copy: {} draw calls, {} primitives. ", samples.back().draw_calls,
@@ -520,6 +532,7 @@ void StopAndWait(const Server::FrontendActions& actions, bool force,
 {
   auto& system = GetSystem();
   INFO_LOG_FMT(OPENXR, "AgentServer: stopping emulation{}", force ? " (forced)" : "");
+  MarkCallRunsEmulation();
   actions.stop(force);
   if (WaitUntil([&] { return Core::IsUninitialized(system); }, timeout, 20ms))
     return;
@@ -539,6 +552,7 @@ void BootAndWait(const Server::FrontendActions& actions, const std::string& path
     throw ToolError(fmt::format("{} does not exist.", path));
   auto& system = GetSystem();
   INFO_LOG_FMT(OPENXR, "AgentServer: booting {}", path);
+  MarkCallRunsEmulation();
   actions.boot(path);
   if (!WaitUntil([&] { return Core::IsRunning(system); }, timeout, 20ms))
   {
@@ -556,15 +570,29 @@ void BootAndWait(const Server::FrontendActions& actions, const std::string& path
       timeout, 20ms);
 }
 
+// stop_game and quit_dolphin run alongside other calls, to recover from one that hangs: they ask
+// it to stop first, so that it does not wait on a game that is going away.
+std::string CancelRunningCall()
+{
+  CallGate& gate = Server::GetInstance().GetCallGate();
+  const std::optional<CallGate::RunningCall> running = gate.GetRunning();
+  if (!running || !gate.Cancel())
+    return {};
+  return fmt::format(" {} (running for {:.1f} s) was asked to stop first.", running->tool,
+                     running->seconds);
+}
+
 ToolResult StopGame(const ToolArgs& args)
 {
   if (Core::IsUninitialized(GetSystem()))
     return ToolResult::Text("No game is running.");
   RequireNoNetPlay();
   const Server::FrontendActions actions = RequireFrontend();
+  const std::string cancelled = CancelRunningCall();
   StopAndWait(actions, args.GetBool("force", false), TimeoutArg(args, STOP_TIMEOUT));
-  return ToolResult::Text("Emulation stopped. The agent server keeps running; boot_game or "
-                          "restart_game starts a game again.");
+  return ToolResult::Text("Emulation stopped." + cancelled +
+                          " The agent server keeps running; boot_game or restart_game starts a "
+                          "game again.");
 }
 
 ToolResult BootGame(const ToolArgs& args)
@@ -624,9 +652,25 @@ ToolResult QuitDolphin(const ToolArgs& args)
 {
   RequireNoNetPlay();
   const Server::FrontendActions actions = RequireFrontend();
+  const std::string cancelled = CancelRunningCall();
   actions.quit(args.GetBool("force", false));
   return ToolResult::Text("Dolphin is closing: emulation stops first, and the agent server stops "
-                          "with Dolphin.");
+                          "with Dolphin." +
+                          cancelled);
+}
+
+ToolResult CancelTool(const ToolArgs&)
+{
+  CallGate& gate = Server::GetInstance().GetCallGate();
+  const std::optional<CallGate::RunningCall> running = gate.GetRunning();
+  if (!running || !gate.Cancel())
+    return ToolResult::Text("No tool call is running.");
+  return ToolResult::Text(fmt::format(
+      "Asked {} (running for {:.1f} s) to stop. A call that lets emulation run (input holds, "
+      "traces, frame steps, captures, experiments) ends at its next check, within milliseconds, "
+      "and returns what it has with a note; a quick call finishes anyway. If get_status still "
+      "shows it a few seconds from now, it is stuck: stop_game with force=true, or quit_dolphin.",
+      running->tool, running->seconds));
 }
 }  // namespace
 
@@ -636,12 +680,26 @@ void RegisterEmulationTools(ToolRegistry& registry, Server&)
                 .title = "Emulation status",
                 .description =
                     "Emulation state, running game, VR session (stereo or flat screen), speed, "
-                    "backend, frame counters, agent look offset and speed overrides. Works "
-                    "without a game.",
+                    "backend, frame counters, agent look offset, speed overrides, and the tool "
+                    "call in progress. Works without a game, and while another call runs.",
                 .input_schema = Schema().Build(),
                 .read_only = true,
                 .idempotent = true,
+                .anytime = true,
                 .handler = GetStatus});
+
+  registry.Add(
+      {.name = "cancel_tool",
+       .title = "Cancel the running call",
+       .description =
+           "Asks the tool call in progress to stop: an input hold, a trace, frame steps, a "
+           "capture or an experiment ends at its next check and returns what it has, with a "
+           "note. For a call that takes longer than planned, or was sent by mistake. Works while "
+           "another call runs (that is its point); get_status shows the running call.",
+       .input_schema = Schema().Build(),
+       .idempotent = true,
+       .anytime = true,
+       .handler = CancelTool});
 
   registry.Add({.name = "pause",
                 .title = "Pause emulation",
@@ -791,7 +849,8 @@ void RegisterEmulationTools(ToolRegistry& registry, Server&)
            "Stops the game as the Stop button does, without the confirmation prompt, and waits "
            "until emulation is shut down. The server keeps running. Use it to recover a game "
            "that froze; force=true skips the Wii's power button shutdown, which a frozen game "
-           "never finishes. Unsaved game progress is lost: make a savestate first when it "
+           "never finishes. Works while another call runs, which it cancels first: the way out "
+           "of a call that hangs. Unsaved game progress is lost: make a savestate first when it "
            "matters.",
        .input_schema = Schema()
                            .Boolean("force", "Stop at once (default false).")
@@ -799,6 +858,7 @@ void RegisterEmulationTools(ToolRegistry& registry, Server&)
                            .Build(),
        .destructive = true,
        .idempotent = true,
+       .anytime = true,
        .handler = StopGame});
 
   registry.Add(
@@ -841,9 +901,11 @@ void RegisterEmulationTools(ToolRegistry& registry, Server&)
        .title = "Close Dolphin",
        .description = "Stops emulation without the confirmation prompt and closes Dolphin, and "
                       "the agent server with it. Only when the user asked for it, or to end a "
-                      "session you started yourself.",
+                      "session you started yourself. Works while another call runs, which it "
+                      "cancels first.",
        .input_schema = Schema().Boolean("force", "Stop the game at once (default false).").Build(),
        .destructive = true,
+       .anytime = true,
        .handler = QuitDolphin});
 }
 }  // namespace AgentServer

@@ -21,7 +21,7 @@
 // Threads: the capture and preview state belongs to the video thread. It is changed by agent video
 // jobs (VR::AgentVideoJobs, run in Presenter::Present) and read by VertexManagerBase::Flush on the
 // same thread, so the draw path checks two plain bools. The published capture is handed to the
-// server thread under a mutex.
+// tool calls under a mutex.
 namespace VR::AgentCapture
 {
 // ---- Eye screenshots ----

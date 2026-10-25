@@ -510,10 +510,13 @@ ToolResult WaitForBreak(const ToolArgs& args)
   const auto timeout =
       std::chrono::milliseconds(std::clamp<s64>(args.GetInt("timeout_ms", 10000), 100, 120000));
   picojson::object structured;
-  if (!WaitUntil(IsPaused, timeout))
+  if (!WaitForEmulation(IsPaused, timeout, 5ms))
   {
     structured["paused"] = JsonBool(false);
-    return ToolResult::Text("No breakpoint was hit in time (emulation is still running).")
+    return ToolResult::Text(IsCallCancelled() ?
+                                "Cancelled before a breakpoint was hit (emulation is still "
+                                "running)." :
+                                "No breakpoint was hit in time (emulation is still running).")
         .SetStructured(std::move(structured));
   }
   Core::CPUThreadGuard guard(GetSystem());

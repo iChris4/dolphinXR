@@ -186,9 +186,10 @@ Step ParseStep(const std::vector<GroupInfo>& groups, const picojson::object& obj
 }
 
 // Waits for `fields` VI fields while emulation runs. False when no field came for a while (the
-// game froze).
+// game froze) or when the call is cancelled.
 bool WaitForFields(u32 fields)
 {
+  MarkCallRunsEmulation();
   FrameCounters& counters = Server::GetInstance().GetFrameCounters();
   u64 last = counters.GetSnapshot().fields;
   const u64 target = last + fields;
@@ -204,7 +205,7 @@ bool WaitForFields(u32 fields)
       last = now_fields;
       last_progress = now;
     }
-    if (now - last_progress > 3s || Server::GetInstance().IsStopping())
+    if (now - last_progress > 3s || Server::GetInstance().IsStopping() || IsCallCancelled())
       return false;
     std::this_thread::sleep_for(2ms);
   }
@@ -318,7 +319,9 @@ ToolResult PressInput(const ToolArgs& args)
 
   if (hung)
   {
-    text += "The game stopped producing fields (it froze or was paused): input released.\n";
+    text += IsCallCancelled() ?
+                "Cancelled: input released.\n" :
+                "The game stopped producing fields (it froze or was paused): input released.\n";
   }
   else
   {
@@ -411,6 +414,8 @@ ToolResult SetVRControls(const ToolArgs& args)
   const bool ran = WaitForFields(static_cast<u32>(frames));
   VR::g_openxr->SetAgentControls(hand, std::nullopt);
   text += ran ? fmt::format(" Held for {} field(s), then released.", frames) :
+          IsCallCancelled() ?
+                " Cancelled: released." :
                 " The game stopped producing fields (it froze or was paused): released.";
   ToolResult images;
   if (ran && args.GetBool("screenshot", true))

@@ -24,8 +24,8 @@ class ControlGroupContainer;
 // same control, and releasing or detaching one layer leaves the other in place.
 //
 // Threads: the CPU thread reads the held values from the override functions (Lookup), and changes
-// the Patch layer. The server thread changes the Agent layer. Override functions are installed or
-// removed under ControllerEmu::EmulatedController::GetStateLock().
+// the Patch layer. Tool calls, one at a time, change the Agent layer. Override functions are
+// installed or removed under ControllerEmu::EmulatedController::GetStateLock().
 namespace AgentServer::AgentInput
 {
 enum class Device : u8

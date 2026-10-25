@@ -13,6 +13,7 @@
 
 #include "Common/CommonTypes.h"
 #include "Common/Config/Config.h"
+#include "Core/AgentServer/CallGate.h"
 #include "Core/AgentServer/FrameCounters.h"
 #include "Core/AgentServer/HttpServer.h"
 #include "Core/AgentServer/OverrideSession.h"
@@ -33,9 +34,10 @@ class McpServer;
 // default ([VR] AgentServer in GFX.ini). The frontend calls ApplyConfig() once at startup and
 // Shutdown() before exit; the server follows the settings by itself afterwards.
 //
-// Threads: requests are served one at a time on the server's own thread. Tool handlers reach the
-// CPU thread with Core::CPUThreadGuard / Core::RunOnCPUThread and the video thread with
-// VR::AgentVideoJobs, and only ever wait with timeouts (see ToolHelpers.h).
+// Threads: each request is handled on a thread of its own, and the CallGate lets tool calls in
+// one at a time (the `anytime` tools excepted). Tool handlers reach the CPU thread with
+// Core::CPUThreadGuard / Core::RunOnCPUThread and the video thread with VR::AgentVideoJobs, and
+// only ever wait with timeouts (see ToolHelpers.h).
 class Server final
 {
 public:
@@ -57,6 +59,7 @@ public:
   OverrideSession& GetOverrideSession() { return m_override_session; }
   LogBuffer* GetLogBuffer() const { return m_log_buffer; }
   const ToolRegistry& GetRegistry() const { return m_registry; }
+  CallGate& GetCallGate() { return m_call_gate; }
   // Set while the server shuts down: waits in tool handlers give up.
   bool IsStopping() const { return m_stopping.load(); }
 
@@ -74,14 +77,14 @@ public:
   // The frontend's cheat code lists keep the codes they loaded and write the whole list back on
   // their next change, which would erase the codes a tool wrote to User/GameSettings/<GameID>.ini.
   // The frontend sets this callback to reload them; the code tools call NotifyGameCodesChanged on
-  // the server thread after each write.
+  // their call's thread after each write.
   void SetGameCodesChangedCallback(std::function<void(const std::string& game_id)> callback);
   void NotifyGameCodesChanged(const std::string& game_id);
 
   // What the frontend does for the lifecycle tools (stop_game, boot_game, restart_game,
   // quit_dolphin): it owns the render window and the stop confirmation. The tools call the
-  // actions on the server thread; they queue the work on the UI thread and return. A frontend that
-  // sets none (Android) makes the tools say so.
+  // actions on their call's thread; they queue the work on the UI thread and return. A frontend
+  // that sets none (Android) makes the tools say so.
   struct FrontendActions
   {
     // Boots a file (disc image, executable or WAD) as the game list does.
@@ -119,7 +122,9 @@ private:
   std::string m_last_boot_path;
 
   ToolRegistry m_registry;
-  std::unique_ptr<McpServer> m_mcp;
+  CallGate m_call_gate;
+  // Shared with the calls in progress: one stuck for good outlives Stop.
+  std::shared_ptr<McpServer> m_mcp;
   HttpServer m_http;
   FrameCounters m_frame_counters;
   OverrideSession m_override_session;

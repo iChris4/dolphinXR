@@ -12,6 +12,7 @@
 
 namespace AgentServer
 {
+class CallGate;
 class ToolRegistry;
 
 // The protocol revision served statelessly ("modern": every request carries its version in
@@ -29,11 +30,14 @@ struct McpServerOptions
   std::string instructions;
   // When not empty, requests must carry "Authorization: Bearer <token>".
   std::string token;
+  // Lets tool calls in one at a time, except the `anytime` tools. None: calls are not gated.
+  CallGate* gate = nullptr;
 };
 
 // MCP over Streamable HTTP: one POST endpoint, one JSON-RPC message per request, JSON responses
-// (no SSE, no sessions). Handle() is a pure function of the request and the tool registry, which
-// keeps the protocol logic unit-testable; tool handlers do the real work.
+// (no SSE, no sessions). Handle() depends only on the request, the tool registry and the gate,
+// which keeps the protocol logic unit-testable; tool handlers do the real work. It is called from
+// several threads at once.
 class McpServer final
 {
 public:

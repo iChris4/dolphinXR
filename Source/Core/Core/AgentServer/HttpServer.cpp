@@ -4,8 +4,12 @@
 #include "Core/AgentServer/HttpServer.h"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <exception>
+#include <memory>
+#include <optional>
+#include <thread>
 
 #include <SFML/Network/SocketSelector.hpp>
 #include <SFML/Network/TcpListener.hpp>
@@ -23,6 +27,8 @@ namespace
 constexpr size_t MAX_CLIENTS = 8;
 // A keep-alive connection the client has not used for this long is closed.
 constexpr auto CLIENT_IDLE_TIMEOUT = std::chrono::minutes(15);
+// How long Stop waits for the calls in progress.
+constexpr auto WORKER_STOP_TIMEOUT = std::chrono::seconds(10);
 
 std::string ToLowerCopy(std::string_view text)
 {
@@ -207,14 +213,22 @@ void HttpServer::ThreadFunc()
 {
   Common::SetCurrentThreadName("Agent Server");
 
+  // A connection. Its requests are handled one at a time on a worker thread; meanwhile the socket
+  // is out of the selector and only the worker uses it.
   struct Client
   {
     std::unique_ptr<sf::TcpSocket> socket;
     std::string buffer;
     bool sent_continue = false;
     std::chrono::steady_clock::time_point last_activity;
+    std::thread worker;
+    std::atomic<bool> worker_done{false};
+    // Written by the worker before worker_done.
+    bool keep_open = false;
+
+    bool IsBusy() const { return worker.joinable(); }
   };
-  std::vector<Client> clients;
+  std::vector<std::shared_ptr<Client>> clients;
   sf::SocketSelector selector;
   selector.add(*m_listener);
   std::array<char, 64 * 1024> chunk;
@@ -223,72 +237,103 @@ void HttpServer::ThreadFunc()
     return socket.send(data.data(), data.size()) == sf::Socket::Status::Done;
   };
 
-  // Serves every complete request in the client's buffer. Returns false to close the connection.
-  const auto serve = [&](Client& client) {
-    while (true)
+  // Starts the next complete request in the client's buffer on a worker thread. Returns false to
+  // close the connection.
+  const auto serve = [&](const std::shared_ptr<Client>& client) {
+    HttpRequest request;
+    size_t consumed = 0;
+    switch (ParseHttpRequest(client->buffer, &request, &consumed))
     {
-      HttpRequest request;
-      size_t consumed = 0;
-      switch (ParseHttpRequest(client.buffer, &request, &consumed))
+    case HttpParseStatus::NeedHeaders:
+      return true;
+    case HttpParseStatus::NeedBody:
+      if (request.expect_continue && !client->sent_continue)
       {
-      case HttpParseStatus::NeedHeaders:
-        return true;
-      case HttpParseStatus::NeedBody:
-        if (request.expect_continue && !client.sent_continue)
-        {
-          client.sent_continue = true;
-          return send_all(*client.socket, "HTTP/1.1 100 Continue\r\n\r\n");
-        }
-        return true;
-      case HttpParseStatus::BadRequest:
-        send_all(*client.socket, SerializeHttpResponse({.status = 400}, false));
-        return false;
-      case HttpParseStatus::TooLarge:
-        send_all(*client.socket, SerializeHttpResponse({.status = 413}, false));
-        return false;
-      case HttpParseStatus::Ok:
-        break;
+        client->sent_continue = true;
+        return send_all(*client->socket, "HTTP/1.1 100 Continue\r\n\r\n");
       }
-
-      client.buffer.erase(0, consumed);
-      client.sent_continue = false;
-
-      HttpResponse response;
-      try
-      {
-        response = m_handler(request);
-      }
-      catch (const std::exception& e)
-      {
-        ERROR_LOG_FMT(CORE, "AgentServer: request handler failed: {}", e.what());
-        response = {.status = 500, .content_type = "text/plain", .body = e.what()};
-      }
-      catch (...)
-      {
-        ERROR_LOG_FMT(CORE, "AgentServer: request handler failed");
-        response = {.status = 500, .content_type = "text/plain", .body = "Internal error"};
-      }
-
-      const bool keep_alive = request.keep_alive && m_running.IsSet();
-      if (!send_all(*client.socket, SerializeHttpResponse(response, keep_alive)) || !keep_alive)
-        return false;
+      return true;
+    case HttpParseStatus::BadRequest:
+      send_all(*client->socket, SerializeHttpResponse({.status = 400}, false));
+      return false;
+    case HttpParseStatus::TooLarge:
+      send_all(*client->socket, SerializeHttpResponse({.status = 413}, false));
+      return false;
+    case HttpParseStatus::Ok:
+      break;
     }
+
+    client->buffer.erase(0, consumed);
+    client->sent_continue = false;
+    selector.remove(*client->socket);
+    client->worker_done.store(false);
+    client->worker =
+        std::thread([client, handler = m_handler, request = std::move(request), send_all] {
+          Common::SetCurrentThreadName("Agent Server call");
+          HttpResponse response;
+          try
+          {
+            response = handler(request);
+          }
+          catch (const std::exception& e)
+          {
+            ERROR_LOG_FMT(CORE, "AgentServer: request handler failed: {}", e.what());
+            response = {.status = 500, .content_type = "text/plain", .body = e.what()};
+          }
+          catch (...)
+          {
+            ERROR_LOG_FMT(CORE, "AgentServer: request handler failed");
+            response = {.status = 500, .content_type = "text/plain", .body = "Internal error"};
+          }
+          client->keep_open =
+              send_all(*client->socket, SerializeHttpResponse(response, request.keep_alive)) &&
+              request.keep_alive;
+          client->worker_done.store(true, std::memory_order_release);
+        });
+    return true;
   };
 
   const auto close_client = [&](size_t index) {
-    selector.remove(*clients[index].socket);
-    clients[index].socket->disconnect();
+    selector.remove(*clients[index]->socket);
+    clients[index]->socket->disconnect();
     clients.erase(clients.begin() + index);
   };
 
   while (m_running.IsSet())
   {
+    // Connections whose request was answered take requests again, starting with what the client
+    // sent meanwhile.
+    bool any_busy = false;
+    for (size_t i = 0; i < clients.size();)
+    {
+      const std::shared_ptr<Client>& client = clients[i];
+      if (client->IsBusy() && client->worker_done.load(std::memory_order_acquire))
+      {
+        client->worker.join();
+        client->last_activity = std::chrono::steady_clock::now();
+        bool keep = client->keep_open;
+        if (keep)
+        {
+          selector.add(*client->socket);
+          keep = serve(client);
+        }
+        if (!keep)
+        {
+          close_client(i);
+          continue;
+        }
+      }
+      any_busy |= client->IsBusy();
+      ++i;
+    }
+
+    // While a call runs, poll often: its connection is served again soon after it answers.
     const auto now = std::chrono::steady_clock::now();
-    if (!selector.wait(sf::milliseconds(100)))
+    if (!selector.wait(sf::milliseconds(any_busy ? 5 : 100)))
     {
       for (size_t i = clients.size(); i-- > 0;)
       {
-        if (now - clients[i].last_activity > CLIENT_IDLE_TIMEOUT)
+        if (!clients[i]->IsBusy() && now - clients[i]->last_activity > CLIENT_IDLE_TIMEOUT)
           close_client(i);
       }
       continue;
@@ -299,26 +344,49 @@ void HttpServer::ThreadFunc()
       auto socket = std::make_unique<sf::TcpSocket>();
       if (m_listener->accept(*socket) == sf::Socket::Status::Done)
       {
+        // Full: the connection idle the longest makes room. A call in progress keeps its own.
         if (clients.size() >= MAX_CLIENTS)
-          close_client(0);
-        selector.add(*socket);
-        clients.push_back({std::move(socket), {}, false, now});
+        {
+          std::optional<size_t> oldest;
+          for (size_t i = 0; i < clients.size(); ++i)
+          {
+            if (!clients[i]->IsBusy() &&
+                (!oldest || clients[i]->last_activity < clients[*oldest]->last_activity))
+            {
+              oldest = i;
+            }
+          }
+          if (oldest)
+            close_client(*oldest);
+        }
+        if (clients.size() < MAX_CLIENTS)
+        {
+          selector.add(*socket);
+          auto client = std::make_shared<Client>();
+          client->socket = std::move(socket);
+          client->last_activity = now;
+          clients.push_back(std::move(client));
+        }
+        else
+        {
+          socket->disconnect();
+        }
       }
     }
 
     for (size_t i = 0; i < clients.size();)
     {
-      Client& client = clients[i];
+      const std::shared_ptr<Client>& client = clients[i];
       bool keep = true;
-      if (selector.isReady(*client.socket))
+      if (!client->IsBusy() && selector.isReady(*client->socket))
       {
         size_t received = 0;
         const sf::Socket::Status status =
-            client.socket->receive(chunk.data(), chunk.size(), received);
+            client->socket->receive(chunk.data(), chunk.size(), received);
         if (status == sf::Socket::Status::Done)
         {
-          client.buffer.append(chunk.data(), received);
-          client.last_activity = std::chrono::steady_clock::now();
+          client->buffer.append(chunk.data(), received);
+          client->last_activity = std::chrono::steady_clock::now();
           keep = serve(client);
         }
         else if (status != sf::Socket::Status::NotReady && status != sf::Socket::Status::Partial)
@@ -334,6 +402,28 @@ void HttpServer::ThreadFunc()
     }
   }
 
+  // Calls still running end soon: their waits give up while the agent server stops. One stuck
+  // for good (an emulator deadlock) is left behind rather than keeping Dolphin from closing; it
+  // owns its connection.
+  const auto deadline = std::chrono::steady_clock::now() + WORKER_STOP_TIMEOUT;
+  for (size_t i = clients.size(); i-- > 0;)
+  {
+    Client& client = *clients[i];
+    if (!client.IsBusy())
+      continue;
+    while (!client.worker_done.load() && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (client.worker_done.load())
+    {
+      client.worker.join();
+    }
+    else
+    {
+      WARN_LOG_FMT(CORE, "AgentServer: a tool call did not end; leaving it behind");
+      client.worker.detach();
+      clients.erase(clients.begin() + i);
+    }
+  }
   while (!clients.empty())
     close_client(clients.size() - 1);
   selector.clear();

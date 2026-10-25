@@ -79,17 +79,22 @@ std::shared_ptr<const CapturedFrame> CaptureFrame(std::chrono::milliseconds time
     const auto capture = VR::AgentCapture::GetLastCapture();
     return capture && capture->id == id;
   };
+  // A capture of several frames lets the game run for a while.
+  if (frames > 1)
+    MarkCallRunsEmulation();
   if (IsPaused())
   {
     // The capture starts at the next EFB->XFB copy and ends `frames` copies later.
-    for (u32 i = 0; i < frames + 6 && !done(); ++i)
+    for (u32 i = 0; i < frames + 6 && !done() && !IsCallCancelled(); ++i)
       AdvanceFrames(1);
     WaitUntil(done, 1s);
   }
   else
   {
-    WaitUntil(done, timeout + frames * 50ms);
+    WaitUntil([&] { return done() || IsCallCancelled(); }, timeout + frames * 50ms);
   }
+  if (!done() && IsCallCancelled())
+    throw ToolError("Cancelled before the capture was complete.");
   if (!done())
     throw ToolError(
         "No frame was captured in time: is the game drawing (not on a loading screen)?");

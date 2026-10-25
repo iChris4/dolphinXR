@@ -122,8 +122,8 @@ void Server::Shutdown()
 
 void Server::OnConfigChanged()
 {
-  // Any thread, often the server's own (tools change settings): only compare here, and leave the
-  // restart to the host thread so the server never joins its own thread.
+  // Any thread, often a tool call's (tools change settings): only compare here, and leave the
+  // restart to the host thread so the server never joins its own threads.
   const DesiredConfig desired = ReadConfig();
   {
     std::lock_guard lock(m_mutex);
@@ -163,11 +163,12 @@ void Server::Start(u16 port, const std::string& token)
   options.server_version = Common::GetScmDescStr();
   options.instructions = GetServerInstructions();
   options.token = token;
-  m_mcp = std::make_unique<McpServer>(m_registry, std::move(options));
+  options.gate = &m_call_gate;
+  m_mcp = std::make_shared<McpServer>(m_registry, std::move(options));
 
   std::string error;
   if (!m_http.Start(
-          port, [this](const HttpRequest& request) { return m_mcp->Handle(request); }, &error))
+          port, [mcp = m_mcp](const HttpRequest& request) { return mcp->Handle(request); }, &error))
   {
     m_last_error = error;
     ERROR_LOG_FMT(OPENXR, "AgentServer: {}", error);
@@ -188,7 +189,7 @@ void Server::Stop()
   if (!m_http.IsRunning())
     return;
 
-  // Wake up any tool handler waiting on emulation so the server thread can be joined.
+  // Wake up any tool handler waiting on emulation so the server's threads can be joined.
   m_stopping.store(true);
   VR::AgentVideoJobs::CancelAll();
   m_http.Stop();

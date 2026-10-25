@@ -53,7 +53,16 @@ ToolResult Screenshot(const ToolArgs& args)
   const std::string eyes = args.GetString("eyes", "both");
   const u32 max_width = static_cast<u32>(std::clamp<s64>(args.GetInt("max_width", 640), 64, 1920));
   if (args.GetBool("advance", false))
+  {
+    // A screenshot runs alongside other calls; a frame step would pause emulation under them.
+    if (const auto running = Server::GetInstance().GetCallGate().GetRunning())
+    {
+      throw ToolError(fmt::format("{} is running: a screenshot taken meanwhile cannot step a "
+                                  "frame. Call it without advance.",
+                                  running->tool));
+    }
     AdvanceFrames(1);
+  }
 
   // The text block comes first, then the images.
   ToolResult result = ToolResult::Text("");
@@ -74,13 +83,15 @@ void RegisterScreenshotTools(ToolRegistry& registry, Server&)
            "right), else the mono frame. This is the game frame with the virtual screen and the "
            "overrides applied, before the headset compositor (no VR menu). Images are downscaled "
            "to max_width (640 is about 450 tokens each). In a VR session it also works while "
-           "paused.",
+           "paused. Works while another call runs (without advance): a screenshot sent during "
+           "an input hold or a trace shows the game at that moment.",
        .input_schema = Schema()
                            .String("eyes", "Which eyes (default both).", {"both", "left", "right"})
                            .Integer("max_width", "Maximum width in pixels (default 640).", 64, 1920)
                            .Boolean("advance", "Step one frame first (paused or not).")
                            .Build(),
        .read_only = true,
+       .anytime = true,
        .handler = Screenshot});
 }
 }  // namespace AgentServer

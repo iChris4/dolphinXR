@@ -350,13 +350,15 @@ void RegisterConfigTools(ToolRegistry& registry, Server& server)
                 .title = "Read the log",
                 .description =
                     "The last lines of Dolphin's log (what the enabled log types let through), "
-                    "newest last, optionally filtered by a case-insensitive regex.",
+                    "newest last, optionally filtered by a case-insensitive regex. Works while "
+                    "another call runs.",
                 .input_schema = Schema()
                                     .Integer("max_lines", "Default 100, at most 500.", 1, 500)
                                     .String("regex", "ECMAScript regex, e.g. \"OpenXR|VR_\".")
                                     .Integer("since_seq", "Only lines after this sequence number.")
                                     .Build(),
                 .read_only = true,
+                .anytime = true,
                 .handler = ReadLog});
 
   registry.Add({.name = "set_log_type",
