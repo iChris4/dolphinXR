@@ -20,7 +20,10 @@
 #include <QPushButton>
 #include <QWidget>
 
+#include "Common/CommonPaths.h"
 #include "Common/Config/Config.h"
+#include "Common/CrashReport.h"
+#include "Common/FileUtil.h"
 #include "Common/MsgHandler.h"
 #include "Common/ScopeGuard.h"
 #include "Common/StringUtil.h"
@@ -203,6 +206,7 @@ int main(int argc, char* argv[])
 
   UICommon::SetUserDirectory(static_cast<const char*>(options.get("user")));
   UICommon::CreateDirectories();
+  Common::InstallCrashReporter(File::GetUserPath(D_LOGS_IDX));
   UICommon::Init();
   Resources::Init();
   Settings::Instance().SetBatchModeEnabled(options.is_set("batch"));

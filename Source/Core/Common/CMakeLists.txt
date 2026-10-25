@@ -37,6 +37,8 @@ add_library(common
   Config/Layer.h
   Contains.h
   CPUDetect.h
+  CrashReport.cpp
+  CrashReport.h
   Crypto/AES.cpp
   Crypto/AES.h
   Crypto/bn.cpp
@@ -212,6 +214,7 @@ if (APPLE)
 elseif(WIN32)
   target_link_libraries(common
   PRIVATE
+    dbghelp.lib
     kernel32.lib
     shlwapi.lib
     winmm.lib
