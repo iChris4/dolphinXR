@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <bit>
 #include <map>
 #include <set>
 #include <string>
@@ -605,4 +606,170 @@ TEST(CorruptionStatePatch, RaisesTheGameState)
   EXPECT_EQ(frame(), Flags{"mp_paused"});
   EXPECT_FALSE(game.memory.wrote);
   EXPECT_FALSE(Warned(script, ""));
+}
+
+// ---- Corruption: turn with the right thumbstick ----
+
+namespace
+{
+constexpr u32 TURN_SCRATCH = 0x80002D70;
+constexpr u32 TURN_CAVE = TURN_SCRATCH + 0x20;
+constexpr u32 TURN_CONTROL = 0x80061BA8;           // zz_80061ba8: a control's value
+constexpr u32 TURN_CONTROL_ORIGINAL = 0x9421FFC0;  // stwu sp, -0x40(sp)
+
+float GetF32(const Memory& memory, u32 address)
+{
+  return std::bit_cast<float>(memory.Get32(address));
+}
+
+// The Wii Remote's buttons and the Nunchuk's stick by their names.
+class WiimoteButtons final : public PadResolver
+{
+public:
+  std::vector<PadControl> Resolve(PadDevice device, u8, PadControlKind kind, std::string_view name,
+                                  std::string* error) override
+  {
+    if (device == PadDevice::Wiimote && kind == PadControlKind::Button &&
+        (name == "-" || name == "+" || name == "1" || name == "2"))
+    {
+      return {{"Buttons", std::string(name)}};
+    }
+    if (device == PadDevice::Attachment && kind == PadControlKind::Stick && name.empty())
+      return {{"Stick", "X"}, {"Stick", "Y"}};
+    *error = "unknown";
+    return {};
+  }
+};
+
+struct TurnGame : CorruptionGame
+{
+  TurnGame()
+  {
+    memory.Set32(TURN_CONTROL, TURN_CONTROL_ORIGINAL);
+    input.hands[1].connected = true;
+    env.pad = &pad;
+    env.is_wii = true;
+    env.scratch_base = TURN_SCRATCH;
+    env.scratch_size = 0x80;
+  }
+
+  WiimoteButtons pad;
+};
+
+std::string ReadTurnPatch()
+{
+  return ReadPatch("RM3E01", "stick-turn");
+}
+
+double Held(PatchScript& script, const std::string& button)
+{
+  const PadHolds& holds = script.GetPadHolds();
+  const auto it = holds.find(PadHoldKey{PadDevice::Wiimote, 0, "Buttons", button});
+  return it == holds.end() ? -1.0 : it->second;
+}
+}  // namespace
+
+TEST(CorruptionStickTurnPatch, ManifestIsValid)
+{
+  const std::string source = ReadTurnPatch();
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/RM3E01/stick-turn.lua is missing";
+  const auto read = ReadManifest(source, "stick-turn");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"RM3E01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, 0x80u);
+  EXPECT_TRUE(manifest.reserve.empty());
+}
+
+TEST(CorruptionStickTurnPatch, TurnsWithTheThumbstickAndRestores)
+{
+  TurnGame game;
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  Memory& m = game.memory;
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+
+  // The control getter branches to the cave, which ends with its first instruction and the way
+  // back.
+  EXPECT_EQ(m.Get32(TURN_CONTROL), 0x48000000u | ((TURN_CAVE - TURN_CONTROL) & 0x03FFFFFC));
+  EXPECT_EQ(m.Get32(TURN_CAVE), 0x3D608000u);  // lis r11, 0x8000
+  u32 back = 0;
+  for (u32 a = TURN_CAVE; a < TURN_SCRATCH + 0x80; a += 4)
+  {
+    if (m.Get32(a) == (0x48000000u | ((TURN_CONTROL + 4 - a) & 0x03FFFFFC)))
+      back = a;
+  }
+  ASSERT_NE(back, 0u) << "the cave's branch back is not inside the scratch memory";
+  EXPECT_EQ(m.Get32(back - 4), TURN_CONTROL_ORIGINAL);
+
+  // Right past the dead zone (0.2): turn right at half speed, for the player's control mapper;
+  // look up and down read 0.
+  game.input.hands[1].thumbstick_x = 0.6f;
+  frame();
+  EXPECT_EQ(m.Get32(TURN_SCRATCH), CORRUPTION_PLAYER + 0x35C4);
+  EXPECT_EQ(m.Get32(TURN_SCRATCH + 4), 1u);
+  EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 8), 0.0f, 1e-6f);
+  EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 0xC), 0.5f, 1e-5f);
+  EXPECT_EQ(script.GetFlags(), Flags{"rm3_hide_crosshair"});
+  // Full left; inside the dead zone nothing.
+  game.input.hands[1].thumbstick_x = -1.0f;
+  frame();
+  EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 8), 1.0f, 1e-6f);
+  EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 0xC), 0.0f, 1e-6f);
+  game.input.hands[1].thumbstick_x = 0.15f;
+  frame();
+  EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 8), 0.0f, 1e-6f);
+  EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 0xC), 0.0f, 1e-6f);
+
+  // While playing, - follows the right grip and + the right B (and the thumbstick no longer
+  // presses them); on the map the user's bindings are back.
+  game.input.hands[1].squeeze_button = true;
+  frame();
+  EXPECT_EQ(Held(script, "-"), 1.0);
+  EXPECT_EQ(Held(script, "+"), 0.0);
+  game.SetMenu(1);
+  frame();
+  EXPECT_EQ(Held(script, "-"), -1.0);
+  EXPECT_EQ(Held(script, "+"), -1.0);
+  game.SetMenu(0);
+
+  // Turning on a diagonal does not press the thumbstick's up and down (1 and 2: the map and the
+  // pause screen); pushed up, they are the user's again.
+  game.input.hands[1].thumbstick_x = 0.8f;
+  game.input.hands[1].thumbstick_y = 0.6f;
+  frame();
+  EXPECT_EQ(Held(script, "1"), 0.0);
+  EXPECT_EQ(Held(script, "2"), 0.0);
+  game.input.hands[1].thumbstick_x = 0.0f;
+  game.input.hands[1].thumbstick_y = 0.9f;
+  frame();
+  EXPECT_EQ(Held(script, "1"), -1.0);
+  EXPECT_EQ(Held(script, "2"), -1.0);
+  game.input.hands[1].thumbstick_y = 0.0f;
+
+  // No player (a load): disarmed.
+  m.Set32(CORRUPTION_STATE_MANAGER + 0x2184, 0);
+  frame();
+  EXPECT_EQ(m.Get32(TURN_SCRATCH), 0u);
+  EXPECT_TRUE(script.GetFlags().empty());
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+
+  // Disabled: the game's code is back.
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(TURN_CONTROL), TURN_CONTROL_ORIGINAL);
+}
+
+TEST(CorruptionStickTurnPatch, RefusesOtherCode)
+{
+  TurnGame game;
+  game.memory.Set32(TURN_CONTROL, 0x60000000);  // not Corruption NTSC-U code
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(TURN_CONTROL), 0x60000000u);
+  EXPECT_EQ(game.memory.Get32(TURN_CAVE), 0u);
+  EXPECT_TRUE(Warned(script, "not installed"));
 }
