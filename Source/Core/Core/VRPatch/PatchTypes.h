@@ -161,5 +161,7 @@ struct LogLine
   u8 level = 0;
   u64 field = 0;
   std::string text;
+  // The patch's run in this game session (1 for the first start, + 1 at each restart).
+  u32 run = 0;
 };
 }  // namespace VRPatch

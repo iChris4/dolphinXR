@@ -35,6 +35,9 @@ struct PatchValues
 
 // Merges the [VRPatch] section of an INI file's text into `values`.
 void MergePatchValues(PatchValues* values, std::string_view ini_text);
+// `overlay`'s enable states and settings over `values` (the agent's session values over the
+// files').
+void OverlayPatchValues(PatchValues* values, const PatchValues& overlay);
 // The file's text with its [VRPatch] section replaced by `values` (removed when empty).
 std::string ReplacePatchSection(std::string_view ini_text, const PatchValues& values);
 

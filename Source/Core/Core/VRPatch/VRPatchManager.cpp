@@ -21,6 +21,7 @@
 #include "Common/FileSearch.h"
 #include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
+#include "Common/ScopeGuard.h"
 #include "Common/StringUtil.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "Core/AchievementManager.h"
@@ -227,6 +228,10 @@ public:
   }
 };
 
+// The files' values with the agent's session values over them.
+PatchValues EffectiveValues(const std::string& game_id, std::optional<u16> revision,
+                            PatchValues* saved = nullptr, PatchValues* session = nullptr);
+
 // ---- The running patches ----
 
 struct RunningPatch
@@ -261,6 +266,8 @@ struct Published
   double max_us = 0;
   size_t memory_bytes = 0;
   std::deque<LogLine> log;
+  // Starts in this game session (the run of the log lines).
+  u32 run = 0;
   std::vector<std::string> flags;
 };
 
@@ -298,9 +305,15 @@ public:
   u16 revision = 0;
   bool is_wii = false;
   std::vector<Command> commands;
+  // Commands queued and applied so far: a change is pending until the CPU thread has applied it,
+  // not only taken it.
+  u64 queued_commands = 0;
+  u64 applied_commands = 0;
   std::map<std::string, Published> published;
   // (game ID, patch ID) -> source.
   std::map<std::pair<std::string, std::string>, std::string> session_sources;
+  // Game ID -> the agent's enable states and settings for this session, over the files'.
+  std::map<std::string, PatchValues> session_values;
 
   // Under `run_mutex`.
   std::vector<std::unique_ptr<RunningPatch>> patches;
@@ -319,6 +332,23 @@ Manager& GetManager()
   return manager;
 }
 
+PatchValues EffectiveValues(const std::string& game_id, std::optional<u16> revision,
+                            PatchValues* saved, PatchValues* session)
+{
+  PatchValues values = LoadPatchValues(game_id, revision);
+  if (saved)
+    *saved = values;
+  Manager& m = GetManager();
+  std::lock_guard lock(m.mutex);
+  if (const auto it = m.session_values.find(game_id); it != m.session_values.end())
+  {
+    OverlayPatchValues(&values, it->second);
+    if (session)
+      *session = it->second;
+  }
+  return values;
+}
+
 void Queue(Command command)
 {
   Manager& m = GetManager();
@@ -326,6 +356,7 @@ void Queue(Command command)
   if (!m.game_running)
     return;
   m.commands.push_back(std::move(command));
+  ++m.queued_commands;
   m.has_work.store(true, std::memory_order_release);
 }
 
@@ -356,9 +387,13 @@ void PublishLog(const std::string& id, std::vector<LogLine> lines)
   }
   Manager& m = GetManager();
   std::lock_guard lock(m.mutex);
-  std::deque<LogLine>& log = m.published[id].log;
+  Published& published = m.published[id];
+  std::deque<LogLine>& log = published.log;
   for (LogLine& line : lines)
+  {
+    line.run = published.run;
     log.push_back(std::move(line));
+  }
   while (log.size() > MAX_LOG_LINES)
     log.pop_front();
 }
@@ -698,6 +733,11 @@ void StartPatch(const std::string& id, SourceChoice choice, const PatchValues& v
                 const ScriptEnvironment& base_env)
 {
   Manager& m = GetManager();
+  {
+    // A new run: its log lines, errors included, are told apart from the earlier runs'.
+    std::lock_guard lock(m.mutex);
+    ++m.published[id].run;
+  }
   auto patch = std::make_unique<RunningPatch>();
   patch->id = id;
   patch->file = choice.file;
@@ -946,12 +986,19 @@ void ApplyCommands(const ScriptEnvironment& env)
 {
   Manager& m = GetManager();
   std::vector<Command> commands;
+  u64 taken = 0;
   {
     std::lock_guard lock(m.mutex);
     commands = std::exchange(m.commands, {});
+    taken = m.queued_commands;
   }
   if (commands.empty())
     return;
+  // Applied once this function returns.
+  Common::ScopeGuard applied([&m, taken] {
+    std::lock_guard lock(m.mutex);
+    m.applied_commands = std::max(m.applied_commands, taken);
+  });
 
   std::string game_id;
   u16 revision = 0;
@@ -960,7 +1007,7 @@ void ApplyCommands(const ScriptEnvironment& env)
     game_id = m.game_id;
     revision = m.revision;
   }
-  const PatchValues values = LoadPatchValues(game_id, revision);
+  const PatchValues values = EffectiveValues(game_id, revision);
   bool changed = false;
   for (const Command& command : commands)
   {
@@ -1068,6 +1115,7 @@ void OnGameLoaded(const std::string& game_id, u16 revision, bool is_wii)
     m.revision = revision;
     m.is_wii = is_wii;
     m.commands.clear();
+    m.applied_commands = m.queued_commands;
     m.published.clear();
   }
   m.field.store(0);
@@ -1133,6 +1181,7 @@ void OnGameUnloaded(const Core::CPUThreadGuard* guard)
   std::lock_guard lock(m.mutex);
   m.game_running = false;
   m.commands.clear();
+  m.applied_commands = m.queued_commands;
   for (auto& [id, published] : m.published)
   {
     published.state = PatchState::Off;
@@ -1173,7 +1222,9 @@ std::vector<PatchInfo> ListPatches(const std::string& game_id, std::optional<u16
   std::vector<PatchInfo> list;
   if (game_id.empty())
     return list;
-  const PatchValues values = LoadPatchValues(game_id, revision);
+  PatchValues saved;
+  PatchValues session_values;
+  const PatchValues values = EffectiveValues(game_id, revision, &saved, &session_values);
 
   std::map<std::string, std::string> session;
   std::map<std::string, Published> published;
@@ -1209,12 +1260,20 @@ std::vector<PatchInfo> ListPatches(const std::string& game_id, std::optional<u16
       info.manifest = *manifest;
       info.for_this_game = GameMismatch(*manifest, game_id, revision).empty();
       info.values = SettingValues(*manifest, values, info.id);
+      info.saved_values = SettingValues(*manifest, saved, info.id);
     }
     else
     {
       info.manifest_error = std::get<std::string>(read);
     }
     info.enabled = info.enabled || values.IsEnabled(info.id);
+    info.saved_enabled = saved.IsEnabled(info.id);
+    if (const auto it = session_values.enabled.find(info.id); it != session_values.enabled.end())
+      info.session_enabled = it->second;
+    if (const auto it = session_values.settings.find(info.id); it != session_values.settings.end())
+    {
+      info.session_settings = it->second;
+    }
     const auto it = published.find(info.id);
     if (it != published.end())
     {
@@ -1311,6 +1370,12 @@ bool SetPatchEnabled(const std::string& game_id, const std::string& id, bool ena
   PatchValues values = LoadUserPatchValues(game_id);
   values.enabled[id] = enabled;
   const bool saved = SaveUserPatchValues(game_id, values);
+  {
+    Manager& m = GetManager();
+    std::lock_guard lock(m.mutex);
+    if (const auto it = m.session_values.find(game_id); it != m.session_values.end())
+      it->second.enabled.erase(id);
+  }
   if (GetRunningGameId() == game_id)
     Queue({Command::Type::Sync, id, false});
   return saved;
@@ -1338,6 +1403,15 @@ bool SetPatchSetting(const std::string& game_id, const std::string& id, const st
     PatchValues values = LoadUserPatchValues(game_id);
     values.settings[id][name] = value;
     saved = SaveUserPatchValues(game_id, values);
+  }
+  {
+    Manager& m = GetManager();
+    std::lock_guard lock(m.mutex);
+    if (const auto it = m.session_values.find(game_id); it != m.session_values.end())
+    {
+      if (const auto settings = it->second.settings.find(id); settings != it->second.settings.end())
+        settings->second.erase(name);
+    }
   }
   if (GetRunningGameId() == game_id)
     Queue({Command::Type::Setting, id, false, name, value});
@@ -1373,7 +1447,7 @@ bool HasPendingChanges()
 {
   Manager& m = GetManager();
   std::lock_guard lock(m.mutex);
-  return !m.commands.empty();
+  return m.applied_commands < m.queued_commands;
 }
 
 void ApplyPendingNow(Core::System& system)
@@ -1397,16 +1471,22 @@ void ApplyPendingNow(Core::System& system)
   m.has_work.store(!m.patches.empty() || !m.commands.empty(), std::memory_order_release);
 }
 
-std::vector<LogLine> GetLog(const std::string& id, size_t max_lines)
+std::vector<LogLine> GetLog(const std::string& id, size_t max_lines, bool current_run_only)
 {
   Manager& m = GetManager();
   std::lock_guard lock(m.mutex);
   const auto it = m.published.find(id);
   if (it == m.published.end())
     return {};
-  const std::deque<LogLine>& log = it->second.log;
-  const size_t start = log.size() > max_lines ? log.size() - max_lines : 0;
-  return {log.begin() + static_cast<std::ptrdiff_t>(start), log.end()};
+  std::vector<LogLine> lines;
+  for (const LogLine& line : it->second.log)
+  {
+    if (!current_run_only || line.run == it->second.run)
+      lines.push_back(line);
+  }
+  if (lines.size() > max_lines)
+    lines.erase(lines.begin(), lines.end() - static_cast<std::ptrdiff_t>(max_lines));
+  return lines;
 }
 
 std::string GetUserPatchDirectory(const std::string& game_id)
@@ -1507,8 +1587,91 @@ std::string SaveSessionSource(const std::string& id, bool enable, std::string* p
     PatchValues values = LoadUserPatchValues(game_id);
     values.enabled[id] = true;
     SaveUserPatchValues(game_id, values);
+    std::lock_guard lock(m.mutex);
+    if (const auto it = m.session_values.find(game_id); it != m.session_values.end())
+      it->second.enabled.erase(id);
   }
   Queue({Command::Type::Sync, id, false});
   return {};
+}
+
+bool SetSessionEnabled(const std::string& id, bool enabled)
+{
+  if (!IsValidPatchId(id))
+    return false;
+  Manager& m = GetManager();
+  {
+    std::lock_guard lock(m.mutex);
+    if (!m.game_running)
+      return false;
+    m.session_values[m.game_id].enabled[id] = enabled;
+  }
+  Queue({Command::Type::Sync, id, false});
+  return true;
+}
+
+bool SetSessionSetting(const std::string& id, const std::string& name, double value)
+{
+  const std::string game_id = GetRunningGameId();
+  if (game_id.empty() || !IsValidPatchId(id) || name.empty())
+    return false;
+  const std::optional<PatchInfo> info = FindPatch(game_id, GetRunningRevision(), id);
+  const SettingDef* def = info && info->manifest ? info->manifest->FindSetting(name) : nullptr;
+  if (!def)
+    return false;
+  value = def->Normalize(value);
+  Manager& m = GetManager();
+  {
+    std::lock_guard lock(m.mutex);
+    m.session_values[game_id].settings[id][name] = value;
+  }
+  Queue({Command::Type::Setting, id, false, name, value});
+  return true;
+}
+
+void ClearSessionValues(const std::string& id)
+{
+  Manager& m = GetManager();
+  std::string game_id;
+  PatchValues dropped;
+  {
+    std::lock_guard lock(m.mutex);
+    game_id = m.game_running ? m.game_id : std::string();
+    if (id.empty())
+    {
+      if (const auto it = m.session_values.find(game_id); it != m.session_values.end())
+        dropped = std::move(it->second);
+      m.session_values.clear();
+    }
+    else if (const auto it = m.session_values.find(game_id); it != m.session_values.end())
+    {
+      if (const auto enabled = it->second.enabled.find(id); enabled != it->second.enabled.end())
+      {
+        dropped.enabled.insert(*enabled);
+        it->second.enabled.erase(enabled);
+      }
+      if (const auto settings = it->second.settings.find(id); settings != it->second.settings.end())
+      {
+        dropped.settings.insert(*settings);
+        it->second.settings.erase(settings);
+      }
+    }
+  }
+  if (game_id.empty())
+    return;
+  for (const auto& [patch, enabled] : dropped.enabled)
+    Queue({Command::Type::Sync, patch, false});
+  // The running patches get their saved setting values back.
+  for (const auto& [patch, settings] : dropped.settings)
+  {
+    const std::optional<PatchInfo> info = FindPatch(game_id, GetRunningRevision(), patch);
+    if (!info)
+      continue;
+    for (const auto& [name, value] : settings)
+    {
+      if (const auto saved = info->saved_values.find(name); saved != info->saved_values.end())
+        Queue({Command::Type::Setting, patch, false, name, saved->second});
+    }
+  }
 }
 }  // namespace VRPatch

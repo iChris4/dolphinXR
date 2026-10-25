@@ -74,6 +74,17 @@ std::optional<double> PatchValues::GetSetting(const std::string& id, const std::
   return value->second;
 }
 
+void OverlayPatchValues(PatchValues* values, const PatchValues& overlay)
+{
+  for (const auto& [id, enabled] : overlay.enabled)
+    values->enabled[id] = enabled;
+  for (const auto& [id, settings] : overlay.settings)
+  {
+    for (const auto& [name, value] : settings)
+      values->settings[id][name] = value;
+  }
+}
+
 void MergePatchValues(PatchValues* values, std::string_view ini_text)
 {
   bool in_section = false;

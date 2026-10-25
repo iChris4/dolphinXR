@@ -17,6 +17,7 @@
 #include "Core/VRPatch/PatchIni.h"
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/PatchTypes.h"
+#include "Core/VRPatch/VRPatch.h"
 
 using namespace VRPatch;
 
@@ -784,4 +785,60 @@ TEST(VRPatch, IniRewriteIsByteExact)
   EXPECT_EQ(ReplacePatchSection(with_section, {}), original);
   // A file without a final newline.
   EXPECT_EQ(ReplacePatchSection("[A]\nx = 1", saved), "[A]\nx = 1\n[VRPatch]\np = True\n");
+}
+
+// The agent's session values over the files', key by key.
+TEST(VRPatch, SessionValuesOverlayTheFiles)
+{
+  PatchValues values;
+  MergePatchValues(&values, "[VRPatch]\narm-cannon = True\narm-cannon/hand = 1\nother = True\n");
+  PatchValues session;
+  session.enabled["other"] = false;
+  session.settings["arm-cannon"]["pitch"] = 20;
+  OverlayPatchValues(&values, session);
+  EXPECT_TRUE(values.IsEnabled("arm-cannon"));
+  EXPECT_FALSE(values.IsEnabled("other"));
+  EXPECT_EQ(values.GetSetting("arm-cannon", "hand"), 1.0);
+  EXPECT_EQ(values.GetSetting("arm-cannon", "pitch"), 20.0);
+}
+
+// The agent tools change patches for the session: over the saved values, dropped on discard, and
+// dropped by a change from a UI (the user's choice wins). A live source stands in for a file.
+TEST(VRPatch, SessionValuesStayInTheSession)
+{
+  OnGameLoaded("ZZTEST", 0, false);
+  ASSERT_EQ(SetSessionSource("probe", R"(patch = {title = "P", settings = {
+      {name = "gain", default = 1, min = 0, max = 10}}})"),
+            "");
+  const auto gain = [] {
+    const std::optional<PatchInfo> info = FindPatch("ZZTEST", 0, "probe");
+    EXPECT_TRUE(info);
+    const auto value = info->values.find("gain");
+    const auto saved = info->saved_values.find("gain");
+    return std::make_pair(value == info->values.end() ? -1.0 : value->second,
+                          saved == info->saved_values.end() ? -1.0 : saved->second);
+  };
+
+  EXPECT_TRUE(SetSessionSetting("probe", "gain", 40));  // clamped to 10
+  EXPECT_FALSE(SetSessionSetting("probe", "missing", 1));
+  EXPECT_EQ(gain(), std::make_pair(10.0, 1.0));
+  EXPECT_TRUE(FindPatch("ZZTEST", 0, "probe")->session_settings.contains("gain"));
+
+  ClearSessionValues("probe");
+  EXPECT_EQ(gain(), std::make_pair(1.0, 1.0));
+  EXPECT_TRUE(FindPatch("ZZTEST", 0, "probe")->session_settings.empty());
+
+  // A slider dragged in a UI (not saved) drops the session value.
+  EXPECT_TRUE(SetSessionSetting("probe", "gain", 4));
+  EXPECT_TRUE(SetPatchSetting("ZZTEST", "probe", "gain", 2, false));
+  EXPECT_TRUE(FindPatch("ZZTEST", 0, "probe")->session_settings.empty());
+
+  EXPECT_TRUE(SetSessionEnabled("probe", false));
+  EXPECT_EQ(FindPatch("ZZTEST", 0, "probe")->session_enabled, false);
+  ClearSessionValues({});
+  EXPECT_FALSE(FindPatch("ZZTEST", 0, "probe")->session_enabled);
+
+  ClearSessionSources();
+  OnGameUnloaded(nullptr);
+  EXPECT_FALSE(SetSessionEnabled("probe", true));
 }

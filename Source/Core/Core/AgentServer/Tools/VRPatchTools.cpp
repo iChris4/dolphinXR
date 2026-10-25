@@ -45,15 +45,18 @@ std::optional<u16> Revision()
   return SConfig::GetInstance().GetRevision();
 }
 
-// Applies queued patch changes: now when paused, else at the next field.
-void ApplyChanges()
+// Applies queued patch changes: now when paused, else at the next field. Returns "" once they are
+// applied, else a note for the result (the status shown predates them).
+std::string ApplyChanges()
 {
   if (IsPaused())
-  {
     VRPatch::ApplyPendingNow(GetSystem());
-    return;
-  }
-  WaitUntil([] { return !VRPatch::HasPendingChanges(); }, 3s);
+  else
+    WaitUntil([] { return !VRPatch::HasPendingChanges(); }, 3s);
+  if (!VRPatch::HasPendingChanges())
+    return {};
+  return "\nNot applied yet: the game has not run a field for 3 s (loading, or stalled after a "
+         "savestate load). The change applies at its next field; the status above predates it.";
 }
 
 std::string FormatValue(const VRPatch::SettingDef& def, double value)
@@ -76,9 +79,20 @@ std::string FormatValue(const VRPatch::SettingDef& def, double value)
 
 std::string DescribePatch(const VRPatch::PatchInfo& info, bool details)
 {
-  std::string text = fmt::format(
-      "{} [{}{}] {}", info.id, VRPatch::PatchStateName(info.state), info.enabled ? ", enabled" : "",
-      info.manifest ? "\"" + info.manifest->title + "\"" : "(manifest error)");
+  std::string enabled;
+  if (info.session_enabled)
+  {
+    enabled = fmt::format(", {} for this session (saved: {})",
+                          *info.session_enabled ? "enabled" : "disabled",
+                          info.saved_enabled ? "enabled" : "disabled");
+  }
+  else if (info.enabled)
+  {
+    enabled = ", enabled";
+  }
+  std::string text =
+      fmt::format("{} [{}{}] {}", info.id, VRPatch::PatchStateName(info.state), enabled,
+                  info.manifest ? "\"" + info.manifest->title + "\"" : "(manifest error)");
   text += fmt::format(" - {}{}", VRPatch::PatchOriginName(info.origin),
                       info.overrides_sys ? " (replaces the Sys file)" : "");
   if (!info.status.empty())
@@ -122,9 +136,15 @@ std::string DescribePatch(const VRPatch::PatchInfo& info, bool details)
   for (const VRPatch::SettingDef& def : m.settings)
   {
     const auto value = info.values.find(def.name);
-    text += fmt::format("\n    setting {} = {} (\"{}\", default {}", def.name,
-                        value == info.values.end() ? "?" : FormatValue(def, value->second),
-                        def.label, FormatValue(def, def.default_value));
+    text += fmt::format("\n    setting {} = {}", def.name,
+                        value == info.values.end() ? "?" : FormatValue(def, value->second));
+    if (info.session_settings.contains(def.name))
+    {
+      const auto saved = info.saved_values.find(def.name);
+      text += fmt::format(" for this session (saved {})",
+                          saved == info.saved_values.end() ? "?" : FormatValue(def, saved->second));
+    }
+    text += fmt::format(" (\"{}\", default {}", def.label, FormatValue(def, def.default_value));
     if (def.type == VRPatch::SettingType::Number)
       text += fmt::format(", {} to {}", def.min, def.max);
     text += ")";
@@ -132,11 +152,16 @@ std::string DescribePatch(const VRPatch::PatchInfo& info, bool details)
   return text;
 }
 
+// With several runs of the patch, a line marks where each one starts.
 std::string FormatLog(const std::vector<VRPatch::LogLine>& lines)
 {
   std::string text;
-  for (const VRPatch::LogLine& line : lines)
+  const bool several_runs = !lines.empty() && lines.front().run != lines.back().run;
+  for (size_t i = 0; i < lines.size(); ++i)
   {
+    const VRPatch::LogLine& line = lines[i];
+    if (several_runs && (i == 0 || lines[i - 1].run != line.run))
+      text += fmt::format("  --- run {} ---\n", line.run);
     static constexpr const char* LEVELS[] = {"", "warning: ", "error: "};
     text +=
         fmt::format("  [{}] {}{}\n", line.field, LEVELS[std::min<u8>(line.level, 2)], line.text);
@@ -160,9 +185,9 @@ std::string StatusAndLog(const std::string& id, size_t log_lines)
   std::string text;
   if (const auto info = VRPatch::FindPatch(GameId(), Revision(), id))
     text = DescribePatch(*info, false);
-  const std::vector<VRPatch::LogLine> log = VRPatch::GetLog(id, log_lines);
+  const std::vector<VRPatch::LogLine> log = VRPatch::GetLog(id, log_lines, true);
   if (!log.empty())
-    text += "\nLog:\n" + FormatLog(log);
+    text += "\nLog (this run):\n" + FormatLog(log);
   return text;
 }
 
@@ -205,7 +230,7 @@ ToolResult SetSource(const ToolArgs& args)
   const std::string error = VRPatch::SetSessionSource(id, std::move(source));
   if (!error.empty())
     throw ToolError("The patch does not load: " + error);
-  ApplyChanges();
+  std::string pending = ApplyChanges();
   const s64 frames = std::clamp<s64>(args.GetInt("frames", 0), 0, 600);
   if (frames > 0)
     AdvanceFrames(static_cast<u32>(frames));
@@ -214,6 +239,8 @@ ToolResult SetSource(const ToolArgs& args)
           "folder.";
   if (IsPaused() && frames == 0)
     text += " Emulation is paused: on_frame runs once frames advance (advance_frames).";
+  if (frames == 0)
+    text += pending;
   return ToolResult::Text(std::move(text));
 }
 
@@ -226,11 +253,11 @@ ToolResult SavePatch(const ToolArgs& args)
   const std::string error = VRPatch::SaveSessionSource(id, enable, &path);
   if (!error.empty())
     throw ToolError(error);
-  ApplyChanges();
+  const std::string pending = ApplyChanges();
   return ToolResult::Text(fmt::format(
       "Saved {}{}. To share it, give that file: it goes in User/VRPatches/{}/ (or a folder named "
-      "after the first 3 letters of the game ID for every region).",
-      path, enable ? " and enabled it for this game" : "", GameId()));
+      "after the first 3 letters of the game ID for every region).{}",
+      path, enable ? " and enabled it for this game" : "", GameId(), pending));
 }
 
 ToolResult DiscardSource(const ToolArgs& args)
@@ -241,8 +268,11 @@ ToolResult DiscardSource(const ToolArgs& args)
     VRPatch::ClearSessionSources();
   else
     VRPatch::ClearSessionSource(id);
-  ApplyChanges();
-  return ToolResult::Text("Live sources discarded; the saved files run again where enabled.");
+  VRPatch::ClearSessionValues(id);
+  const std::string pending = ApplyChanges();
+  return ToolResult::Text("Session changes discarded (live sources, and the enable states and "
+                          "settings set without save): the saved files and values apply again." +
+                          pending);
 }
 
 ToolResult EnablePatch(const ToolArgs& args)
@@ -250,19 +280,26 @@ ToolResult EnablePatch(const ToolArgs& args)
   RequireGame();
   const std::string id = args.RequireString("id");
   const bool enabled = args.GetBool("enabled", true);
+  const bool save = args.GetBool("save", false);
   RequirePatch(id);
-  if (!VRPatch::SetPatchEnabled(GameId(), id, enabled))
+  if (save && !VRPatch::SetPatchEnabled(GameId(), id, enabled))
     throw ToolError("The user's GameSettingsVR file could not be written.");
-  ApplyChanges();
+  if (!save && !VRPatch::SetSessionEnabled(id, enabled))
+    throw ToolError("No game is running.");
+  const std::string pending = ApplyChanges();
   // A live source runs whether the patch is enabled or not.
   const std::string_view live =
       !enabled && VRPatch::HasSessionSource(id) ?
           " Its live source from set_vr_patch_source still runs: discard_vr_patch_source stops "
           "it." :
           "";
-  return ToolResult::Text(fmt::format(
-      "{} {} for {} (saved in GameSettingsVR/{}.ini [VRPatch]).{}\n{}", id,
-      enabled ? "enabled" : "disabled", GameId(), GameId(), live, StatusAndLog(id, 10)));
+  const std::string where =
+      save ? fmt::format("saved in GameSettingsVR/{}.ini [VRPatch]", GameId()) :
+             "for this session only: the user's files are unchanged, save=true writes it, "
+             "discard_vr_patch_source drops it";
+  return ToolResult::Text(fmt::format("{} {} for {} ({}).{}\n{}{}", id,
+                                      enabled ? "enabled" : "disabled", GameId(), where, live,
+                                      StatusAndLog(id, 10), pending));
 }
 
 ToolResult SetSetting(const ToolArgs& args)
@@ -284,32 +321,45 @@ ToolResult SetSetting(const ToolArgs& args)
     value = it->second.get<double>();
   else
     throw ToolError("value is a number, or true/false.");
-  if (!VRPatch::SetPatchSetting(GameId(), id, name, value))
+  const bool save = args.GetBool("save", false);
+  if (save && !VRPatch::SetPatchSetting(GameId(), id, name, value))
     throw ToolError("The setting could not be saved.");
-  ApplyChanges();
-  return ToolResult::Text(
-      fmt::format("{}.{} set and saved.\n{}", id, name, DescribePatch(RequirePatch(id), true)));
+  if (!save && !VRPatch::SetSessionSetting(id, name, value))
+    throw ToolError("No game is running.");
+  const std::string pending = ApplyChanges();
+  return ToolResult::Text(fmt::format("{}.{} set {}.\n{}{}", id, name,
+                                      save ? "and saved in the user's GameSettingsVR file" :
+                                             "for this session only (save=true writes it)",
+                                      DescribePatch(RequirePatch(id), true), pending));
 }
 
 ToolResult Reload(const ToolArgs&)
 {
   RequireGame();
   VRPatch::ReloadPatches();
-  ApplyChanges();
+  const std::string pending = ApplyChanges();
   std::string text = "Reloaded:\n";
   for (const VRPatch::PatchInfo& info : VRPatch::ListPatches(GameId(), Revision()))
     text += DescribePatch(info, false) + "\n";
-  return ToolResult::Text(std::move(text));
+  return ToolResult::Text(text + pending);
 }
 
 ToolResult GetLog(const ToolArgs& args)
 {
   const std::string id = args.RequireString("id");
   const s64 lines = std::clamp<s64>(args.GetInt("lines", 40), 1, 300);
-  const std::vector<VRPatch::LogLine> log = VRPatch::GetLog(id, static_cast<size_t>(lines));
+  const bool all_runs = args.GetBool("all_runs", false);
+  const std::vector<VRPatch::LogLine> log =
+      VRPatch::GetLog(id, static_cast<size_t>(lines), !all_runs);
   if (log.empty())
-    return ToolResult::Text(fmt::format("{} has logged nothing in this game session.", id));
-  return ToolResult::Text(fmt::format("{} (field: line):\n{}", id, FormatLog(log)));
+  {
+    return ToolResult::Text(fmt::format("{} has logged nothing {}.", id,
+                                        all_runs ? "in this game session" : "since it started"));
+  }
+  return ToolResult::Text(fmt::format("{} ({}, [field] line):\n{}", id,
+                                      all_runs ? "every run in this game session" :
+                                                 fmt::format("run {}", log.back().run),
+                                      FormatLog(log)));
 }
 
 std::string FormatPose(const Common::VR::OpenXRPoseState& pose)
@@ -548,8 +598,11 @@ ToolResult FindTransforms(const ToolArgs& args)
 
 void RegisterVRPatchTools(ToolRegistry& registry, Server& server)
 {
-  // Live sources belong to the agent's session.
-  server.AddServerStoppedCallback([] { VRPatch::ClearSessionSources(); });
+  // Live sources, enable states and settings set without save belong to the agent's session.
+  server.AddServerStoppedCallback([] {
+    VRPatch::ClearSessionSources();
+    VRPatch::ClearSessionValues({});
+  });
 
   registry.Add({.name = "list_vr_patches",
                 .title = "List VR game patches",
@@ -612,20 +665,24 @@ void RegisterVRPatchTools(ToolRegistry& registry, Server& server)
                 .handler = SavePatch});
 
   registry.Add({.name = "discard_vr_patch_source",
-                .title = "Discard live VR patch sources",
-                .description = "Drops the live source of a patch (or of all, without id): its "
-                               "saved file runs again if it is enabled.",
+                .title = "Discard session changes to VR patches",
+                .description = "Drops the agent's session changes to a patch (to all, without "
+                               "id): its live source, and the enable state and settings set "
+                               "without save. Its saved file and values apply again.",
                 .input_schema = Schema().String("id", "Patch id; empty = all.").Build(),
                 .idempotent = true,
                 .handler = DiscardSource});
 
   registry.Add({.name = "enable_vr_patch",
                 .title = "Enable or disable a VR patch",
-                .description = "Turns a patch on or off for the game (saved in the user's "
-                               "GameSettingsVR [VRPatch] section) and returns its status.",
+                .description = "Turns a patch on or off for this session (the user's files "
+                               "are unchanged) and returns its status and log. save=true writes "
+                               "it to the user's GameSettingsVR [VRPatch] section: only when the "
+                               "user asked to keep it.",
                 .input_schema = Schema()
                                     .String("id", "Patch id.")
                                     .Boolean("enabled", "Default true.")
+                                    .Boolean("save", "Write it to the user's file (default false).")
                                     .Required({"id"})
                                     .Build(),
                 .idempotent = true,
@@ -633,12 +690,15 @@ void RegisterVRPatchTools(ToolRegistry& registry, Server& server)
 
   registry.Add({.name = "set_vr_patch_setting",
                 .title = "Change a VR patch setting",
-                .description = "Sets one of a patch's settings (calibration offsets...), saved "
-                               "for the game; the running patch sees it at once.",
+                .description = "Sets one of a patch's settings (calibration offsets, test "
+                               "switches) for this session; the running patch sees it at once. "
+                               "save=true writes it to the user's GameSettingsVR file: only for a "
+                               "value the user confirmed.",
                 .input_schema = Schema()
                                     .String("id", "Patch id.")
                                     .String("name", "Setting name.")
                                     .Number("value", "A number (true/false for a switch).")
+                                    .Boolean("save", "Write it to the user's file (default false).")
                                     .Required({"id", "name", "value"})
                                     .Build(),
                 .idempotent = true,
@@ -654,10 +714,13 @@ void RegisterVRPatchTools(ToolRegistry& registry, Server& server)
   registry.Add({.name = "get_vr_patch_log",
                 .title = "Read a VR patch's log",
                 .description = "What a patch logged (log/warn) and its errors, with the field "
-                               "numbers.",
+                               "numbers, since it last started (a reload, a new live source, "
+                               "being enabled again); all_runs adds the earlier runs of this "
+                               "game session, each marked.",
                 .input_schema = Schema()
                                     .String("id", "Patch id.")
                                     .Integer("lines", "Last lines, default 40.", 1, 300)
+                                    .Boolean("all_runs", "Earlier runs too (default false).")
                                     .Required({"id"})
                                     .Build(),
                 .read_only = true,

@@ -73,10 +73,17 @@ struct PatchInfo
   bool for_this_game = true;
   // Enabled in the game's [VRPatch] section, or loaded live by the agent server.
   bool enabled = false;
+  // Enabled in the files, before the agent's session values.
+  bool saved_enabled = false;
+  // The agent's session values over the saved ones (SetSessionEnabled, SetSessionSetting).
+  std::optional<bool> session_enabled;
+  std::map<std::string, double> session_settings;
   PatchState state = PatchState::Off;
   std::string status;
   // Every manifest setting (defaults filled in).
   std::map<std::string, double> values;
+  // The same as saved in the files.
+  std::map<std::string, double> saved_values;
   u32 scratch_base = 0;
   u32 scratch_size = 0;
   // Microseconds per field (all hooks of the field).
@@ -96,9 +103,10 @@ std::string ReadPatchSource(const std::string& game_id, std::optional<u16> revis
                             const std::string& id);
 
 // Saved to the user's GameSettingsVR/<GameID>.ini; applied at the next field when the game runs.
+// The user's choice: it drops the agent's session value of the patch.
 bool SetPatchEnabled(const std::string& game_id, const std::string& id, bool enabled);
 // `save` false applies the value to the running patch without writing the file (a slider being
-// dragged); a later call with `save` keeps it.
+// dragged); a later call with `save` keeps it. It drops the agent's session value of the setting.
 bool SetPatchSetting(const std::string& game_id, const std::string& id, const std::string& name,
                      double value, bool save = true);
 // Restarts the running game's patches from their files.
@@ -107,14 +115,15 @@ void ReloadPatches();
 // The running game, or "" when none.
 std::string GetRunningGameId();
 std::optional<u16> GetRunningRevision();
-// Changes are queued for the CPU thread (the next field).
+// Changes are queued for the CPU thread (the next field): pending until it has applied them.
 bool HasPendingChanges();
 // While emulation is paused, applies the queued changes now (pausing the CPU thread for it). Not
 // from the video thread.
 void ApplyPendingNow(Core::System& system);
 
-// The last lines a patch logged (its errors included), oldest first.
-std::vector<LogLine> GetLog(const std::string& id, size_t max_lines);
+// The last lines a patch logged (its errors included), oldest first; with `current_run_only`,
+// only since it last started (a reload, a new live source, being enabled again).
+std::vector<LogLine> GetLog(const std::string& id, size_t max_lines, bool current_run_only = false);
 
 // User/VRPatches/<GameID>/ and Sys/VRPatches/.
 std::string GetUserPatchDirectory(const std::string& game_id);
@@ -130,7 +139,16 @@ bool HasSessionSource(const std::string& id);
 void ClearSessionSource(const std::string& id);
 void ClearSessionSources();
 // Writes the live source to User/VRPatches/<GameID>/<id>.lua and forgets it: the file runs in its
-// place when the patch is enabled (`enable` enables it for the game). Returns an error message, ""
-// on success.
+// place when the patch is enabled (`enable` enables it for the game, over a session value).
+// Returns an error message, "" on success.
 std::string SaveSessionSource(const std::string& id, bool enable, std::string* path);
+
+// For this session only, over the files' values of the running game: whether a patch runs, and a
+// setting's value. Nothing is written: SetPatchEnabled / SetPatchSetting save, and a change from a
+// UI drops the session value. False when no game runs or the patch has no such setting.
+bool SetSessionEnabled(const std::string& id, bool enabled);
+bool SetSessionSetting(const std::string& id, const std::string& name, double value);
+// Drops the session values of a patch (of every patch when `id` is empty, for every game): the
+// saved ones apply again.
+void ClearSessionValues(const std::string& id);
 }  // namespace VRPatch
