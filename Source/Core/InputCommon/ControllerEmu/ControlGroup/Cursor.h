@@ -40,6 +40,12 @@ public:
   // Vertical offset in meters.
   ControlState GetVerticalOffset() const;
 
+  // An input override function may also supply the pointer's geometry in place of the settings
+  // (an absolute pointer, such as the VR controllers' aim): meters and radians.
+  static constexpr const char* VERTICAL_OFFSET_OVERRIDE = "Vertical Offset";
+  static constexpr const char* TOTAL_YAW_OVERRIDE = "Total Yaw";
+  static constexpr const char* TOTAL_PITCH_OVERRIDE = "Total Pitch";
+
   // Gain applied to forward/backward pointing distance. 1.0 is a 1:1 physical mapping.
   ControlState GetDistanceSensitivity() const;
 

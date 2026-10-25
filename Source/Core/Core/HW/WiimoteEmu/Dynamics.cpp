@@ -252,10 +252,25 @@ void EmulatePoint(MotionState* state, ControllerEmu::Cursor* ir_group,
   // This is kinda odd but it does seem to maintain consistent cursor behavior.
   const bool sensor_bar_on_top = Config::Get(Config::SYSCONF_SENSOR_BAR_POSITION) != 0;
 
-  const float height = ir_group->GetVerticalOffset() * (sensor_bar_on_top ? 1 : -1);
+  // An absolute pointer (the VR controllers' aim on the virtual screen) supplies its own geometry.
+  double vertical_offset = ir_group->GetVerticalOffset();
+  double total_yaw = ir_group->GetTotalYaw();
+  double total_pitch = ir_group->GetTotalPitch();
+  if (override_func)
+  {
+    using ControllerEmu::Cursor;
+    if (const auto value = override_func(ir_group->name, Cursor::VERTICAL_OFFSET_OVERRIDE, 0.0))
+      vertical_offset = *value;
+    if (const auto value = override_func(ir_group->name, Cursor::TOTAL_YAW_OVERRIDE, 0.0))
+      total_yaw = *value;
+    if (const auto value = override_func(ir_group->name, Cursor::TOTAL_PITCH_OVERRIDE, 0.0))
+      total_pitch = *value;
+  }
 
-  const float yaw_scale = ir_group->GetTotalYaw() / 2;
-  const float pitch_scale = ir_group->GetTotalPitch() / 2;
+  const float height = static_cast<float>(vertical_offset) * (sensor_bar_on_top ? 1 : -1);
+
+  const float yaw_scale = static_cast<float>(total_yaw) / 2;
+  const float pitch_scale = static_cast<float>(total_pitch) / 2;
 
   const bool recenter_pressed = ir_group->controls[5]->GetState<bool>();
 

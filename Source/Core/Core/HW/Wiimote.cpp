@@ -102,10 +102,14 @@ void PublishOpenXRInput(unsigned int index, const OpenXRWiimoteState* state,
   s_openxr_inputs[index].input = input;
 }
 
+// The emulated pointer's yaw and pitch ranges that put the game's cursor where the aim meets
+// the virtual screen (1:1, with no vertical offset; see the IR group override below).
+constexpr double OPENXR_IR_TOTAL_YAW_DEG = 25.6;
+constexpr double OPENXR_IR_TOTAL_PITCH_DEG = 26.3;
 // How far past the screen edge (in screen half-extents) the pointer stays tracked before
 // the emulated IR camera "loses" it, matching real hardware: the wiimote camera FOV
-// (42°x31.5°) extends well past the cursor's Total Yaw/Pitch range (25°/20°), so real
-// dots survive to roughly these excursions.
+// (42°x31.5°) extends well past the cursor's yaw and pitch range, so real dots survive to
+// roughly these excursions.
 constexpr float OPENXR_IR_HIDE_MARGIN_U = 1.9f;
 constexpr float OPENXR_IR_HIDE_MARGIN_V = 1.5f;
 // An off-screen excursion must persist this long before the pointer is hidden. Runtime pose
@@ -433,6 +437,18 @@ ControllerEmu::InputOverrideFunction CreateOpenXRInputOverrideFunction(unsigned 
       // reference to reset, so EmulatePoint's "Recenter" signal is a no-op.
       if (control_name == "Recenter")
         return std::nullopt;
+      // The aim maps the game's screen 1:1 (measured on Metroid Prime 3, whose pointer comes
+      // from the Wii's pointing library like other games'): no vertical offset, which also
+      // keeps the cursor in place whatever the sensor bar position (live in Dolphin, but the one
+      // the game booted with in a savestate), and the yaw and pitch that span the screen. The
+      // profile's defaults (10 cm, 25 and 20 degrees) put the cursor a quarter of the screen
+      // below the aim and three quarters of the way to the top and bottom edges.
+      if (control_name == ControllerEmu::Cursor::VERTICAL_OFFSET_OVERRIDE)
+        return 0.0;
+      if (control_name == ControllerEmu::Cursor::TOTAL_YAW_OVERRIDE)
+        return OPENXR_IR_TOTAL_YAW_DEG * MathUtil::TAU / 360;
+      if (control_name == ControllerEmu::Cursor::TOTAL_PITCH_OVERRIDE)
+        return OPENXR_IR_TOTAL_PITCH_DEG * MathUtil::TAU / 360;
       // NaN = pointer not on screen; the cursor hides like a real wiimote losing the bar.
       if (control_name == ControllerEmu::ReshapableInput::X_INPUT_OVERRIDE)
         return static_cast<double>(cached_state.ir_x);
