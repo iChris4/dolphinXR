@@ -34,11 +34,20 @@ inline float SkyboxTranslationLength(const float* matrix)
   return std::sqrt(matrix[3] * matrix[3] + matrix[7] * matrix[7] + matrix[11] * matrix[11]);
 }
 
+// Draws already in view space use the identity. The whole diagonal is tested: a camera that turns
+// about one axis only keeps a 1 on that axis (Metroid Prime 3's gunship cockpit only pitches, and
+// its [0][0] is 1 or one rounding step under it from frame to frame: testing it alone made the sky
+// jump between infinity and its distance).
+inline bool IsIdentityRotation(const float* matrix)
+{
+  return matrix[0] == 1.0f && matrix[5] == 1.0f && matrix[10] == 1.0f;
+}
+
 // The test before reading any vertex: `matrix` is the 3x4 row-major position matrix, its origin
 // must be nearer to the camera than the near plane.
 inline bool IsSkyboxCandidate(const float* matrix, float near_z)
 {
-  return matrix[0] != 1.0f && SkyboxTranslationLength(matrix) <= near_z;
+  return !IsIdentityRotation(matrix) && SkyboxTranslationLength(matrix) <= near_z;
 }
 
 // The full test, with the distance of the draw's closest vertex from the camera.

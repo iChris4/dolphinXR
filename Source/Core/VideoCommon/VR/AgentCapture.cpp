@@ -603,9 +603,11 @@ std::string FormatDrawDetails(const DrawRecord& draw)
   }
   if (draw.perspective)
   {
-    text += fmt::format("Position matrix: translation ({:.6g}, {:.6g}, {:.6g}), [0][0] {:.6g}",
+    text += fmt::format("Position matrix: translation ({:.6g}, {:.6g}, {:.6g}), diagonal ({:.9g}, "
+                        "{:.9g}, {:.9g})",
                         draw.shared_translation[0], draw.shared_translation[1],
-                        draw.shared_translation[2], draw.shared_scale_x);
+                        draw.shared_translation[2], draw.shared_diagonal[0],
+                        draw.shared_diagonal[1], draw.shared_diagonal[2]);
     if (draw.per_vertex_matrix)
     {
       text += fmt::format("; the vertices carry their own matrix index, the first one's "

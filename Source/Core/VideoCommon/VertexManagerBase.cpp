@@ -1097,7 +1097,7 @@ static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool age
   record->detect_skybox = g_ActiveConfig.vr_detect_skybox;
   record->skybox = geometry_shader_manager.vr_skybox_draw;
   record->shared_translation = {pnm[0][3], pnm[1][3], pnm[2][3]};
-  record->shared_scale_x = pnm[0][0];
+  record->shared_diagonal = {pnm[0][0], pnm[1][1], pnm[2][2]};
   record->per_vertex_matrix = draw_depth.HasPerVertexMatrix();
   if (const float* matrix = draw_depth.FirstVertexMatrix(); matrix && record->per_vertex_matrix)
     record->vertex_translation = {matrix[3], matrix[7], matrix[11]};

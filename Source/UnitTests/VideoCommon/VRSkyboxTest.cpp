@@ -65,6 +65,22 @@ TEST(VRSkybox, IdentityIsNot)
   EXPECT_FALSE(IsSkyboxDraw(identity.data(), 100.0f, 0.1f));
 }
 
+TEST(VRSkybox, ACameraThatOnlyPitchesIsASky)
+{
+  // Metroid Prime 3's gunship cockpit: the camera only pitches (Z up turned to Y up), so [0][0] is
+  // exactly 1 in some frames and one rounding step under it in others; the sky is 9 units away
+  // with a 0.2 near plane.
+  for (const float x : {1.0f, 0.99999994f})
+  {
+    const std::array<float, 12> pitch_only = {
+        x,    0.0f,     0.0f,     0.0f,  // X unchanged
+        0.0f, -0.0517f, 0.9987f,  0.0f,  // the pitch turning Z up into Y up
+        0.0f, -0.9987f, -0.0517f, 0.0f};
+    EXPECT_TRUE(IsSkyboxCandidate(pitch_only.data(), 0.2f));
+    EXPECT_TRUE(IsSkyboxDraw(pitch_only.data(), 8.993f, 0.2f));
+  }
+}
+
 TEST(VRSkybox, OnlyOriginsWithinTheNearPlaneAreCandidates)
 {
   // The vertices are read only for draws whose origin is nearer to the camera than the near
