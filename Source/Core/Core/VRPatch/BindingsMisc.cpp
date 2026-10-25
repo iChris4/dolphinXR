@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include <fmt/format.h>
 
@@ -178,10 +179,13 @@ bool SetHold(ScriptContext* context, PadDevice device, u8 port, PadControlKind k
       changed |= context->pad_holds.erase(key) != 0;
       continue;
     }
-    // Sticks: X then Y. Buttons and triggers: every control gets the value.
-    const double value = kind == PadControlKind::Stick && i == 1 ? second : first;
+    // Sticks and the pointer: X then Y. Buttons and triggers: every control gets the value.
+    const bool two_axes = kind == PadControlKind::Stick || kind == PadControlKind::Pointer;
+    const double value = two_axes && i == 1 ? second : first;
     auto [it, inserted] = context->pad_holds.try_emplace(std::move(key), value);
-    if (inserted || it->second != value)
+    // A hidden pointer (NaN) held again is no change.
+    const bool same = it->second == value || (std::isnan(it->second) && std::isnan(value));
+    if (inserted || !same)
     {
       it->second = value;
       changed = true;
@@ -268,12 +272,34 @@ int PadSetStick(lua_State* L)
                                    std::string_view(name, length), cx, cy, false));
 }
 
+// The pointer group's name, for set_pointer and release.
+constexpr std::string_view POINTER_NAME = "IR";
+
+// wiimote.set_pointer(port, x, y): the Wii Remote's pointer at -1..1 (x right, y up); without x,
+// off the screen (the game sees no sensor bar).
+int PadSetPointer(lua_State* L)
+{
+  const PadDevice device = UpvalueDevice(L);
+  const u8 port = CheckPort(L, 1);
+  double x = std::numeric_limits<double>::quiet_NaN();
+  double y = x;
+  if (!lua_isnoneornil(L, 2))
+  {
+    const double raw_x = luaL_checknumber(L, 2);
+    const double raw_y = luaL_checknumber(L, 3);
+    x = std::isfinite(raw_x) ? std::clamp(raw_x, -1.0, 1.0) : 0.0;
+    y = std::isfinite(raw_y) ? std::clamp(raw_y, -1.0, 1.0) : 0.0;
+  }
+  return PushHoldResult(
+      L, SetHold(GetContext(L), device, port, PadControlKind::Pointer, POINTER_NAME, x, y, false));
+}
+
 // Releases a name the patch held before, whatever its kind.
 bool ReleaseName(ScriptContext* context, PadDevice device, u8 port, std::string_view name)
 {
   bool released = false;
-  for (const PadControlKind kind :
-       {PadControlKind::Button, PadControlKind::Analog, PadControlKind::Stick})
+  for (const PadControlKind kind : {PadControlKind::Button, PadControlKind::Analog,
+                                    PadControlKind::Stick, PadControlKind::Pointer})
   {
     // Only the kinds the name was resolved as, so the other kinds are not logged as unknown.
     const auto it = context->pad_names.find(std::make_tuple(device, port, kind, std::string(name)));
@@ -306,8 +332,13 @@ int PadClear(lua_State* L)
 void RegisterPadTable(lua_State* L, const char* name, PadDevice device)
 {
   static constexpr luaL_Reg FUNCTIONS[] = {
-      {"set_button", PadSetButton}, {"set_value", PadSetValue}, {"set_trigger", PadSetTrigger},
-      {"set_stick", PadSetStick},   {"release", PadRelease},    {"clear", PadClear},
+      {"set_button", PadSetButton},
+      {"set_value", PadSetValue},
+      {"set_trigger", PadSetTrigger},
+      {"set_stick", PadSetStick},
+      {"set_pointer", PadSetPointer},
+      {"release", PadRelease},
+      {"clear", PadClear},
       {nullptr, nullptr},
   };
   lua_newtable(L);

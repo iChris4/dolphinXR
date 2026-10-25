@@ -208,7 +208,10 @@ public:
         controls.push_back({held->group, held->control});
       break;
     case PadControlKind::Stick:
-      if (const auto group = AI::ResolveGroup(groups, AI::GroupKind::Stick, name, error))
+    case PadControlKind::Pointer:
+      if (const auto group = AI::ResolveGroup(
+              groups, kind == PadControlKind::Stick ? AI::GroupKind::Stick : AI::GroupKind::Pointer,
+              name, error))
       {
         for (const AI::GroupInfo& info : groups)
         {

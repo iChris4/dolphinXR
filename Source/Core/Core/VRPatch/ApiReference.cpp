@@ -116,6 +116,9 @@ agent's press_input; names as in Dolphin's controller settings, "Group/Control" 
   pad.set_value(port, name, value 0-1)    -- forces a value (0 = released even if the user presses)
   pad.set_trigger(port, name, value 0-1)  -- "L-Analog", "R-Analog"
   pad.set_stick(port, name, x, y)         -- "Main Stick", "C-Stick" ("" = the first stick), -1..1
+  wiimote.set_pointer(port, x, y)         -- the IR pointer, -1..1 (x right, y up) as the VR
+                                             pointer sets it; no x: off the screen.
+                                             wiimote.release(port, "IR") gives it back
   pad.release(port, name), pad.clear(port)
   All return true, or false and a message.
 

@@ -36,6 +36,8 @@ enum class PadControlKind : u8
   Button,
   Analog,
   Stick,
+  // The Wii Remote's IR pointer ("IR"): its X and Y controls. A NaN value takes it off the screen.
+  Pointer,
 };
 
 struct PadControl
@@ -50,8 +52,9 @@ class PadResolver
 {
 public:
   virtual ~PadResolver();
-  // A button ("A", "D-Pad/Up"), an analog trigger ("L-Analog") or a stick group ("Main Stick", ""
-  // = the first stick: its X and Y controls). Empty with `error` set when unknown.
+  // A button ("A", "D-Pad/Up"), an analog trigger ("L-Analog"), a stick group ("Main Stick", ""
+  // = the first stick: its X and Y controls) or the pointer group ("IR": its X and Y controls).
+  // Empty with `error` set when unknown.
   virtual std::vector<PadControl> Resolve(PadDevice device, u8 port, PadControlKind kind,
                                           std::string_view name, std::string* error) = 0;
 };

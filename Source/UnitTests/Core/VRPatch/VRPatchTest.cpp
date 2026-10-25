@@ -85,6 +85,11 @@ public:
                                   std::string_view name, std::string* error) override
   {
     ++resolves;
+    if (device == PadDevice::Wiimote && port == 0 && kind == PadControlKind::Pointer &&
+        name == "IR")
+    {
+      return {{"IR", "X"}, {"IR", "Y"}};
+    }
     if (device != PadDevice::GCPad || port != 0)
     {
       *error = "nothing plugged in";
@@ -580,6 +585,42 @@ TEST(VRPatch, HoldsControllerInput)
   EXPECT_EQ(value("Buttons", "A"), -100.0);
   EXPECT_EQ(value("Main Stick", "X"), -100.0);
   EXPECT_EQ(value("Triggers", "L"), 1.0);
+}
+
+TEST(VRPatch, HoldsTheWiiPointer)
+{
+  Harness h;
+  PatchScript script("pointer");
+  ASSERT_TRUE(h.Load(script, R"(
+    patch = {title = "P", settings = {{name = "hide", type = "bool", default = false}}}
+    function on_frame()
+      if settings.hide then
+        assert(wiimote.set_pointer(1))
+      else
+        assert(wiimote.set_pointer(1, 0.25, 2))
+      end
+    end
+    function on_unload() assert(wiimote.release(1, "IR")) end
+  )")) << script.Error();
+  const auto value = [&](const char* control) {
+    const auto it = script.GetPadHolds().find({PadDevice::Wiimote, 0, "IR", control});
+    return it == script.GetPadHolds().end() ? -100.0 : it->second;
+  };
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(value("X"), 0.25);
+  EXPECT_EQ(value("Y"), 1.0);  // clamped
+
+  // Off the screen: NaN, and holding it again changes nothing.
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("hide"), 1));
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_TRUE(std::isnan(value("X")));
+  EXPECT_TRUE(std::isnan(value("Y")));
+  const u64 generation = script.GetPadHoldsGeneration();
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(script.GetPadHoldsGeneration(), generation);
+
+  EXPECT_TRUE(script.Call(Hook::OnUnload, h.env)) << script.Error();
+  EXPECT_TRUE(script.GetPadHolds().empty());
 }
 
 TEST(VRPatch, RaisesOverrideFlags)
