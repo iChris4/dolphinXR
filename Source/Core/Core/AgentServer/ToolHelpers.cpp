@@ -143,7 +143,25 @@ bool WaitUntil(const std::function<bool()>& predicate, std::chrono::milliseconds
 
 bool IsPaused()
 {
-  return Core::GetState(GetSystem()) == Core::State::Paused;
+  // While a thread holds a Core::CPUThreadGuard (Dolphin's debugger views take one to read
+  // memory, a savestate does), the CPU is stepping and Core::GetState reads Paused. A tool that
+  // took a running game for a paused one would pause it when done: read it while no thread
+  // pauses and locks the system.
+  auto& system = GetSystem();
+  if (Core::GetState(system) != Core::State::Paused)
+    return false;
+  const auto deadline = std::chrono::steady_clock::now() + 100ms;
+  while (true)
+  {
+    std::optional<bool> paused;
+    Core::TryRunUnlessPausedAndLocked(
+        [&] { paused = Core::GetState(system) == Core::State::Paused; });
+    if (paused)
+      return *paused;
+    if (std::chrono::steady_clock::now() >= deadline)
+      return Core::GetState(system) == Core::State::Paused;
+    std::this_thread::sleep_for(1ms);
+  }
 }
 
 std::optional<std::regex> MakeToolRegex(std::string_view pattern)
