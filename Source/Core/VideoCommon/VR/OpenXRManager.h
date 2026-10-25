@@ -364,6 +364,28 @@ public:
   void SetAgentPose(AgentPoseTarget target, std::optional<AgentPose> pose);
   std::optional<AgentPose> GetAgentPose(AgentPoseTarget target) const;
 
+  // Agent server: a controller's thumbstick, triggers and buttons, in place of the real ones (the
+  // pose stays the tracked one or SetAgentPose's). The controller reads as connected, and
+  // everything that reads the VR controllers follows: VR patches, the user's bindings of the
+  // "OpenXR Controller" device, and DolphinXR's VR menu (a left thumbstick click opens it). Any
+  // thread; used from the next input poll.
+  struct AgentControls
+  {
+    float thumbstick_x = 0.0f;
+    float thumbstick_y = 0.0f;
+    float trigger = 0.0f;
+    float squeeze = 0.0f;
+    bool primary = false;
+    bool secondary = false;
+    bool button_3 = false;
+    bool button_4 = false;
+    bool menu = false;
+    bool shoulder = false;
+    bool thumbstick = false;
+  };
+  void SetAgentControls(size_t hand, std::optional<AgentControls> controls);
+  std::optional<AgentControls> GetAgentControls(size_t hand) const;
+
   // ---- Flat mono panel (vr_flat_screen) ----
 
   // Aspect ratio (width / height) of the flat game panel. Set by the presenter each frame
@@ -994,6 +1016,8 @@ private:
   mutable std::mutex m_agent_pose_mutex;
   std::array<std::optional<AgentPose>, 3> m_agent_poses;
   std::atomic<bool> m_agent_poses_active{false};
+  std::array<std::optional<AgentControls>, 2> m_agent_controls;
+  std::atomic<bool> m_agent_controls_active{false};
 
   // Flat panel state. The anchor (head center + heading) is captured lazily on the video
   // thread and invalidated on recenter; the pose is rebuilt from it with the live screen

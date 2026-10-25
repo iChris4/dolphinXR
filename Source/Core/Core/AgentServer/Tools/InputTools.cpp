@@ -20,6 +20,7 @@
 #include "Core/Movie.h"
 #include "Core/NetPlayProto.h"
 #include "Core/System.h"
+#include "VideoCommon/VR/OpenXRManager.h"
 
 namespace AgentServer
 {
@@ -348,6 +349,106 @@ ToolResult PressInput(const ToolArgs& args)
 }
 }  // namespace
 
+namespace
+{
+// ---- The VR controllers' own input (set_vr_controls) ----
+
+size_t RequireHand(const ToolArgs& args)
+{
+  const std::string hand = args.RequireString("hand");
+  if (hand == "left")
+    return 0;
+  if (hand == "right")
+    return 1;
+  throw ToolError("hand is \"left\" or \"right\".");
+}
+
+ToolResult SetVRControls(const ToolArgs& args)
+{
+  RequireVRSession();
+  const size_t hand = RequireHand(args);
+  VR::OpenXRManager::AgentControls controls;
+  controls.thumbstick_x =
+      static_cast<float>(std::clamp(args.GetNumber("thumbstick_x", 0.0), -1.0, 1.0));
+  controls.thumbstick_y =
+      static_cast<float>(std::clamp(args.GetNumber("thumbstick_y", 0.0), -1.0, 1.0));
+  controls.trigger = static_cast<float>(std::clamp(args.GetNumber("trigger", 0.0), 0.0, 1.0));
+  controls.squeeze = static_cast<float>(std::clamp(args.GetNumber("squeeze", 0.0), 0.0, 1.0));
+  std::string pressed;
+  for (const std::string& name : args.GetStringArray("buttons"))
+  {
+    bool* button = name == "primary"    ? &controls.primary :
+                   name == "secondary"  ? &controls.secondary :
+                   name == "button_3"   ? &controls.button_3 :
+                   name == "button_4"   ? &controls.button_4 :
+                   name == "menu"       ? &controls.menu :
+                   name == "shoulder"   ? &controls.shoulder :
+                   name == "thumbstick" ? &controls.thumbstick :
+                                          nullptr;
+    if (name == "trigger")
+      controls.trigger = 1.0f;
+    else if (name == "squeeze")
+      controls.squeeze = 1.0f;
+    else if (button)
+      *button = true;
+    else
+      throw ToolError(fmt::format("Unknown button \"{}\".", name));
+    pressed += (pressed.empty() ? "" : ", ") + name;
+  }
+  VR::g_openxr->SetAgentControls(hand, controls);
+  std::string text = fmt::format(
+      "{} controller: thumbstick ({:.2f}, {:.2f}), trigger {:.2f}, grip {:.2f}, buttons {}.",
+      hand == 0 ? "Left" : "Right", controls.thumbstick_x, controls.thumbstick_y, controls.trigger,
+      controls.squeeze, pressed.empty() ? "none" : pressed);
+
+  const s64 frames = args.GetInt("frames", 0);
+  if (frames <= 0)
+    return ToolResult::Text(text + " Held until clear_vr_controls.");
+
+  // Held for that many fields while emulation runs, then released.
+  const bool was_paused = IsPaused();
+  ResumeEmulation();
+  const bool ran = WaitForFields(static_cast<u32>(frames));
+  VR::g_openxr->SetAgentControls(hand, std::nullopt);
+  text += ran ? fmt::format(" Held for {} field(s), then released.", frames) :
+                " The game stopped producing fields (it froze or was paused): released.";
+  ToolResult images;
+  if (ran && args.GetBool("screenshot", true))
+  {
+    const u32 max_width =
+        static_cast<u32>(std::clamp<s64>(args.GetInt("max_width", 480), 64, 1280));
+    try
+    {
+      text += " Screenshot: " + AppendScreenshots(images, max_width, true, true) + ".";
+    }
+    catch (const ToolError& e)
+    {
+      text += fmt::format(" No screenshot: {}.", e.what());
+    }
+  }
+  if (was_paused)
+    PauseEmulation();
+  ToolResult output = ToolResult::Text(std::move(text));
+  for (picojson::value& block : images.content)
+    output.content.push_back(std::move(block));
+  return output;
+}
+
+ToolResult ClearVRControls(const ToolArgs& args)
+{
+  RequireVRSession();
+  const std::string hand = args.GetString("hand", "all");
+  if (hand != "all")
+  {
+    VR::g_openxr->SetAgentControls(RequireHand(args), std::nullopt);
+    return ToolResult::Text(fmt::format("The {} controller's own input is back.", hand));
+  }
+  VR::g_openxr->SetAgentControls(0, std::nullopt);
+  VR::g_openxr->SetAgentControls(1, std::nullopt);
+  return ToolResult::Text("The controllers' own input is back.");
+}
+}  // namespace
+
 void RegisterInputTools(ToolRegistry& registry, Server& server)
 {
   server.AddEmulationStoppedCallback([] { AgentInput::DetachAll(); });
@@ -420,5 +521,47 @@ void RegisterInputTools(ToolRegistry& registry, Server& server)
                            .Required({"steps"})
                            .Build(),
        .handler = PressInput});
+
+  registry.Add(
+      {.name = "set_vr_controls",
+       .title = "Use a VR controller",
+       .description =
+           "Holds a VR controller's thumbstick, trigger, grip and buttons, in place of the real "
+           "ones. Unlike press_input, which drives the emulated controller, this is the VR "
+           "controller itself: VR patches (vr.axis, vr.button), the user's bindings of the "
+           "OpenXR controller to the emulated one, and DolphinXR's VR menu all see it (a left "
+           "thumbstick click opens the menu). The controller reads as connected; its pose is "
+           "the tracked one or set_vr_pose's. With frames, held while emulation runs for that "
+           "many VI fields, then released, with a screenshot; without, held until "
+           "clear_vr_controls. Each call replaces the hand's previous controls.",
+       .input_schema =
+           Schema()
+               .String("hand", "left or right.", {"left", "right"})
+               .Number("thumbstick_x", "-1 (left) to 1 (right).")
+               .Number("thumbstick_y", "-1 (down) to 1 (up).")
+               .Number("trigger", "0 to 1.")
+               .Number("squeeze", "The grip, 0 to 1.")
+               .StringArray("buttons",
+                            "Held buttons: primary (A/X), secondary (B/Y), thumbstick (click), "
+                            "trigger, squeeze, menu, button_3, button_4, shoulder.",
+                            {"primary", "secondary", "thumbstick", "trigger", "squeeze", "menu",
+                             "button_3", "button_4", "shoulder"})
+               .Integer("frames", "VI fields to hold, then release (default: until cleared).", 1,
+                        MAX_STEP_FIELDS)
+               .Boolean("screenshot", "With frames: screenshot at the end (default true).")
+               .Integer("max_width", "Screenshot width (default 480).", 64, 1280)
+               .Required({"hand"})
+               .Build(),
+       .handler = SetVRControls});
+
+  registry.Add({.name = "clear_vr_controls",
+                .title = "Give the VR controllers back",
+                .description = "Removes the controls set by set_vr_controls.",
+                .input_schema =
+                    Schema()
+                        .String("hand", "all (default), left or right.", {"all", "left", "right"})
+                        .Build(),
+                .idempotent = true,
+                .handler = ClearVRControls});
 }
 }  // namespace AgentServer

@@ -78,6 +78,7 @@ Workflow 6: VR control patch (a game object follows the VR controller, motion co
 Controller input
 - press_input plays steps on an emulated controller (GameCube pad, Wii Remote or its attachment): each step holds buttons, sticks, analog triggers or the Wii pointer for some VI fields, a step with only frames waits. Hold a button 3 or 4 fields and put a wait step between two presses of the same button. It ends with a screenshot.
 - list_input_controls gives the exact names (write Group/Control when a name is ambiguous, e.g. D-Pad/Up).
+- press_input drives the emulated controller. set_vr_controls drives a VR controller itself (thumbstick, trigger, grip, buttons; with frames, for that many fields), which VR patches and the user's bindings read: use it, with set_vr_pose for the hands, to test VR patches. A left thumbstick click opens DolphinXR's VR menu.
 - Tell the user before you navigate: the input goes to their game. Prefer an agent savestate before going through menus that change the game (saving, deleting a file).
 - Many games only listen to the controller that started the game, file or race (Mario Kart Wii with a GameCube pad ignores the Wii Remote). If a press changes nothing, ask the user which controller they play with.
 - VR patches hold controller input with pad.* underneath press_input: your steps win while they run.

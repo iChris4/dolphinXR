@@ -2803,6 +2803,26 @@ void OpenXRManager::UpdateInputActions()
     controller.squeeze_button =
         squeeze_click || std::max(controller.squeeze_value, controller.squeeze_force) > 0.5f;
     controller.connected = action_seen || controller.aim_pose.valid || controller.grip_pose.valid;
+
+    // The agent's controls (SetAgentControls) in place of the controller's.
+    if (const std::optional<AgentControls> agent = GetAgentControls(hand))
+    {
+      controller.thumbstick_x = std::clamp(agent->thumbstick_x, -1.0f, 1.0f);
+      controller.thumbstick_y = std::clamp(agent->thumbstick_y, -1.0f, 1.0f);
+      controller.trigger_value = std::clamp(agent->trigger, 0.0f, 1.0f);
+      controller.squeeze_value = std::clamp(agent->squeeze, 0.0f, 1.0f);
+      controller.squeeze_force = controller.squeeze_value;
+      controller.primary_button = agent->primary;
+      controller.secondary_button = agent->secondary;
+      controller.button_3 = agent->button_3;
+      controller.button_4 = agent->button_4;
+      controller.menu_button = agent->menu;
+      controller.shoulder_button = agent->shoulder;
+      controller.thumbstick_button = agent->thumbstick;
+      controller.trigger_button = controller.trigger_value > 0.5f;
+      controller.squeeze_button = controller.squeeze_value > 0.5f;
+      controller.connected = true;
+    }
   }
 
   // Throttled periodic diagnostic log.
@@ -3440,6 +3460,22 @@ std::optional<OpenXRManager::AgentPose> OpenXRManager::GetAgentPose(AgentPoseTar
 {
   std::lock_guard lock(m_agent_pose_mutex);
   return m_agent_poses[static_cast<size_t>(target)];
+}
+
+void OpenXRManager::SetAgentControls(size_t hand, std::optional<AgentControls> controls)
+{
+  std::lock_guard lock(m_agent_pose_mutex);
+  m_agent_controls[hand] = controls;
+  m_agent_controls_active.store(m_agent_controls[0].has_value() || m_agent_controls[1].has_value(),
+                                std::memory_order_release);
+}
+
+std::optional<OpenXRManager::AgentControls> OpenXRManager::GetAgentControls(size_t hand) const
+{
+  if (!m_agent_controls_active.load(std::memory_order_acquire))
+    return std::nullopt;
+  std::lock_guard lock(m_agent_pose_mutex);
+  return m_agent_controls[hand];
 }
 
 namespace

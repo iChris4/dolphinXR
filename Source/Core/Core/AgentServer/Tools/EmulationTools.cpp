@@ -247,6 +247,14 @@ ToolResult GetStatus(const ToolArgs&)
         if (const auto pose = VR::g_openxr->GetAgentPose(target))
           text += "\nAgent " + FormatAgentPose(target, *pose) + " (set_vr_pose).";
       }
+      for (size_t hand = 0; hand < 2; ++hand)
+      {
+        if (VR::g_openxr->GetAgentControls(hand))
+        {
+          text += fmt::format("\nAgent input on the {} controller (set_vr_controls).",
+                              hand == 0 ? "left" : "right");
+        }
+      }
     }
     text += fmt::format("\nCheats {}, debugging mode {}.",
                         Config::AreCheatsEnabled() ? "enabled" : "disabled",

@@ -209,6 +209,8 @@ void Server::Stop()
     {
       VR::g_openxr->SetAgentPose(target, std::nullopt);
     }
+    VR::g_openxr->SetAgentControls(0, std::nullopt);
+    VR::g_openxr->SetAgentControls(1, std::nullopt);
   }
   {
     std::lock_guard lock(m_stopped_callbacks_mutex);
