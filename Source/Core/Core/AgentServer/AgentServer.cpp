@@ -55,6 +55,7 @@ Server::Server()
   RegisterOverrideTools(m_registry, *this);
   RegisterCodeTools(m_registry, *this);
   RegisterMemoryTools(m_registry, *this);
+  RegisterPointerTools(m_registry, *this);
   RegisterExperimentTools(m_registry, *this);
   RegisterInputTools(m_registry, *this);
   RegisterVRPatchTools(m_registry, *this);

@@ -709,6 +709,8 @@ if(ENABLE_VR)
     AgentServer/OverrideSession.h
     AgentServer/PatchTemplates.cpp
     AgentServer/PatchTemplates.h
+    AgentServer/PointerScan.cpp
+    AgentServer/PointerScan.h
     AgentServer/ToolHelpers.cpp
     AgentServer/ToolHelpers.h
     AgentServer/ToolRegistry.cpp
@@ -721,6 +723,7 @@ if(ENABLE_VR)
     AgentServer/Tools/InputTools.cpp
     AgentServer/Tools/MemoryTools.cpp
     AgentServer/Tools/OverrideTools.cpp
+    AgentServer/Tools/PointerTools.cpp
     AgentServer/Tools/ScreenshotTools.cpp
     AgentServer/Tools/Tools.h
     AgentServer/Tools/VRPatchTools.cpp

@@ -83,6 +83,13 @@ std::string_view SymbolName(const Common::Symbol& symbol);
 // Builds the symbol map from the signature database when it is empty. Returns a note or "".
 std::string EnsureSymbols();
 
+// ---- PointerTools.cpp ----
+
+// An "address" (hex) or "path" argument: [[8067DC18]+C54]+9C or mem.chain(0x8067DC18, 0xC54,
+// 0x9C), followed now. `how` gets "[[8067DC18]+C54]+9C = 8097281C" for a path. Throws ToolError
+// when neither is given or the path breaks.
+u32 ResolveAddressOrPath(const Core::CPUThreadGuard& guard, const ToolArgs& args, std::string* how);
+
 // ---- ExperimentTools.cpp ----
 
 struct ExperimentOptions

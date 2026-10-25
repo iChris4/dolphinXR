@@ -8,6 +8,7 @@ if(ENABLE_VR)
     AgentServer/HttpParserTest.cpp
     AgentServer/McpServerTest.cpp
     AgentServer/OverrideSessionTest.cpp
+    AgentServer/PointerScanTest.cpp
     AgentServer/ToolRegistryTest.cpp
     AgentServer/TransformScanTest.cpp
   )

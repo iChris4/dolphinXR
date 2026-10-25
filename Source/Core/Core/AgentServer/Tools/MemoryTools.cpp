@@ -256,12 +256,14 @@ ToolResult Disassemble(const ToolArgs& args)
 ToolResult ReadMemory(const ToolArgs& args)
 {
   RequireGame();
-  const u32 address = args.RequireAddress("address");
   const std::string format = args.GetString("format", "u32");
   const u32 count = static_cast<u32>(std::clamp<s64>(args.GetInt("count", 16), 1, 1024));
 
   Core::CPUThreadGuard guard(GetSystem());
-  std::string text = fmt::format("{} at {}:\n", format, DescribeAddress(address));
+  std::string how;
+  const u32 address = ResolveAddressOrPath(guard, args, &how);
+  std::string text = fmt::format("{} at {}{}:\n", format, DescribeAddress(address),
+                                 how.empty() ? "" : " (" + how + ")");
   picojson::object structured;
   structured["address"] = JsonNumber(address);
   structured["format"] = JsonString(format);
@@ -863,16 +865,18 @@ void RegisterMemoryTools(ToolRegistry& registry, Server& server)
       {.name = "read_memory",
        .title = "Read memory",
        .description =
-           "Reads emulated memory (effective addresses, e.g. 0x80xxxxxx). structuredContent: "
-           "{address, format, values: [numbers; floats at full precision, NaN/infinity as "
-           "strings, u64 as hex strings, null where unreadable]} or {address, format, value} for "
-           "a string.",
+           "Reads emulated memory (effective addresses, e.g. 0x80xxxxxx), at an address or at "
+           "the end of a path through pointers ([[805C4F98]+2184]+3C, as find_pointer_paths "
+           "prints them). dump_struct reads a block with each word's likely type. "
+           "structuredContent: {address, format, values: [numbers; floats at full precision, "
+           "NaN/infinity as strings, u64 as hex strings, null where unreadable]} or {address, "
+           "format, value} for a string.",
        .input_schema = Schema()
                            .Hex("address", "Start address.")
+                           .String("path", "Or a path to the start, e.g. [[805C4F98]+2184]+3C.")
                            .String("format", "Default u32.",
                                    {"u8", "u16", "u32", "s32", "u64", "f32", "f64", "string"})
                            .Integer("count", "Values (or string length), default 16.", 1, 1024)
-                           .Required({"address"})
                            .Build(),
        .read_only = true,
        .idempotent = true,

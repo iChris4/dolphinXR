@@ -64,7 +64,7 @@ Workflow 6: VR control patch (a game object follows the VR controller, motion co
 - A VR patch is a Lua file run at every field (describe_vr_patch_api has the format and the API): it reads the VR input (vr.*) and the game's memory (mem.*), writes values or code caves, and can hold controller input (pad.*). It needs no special Dolphin build, and the user can share the file. list_vr_patches shows the game's patches (Sys/VRPatches/GM8E01/arm-cannon.lua, Metroid Prime's arm cannon, is a complete example: get_vr_patch id=arm-cannon source=true). Ask the user first whether a mod already does it for this game.
 1. Make a reference in gameplay, where the object (the gun, the camera) is visible: save_state label=ref.
 2. Find the camera: find_transforms label=a (layout 3x4 is the GameCube Mtx), turn the game's camera (press_input on the camera stick, or ask the user), then find_transforms compare_to=a: the camera and the player's transforms turned the most. watch_memory on the candidates while turning confirms.
-3. Find the object's transform the same way (move it with the game's own controls between two scans), or from a pointer chain: symbols (list_symbols, get_symbol) and read_memory format=f32 around the structures they use. cheat_search finds the pointers to it.
+3. Find the object's transform the same way (move it with the game's own controls between two scans), or from a pointer chain: symbols (list_symbols, get_symbol) and read_memory format=f32 around the structures they use. find_pointer_paths gives the paths from fixed addresses to it, the form a patch needs (mem.chain); objects move between rooms, so keep the paths that still reach it in a second savestate (check=<label> address=<its new address>). dump_struct label=a, a change in the game, then dump_struct compare_to=a shows which of its fields moved.
 4. Prove it: write a tilted basis with test_memory_write reference=ref or write_memory type=f32 floats=[...], and take a screenshot. If nothing changes, the game rewrites it every frame: set_watchpoint on it (or trace_memory write=true) gives the code that stores it.
 5. Choose how to drive it:
    - a host write, when the game reads the value but does not rebuild it every frame: write it from on_frame;
@@ -85,7 +85,7 @@ Controller input
 - VR patches hold controller input with pad.* underneath press_input: your steps win while they run.
 
 Debugger tools
-- set_breakpoint / wait_for_break / get_registers / get_callstack / step_instruction / remove_breakpoint, set_watchpoint / remove_watchpoint, read_memory / write_memory. Debugging mode is enabled when needed and released when no agent breakpoint remains.
+- set_breakpoint / wait_for_break / get_registers / get_callstack / step_instruction / remove_breakpoint, set_watchpoint / remove_watchpoint, read_memory / write_memory. read_memory and dump_struct (each word as a pointer, float, integer or text) also take a path through pointers: [[805C4F98]+2184]+3C. Debugging mode is enabled when needed and released when no agent breakpoint remains.
 - read_log reads Dolphin's log; set_draw_debug_logging logs every draw (VR_DRAW lines), but capture_frame is usually better.)INSTRUCTIONS";
 }
 }  // namespace AgentServer
