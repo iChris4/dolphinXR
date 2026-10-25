@@ -3,6 +3,7 @@
 
 #include "Core/HW/Wiimote.h"
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -67,6 +68,21 @@ Common::Vec3 ToVec3(const std::array<float, 3>& vec)
   return {vec[0], vec[1], vec[2]};
 }
 
+// Up in the remote's body frame (Y along the pointing axis), with the pointing axis tilted at most
+// max_tilt_rad out of the horizontal; the roll is kept.
+Common::Vec3 LimitPointingTilt(const Common::Vec3& up, float max_tilt_rad)
+{
+  const float limit = std::sin(max_tilt_rad);
+  if (std::abs(up.y) <= limit)
+    return up;
+  const float y = std::copysign(limit, up.y);
+  const float side = std::hypot(up.x, up.z);
+  if (side < 1e-6f)
+    return {0.0f, y, std::cos(max_tilt_rad)};
+  const float scale = std::cos(max_tilt_rad) / side;
+  return {up.x * scale, y, up.z * scale};
+}
+
 struct OpenXRWiimoteState
 {
   u64 generation = std::numeric_limits<u64>::max();
@@ -112,6 +128,13 @@ constexpr double OPENXR_IR_TOTAL_PITCH_DEG = 26.3;
 // roughly these excursions.
 constexpr float OPENXR_IR_HIDE_MARGIN_U = 1.9f;
 constexpr float OPENXR_IR_HIDE_MARGIN_V = 1.5f;
+// SetOpenXRPointerKeptOnScreen.
+std::atomic<bool> s_openxr_pointer_kept_on_screen{false};
+// While the pointer is kept on the screen, how far the remote's pointing axis may tilt up or down
+// in its accelerometer. Metroid Prime 3 stops reading the pointer while the remote points more
+// than about 45 degrees up (measured: it follows at 45, freezes at 50), which aiming at the top of
+// a large virtual screen reaches with the motion pitch; a remote aimed at a TV never does.
+constexpr float OPENXR_KEPT_POINTER_MAX_TILT_DEG = 40.0f;
 // An off-screen excursion must persist this long before the pointer is hidden. Runtime pose
 // spikes during fast controller motion produce brief excursions; without the debounce every
 // spike dropped IR tracking entirely.
@@ -264,8 +287,21 @@ OpenXRWiimoteState BuildOpenXRState(const Common::VR::OpenXRControllerState& con
   const Common::Vec3 swing_body = angular_acceleration.Cross(lever) + w.Cross(w.Cross(lever));
 
   // Gravity in the body frame, from the current orientation: world up in aim-local, mapped
-  // with v -> (-x, z, y).
-  const Common::Vec3 gravity_body(-get_matrix(0, 1), get_matrix(2, 1), get_matrix(1, 1));
+  // with v -> (-x, z, y). While the virtual screen is turned up with the game camera's pitch, up
+  // is turned with it: the remote's tilt is relative to the screen, like the pointer. Aiming at
+  // the raised screen would otherwise read as a remote held far above a TV, which games do not
+  // expect (see OPENXR_KEPT_POINTER_MAX_TILT_DEG).
+  const float up_y = std::cos(controller.screen_pitch);
+  const float up_z = std::sin(controller.screen_pitch);
+  const auto local_up = [&](int row) {
+    return get_matrix(row, 1) * up_y + get_matrix(row, 2) * up_z;
+  };
+  Common::Vec3 gravity_body(-local_up(0), local_up(2), local_up(1));
+  if (s_openxr_pointer_kept_on_screen.load(std::memory_order_relaxed))
+  {
+    gravity_body = LimitPointingTilt(gravity_body,
+                                     OPENXR_KEPT_POINTER_MAX_TILT_DEG * float(MathUtil::TAU) / 360);
+  }
   out.acceleration = gravity_body * float(MathUtil::GRAVITY_ACCELERATION) + hand_body + swing_body;
   history->Push(sample);
 
@@ -350,6 +386,23 @@ ControllerEmu::InputOverrideFunction CreateOpenXRInputOverrideFunction(unsigned 
       }
       else
         cached_state = {};
+
+      // Kept on the screen: an aim past an edge pins the cursor at that edge, and a ray that
+      // misses the screen's plane (or a lost controller) keeps the last position.
+      if (s_openxr_pointer_kept_on_screen.load(std::memory_order_relaxed))
+      {
+        if (std::isnan(cached_state.ir_x) && !std::isnan(held_ir_x))
+        {
+          cached_state.ir_x = held_ir_x;
+          cached_state.ir_y = held_ir_y;
+          cached_state.ir_z = held_ir_z;
+        }
+        if (!std::isnan(cached_state.ir_x))
+        {
+          cached_state.ir_x = std::clamp(cached_state.ir_x, -1.0f, 1.0f);
+          cached_state.ir_y = std::clamp(cached_state.ir_y, -1.0f, 1.0f);
+        }
+      }
 
       // Off-screen debounce: a real wiimote's camera keeps tracking well past the screen
       // edge, and a runtime pose spike during fast motion must not drop the pointer.
@@ -616,6 +669,11 @@ InputConfig* GetConfig()
 bool IsOpenXRInputOverrideInstalled(unsigned int index)
 {
   return index < MAX_BBMOTES && s_openxr_overrides[index].enabled;
+}
+
+void SetOpenXRPointerKeptOnScreen(bool keep)
+{
+  s_openxr_pointer_kept_on_screen.store(keep, std::memory_order_relaxed);
 }
 #endif
 

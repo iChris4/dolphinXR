@@ -91,7 +91,9 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
                                              it (recenter, camera height, Camera Anchor), meters,
                                              +X right +Y up -Z forward of the camera; nil in
                                              flat-screen mode. Use "view" to place an object in
-                                             the hand.
+                                             the hand. "level_view": the same relative to the
+                                             camera's level frame, without the pitch the VR view
+                                             removes (vr.set_camera_pitch_source).
   vr.hand_in_head_space(hand [, kind]) -> pose relative to the head
   vr.raw_pose(hand | "head" [, kind]) -> valid, px, py, pz, qx, qy, qz, qw   -- the same as plain
                                              numbers (valid false when there is none): no tables
@@ -109,6 +111,21 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
       game's Shader, Elements and Texture overrides): raised until lowered with false or the
       patch stops; the overrides see a change from the next video frame. Names: 1 to 64 letters,
       digits, '_', '.', '-'. For the game's state read from memory (a visor, a menu).
+  vr.set_camera_pitch_source(address | nil)   -- the f32 at address is the sine of the game
+      camera's pitch (+ up), e.g. the up component of its forward axis in its matrix. The VR view
+      removes that pitch from each frame (read when the frame starts drawing, so it matches the
+      frame), while the virtual screen and the Wii pointer turn with the game camera: a patch can
+      let the game tilt its camera (as the Wii pointer does at the screen's edges) without the
+      world moving. Until nil or the patch stops. vr.camera_pitch_source() -> the address the
+      running patches named, or nil. raw_pose(hand, "level_view") is the hand relative to the
+      game camera's level frame (its pitch removed): for an object placed from the camera at the
+      time the game draws, rebuild the level frame from the camera's right axis.
+  vr.keep_pointer_on_screen(keep)   -- true: an aim past the virtual screen's edge holds the Wii
+      pointer at that edge, and an aim that misses the screen keeps the last position, instead of
+      losing the sensor bar; the remote's tilt in its accelerometer stays within +-40 degrees, as
+      when aiming at a TV. For games that turn the camera on their own while the pointer is lost,
+      or stop reading it from a remote held far up (Metroid Prime 3: past 45 degrees). Until false
+      or the patch stops.
 
 pad / wiimote / nunchuk (emulated controllers, port 1-4; held until changed or released, under the
 agent's press_input; names as in Dolphin's controller settings, "Group/Control" when ambiguous)

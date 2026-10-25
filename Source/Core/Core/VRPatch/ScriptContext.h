@@ -13,6 +13,7 @@
 
 #include <array>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
@@ -75,6 +76,11 @@ struct ScriptContext
   // Override flags raised with vr.set_flag (VR::PatchFlags).
   std::set<std::string> flags;
   u64 flags_generation = 0;
+
+  // vr.set_camera_pitch_source (VR::CameraPitch).
+  std::optional<u32> camera_pitch_source;
+  // vr.keep_pointer_on_screen (Wiimote::SetOpenXRPointerKeptOnScreen).
+  bool keep_pointer_on_screen = false;
 };
 
 ScriptContext* GetContext(lua_State* L);

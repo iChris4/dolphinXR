@@ -103,6 +103,13 @@ std::optional<OpenXRWiiRemoteState> GetOpenXRHandState(bool left_hand);
 // returns the agent server's input). Hold EmulatedController::GetStateLock().
 bool IsOpenXRInputOverrideInstalled(unsigned int index);
 
+// While set, the VR controllers' pointer stays on the screen: an aim past an edge holds the cursor
+// at that edge instead of losing the sensor bar, and the remote's tilt in its accelerometer stays
+// within what aiming at a TV gives (+-40 degrees), for games that turn the camera on their own
+// while the pointer is lost or stop reading it from a remote held far up (Metroid Prime 3). A VR
+// game patch sets it (vr.keep_pointer_on_screen). Any thread.
+void SetOpenXRPointerKeptOnScreen(bool keep);
+
 // The pose of the VR controller that drives an OpenXR Wii Remote (the same hand and motion
 // orientation the input override uses: the aim at the input sample time pitched by
 // GFX_VR_WIIMOTE_MOTION_PITCH), in Dolphin's Wii Remote frames: body +X left, +Y backward, +Z up,

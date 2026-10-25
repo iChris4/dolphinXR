@@ -11,6 +11,7 @@
 #include "Common/VR/OpenXRInputState.h"
 #include "Core/VRPatch/ScriptContext.h"
 #include "Core/VRPatch/VRSettingsTable.h"
+#include "VideoCommon/VR/CameraPitch.h"
 
 namespace VRPatch
 {
@@ -51,7 +52,7 @@ int PushPose(lua_State* L, const PoseInput& pose)
 }
 
 // vr.raw_pose(which, kind) -> valid, px, py, pz, qx, qy, qz, qw. which: "head" or a hand; kind:
-// "aim" (default), "grip", "pointer" or "view".
+// "aim" (default), "grip", "pointer", "view" or "level_view".
 int VRRawPose(lua_State* L)
 {
   const VRInputFrame& input = Input(L);
@@ -67,7 +68,9 @@ int VRRawPose(lua_State* L)
     return PushPose(L, hand.pointer);
   if (std::strcmp(kind, "view") == 0)
     return PushPose(L, hand.view);
-  return luaL_argerror(L, 2, "kind is \"aim\", \"grip\", \"pointer\" or \"view\"");
+  if (std::strcmp(kind, "level_view") == 0)
+    return PushPose(L, hand.level_view);
+  return luaL_argerror(L, 2, "kind is \"aim\", \"grip\", \"pointer\", \"view\" or \"level_view\"");
 }
 
 int VRButton(lua_State* L)
@@ -298,6 +301,42 @@ int VRSetFlag(lua_State* L)
   return 0;
 }
 
+// vr.set_camera_pitch_source(address | nil): the f32 at `address` holds the sine of the game
+// camera's pitch (+ up); the VR view removes that pitch from each frame. nil: no more.
+int VRSetCameraPitchSource(lua_State* L)
+{
+  ScriptContext* context = GetContext(L);
+  if (lua_isnoneornil(L, 1))
+  {
+    context->camera_pitch_source.reset();
+    return 0;
+  }
+  const lua_Integer address = luaL_checkinteger(L, 1);
+  if (address < 0x80000000 || address > 0xFFFFFFFC || (address & 3) != 0)
+    return luaL_argerror(L, 1, "an aligned address of the game's memory (0x8xxxxxxx, 0x9xxxxxxx)");
+  context->camera_pitch_source = static_cast<u32>(address);
+  return 0;
+}
+
+// vr.camera_pitch_source() -> address or nil: the source the running patches named, whose pitch
+// the VR view removes.
+int VRCameraPitchSource(lua_State* L)
+{
+  if (const std::optional<u32> source = VR::CameraPitch::GetSource())
+    lua_pushinteger(L, *source);
+  else
+    lua_pushnil(L);
+  return 1;
+}
+
+// vr.keep_pointer_on_screen(keep): an aim past the screen's edge holds the VR pointer at that
+// edge instead of losing it.
+int VRKeepPointerOnScreen(lua_State* L)
+{
+  GetContext(L)->keep_pointer_on_screen = lua_toboolean(L, 1);
+  return 0;
+}
+
 // vr.clear_flags(): lowers every flag of the patch.
 int VRClearFlags(lua_State* L)
 {
@@ -329,6 +368,9 @@ void RegisterVRBindings(lua_State* L)
       {"set_setting", VRSettingSet},
       {"set_flag", VRSetFlag},
       {"clear_flags", VRClearFlags},
+      {"set_camera_pitch_source", VRSetCameraPitchSource},
+      {"camera_pitch_source", VRCameraPitchSource},
+      {"keep_pointer_on_screen", VRKeepPointerOnScreen},
       {nullptr, nullptr},
   };
   luaL_newlib(L, FUNCTIONS);

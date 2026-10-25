@@ -8,6 +8,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -146,6 +147,10 @@ public:
   // The override flags raised with vr.set_flag, and a counter that changes with them.
   const std::set<std::string>& GetFlags() const;
   u64 GetFlagsGeneration() const;
+  // Where the game keeps its camera pitch's sine (vr.set_camera_pitch_source), or nothing.
+  std::optional<u32> GetCameraPitchSource() const;
+  // The patch keeps the VR pointer on the screen (vr.keep_pointer_on_screen).
+  bool KeepsPointerOnScreen() const;
 
   size_t GetMemoryUsed() const;
   // Microseconds the last call took.

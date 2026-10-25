@@ -31,6 +31,7 @@
 #include "Core/Core.h"
 #include "Core/GeckoCode.h"
 #include "Core/GeckoCodeConfig.h"
+#include "Core/HW/Wiimote.h"
 #include "Core/Movie.h"
 #include "Core/NetPlayProto.h"
 #include "Core/PowerPC/PowerPC.h"
@@ -40,6 +41,7 @@
 #include "Core/VRPatch/PatchIni.h"
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/VRSettingsTable.h"
+#include "VideoCommon/VR/CameraPitch.h"
 #include "VideoCommon/VR/OverrideSuppression.h"
 #include "VideoCommon/VR/PatchFlags.h"
 
@@ -482,6 +484,7 @@ VRInputFrame CaptureInput()
     copy_pose(from.grip_pose, &to.grip);
     copy_pose(from.pointer_pose, &to.pointer);
     copy_pose(from.view_pose, &to.view);
+    copy_pose(from.level_view_pose, &to.level_view);
     to.linear_velocity_valid = from.grip_velocity.linear_valid;
     to.angular_velocity_valid = from.grip_velocity.angular_valid;
     to.linear_velocity = from.grip_velocity.linear;
@@ -617,9 +620,41 @@ void UpdatePadHolds()
   m.pad_holds = std::move(holds);
 }
 
+// Publishes the game camera's pitch source of the first running patch that names one
+// (vr.set_camera_pitch_source).
+void UpdateCameraPitchSource()
+{
+  std::optional<u32> source;
+  for (const auto& patch : GetManager().patches)
+  {
+    if (patch->script && patch->state == PatchState::Running)
+    {
+      source = patch->script->GetCameraPitchSource();
+      if (source)
+        break;
+    }
+  }
+  VR::CameraPitch::SetSource(source);
+}
+
+// Keeps the VR pointer on the screen while a running patch asks for it
+// (vr.keep_pointer_on_screen).
+void UpdatePointerKeptOnScreen()
+{
+  bool keep = false;
+  for (const auto& patch : GetManager().patches)
+  {
+    if (patch->script && patch->state == PatchState::Running)
+      keep = keep || patch->script->KeepsPointerOnScreen();
+  }
+  Wiimote::SetOpenXRPointerKeptOnScreen(keep);
+}
+
 // Publishes the flags the running patches raise (vr.set_flag) for the override managers.
 void UpdatePatchFlags()
 {
+  UpdateCameraPitchSource();
+  UpdatePointerKeptOnScreen();
   Manager& m = GetManager();
   u64 signature = 0;
   for (const auto& patch : m.patches)
@@ -1177,6 +1212,8 @@ void OnGameUnloaded(const Core::CPUThreadGuard* guard)
   Gecko::SetVRPatchRegion({});
   VR::OverrideSuppression::Set({});
   VR::PatchFlags::Set({});
+  VR::CameraPitch::SetSource(std::nullopt);
+  Wiimote::SetOpenXRPointerKeptOnScreen(false);
   m.flags_signature = 0;
   std::lock_guard lock(m.mutex);
   m.game_running = false;

@@ -340,6 +340,13 @@ public:
   void SetAgentLookOffset(float yaw_deg, float pitch_deg, float roll_deg);
   std::array<float, 3> GetAgentLookOffset() const;
 
+  // The game camera's pitch from VR::CameraPitch's source (a VR patch that lets the game tilt its
+  // camera), read when a frame starts drawing: the eye rigs remove it, so the world
+  // stays where the head looks, while the virtual screen and the Wii pointer, which live in game
+  // view space, turn with the game camera. Radians, + up; 0 without a source. Video thread.
+  void LatchGameCameraPitch();
+  float GetGameCameraPitch() const;
+
   // Agent server: a head or a hand that replaces the tracked one, to test without wearing the
   // headset. The head replaces the located views, so the game is rendered from it, the frame is
   // submitted with it (in the headset the view stays where the agent looks) and VR patches read
@@ -685,9 +692,11 @@ private:
   void ResetMenuGate();
   // Core of GetControllerAnchorViewPose without the per-frame cache: maps an aim pose
   // (reference space) into game view space. Frame/video-thread only.
+  // `remove_camera_pitch` false: relative to the game camera's level frame (no
+  // LatchGameCameraPitch).
   bool MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim, float units_per_meter,
-                            std::array<float, 3>* out_position,
-                            std::array<float, 9>* out_rotation) const;
+                            std::array<float, 3>* out_position, std::array<float, 9>* out_rotation,
+                            bool remove_camera_pitch = true) const;
   // Computes the intersection of the aim ray with the virtual screen (flat panel quad in
   // flat-screen mode, ortho virtual screen otherwise), using the same transform chain the
   // renderer uses to place that screen.
@@ -696,7 +705,8 @@ private:
   // The aim pose relative to the game camera in meters (OpenXRControllerState::view_pose), from
   // MapAimPoseToGameView. Invalid in flat-screen mode.
   void ComputeViewPose(const Common::VR::OpenXRPoseState& aim,
-                       Common::VR::OpenXRPoseState* out_pose) const;
+                       Common::VR::OpenXRPoseState* out_pose,
+                       bool remove_camera_pitch = true) const;
   // XrTime of "now" via the platform time-conversion extension, 0 when unavailable.
   XrTime GetNowTime();
   // Input wants measured poses — locating at the predicted display time extrapolates fast
@@ -1009,6 +1019,8 @@ private:
   std::atomic<float> m_agent_look_yaw_deg{0.0f};
   std::atomic<float> m_agent_look_pitch_deg{0.0f};
   std::atomic<float> m_agent_look_roll_deg{0.0f};
+  // LatchGameCameraPitch: read on the video thread, used on the input thread too.
+  std::atomic<float> m_game_camera_pitch{0.0f};
 
   // SetAgentPose: the head, then the left and right hands.
   void ApplyAgentHeadPose();

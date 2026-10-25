@@ -872,6 +872,16 @@ u64 PatchScript::GetFlagsGeneration() const
   return m_context->flags_generation;
 }
 
+std::optional<u32> PatchScript::GetCameraPitchSource() const
+{
+  return m_context->camera_pitch_source;
+}
+
+bool PatchScript::KeepsPointerOnScreen() const
+{
+  return m_context->keep_pointer_on_screen;
+}
+
 size_t PatchScript::GetMemoryUsed() const
 {
   return m_context->memory_used;

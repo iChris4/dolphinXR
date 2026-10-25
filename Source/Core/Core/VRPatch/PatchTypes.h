@@ -122,6 +122,7 @@ struct HandInput
   PoseInput pointer;
   // The aim pose relative to the game camera (meters, +X right, +Y up, -Z forward of the camera).
   PoseInput view;
+  PoseInput level_view;
   bool linear_velocity_valid = false;
   bool angular_velocity_valid = false;
   std::array<float, 3> linear_velocity{};

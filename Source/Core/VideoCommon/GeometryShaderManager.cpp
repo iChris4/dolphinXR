@@ -680,6 +680,9 @@ void GeometryShaderManager::RefreshVREyeRowCache()
   m_vr_eye_rows_generation = generation;
   m_vr_eye_rows_freelook = freelook;
   m_vr_pose_needs_refresh = false;
+  // The first draw of a frame (under the head-pose lock): the game camera has its pitch for
+  // this frame, which the new rows remove.
+  VR::g_openxr->LatchGameCameraPitch();
 }
 
 const GeometryShaderManager::VREyeRows& GeometryShaderManager::GetVREyeRows(float units_per_meter)

@@ -661,6 +661,44 @@ TEST(VRPatch, RaisesOverrideFlags)
   EXPECT_NE(script.Error().find("flag name"), std::string::npos) << script.Error();
 }
 
+// A patch names where the game keeps its camera pitch's sine; nil stops it.
+TEST(VRPatch, NamesTheCameraPitchSource)
+{
+  Harness h;
+  PatchScript script("pitch");
+  ASSERT_TRUE(h.Load(script, R"(
+    patch = {title = "P", settings = {{name = "on", type = "bool", default = true}}}
+    function on_frame()
+      vr.set_camera_pitch_source(settings.on and 0x80B8B8D0 or nil)
+    end
+    function on_load() vr.set_camera_pitch_source(0x80B8B8D1) end
+  )")) << script.Error();
+  EXPECT_FALSE(script.GetCameraPitchSource());
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(script.GetCameraPitchSource(), 0x80B8B8D0u);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("on"), 0));
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_FALSE(script.GetCameraPitchSource());
+  // Unaligned.
+  EXPECT_FALSE(script.Call(Hook::OnLoad, h.env));
+}
+
+TEST(VRPatch, KeepsThePointerOnScreen)
+{
+  Harness h;
+  PatchScript script("keep");
+  ASSERT_TRUE(h.Load(script, R"(
+    patch = {title = "K", settings = {{name = "on", type = "bool", default = true}}}
+    function on_frame() vr.keep_pointer_on_screen(settings.on) end
+  )")) << script.Error();
+  EXPECT_FALSE(script.KeepsPointerOnScreen());
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_TRUE(script.KeepsPointerOnScreen());
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("on"), 0));
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_FALSE(script.KeepsPointerOnScreen());
+}
+
 TEST(VRPatch, ValidatesIds)
 {
   EXPECT_TRUE(IsValidPatchId("arm-cannon"));

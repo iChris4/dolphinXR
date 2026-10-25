@@ -67,6 +67,12 @@ struct OpenXRControllerState
   // camera): the same chain the Controller Anchor and the eyes use (recenter, camera height and
   // forward, Camera Anchor). Invalid in flat-screen mode, where there is no game view to match.
   OpenXRPoseState view_pose;
+  // The same without the game camera's pitch that the VR view removes (a VR patch's camera pitch
+  // source): relative to the camera's level frame. Equal to view_pose without a source.
+  OpenXRPoseState level_view_pose;
+  // That pitch (radians, + up), 0 without a source: the virtual screen and the pointer are turned
+  // up by it about the reference space's X axis.
+  float screen_pitch = 0.0f;
 };
 
 // In-game VR menu state, decided on the input thread from the raw controller state.
@@ -150,6 +156,8 @@ public:
       controller.thumbstick_y = 0.0f;
       controller.aim_pose = frozen.aim_pose;
       controller.view_pose = frozen.view_pose;
+      controller.level_view_pose = frozen.level_view_pose;
+      controller.screen_pitch = frozen.screen_pitch;
       controller.pointer_pose = frozen.pointer_pose;
       controller.grip_pose = frozen.grip_pose;
       controller.grip_velocity = {};

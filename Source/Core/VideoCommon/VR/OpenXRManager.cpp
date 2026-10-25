@@ -30,6 +30,7 @@
 #endif
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -46,11 +47,15 @@
 #include "Common/Config/Config.h"
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
+#include "Common/Swap.h"
 #include "Common/Thread.h"
 #include "Common/Timer.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "Core/Config/GraphicsSettings.h"
+#include "Core/HW/Memmap.h"
+#include "Core/System.h"
 #include "VideoCommon/OnScreenDisplay.h"
+#include "VideoCommon/VR/CameraPitch.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace VR
@@ -2789,6 +2794,11 @@ void OpenXRManager::UpdateInputActions()
     // For VR game patches: the display-time aim seen from the game camera, like the Controller
     // Anchor (a patch writes game memory that is rendered at about that time).
     ComputeViewPose(controller.aim_pose, &controller.view_pose);
+    controller.screen_pitch = m_game_camera_pitch.load(std::memory_order_relaxed);
+    if (controller.screen_pitch != 0.0f)
+      ComputeViewPose(controller.aim_pose, &controller.level_view_pose, false);
+    else
+      controller.level_view_pose = controller.view_pose;
 
     // Absolute pointing target for the emulated Wii Remote IR: where the aim ray meets
     // the virtual screen the renderer is actually displaying. Uses a dedicated measured
@@ -4056,9 +4066,9 @@ bool OpenXRManager::GetControllerAnchorViewPose(int hand, float units_per_meter,
 }
 
 bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
-                                         float units_per_meter,
-                                         std::array<float, 3>* out_position,
-                                         std::array<float, 9>* out_rotation) const
+                                         float units_per_meter, std::array<float, 3>* out_position,
+                                         std::array<float, 9>* out_rotation,
+                                         bool remove_camera_pitch) const
 {
   if (!aim.valid || !out_position)
     return false;
@@ -4098,6 +4108,16 @@ bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
     py = A[3] * rx + A[4] * ry + A[5] * rz;
     pz = A[6] * rx + A[7] * ry + A[8] * rz;
   }
+  // The game camera's pitch, as in ComputeEyeRigs.
+  const float camera_pitch =
+      remove_camera_pitch ? m_game_camera_pitch.load(std::memory_order_relaxed) : 0.0f;
+  const float pitch_cos = std::cos(camera_pitch), pitch_sin = std::sin(camera_pitch);
+  if (camera_pitch != 0.0f)
+  {
+    const float ry = py, rz = pz;
+    py = pitch_cos * ry + pitch_sin * rz;
+    pz = -pitch_sin * ry + pitch_cos * rz;
+  }
   px += m_camera_anchor_position[0];
   py += m_camera_anchor_position[1];
   pz += m_camera_anchor_position[2];
@@ -4127,6 +4147,15 @@ bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
       }
     }
   }
+  if (camera_pitch != 0.0f)
+  {
+    for (int col = 0; col < 3; ++col)
+    {
+      const float r1 = rot[3 + col], r2 = rot[6 + col];
+      rot[3 + col] = pitch_cos * r1 + pitch_sin * r2;
+      rot[6 + col] = -pitch_sin * r1 + pitch_cos * r2;
+    }
+  }
 
   *out_position = {px, py, pz};
   if (out_rotation)
@@ -4135,7 +4164,8 @@ bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
 }
 
 void OpenXRManager::ComputeViewPose(const Common::VR::OpenXRPoseState& aim,
-                                    Common::VR::OpenXRPoseState* out_pose) const
+                                    Common::VR::OpenXRPoseState* out_pose,
+                                    bool remove_camera_pitch) const
 {
   *out_pose = {};
   if (!aim.valid || g_ActiveConfig.vr_flat_screen)
@@ -4143,7 +4173,7 @@ void OpenXRManager::ComputeViewPose(const Common::VR::OpenXRPoseState& aim,
   const float upm = std::max(GetEffectiveUnitsPerMeter(), 0.0001f);
   std::array<float, 3> position{};
   std::array<float, 9> m{};
-  if (!MapAimPoseToGameView(aim, upm, &position, &m))
+  if (!MapAimPoseToGameView(aim, upm, &position, &m, remove_camera_pitch))
     return;
 
   // Rotation matrix (columns = controller axes in view space) to a quaternion.
@@ -4187,6 +4217,38 @@ void OpenXRManager::ComputeViewPose(const Common::VR::OpenXRPoseState& aim,
   out_pose->valid = true;
   out_pose->position = {position[0] / upm, position[1] / upm, position[2] / upm};
   out_pose->orientation = {x / length, y / length, z / length, w / length};
+}
+
+void OpenXRManager::LatchGameCameraPitch()
+{
+  float pitch = 0.0f;
+  const std::optional<u32> address = CameraPitch::GetSource();
+  if (address && !g_ActiveConfig.vr_flat_screen && (*address & 3) == 0)
+  {
+    // Checked first: the memory manager raises an alert for an address outside the RAM.
+    const Memory::MemoryManager& memory = Core::System::GetInstance().GetMemory();
+    const u32 physical = *address & 0x3FFFFFFF;
+    const bool in_mem1 = physical + 4 <= memory.GetRamSizeReal();
+    const bool in_mem2 = memory.GetExRamSizeReal() != 0 && (physical >> 28) == 1 &&
+                         (physical & 0x0FFFFFFF) + 4 <= memory.GetExRamSizeReal();
+    if (in_mem1 || in_mem2)
+    {
+      if (const u8* bytes = memory.GetPointerForRange(*address, 4))
+      {
+        u32 word;
+        std::memcpy(&word, bytes, sizeof(word));
+        const float sine = std::bit_cast<float>(Common::swap32(word));
+        if (std::isfinite(sine) && std::abs(sine) <= 1.0f)
+          pitch = std::asin(sine);
+      }
+    }
+  }
+  m_game_camera_pitch.store(pitch, std::memory_order_relaxed);
+}
+
+float OpenXRManager::GetGameCameraPitch() const
+{
+  return m_game_camera_pitch.load(std::memory_order_relaxed);
 }
 
 void OpenXRManager::ComputeVirtualScreenHit(const Common::VR::OpenXRPoseState& aim,
@@ -4292,6 +4354,8 @@ std::array<OpenXRManager::EyeRig, 2> OpenXRManager::ComputeEyeRigs(float units_p
           0.0f;
 
   const std::array<XREyeView, 2> eye_views = GetTrackingAdjustedEyeViews();
+  const float camera_pitch = m_game_camera_pitch.load(std::memory_order_relaxed);
+  const float pitch_cos = std::cos(camera_pitch), pitch_sin = std::sin(camera_pitch);
 
   // Agent look offset (SetAgentLookOffset): L = Ry(-yaw) * Rx(pitch) * Rz(roll), applied like a
   // turn of the rig around the head: it rotates the eye axes (L*R) and the head-relative eye
@@ -4425,6 +4489,23 @@ std::array<OpenXRManager::EyeRig, 2> OpenXRManager::ComputeEyeRigs(float units_p
       ex = A[0] * rx + A[1] * ry + A[2] * rz;
       ey = A[3] * rx + A[4] * ry + A[5] * rz;
       ez = A[6] * rx + A[7] * ry + A[8] * rz;
+    }
+    // The game camera's pitch (LatchGameCameraPitch): its view space is the level one turned up
+    // by the pitch, so the rig, expressed in it, turns down by as much: C = Rx(-pitch). The
+    // world then stays where the head looks. It applies to the virtual-screen rows too
+    // (apply_game_camera false): the screen and the Wii pointer turn with the game camera.
+    if (camera_pitch != 0.0f)
+    {
+      const float t10 = m10, t11 = m11, t12 = m12;
+      m10 = pitch_cos * t10 + pitch_sin * m20;
+      m11 = pitch_cos * t11 + pitch_sin * m21;
+      m12 = pitch_cos * t12 + pitch_sin * m22;
+      m20 = -pitch_sin * t10 + pitch_cos * m20;
+      m21 = -pitch_sin * t11 + pitch_cos * m21;
+      m22 = -pitch_sin * t12 + pitch_cos * m22;
+      const float ry = ey, rz = ez;
+      ey = pitch_cos * ry + pitch_sin * rz;
+      ez = -pitch_sin * ry + pitch_cos * rz;
     }
     // Camera anchor: committed element position, already in game units and game view
     // space (see CommitCameraAnchorFrame). Zero when no anchor override is active;

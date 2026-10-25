@@ -242,6 +242,8 @@ add_library(videocommon
   VideoConfig.h
   VideoState.cpp
   VideoState.h
+  VR/CameraPitch.cpp
+  VR/CameraPitch.h
   VR/OverrideSuppression.cpp
   VR/OverrideSuppression.h
   VR/PatchFlags.cpp
