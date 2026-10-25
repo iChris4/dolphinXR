@@ -48,7 +48,7 @@ GeometryShaderUid GetGeometryShaderUid(PrimitiveType primitive_type)
   GeometryShaderUid out;
 
   geometry_shader_uid_data* const uid_data = out.GetUidData();
-  uid_data->code_version = 38;
+  uid_data->code_version = 39;
   uid_data->primitive_type = static_cast<u32>(primitive_type);
   uid_data->numTexGens = xfmem.numTexGen.numTexGens;
 
@@ -419,6 +419,13 @@ ShaderCode GenerateGeometryShaderCode(APIType api_type, const ShaderHostConfig& 
       // Uses unrotated (raw) per-eye projection — no head rotation baked in.
       out.Write("\telse if (" I_STEREOPARAMS ".w < -1.5f)\n");
       out.Write("\t{{\n");
+      // The game's clip W. The final position is scaled by it: the same point after the divide,
+      // but a vertex behind the game's camera (W < 0) gets a negative W and the triangle is clipped
+      // there as on the console, instead of the vertex folding back in front of the view (Metroid
+      // Prime 3's minimap and hypermode visor streaked across the view). Textures also follow the
+      // game's perspective. Orthographic draws have W = 1: unchanged.
+      out.Write("\t\tfloat vr_game_w = (abs(f.pos.w) > 1.0e-5) ? f.pos.w : "
+                "((f.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
       if (api_type == APIType::Vulkan)
       {
         // Vulkan only guards the divide (w ~ 0 gives NaN/Inf and vanishing geometry);
@@ -455,6 +462,7 @@ ShaderCode GenerateGeometryShaderCode(APIType api_type, const ShaderHostConfig& 
       // Park the geometry mid-range; the real depth comes from the PS export (Exact Screen
       // Depth), with the tiny game-z term left as the legacy fallback ordering.
       out.Write("\t\tf.pos.z = f.pos.w * (0.5 + ndc_z_clamped * 0.0001);\n");
+      out.Write("\t\tf.pos *= vr_game_w;\n");
       if (!host_config.fast_depth_calc)
         out.Write("\t\tf.clipPos = f.pos;\n");
       if (!host_config.backend_clip_control)
@@ -481,6 +489,9 @@ ShaderCode GenerateGeometryShaderCode(APIType api_type, const ShaderHostConfig& 
       // then re-project through the per-eye HMD projection (world-fixed).
       out.Write("\telse if (" I_STEREOPARAMS ".w < -0.5f)\n");
       out.Write("\t{{\n");
+      // Scaled by the game's clip W like the head-locked branch above.
+      out.Write("\t\tfloat vr_game_w = (abs(f.pos.w) > 1.0e-5) ? f.pos.w : "
+                "((f.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
       if (api_type == APIType::Vulkan)
       {
         // Vulkan only guards the divide (w ~ 0 gives NaN/Inf and vanishing geometry);
@@ -525,6 +536,9 @@ ShaderCode GenerateGeometryShaderCode(APIType api_type, const ShaderHostConfig& 
       // (cvr_depth.y = Element Depth). With Exact Screen Depth on (the default) the PS overwrites
       // this with the game's original depth value; this remains as the legacy fallback.
       out.Write("\t\tf.pos.z = f.pos.w * (0.5 + ndc_z_clamped * " I_VR_DEPTH ".y);\n");
+      out.Write("\t\tf.pos *= vr_game_w;\n");
+      if (!host_config.fast_depth_calc)
+        out.Write("\t\tf.clipPos *= vr_game_w;\n");
       if (!host_config.backend_clip_control)
         out.Write("\t\tf.pos.z = f.pos.z * 2.0 - f.pos.w;\n");
       out.Write("\t\tf.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");

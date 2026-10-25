@@ -14,7 +14,7 @@
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
 
-static constexpr u32 VERTEX_SHADER_CODE_VERSION = 22;
+static constexpr u32 VERTEX_SHADER_CODE_VERSION = 23;
 
 VertexShaderUid GetVertexShaderUid()
 {
@@ -527,6 +527,10 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
 
   // Head-locked VR: 2D content on a virtual screen that follows head movements.
   out.Write("\telse if (" I_STEREOPARAMS ".w < -1.5f)\n\t{{\n");
+  // The game's clip W, which scales the final position (see GeometryShaderGen): a vertex behind
+  // the game's camera is clipped instead of folding back in front of the view.
+  out.Write("\t\tfloat vr_game_w = (abs(o.pos.w) > 1.0e-5) ? o.pos.w : "
+            "((o.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
   if (api_type == APIType::Vulkan)
   {
     // Vulkan only guards the divide (w ~ 0 gives NaN/Inf and vanishing geometry);
@@ -562,6 +566,7 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
   // Park the geometry mid-range; the real depth comes from the PS export (Exact Screen Depth),
   // with the tiny game-z term left as the legacy fallback ordering.
   out.Write("\t\to.pos.z = o.pos.w * (0.5 + ndc_z_clamped * 0.0001);\n");
+  out.Write("\t\to.pos *= vr_game_w;\n");
   // Exact game depth for the PS depth export: remap the console-convention NDC (-1..0) to the
   // backend 0..1 convention, mirroring the trailing capture this branch suppresses.
   out.Write("\t\to.vr_depth = clamp(" I_PIXELCENTERCORRECTION ".w - ndc_z_clamped * "
@@ -575,6 +580,8 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
 
   // Orthographic VR: place 2D content (HUD/menus/FMV) on a virtual screen plane.
   out.Write("\telse if (" I_STEREOPARAMS ".w < -0.5f)\n\t{{\n");
+  out.Write("\t\tfloat vr_game_w = (abs(o.pos.w) > 1.0e-5) ? o.pos.w : "
+            "((o.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
   if (api_type == APIType::Vulkan)
   {
     // Vulkan only guards the divide (w ~ 0 gives NaN/Inf and vanishing geometry);
@@ -617,6 +624,10 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
   // (cvr_depth.y = Element Depth). With Exact Screen Depth on (the default) the PS overwrites
   // this with the game's original depth value; this remains as the legacy fallback.
   out.Write("\t\to.pos.z = o.pos.w * (0.5 + ndc_z_clamped * " I_VR_DEPTH ".y);\n");
+  // Scaled by the game's clip W like the head-locked branch above; the pane clip distances too,
+  // so they stay linear in the new position.
+  out.Write("\t\to.pos *= vr_game_w;\n");
+  out.Write("\t\tvr_pane_clip_dist *= vr_game_w;\n");
   // Exact game depth for the PS depth export: remap the console-convention NDC (-1..0) to the
   // backend 0..1 convention, mirroring the trailing capture this branch suppresses.
   out.Write("\t\to.vr_depth = clamp(" I_PIXELCENTERCORRECTION ".w - ndc_z_clamped * "
