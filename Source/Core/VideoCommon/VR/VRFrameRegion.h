@@ -129,6 +129,29 @@ struct VREyeTangents
 std::array<float, 2> MapGameNDCToEyeNDC(const std::array<float, 6>& game_projection,
                                         const VREyeTangents& eye, float x, float y);
 
+// An eye's view of the game's view space as rendered (OpenXRManager::GetEyeProjectionRows: head
+// rotation and eye position included): clip x = dot(x, viewPos), clip y = dot(y, viewPos), eye
+// space z = dot(z, viewPos), with the eye looking down -z.
+struct VREyeViewRows
+{
+  std::array<float, 4> x{};
+  std::array<float, 4> y{};
+  std::array<float, 4> z{};
+};
+
+// Where a point of the game's screen lands in an eye's image as rendered: through the game's
+// perspective projection to a direction from the game camera, then through the eye's rows (only
+// their rotation: a direction is a point at infinity). NDC, Y up; NaN when the direction is
+// behind the eye.
+std::array<float, 2> MapGameNDCToEyeViewNDC(const std::array<float, 6>& game_projection,
+                                            const VREyeViewRows& eye, float x, float y);
+
+// Whether an EFB copy rectangle looks like the block a game reads back under its reticle: centred
+// on the frame and at most half its size (Metroid Prime 2), or at most a quarter of it and clear
+// of the frame's edges (Metroid Prime 3's reticle moves with the pointer). Render-to-texture and
+// downscaled effect buffers sit at the frame's edges.
+bool IsVRReticleCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFrameRegion& frame);
+
 // An EFB copy rectangle (native EFB pixels) moved by MapGameNDCToEyeNDC: its centre goes where
 // the eye's image shows the direction the game's screen shows there. It keeps its size and stays
 // inside the frame; unchanged when the frame or the projections are unusable.
@@ -136,6 +159,12 @@ MathUtil::Rectangle<int> MapVRGazeCopyRectangle(const MathUtil::Rectangle<int>& 
                                                 const VRFrameRegion& frame,
                                                 const std::array<float, 6>& game_projection,
                                                 const VREyeTangents& eye);
+
+// The same, moved by MapGameNDCToEyeViewNDC: through the eye's view, head turn included.
+MathUtil::Rectangle<int> MapVRViewCopyRectangle(const MathUtil::Rectangle<int>& rect,
+                                                const VRFrameRegion& frame,
+                                                const std::array<float, 6>& game_projection,
+                                                const VREyeViewRows& eye);
 
 const char* GetVRViewportClassName(VRViewportClass vclass);
 }  // namespace VR

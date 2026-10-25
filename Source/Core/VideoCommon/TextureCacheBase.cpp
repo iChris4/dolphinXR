@@ -62,6 +62,7 @@
 #include "VideoCommon/VertexManagerBase.h"
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/XFMemory.h"
 #ifdef ENABLE_VR
 #include "VideoCommon/VR/AgentCapture.h"
 #include "VideoCommon/VR/OpenXRManager.h"
@@ -129,18 +130,21 @@ static bool IsMetroidPrime3Wii()
 }
 
 #ifdef ENABLE_VR
-// GazeRamCopies: some games find the object under their reticle by copying a small block at the
-// centre of the EFB to RAM and reading it back (Metroid Prime 2 GC's scan visor: colour and
-// depth). In VR the EFB holds the left eye's wider and off-centre view, so its centre is not where
-// the user looks: objects were scanned only when the head pointed to their right. Read the block
-// where the eye's image shows the direction straight ahead of the head, where a head-locked HUD
-// shows the reticle.
+// GazeRamCopies: some games find the object under their reticle by copying a small block of the
+// EFB to RAM and reading it back (the scan visors of Metroid Prime 2 GC, a block at the centre,
+// and Metroid Prime 3, a block under the pointer: colour and depth). In VR the EFB holds the left
+// eye's view, wider than the game's, off-centre and turned with the head, so the block showed
+// something else: objects were scanned only when the head pointed to their right. Read the block
+// where the eye's image shows that point of the game's screen: as if the head looked along the
+// game camera when the reticle is on a head-locked HUD (Prime 2), through the eye's real view when
+// it is drawn in the 3D scene (Prime 3).
 static std::optional<MathUtil::Rectangle<int>>
 GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
 {
+  const int mode = g_ActiveConfig.vr_gaze_ram_copies;
   if (resolved_data.is_xfb || g_ActiveConfig.stereo_mode != StereoMode::OpenXR ||
-      g_ActiveConfig.vr_flat_screen || !g_ActiveConfig.vr_gaze_ram_copies || !VR::g_openxr ||
-      !VR::g_openxr->IsSessionRunning())
+      g_ActiveConfig.vr_flat_screen || mode == Config::GFX_VR_GAZE_RAM_COPIES_OFF ||
+      !VR::g_openxr || !VR::g_openxr->IsSessionRunning())
   {
     return std::nullopt;
   }
@@ -149,22 +153,35 @@ GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
   if (!projection || !frame.valid)
     return std::nullopt;
 
-  // Only blocks centred on the screen and smaller than half of it: the reticle's.
+  // Only the reticle's block, copied from the main scene (render-to-texture and downscaling
+  // passes draw with their own viewports).
   const MathUtil::Rectangle<int>& rect = resolved_data.source_data.src_rect;
-  if (std::abs(rect.left + rect.right - 2 * frame.left - frame.width) > 4 ||
-      std::abs(rect.top + rect.bottom - 2 * frame.top - frame.height) > 4 ||
-      rect.GetWidth() * 2 > frame.width || rect.GetHeight() * 2 > frame.height)
+  if (!VR::IsVRReticleCopyRectangle(rect, frame) ||
+      VR::ClassifyVRViewport(xfmem.viewport, VR::GetVRScissor(), bpmem.scissorOffset.x << 1,
+                             bpmem.scissorOffset.y << 1) != VR::VRViewportClass::MainScene)
   {
     return std::nullopt;
   }
 
   // The RAM copy reads the EFB's first layer: the left eye.
-  const XrFovf& fov = VR::g_openxr->GetRenderedEyeViews()[0].fov;
-  const VR::VREyeTangents eye{.left = std::tan(fov.angleLeft),
-                              .right = std::tan(fov.angleRight),
-                              .up = std::tan(fov.angleUp),
-                              .down = std::tan(fov.angleDown)};
-  const MathUtil::Rectangle<int> moved = VR::MapVRGazeCopyRectangle(rect, frame, *projection, eye);
+  MathUtil::Rectangle<int> moved;
+  if (mode == Config::GFX_VR_GAZE_RAM_COPIES_VIEW)
+  {
+    std::array<std::array<float, 4>, 4> rows;
+    std::array<std::array<float, 4>, 2> z_rows;
+    VR::g_openxr->GetEyeProjectionRows(VR::g_openxr->GetEffectiveUnitsPerMeter(), rows, z_rows);
+    moved = VR::MapVRViewCopyRectangle(rect, frame, *projection,
+                                       {.x = rows[0], .y = rows[1], .z = z_rows[0]});
+  }
+  else
+  {
+    const XrFovf& fov = VR::g_openxr->GetRenderedEyeViews()[0].fov;
+    const VR::VREyeTangents eye{.left = std::tan(fov.angleLeft),
+                                .right = std::tan(fov.angleRight),
+                                .up = std::tan(fov.angleUp),
+                                .down = std::tan(fov.angleDown)};
+    moved = VR::MapVRGazeCopyRectangle(rect, frame, *projection, eye);
+  }
   if (moved == rect)
     return std::nullopt;
   return moved;

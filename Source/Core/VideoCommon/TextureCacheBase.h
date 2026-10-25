@@ -123,8 +123,8 @@ struct FramebufferCopyRawData
   // DolphinXR: source region for the VRAM copy when it differs from src_rect (the VR presentation
   // region of an XFB copy, for the cinematic-bar fix).
   std::optional<MathUtil::Rectangle<int>> vr_vram_src_rect;
-  // DolphinXR: source region for the RAM copy when it differs from src_rect (Metroid Prime 2's
-  // scan visor blocks, read where the head looks).
+  // DolphinXR: source region for the RAM copy when it differs from src_rect (the Metroid Prime
+  // scan visor blocks, read where the left eye shows them: GazeRamCopies).
   std::optional<MathUtil::Rectangle<int>> vr_ram_src_rect;
 };
 

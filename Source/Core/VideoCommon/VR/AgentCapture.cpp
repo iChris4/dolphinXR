@@ -674,13 +674,13 @@ std::string FormatCopyRow(const CopyRecord& copy)
   const char* destination = copy.to_texture && copy.to_ram ? "texture and RAM" :
                             copy.to_texture                ? "texture only" :
                                                              "RAM only";
-  return fmt::format("f{} {}: EFB {}{} -> texture {} ({}x{} {:n}, {} at {:08x}){}", copy.frame,
-                     after, copy.depth ? "depth " : "", source,
-                     copy.texture != 0 ? fmt::format("{:016x}", copy.texture) : std::string("-"),
-                     copy.width, copy.height, static_cast<TextureFormat>(copy.format), destination,
-                     copy.address,
-                     copy.ram_moved ? fmt::format("; RAM copy read at {},{}, where the head looks",
-                                                  copy.ram_left, copy.ram_top) :
-                                      std::string());
+  return fmt::format(
+      "f{} {}: EFB {}{} -> texture {} ({}x{} {:n}, {} at {:08x}){}", copy.frame, after,
+      copy.depth ? "depth " : "", source,
+      copy.texture != 0 ? fmt::format("{:016x}", copy.texture) : std::string("-"), copy.width,
+      copy.height, static_cast<TextureFormat>(copy.format), destination, copy.address,
+      copy.ram_moved ? fmt::format("; RAM copy read at {},{}, where the left eye shows it",
+                                   copy.ram_left, copy.ram_top) :
+                       std::string());
 }
 }  // namespace VR::AgentCapture

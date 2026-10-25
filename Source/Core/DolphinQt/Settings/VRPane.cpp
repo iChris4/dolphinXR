@@ -488,8 +488,14 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
             update_layered_palette_conversion_path(checked);
           });
   update_layered_palette_conversion_path(m_layered_palette_conversion_path->isChecked());
-  m_gaze_ram_copies =
-      new ConfigBool(tr("Screen Read-Backs Follow the Gaze"), Config::GFX_VR_GAZE_RAM_COPIES);
+  m_gaze_ram_copies = new ConfigChoiceMap<int>(
+      {{tr("Off"), Config::GFX_VR_GAZE_RAM_COPIES_OFF},
+       {tr("Reticle on a Head-Locked HUD"), Config::GFX_VR_GAZE_RAM_COPIES_HEAD},
+       {tr("Reticle in the 3D Scene"), Config::GFX_VR_GAZE_RAM_COPIES_VIEW}},
+      Config::GFX_VR_GAZE_RAM_COPIES);
+  auto* gaze_ram_copies_layout = new QHBoxLayout;
+  gaze_ram_copies_layout->addWidget(new QLabel(tr("Screen Read-Backs:")));
+  gaze_ram_copies_layout->addWidget(m_gaze_ram_copies, 1);
 
   hacks_group_layout->addWidget(m_use_vulkan_multiview);
   hacks_group_layout->addWidget(m_dont_clear_screen);
@@ -505,7 +511,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hacks_group_layout->addWidget(m_detect_skybox);
   hacks_group_layout->addWidget(m_skip_background_fill);
   hacks_group_layout->addWidget(m_layered_palette_conversion_path);
-  hacks_group_layout->addWidget(m_gaze_ram_copies);
+  hacks_group_layout->addLayout(gaze_ram_copies_layout);
   hack_layout->addWidget(hacks_group);
   hack_layout->addWidget(framerate_group);
 
@@ -819,12 +825,15 @@ void VRPane::AddDescriptions()
       "copies. It does not change normal game shaders, X-Ray handling, or non-Metroid games."
       "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
   static constexpr char TR_GAZE_RAM_COPIES_DESCRIPTION[] = QT_TR_NOOP(
-      "Some games find what is under their reticle by copying a small block at the centre of the "
-      "screen to memory and reading it back, such as Metroid Prime 2's scan visor. In VR the "
-      "screen they copy is the left eye's wider view, whose centre is not where you look."
-      "<br><br>This reads such centred blocks where the headset looks straight ahead instead, "
-      "where a head-locked HUD shows the reticle. Turn it on per game."
-      "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
+      "Some games find what is under their reticle by copying a small block of the screen to "
+      "memory and reading it back, such as the scan visors of Metroid Prime 2 and 3. In VR the "
+      "screen they copy is the left eye's view, wider than the game's and turned with your head, "
+      "so the block shows something else."
+      "<br><br>This reads the block where the left eye's image shows that point of the game's "
+      "screen. <b>Reticle on a Head-Locked HUD</b> assumes the reticle stays in front of your "
+      "head (Metroid Prime 2). <b>Reticle in the 3D Scene</b> follows the reticle where it is "
+      "drawn in the game's world, head turn included (Metroid Prime 3). Set it per game."
+      "<br><br><dolphin_emphasis>If unsure, select Off.</dolphin_emphasis>");
   static constexpr char TR_VR_GAMMA_DESCRIPTION[] = QT_TR_NOOP(
       "Adjusts gamma correction for VR eye output."
       "<br><br>1.0 = no correction (default). 2.2 = standard sRGB gamma. "

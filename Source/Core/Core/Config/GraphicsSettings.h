@@ -292,10 +292,18 @@ extern const Info<bool> GFX_VR_DETECT_SKYBOX;
 extern const Info<bool> GFX_VR_SKIP_BACKGROUND_FILL;
 extern const Info<bool> GFX_VR_METROID_THERMAL_VISOR_FIX;
 extern const Info<bool> GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX;
-// EFB copies to RAM of small blocks centred on the screen are read where the head looks, not at
-// the left eye's image centre: games that find what is under their reticle by reading the screen
-// back (Metroid Prime 2's scan visor). Per game.
-extern const Info<bool> GFX_VR_GAZE_RAM_COPIES;
+// EFB copies to RAM of small blocks of the screen, which some games read back to find what is
+// under their reticle (Metroid Prime 2's and 3's scan visors). In VR the screen they copy is the
+// left eye's view, wider than the game's and turned with the head, so the block is read where
+// that eye's image shows that point of the game's screen. Per game:
+//   GFX_VR_GAZE_RAM_COPIES_HEAD: as if the head looked along the game camera, for a reticle on a
+//     head-locked HUD (Metroid Prime 2).
+//   GFX_VR_GAZE_RAM_COPIES_VIEW: through the eye's view, head turn included, for a reticle drawn
+//     in the 3D scene (Metroid Prime 3).
+extern const Info<int> GFX_VR_GAZE_RAM_COPIES;
+static constexpr int GFX_VR_GAZE_RAM_COPIES_OFF = 0;
+static constexpr int GFX_VR_GAZE_RAM_COPIES_HEAD = 1;
+static constexpr int GFX_VR_GAZE_RAM_COPIES_VIEW = 2;
 extern const Info<bool> GFX_VR_PASSTHROUGH;
 // Passthrough around the flat screen. On by default; the in-game VR menu changes it for the
 // session only, and turning the flat screen off from the menu resets it.

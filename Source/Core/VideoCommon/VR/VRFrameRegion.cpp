@@ -416,6 +416,61 @@ std::array<float, 2> MapGameNDCToEyeNDC(const std::array<float, 6>& game_project
           2.0f * (tan_y - eye.down) / (eye.up - eye.down) - 1.0f};
 }
 
+std::array<float, 2> MapGameNDCToEyeViewNDC(const std::array<float, 6>& game_projection,
+                                            const VREyeViewRows& eye, float x, float y)
+{
+  // The direction (tan_x, tan_y, -1) in the game's view space; see MapGameNDCToEyeNDC.
+  const float tan_x = (x + game_projection[1]) / game_projection[0];
+  const float tan_y = (y + game_projection[3]) / game_projection[2];
+  const auto dot = [tan_x, tan_y](const std::array<float, 4>& row) {
+    return row[0] * tan_x + row[1] * tan_y - row[2];
+  };
+  const float w = -dot(eye.z);
+  if (!(w > 0.0f))
+    return {NAN, NAN};
+  return {dot(eye.x) / w, dot(eye.y) / w};
+}
+
+bool IsVRReticleCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFrameRegion& frame)
+{
+  if (!frame.valid)
+    return false;
+  const int width = rect.GetWidth();
+  const int height = rect.GetHeight();
+  const bool centred = std::abs(rect.left + rect.right - 2 * frame.left - frame.width) <= 4 &&
+                       std::abs(rect.top + rect.bottom - 2 * frame.top - frame.height) <= 4 &&
+                       width * 2 <= frame.width && height * 2 <= frame.height;
+  const bool small_inside = width * 4 <= frame.width && height * 4 <= frame.height &&
+                            rect.left > frame.left && rect.top > frame.top &&
+                            rect.right < frame.left + frame.width &&
+                            rect.bottom < frame.top + frame.height;
+  return centred || small_inside;
+}
+
+namespace
+{
+// Moves the rectangle so that its centre goes where map(game NDC) says, in the frame's pixels.
+template <typename Map>
+MathUtil::Rectangle<int> MoveCopyRectangle(const MathUtil::Rectangle<int>& rect,
+                                           const VRFrameRegion& frame, const Map& map)
+{
+  const float center_x = (rect.left + rect.right) * 0.5f;
+  const float center_y = (rect.top + rect.bottom) * 0.5f;
+  const auto [eye_x, eye_y] = map(2.0f * (center_x - frame.left) / frame.width - 1.0f,
+                                  1.0f - 2.0f * (center_y - frame.top) / frame.height);
+  if (!std::isfinite(eye_x) || !std::isfinite(eye_y))
+    return rect;
+
+  const int dx = std::clamp(
+      static_cast<int>(std::lround(frame.left + (eye_x + 1.0f) * 0.5f * frame.width - center_x)),
+      frame.left - rect.left, frame.left + frame.width - rect.right);
+  const int dy = std::clamp(
+      static_cast<int>(std::lround(frame.top + (1.0f - eye_y) * 0.5f * frame.height - center_y)),
+      frame.top - rect.top, frame.top + frame.height - rect.bottom);
+  return {rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy};
+}
+}  // namespace
+
 MathUtil::Rectangle<int> MapVRGazeCopyRectangle(const MathUtil::Rectangle<int>& rect,
                                                 const VRFrameRegion& frame,
                                                 const std::array<float, 6>& game_projection,
@@ -427,22 +482,24 @@ MathUtil::Rectangle<int> MapVRGazeCopyRectangle(const MathUtil::Rectangle<int>& 
   {
     return rect;
   }
+  return MoveCopyRectangle(rect, frame, [&](float x, float y) {
+    return MapGameNDCToEyeNDC(game_projection, eye, x, y);
+  });
+}
 
-  const float center_x = (rect.left + rect.right) * 0.5f;
-  const float center_y = (rect.top + rect.bottom) * 0.5f;
-  const auto [eye_x, eye_y] =
-      MapGameNDCToEyeNDC(game_projection, eye, 2.0f * (center_x - frame.left) / frame.width - 1.0f,
-                         1.0f - 2.0f * (center_y - frame.top) / frame.height);
-  if (!std::isfinite(eye_x) || !std::isfinite(eye_y))
+MathUtil::Rectangle<int> MapVRViewCopyRectangle(const MathUtil::Rectangle<int>& rect,
+                                                const VRFrameRegion& frame,
+                                                const std::array<float, 6>& game_projection,
+                                                const VREyeViewRows& eye)
+{
+  if (!frame.valid || rect.GetWidth() > frame.width || rect.GetHeight() > frame.height ||
+      game_projection[0] == 0.0f || game_projection[2] == 0.0f)
+  {
     return rect;
-
-  const int dx = std::clamp(
-      static_cast<int>(std::lround(frame.left + (eye_x + 1.0f) * 0.5f * frame.width - center_x)),
-      frame.left - rect.left, frame.left + frame.width - rect.right);
-  const int dy = std::clamp(
-      static_cast<int>(std::lround(frame.top + (1.0f - eye_y) * 0.5f * frame.height - center_y)),
-      frame.top - rect.top, frame.top + frame.height - rect.bottom);
-  return {rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy};
+  }
+  return MoveCopyRectangle(rect, frame, [&](float x, float y) {
+    return MapGameNDCToEyeViewNDC(game_projection, eye, x, y);
+  });
 }
 
 const char* GetVRViewportClassName(VRViewportClass vclass)

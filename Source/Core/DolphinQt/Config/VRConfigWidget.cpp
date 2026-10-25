@@ -12,6 +12,7 @@
 #include <QFont>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QStyle>
 #include <QTabWidget>
@@ -309,8 +310,15 @@ void VRConfigWidget::CreateWidgets()
       make_bool(tr("Skip Background Fill"), Config::GFX_VR_SKIP_BACKGROUND_FILL));
   hacks_group_layout->addWidget(
       make_bool(tr("Layered Palette Conversion Path"), Config::GFX_VR_METROID_THERMAL_VISOR_FIX));
-  hacks_group_layout->addWidget(
-      make_bool(tr("Screen Read-Backs Follow the Gaze"), Config::GFX_VR_GAZE_RAM_COPIES));
+  auto* gaze_ram_copies = mark_default(new ConfigChoiceMap<int>(
+      {{tr("Off"), Config::GFX_VR_GAZE_RAM_COPIES_OFF},
+       {tr("Reticle on a Head-Locked HUD"), Config::GFX_VR_GAZE_RAM_COPIES_HEAD},
+       {tr("Reticle in the 3D Scene"), Config::GFX_VR_GAZE_RAM_COPIES_VIEW}},
+      Config::GFX_VR_GAZE_RAM_COPIES, layer, m_global_layer.get()));
+  auto* gaze_ram_copies_layout = new QHBoxLayout;
+  gaze_ram_copies_layout->addWidget(new QLabel(tr("Screen Read-Backs:")));
+  gaze_ram_copies_layout->addWidget(gaze_ram_copies, 1);
+  hacks_group_layout->addLayout(gaze_ram_copies_layout);
 
   auto* framerate_group = new QGroupBox(tr("Framerate"));
   auto* framerate_layout = new QGridLayout(framerate_group);

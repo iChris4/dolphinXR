@@ -56,6 +56,12 @@ constexpr std::array<std::pair<VRMenuToggleButton, const char*>, 4> MENU_BUTTONS
     {VRMenuToggleButton::Disabled, "Disabled"},
 }};
 
+constexpr std::array<std::pair<int, const char*>, 3> GAZE_RAM_COPIES{{
+    {Config::GFX_VR_GAZE_RAM_COPIES_OFF, "Off"},
+    {Config::GFX_VR_GAZE_RAM_COPIES_HEAD, "Reticle on a head-locked HUD"},
+    {Config::GFX_VR_GAZE_RAM_COPIES_VIEW, "Reticle in the 3D scene"},
+}};
+
 class VRSettingsTab final : public VRMenuTab
 {
 public:
@@ -257,12 +263,13 @@ private:
       if (touched)
         touched->Add(Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX.GetLocation());
     }
-    MenuWidgets::Checkbox(
-        "Screen Read-Backs Follow the Gaze",
-        "Some games find what is under their reticle by reading back a small block at the centre "
-        "of the screen (Metroid Prime 2's scan visor). This reads it where you look straight "
-        "ahead instead of at the left eye's image centre. Turn it on per game.",
-        Config::GFX_VR_GAZE_RAM_COPIES, touched);
+    MenuWidgets::Combo<int>(
+        "Screen Read-Backs",
+        "Some games find what is under their reticle by reading back a small block of the screen "
+        "(the scan visors of Metroid Prime 2 and 3). This reads it where the left eye shows that "
+        "point: for a reticle that stays in front of your head (Prime 2) or one drawn in the "
+        "game's world (Prime 3). Set it per game.",
+        Config::GFX_VR_GAZE_RAM_COPIES, GAZE_RAM_COPIES, touched);
   }
 
   static void DrawRendering(MenuWidgets::TouchedKeys* touched)

@@ -362,3 +362,73 @@ TEST(VRFrameRegion, GazeCopyRectangleMovesToStraightAhead)
                                        AsymmetricLeftEye()),
             block);
 }
+
+namespace
+{
+// OpenXRManager::GetEyeProjectionRows for an eye at the game camera, turned left by yaw degrees.
+VR::VREyeViewRows TurnedEyeRows(const VR::VREyeTangents& eye, float yaw_degrees)
+{
+  const float c = std::cos(yaw_degrees * 3.14159265f / 180.0f);
+  const float s = std::sin(yaw_degrees * 3.14159265f / 180.0f);
+  // The eye's axes in view space, as columns: a rotation about +Y.
+  const float m[3][3] = {{c, 0.0f, s}, {0.0f, 1.0f, 0.0f}, {-s, 0.0f, c}};
+  const float p0x = 2.0f / (eye.right - eye.left);
+  const float p0z = (eye.right + eye.left) / (eye.right - eye.left);
+  const float p1y = 2.0f / (eye.up - eye.down);
+  const float p1z = (eye.up + eye.down) / (eye.up - eye.down);
+  return {.x = {m[0][0] * p0x + m[0][2] * p0z, m[1][0] * p0x + m[1][2] * p0z,
+                m[2][0] * p0x + m[2][2] * p0z, 0.0f},
+          .y = {m[0][1] * p1y + m[0][2] * p1z, m[1][1] * p1y + m[1][2] * p1z,
+                m[2][1] * p1y + m[2][2] * p1z, 0.0f},
+          .z = {m[0][2], m[1][2], m[2][2], 0.0f}};
+}
+}  // namespace
+
+TEST(VRFrameRegion, ViewMappingFollowsTheHeadTurn)
+{
+  const std::array<float, 6> game = Prime2WorldProjection();
+  const VR::VREyeTangents eye = AsymmetricLeftEye();
+
+  // Looking along the game camera, the eye's view is the tangent mapping.
+  const auto straight = VR::MapGameNDCToEyeViewNDC(game, TurnedEyeRows(eye, 0.0f), 0.5f, 0.25f);
+  const auto gaze = VR::MapGameNDCToEyeNDC(game, eye, 0.5f, 0.25f);
+  EXPECT_NEAR(straight[0], gaze[0], 1e-5f);
+  EXPECT_NEAR(straight[1], gaze[1], 1e-5f);
+
+  // With the head turned 10 degrees left, the game's screen centre is 10 degrees right of the
+  // eye's straight ahead.
+  const auto turned = VR::MapGameNDCToEyeViewNDC(game, TurnedEyeRows(eye, 10.0f), 0.0f, 0.0f);
+  EXPECT_NEAR(turned[0], 2.0f * (TanDegrees(10.0f) - eye.left) / (eye.right - eye.left) - 1.0f,
+              1e-4f);
+
+  // Behind the eye: no place in its image, and a copy rectangle stays where it is.
+  EXPECT_TRUE(std::isnan(VR::MapGameNDCToEyeViewNDC(game, TurnedEyeRows(eye, 180.0f), 0, 0)[0]));
+  const VR::VRFrameRegion frame{.left = 0, .top = 0, .width = 640, .height = 448, .valid = true};
+  const MathUtil::Rectangle<int> block{270, 204, 302, 236};
+  EXPECT_EQ(VR::MapVRViewCopyRectangle(block, frame, game, TurnedEyeRows(eye, 180.0f)), block);
+
+  // Without a head turn the view mapping moves a block like the gaze mapping.
+  EXPECT_EQ(VR::MapVRViewCopyRectangle(block, frame, game, TurnedEyeRows(eye, 0.0f)),
+            VR::MapVRGazeCopyRectangle(block, frame, game, eye));
+}
+
+// The blocks Metroid Prime 2 and 3 read back under their reticles, and the copies that must stay
+// where they are.
+TEST(VRFrameRegion, ReticleCopyRectangles)
+{
+  const VR::VRFrameRegion frame{.left = 0, .top = 0, .width = 640, .height = 448, .valid = true};
+  // Echoes: the scan block and the scan box's view, centred.
+  EXPECT_TRUE(VR::IsVRReticleCopyRectangle({304, 192, 336, 256}, frame));
+  EXPECT_TRUE(VR::IsVRReticleCopyRectangle({216, 178, 424, 270}, frame));
+  // Corruption: a block under the pointer.
+  EXPECT_TRUE(VR::IsVRReticleCopyRectangle({270, 204, 302, 236}, frame));
+  EXPECT_TRUE(VR::IsVRReticleCopyRectangle({382, 350, 414, 382}, frame));
+  // A quarter of the scene, render-to-texture passes and downscaled buffers at the edges, a
+  // centred copy bigger than half the frame.
+  EXPECT_FALSE(VR::IsVRReticleCopyRectangle({0, 0, 320, 224}, frame));
+  EXPECT_FALSE(VR::IsVRReticleCopyRectangle({0, 384, 64, 448}, frame));
+  EXPECT_FALSE(VR::IsVRReticleCopyRectangle({0, 416, 32, 448}, frame));
+  EXPECT_FALSE(VR::IsVRReticleCopyRectangle({0, 0, 160, 112}, frame));
+  EXPECT_FALSE(VR::IsVRReticleCopyRectangle({114, 86, 522, 372}, frame));
+  EXPECT_FALSE(VR::IsVRReticleCopyRectangle({270, 204, 302, 236}, VR::VRFrameRegion{}));
+}

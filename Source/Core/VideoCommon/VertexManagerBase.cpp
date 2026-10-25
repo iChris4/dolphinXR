@@ -19,6 +19,7 @@
 #include "Common/ScopeGuard.h"
 #include "Common/SmallVector.h"
 
+#include "Core/Config/GraphicsSettings.h"
 #include "Core/DolphinAnalytics.h"
 #include "Core/HW/SystemTimers.h"
 #include "Core/System.h"
@@ -1812,7 +1813,8 @@ void VertexManagerBase::Flush()
               handling_source = 4;
             }
             // The scene's projection, which TextureCacheBase needs to aim GazeRamCopies.
-            if (handling == ShaderHunter::HandlingType::Skip && g_ActiveConfig.vr_gaze_ram_copies &&
+            if (handling == ShaderHunter::HandlingType::Skip &&
+                g_ActiveConfig.vr_gaze_ram_copies != Config::GFX_VR_GAZE_RAM_COPIES_OFF &&
                 xfmem.projection.type == ProjectionType::Perspective)
             {
               m_vr_scene_projection = xfmem.projection.rawProjection;
