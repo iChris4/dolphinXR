@@ -39,6 +39,9 @@ public:
     // The agent server's in-memory log (Core/AgentServer/LogBuffer).
     AGENT_LISTENER,
 #endif
+    // The first warnings and errors of a video backend's run, for the report of a lost GPU
+    // (VideoCommon/GPUDeviceLost).
+    GPU_LOST_LISTENER,
 
     NUMBER_OF_LISTENERS  // Must be last
   };

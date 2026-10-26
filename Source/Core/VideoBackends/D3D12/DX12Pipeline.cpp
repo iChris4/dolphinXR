@@ -241,6 +241,8 @@ std::unique_ptr<DXPipeline> DXPipeline::Create(const AbstractPipelineConfig& con
                  config.blending_state.blend_enable.Value() ? 1 : 0,
                  config.blending_state.logic_op_enable.Value() ? 1 : 0,
                  config.blending_state.use_dual_src.Value() ? 1 : 0);
+    // A lost device fails every creation: stop now rather than drawing without pipelines.
+    g_dx_context->CheckDeviceLost("CreateGraphicsPipelineState");
     return nullptr;
   }
 
