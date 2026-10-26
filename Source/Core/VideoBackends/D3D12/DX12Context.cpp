@@ -38,6 +38,40 @@ static PFN_D3D12_CREATE_DEVICE s_d3d12_create_device;
 static PFN_D3D12_GET_DEBUG_INTERFACE s_d3d12_get_debug_interface;
 static PFN_D3D12_SERIALIZE_ROOT_SIGNATURE s_d3d12_serialize_root_signature;
 
+// A DRED breadcrumb operation's name.
+static std::string_view BreadcrumbOpName(D3D12_AUTO_BREADCRUMB_OP op)
+{
+  static constexpr std::array<std::string_view, 27> NAMES = {"SetMarker",
+                                                             "BeginEvent",
+                                                             "EndEvent",
+                                                             "DrawInstanced",
+                                                             "DrawIndexedInstanced",
+                                                             "ExecuteIndirect",
+                                                             "Dispatch",
+                                                             "CopyBufferRegion",
+                                                             "CopyTextureRegion",
+                                                             "CopyResource",
+                                                             "CopyTiles",
+                                                             "ResolveSubresource",
+                                                             "ClearRenderTargetView",
+                                                             "ClearUnorderedAccessView",
+                                                             "ClearDepthStencilView",
+                                                             "ResourceBarrier",
+                                                             "ExecuteBundle",
+                                                             "Present",
+                                                             "ResolveQueryData",
+                                                             "BeginSubmission",
+                                                             "EndSubmission",
+                                                             "DecodeFrame",
+                                                             "ProcessFrames",
+                                                             "AtomicCopyBufferUINT",
+                                                             "AtomicCopyBufferUINT64",
+                                                             "ResolveSubresourceRegion",
+                                                             "WriteBufferImmediate"};
+  const auto index = static_cast<size_t>(op);
+  return index < NAMES.size() ? NAMES[index] : "other";
+}
+
 DXContext::DXContext() = default;
 
 DXContext::~DXContext()
@@ -199,6 +233,16 @@ bool DXContext::CreateDevice(u32 adapter_index, bool enable_debug_layer)
       ERROR_LOG_FMT(VIDEO, "Debug layer requested but not available: {}", DX12HRWrap(hr));
       enable_debug_layer = false;
     }
+  }
+
+  // Device Removed Extended Data: when the GPU faults, which operations of the command lists
+  // in flight had run, and the allocations near a page fault (DescribeDeviceRemoval). The cost
+  // is a small write after each operation; it must be set before the device is created.
+  ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dred_settings;
+  if (SUCCEEDED(s_d3d12_get_debug_interface(IID_PPV_ARGS(&dred_settings))))
+  {
+    dred_settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+    dred_settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
   }
 
   // Create the actual device.
@@ -566,8 +610,65 @@ bool DXContext::CheckDeviceLost(std::string_view operation)
   if (reason == S_OK)
     return false;
   VideoCommon::ReportGPUDeviceLost("D3D12",
-                                   fmt::format("{} after {}", Common::HRWrap(reason), operation));
+                                   fmt::format("{} after {}", Common::HRWrap(reason), operation),
+                                   DescribeDeviceRemoval());
   return true;
+}
+
+std::string DXContext::DescribeDeviceRemoval() const
+{
+  ComPtr<ID3D12DeviceRemovedExtendedData> dred;
+  if (FAILED(m_device.As(&dred)))
+    return "No DRED data.\n";
+
+  std::string text;
+  D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT breadcrumbs = {};
+  if (SUCCEEDED(dred->GetAutoBreadcrumbsOutput(&breadcrumbs)))
+  {
+    text += "Command lists the GPU had not finished (DRED breadcrumbs, [the next operation]):\n";
+    bool any = false;
+    for (const D3D12_AUTO_BREADCRUMB_NODE* node = breadcrumbs.pHeadAutoBreadcrumbNode; node;
+         node = node->pNext)
+    {
+      const u32 done = node->pLastBreadcrumbValue ? *node->pLastBreadcrumbValue : 0;
+      if (done >= node->BreadcrumbCount || !node->pCommandHistory)
+        continue;
+      any = true;
+      text += fmt::format("  {} of {} operations done:", done, node->BreadcrumbCount);
+      const u32 first = done > 8 ? done - 8 : 0;
+      const u32 last = std::min(node->BreadcrumbCount, done + 4);
+      for (u32 i = first; i < last; ++i)
+      {
+        const std::string_view name = BreadcrumbOpName(node->pCommandHistory[i]);
+        text += i == done ? fmt::format(" [{}]", name) : fmt::format(" {}", name);
+      }
+      text += "\n";
+    }
+    if (!any)
+      text += "  none\n";
+  }
+  D3D12_DRED_PAGE_FAULT_OUTPUT fault = {};
+  if (SUCCEEDED(dred->GetPageFaultAllocationOutput(&fault)) && fault.PageFaultVA != 0)
+  {
+    text += fmt::format("Page fault at GPU address {:#x}.\n", fault.PageFaultVA);
+    const auto list = [&text](const char* title, const D3D12_DRED_ALLOCATION_NODE* node) {
+      text += title;
+      for (int count = 0; node && count < 16; node = node->pNext, ++count)
+      {
+        text += fmt::format("  {} (type {})\n",
+                            node->ObjectNameW ? WStringToUTF8(node->ObjectNameW) :
+                                                (node->ObjectNameA ? node->ObjectNameA : "unnamed"),
+                            static_cast<int>(node->AllocationType));
+      }
+    };
+    list("Allocations at that address:\n", fault.pHeadExistingAllocationNode);
+    list("Allocations freed there recently:\n", fault.pHeadRecentFreedAllocationNode);
+  }
+  else
+  {
+    text += "No page fault recorded.\n";
+  }
+  return text;
 }
 
 bool DXContext::RemoveDeviceForTesting()

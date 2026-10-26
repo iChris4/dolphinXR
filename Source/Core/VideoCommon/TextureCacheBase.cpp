@@ -44,6 +44,7 @@
 #include "VideoCommon/BPMemory.h"
 #include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/FramebufferManager.h"
+#include "VideoCommon/GPUDeviceLost.h"
 #include "VideoCommon/GPUWaitStats.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/FBInfo.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h"
@@ -2149,6 +2150,9 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
       CreateTextureEntry(TextureCreationInfo{base_hash, full_hash, bytes_per_block, palette_size},
                          texture_info, textureCacheSafetyColorSampleSize, custom_texture_data.get(),
                          has_arbitrary_mipmaps, skip_texture_dump);
+  // No texture could be created (a lost GPU device).
+  if (!entry) [[unlikely]]
+    return entry;
   entry->hires_texture = std::move(hires_texture);
   entry->last_load_time = load_time;
   entry->SetTextureInfoName(std::move(texture_name));
@@ -2396,6 +2400,8 @@ RcTcacheEntry TextureCacheBase::GetXFBTexture(u32 address, u32 width, u32 height
   entry = AllocateCacheEntry(TextureConfig(width, height, 1, 1, 1, AbstractTextureFormat::RGBA8,
                                            AbstractTextureFlag_RenderTarget,
                                            AbstractTextureType::Texture_2DArray));
+  if (!entry) [[unlikely]]
+    return entry;
 
   entry->SetGeneralParameters(address, total_size,
                               TextureAndTLUTFormat(TextureFormat::XFB, TLUTFormat::IA8), true);
@@ -2683,6 +2689,10 @@ bool TextureCacheBase::IsMetroidPrime1ThermalStereoSourceCandidate(u32 width, u3
 
 void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& resolved_data)
 {
+  // A lost GPU device copies nothing (VideoCommon::ReportGPUDeviceLost).
+  if (VideoCommon::IsGPUDeviceLost()) [[unlikely]]
+    return;
+
   // Emulation methods:
   //
   // - EFB to RAM:
@@ -3630,6 +3640,8 @@ void TextureCacheBase::ApplyMaterialToCacheEntry(const VideoCommon::MaterialReso
   // Make a copy, we can't write to our texture and use its framebuffer
   // at the same time
   auto new_entry = AllocateCacheEntry(entry->texture->GetConfig());
+  if (!new_entry) [[unlikely]]
+    return;
   new_entry->SetGeneralParameters(entry->addr, entry->size_in_bytes, entry->format,
                                   entry->should_force_safe_hashing);
   new_entry->SetDimensions(entry->native_width, entry->native_height, 1);
@@ -4071,8 +4083,9 @@ void TextureCacheBase::CopyRenderTargetToRam(RcTcacheEntry& entry,
             resolved_data.source_data.clamp_top, resolved_data.source_data.clamp_bottom,
             coefficients);
 
-    // We can't defer if there is no VRAM copy (since we need to update the hash).
-    if (!resolved_data.copy_to_vram || !defer_write)
+    // We can't defer if there is no VRAM copy (since we need to update the hash), or if its
+    // texture could not be created.
+    if (!resolved_data.copy_to_vram || !defer_write || !entry)
     {
       // Immediately flush it.
       WriteEFBCopyToRAM(dst, resolved_data.bytes_per_row / sizeof(u32), resolved_data.num_blocks_y,

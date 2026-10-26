@@ -188,6 +188,15 @@ bool Presenter::FetchXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_heigh
   {
     m_xfb_entry =
         g_texture_cache->GetXFBTexture(xfb_addr, fb_width, fb_height, fb_stride, &m_xfb_rect);
+  }
+  // No texture could be created for it (a lost GPU device): nothing to show, as when blanking.
+  if (fb_width != 0 && fb_height != 0 && !m_xfb_entry) [[unlikely]]
+  {
+    m_xfb_rect = MathUtil::Rectangle<int>();
+    m_last_xfb_id = std::numeric_limits<u64>::max();
+  }
+  else if (m_xfb_entry)
+  {
     m_last_xfb_id = m_xfb_entry->id;
 
     m_xfb_entry->AcquireContentLock();

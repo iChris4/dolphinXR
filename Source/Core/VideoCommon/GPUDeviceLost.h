@@ -10,11 +10,15 @@ namespace VideoCommon
 // The video backend lost its GPU device: a driver reset after a GPU fault (Windows' TDR), or the
 // GPU removed. Nothing the device held works any more and new resources cannot be created, so the
 // paths that use them would crash (a failed texture allocation made an EFB copy write into a null
-// cache entry). From the first report on, the video thread drops the FIFO's commands and the CPU
-// thread's video requests answer without the GPU, emulation stops, and the user is told.
+// cache entry). From the first report on, the video thread drops the FIFO's commands (and the
+// draws and EFB copies of the commands it is running), the CPU thread's video requests answer
+// without the GPU, emulation stops, and the user is told.
 
-// Any thread. The first call logs `detail` and stops emulation with a message for the user.
-void ReportGPUDeviceLost(std::string_view backend, std::string_view detail);
+// Any thread. The first call logs `detail` and the backend's `diagnostics` (what the GPU was
+// doing), writes them to User/Logs/gpu-lost-<time>.txt, and stops emulation with a message for the
+// user.
+void ReportGPUDeviceLost(std::string_view backend, std::string_view detail,
+                         std::string_view diagnostics = {});
 
 // Any thread.
 bool IsGPUDeviceLost();

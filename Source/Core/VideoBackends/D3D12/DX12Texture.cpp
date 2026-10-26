@@ -39,7 +39,8 @@ static ComPtr<ID3D12Resource> CreateTextureUploadBuffer(u32 buffer_size)
   HRESULT hr = g_dx_context->GetDevice()->CreateCommittedResource(
       &heap_properties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
       IID_PPV_ARGS(&resource));
-  ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Failed to create texture upload buffer: {}", DX12HRWrap(hr));
+  ASSERT_MSG(VIDEO, SUCCEEDED(hr) || g_dx_context->CheckDeviceLost("CreateUploadBuffer"),
+             "Failed to create texture upload buffer: {}", DX12HRWrap(hr));
   return resource;
 }
 
@@ -116,7 +117,8 @@ std::unique_ptr<DXTexture> DXTexture::Create(const TextureConfig& config, std::s
   HRESULT hr = g_dx_context->GetDevice()->CreateCommittedResource(
       &heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, resource_state,
       config.IsRenderTarget() ? &optimized_clear_value : nullptr, IID_PPV_ARGS(&resource));
-  ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Failed to create D3D12 texture resource: {}", DX12HRWrap(hr));
+  ASSERT_MSG(VIDEO, SUCCEEDED(hr) || g_dx_context->CheckDeviceLost("CreateTexture"),
+             "Failed to create D3D12 texture resource: {}", DX12HRWrap(hr));
   if (FAILED(hr))
     return nullptr;
 
@@ -752,7 +754,8 @@ bool DXStagingTexture::Map()
 
   const D3D12_RANGE read_range = {0u, m_type == StagingTextureType::Upload ? 0u : m_buffer_size};
   HRESULT hr = m_resource->Map(0, &read_range, reinterpret_cast<void**>(&m_map_pointer));
-  ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Map resource failed: {}", DX12HRWrap(hr));
+  ASSERT_MSG(VIDEO, SUCCEEDED(hr) || g_dx_context->CheckDeviceLost("Map"),
+             "Map resource failed: {}", DX12HRWrap(hr));
   if (FAILED(hr))
     return false;
 
@@ -837,7 +840,8 @@ std::unique_ptr<DXStagingTexture> DXStagingTexture::Create(StagingTextureType ty
       &heap_properties, D3D12_HEAP_FLAG_NONE, &desc,
       is_upload ? D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
       IID_PPV_ARGS(&resource));
-  ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Failed to create staging texture resource: {}", DX12HRWrap(hr));
+  ASSERT_MSG(VIDEO, SUCCEEDED(hr) || g_dx_context->CheckDeviceLost("CreateStagingTexture"),
+             "Failed to create staging texture resource: {}", DX12HRWrap(hr));
   if (FAILED(hr))
     return nullptr;
 

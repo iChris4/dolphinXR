@@ -32,6 +32,7 @@
 #include "VideoCommon/DrawDepth.h"
 #include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/FramebufferManager.h"
+#include "VideoCommon/GPUDeviceLost.h"
 #include "VideoCommon/GeometryShaderManager.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
@@ -1139,6 +1140,13 @@ void VertexManagerBase::Flush()
   m_is_flushed = true;
   const bool vr_culled = std::exchange(m_vr_culled_pending, false);
   const bool vr_cone_only = std::exchange(m_vr_cone_only_pending, false);
+
+  // A lost GPU device draws nothing (VideoCommon::ReportGPUDeviceLost).
+  if (VideoCommon::IsGPUDeviceLost()) [[unlikely]]
+  {
+    HideObjectEngine::Engine::GetInstance().DiscardPendingCapturedPrefixes();
+    return;
+  }
 
   if (m_draw_counter == 0)
   {

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -123,6 +124,9 @@ public:
   // Whether the device is lost (a driver reset); the first time, VideoCommon::ReportGPUDeviceLost
   // with the removal reason and `operation`.
   bool CheckDeviceLost(std::string_view operation);
+
+  // After a device removal: what DRED recorded (the operations in flight, a page fault).
+  std::string DescribeDeviceRemoval() const;
 
   // Waits for a specific fence.
   void WaitForFence(u64 fence);
