@@ -62,6 +62,7 @@ static void WriteHeader(APIType api_type, ShaderCode& out)
             "  float2 clamp_tb;\n"
             "  float pixel_height;\n"
             "  float vr_scene_alpha;\n"
+            "  float vr_layer_scale;\n"
             "}};\n");
 }
 
@@ -110,7 +111,7 @@ ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data)
   out.Write("uint4 SampleEFB(float3 uv, float y_offset) {{\n"
             "  float4 tex_sample = texture(samp0, float3(uv.x, clamp(uv.y + (y_offset * "
             "pixel_height), clamp_tb.x, clamp_tb.y), {}));\n",
-            mono_depth ? "0.0" : "uv.z");
+            mono_depth ? "0.0" : "uv.z * vr_layer_scale");
   if (uid_data->is_depth_copy)
   {
     if (!g_backend_info.bSupportsReversedDepthRange)

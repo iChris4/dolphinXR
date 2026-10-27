@@ -155,11 +155,29 @@ GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
     return std::nullopt;
 
   // Only the reticle's block, copied from the main scene (render-to-texture and downscaling
-  // passes draw with their own viewports).
+  // passes draw with their own viewports). A letterboxed scene keeps the game's viewport in VR
+  // (Prime in Metroid Prime Trilogy: 640x448 in a 640x480 frame), so the eye's image fills that
+  // viewport: the block is placed within it.
+  const int x_off = bpmem.scissorOffset.x << 1;
+  const int y_off = bpmem.scissorOffset.y << 1;
+  const VR::VRViewportClass viewport_class =
+      VR::ClassifyVRViewport(xfmem.viewport, VR::GetVRScissor(), x_off, y_off);
+  VR::VRFrameRegion scene = frame;
+  if (viewport_class == VR::VRViewportClass::Letterboxed)
+  {
+    scene = {
+        .left = static_cast<int>(std::lround(xfmem.viewport.xOrig - std::fabs(xfmem.viewport.wd))) -
+                x_off,
+        .top = static_cast<int>(std::lround(xfmem.viewport.yOrig - std::fabs(xfmem.viewport.ht))) -
+               y_off,
+        .width = static_cast<int>(std::lround(2.0f * std::fabs(xfmem.viewport.wd))),
+        .height = static_cast<int>(std::lround(2.0f * std::fabs(xfmem.viewport.ht))),
+        .valid = true};
+  }
   const MathUtil::Rectangle<int>& rect = resolved_data.source_data.src_rect;
-  if (!VR::IsVRReticleCopyRectangle(rect, frame) ||
-      VR::ClassifyVRViewport(xfmem.viewport, VR::GetVRScissor(), bpmem.scissorOffset.x << 1,
-                             bpmem.scissorOffset.y << 1) != VR::VRViewportClass::MainScene)
+  if ((viewport_class != VR::VRViewportClass::MainScene &&
+       viewport_class != VR::VRViewportClass::Letterboxed) ||
+      !VR::IsVRReticleCopyRectangle(rect, scene))
   {
     return std::nullopt;
   }
@@ -171,7 +189,7 @@ GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
     std::array<std::array<float, 4>, 4> rows;
     std::array<std::array<float, 4>, 2> z_rows;
     VR::g_openxr->GetEyeProjectionRows(VR::g_openxr->GetEffectiveUnitsPerMeter(), rows, z_rows);
-    moved = VR::MapVRViewCopyRectangle(rect, frame, *projection,
+    moved = VR::MapVRViewCopyRectangle(rect, scene, *projection,
                                        {.x = rows[0], .y = rows[1], .z = z_rows[0]});
   }
   else
@@ -181,7 +199,7 @@ GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
                                 .right = std::tan(fov.angleRight),
                                 .up = std::tan(fov.angleUp),
                                 .down = std::tan(fov.angleDown)};
-    moved = VR::MapVRGazeCopyRectangle(rect, frame, *projection, eye);
+    moved = VR::MapVRGazeCopyRectangle(rect, scene, *projection, eye);
   }
   if (moved == rect)
     return std::nullopt;
@@ -2798,6 +2816,18 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
     }
   }
 
+#ifdef ENABLE_VR
+  // A reticle's block, read where the left eye shows it. The game may also draw it (the scan
+  // box's magnified view of Metroid Prime Trilogy): out of the 3D scene, its texture takes the
+  // same block, the left eye's in both eyes.
+  const std::optional<MathUtil::Rectangle<int>> gaze_rect = GetVRGazeRamCopyRect(resolved_data);
+  if (gaze_rect && g_ActiveConfig.vr_gaze_ram_copies == Config::GFX_VR_GAZE_RAM_COPIES_VIEW)
+  {
+    resolved_data.source_data.vr_vram_src_rect = gaze_rect;
+    resolved_data.source_data.vr_vram_mono = true;
+  }
+#endif
+
   RcTcacheEntry entry;
   if (resolved_data.copy_to_vram)
   {
@@ -2810,7 +2840,7 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
   if (resolved_data.copy_to_ram)
   {
 #ifdef ENABLE_VR
-    resolved_data.source_data.vr_ram_src_rect = GetVRGazeRamCopyRect(resolved_data);
+    resolved_data.source_data.vr_ram_src_rect = gaze_rect;
 #endif
     const bool defer_write = g_ActiveConfig.bDeferEFBCopies;
     CopyRenderTargetToRam(entry, g_framebuffer_manager.get(), dst, resolved_data, defer_write);
@@ -3396,7 +3426,8 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
                                            bool scale_by_half, bool linear_filter,
                                            EFBCopyFormat dst_format, bool is_intensity, float gamma,
                                            bool clamp_top, bool clamp_bottom,
-                                           const std::array<u32, 3>& filter_coefficients)
+                                           const std::array<u32, 3>& filter_coefficients,
+                                           bool vr_mono_layers)
 {
   // Flush EFB pokes first, as they're expected to be included.
   g_framebuffer_manager->FlushEFBPokes();
@@ -3439,8 +3470,10 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
     float clamp_bottom;
     float pixel_height;
     float vr_scene_alpha;
+    float vr_layer_scale;
+    float padding[3];
   };
-  Uniforms uniforms;
+  Uniforms uniforms = {};
   const float rcp_efb_width = 1.0f / static_cast<float>(g_framebuffer_manager->GetEFBWidth());
   const u32 efb_height = g_framebuffer_manager->GetEFBHeight();
   const float rcp_efb_height = 1.0f / static_cast<float>(efb_height);
@@ -3463,6 +3496,8 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
   uniforms.vr_scene_alpha = g_ActiveConfig.VRPassthroughEnabled() ?
                                 g_ActiveConfig.vr_passthrough_scene_opacity :
                                 1.0f;
+  // The source layer is the destination's times this: 0 copies the left eye into every layer.
+  uniforms.vr_layer_scale = vr_mono_layers ? 0.0f : 1.0f;
   g_vertex_manager->UploadUtilityUniforms(&uniforms, sizeof(uniforms));
 
   // Use the copy pipeline to render the VRAM copy.
@@ -4016,7 +4051,8 @@ void TextureCacheBase::CopyRenderTargetToVRam(RcTcacheEntry& entry,
     CopyEFBToCacheEntry(entry, source.is_depth_format, vram_src_rect, source.half_scale,
                         vram_linear_filter, source.efbcopy_format, source.is_intensity_format,
                         source.gamma, source.clamp_top, source.clamp_bottom,
-                        GetVRAMCopyFilterCoefficients(source.filter_coefficients));
+                        GetVRAMCopyFilterCoefficients(source.filter_coefficients),
+                        source.vr_vram_mono);
   }
 
   if (g_ActiveConfig.bGraphicMods)

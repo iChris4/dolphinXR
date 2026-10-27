@@ -126,6 +126,9 @@ struct FramebufferCopyRawData
   // DolphinXR: source region for the RAM copy when it differs from src_rect (the Metroid Prime
   // scan visor blocks, read where the left eye shows them: GazeRamCopies).
   std::optional<MathUtil::Rectangle<int>> vr_ram_src_rect;
+  // DolphinXR: the VRAM copy takes the EFB's first layer (the left eye) into every layer, for a
+  // block moved to where the left eye shows it (a reticle in the 3D scene, GazeRamCopies 2).
+  bool vr_vram_mono = false;
 };
 
 struct FramebufferCopyResolvedData
@@ -467,11 +470,13 @@ protected:
                        const MathUtil::Rectangle<int>& src_rect, bool scale_by_half,
                        bool linear_filter, float y_scale, float gamma, bool clamp_top,
                        bool clamp_bottom, const std::array<u32, 3>& filter_coefficients);
+  // vr_mono_layers: every layer of the copy takes the EFB's first layer (the left eye).
   virtual void CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_copy,
                                    const MathUtil::Rectangle<int>& src_rect, bool scale_by_half,
                                    bool linear_filter, EFBCopyFormat dst_format, bool is_intensity,
                                    float gamma, bool clamp_top, bool clamp_bottom,
-                                   const std::array<u32, 3>& filter_coefficients);
+                                   const std::array<u32, 3>& filter_coefficients,
+                                   bool vr_mono_layers);
 
   alignas(16) u8* m_temp = nullptr;
   size_t m_temp_size = 0;
