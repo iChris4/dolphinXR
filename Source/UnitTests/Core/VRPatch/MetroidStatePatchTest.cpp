@@ -1114,3 +1114,55 @@ TEST(TrilogySmoothScanLinesPatch, FillsOnlyWhileEchoesRuns)
   ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
   EXPECT_EQ(GetTexture(game.memory, TRILOGY_LINES_TEXTURE), LINES);
 }
+
+namespace
+{
+// Echoes' scan visor: the fan around the pointer, between its begin and end calls.
+constexpr u32 SPOTLIGHT_SITE = 0x803AEEC8;
+constexpr u32 SPOTLIGHT_ORIGINAL = 0x4BF59489;  // bl 0x80308350: begins the fan
+constexpr u32 SPOTLIGHT_SKIP = 0x48000134;      // b 0x803AEFFC
+constexpr u32 SPOTLIGHT_END_CALL = 0x803AEFF8;
+constexpr u32 SPOTLIGHT_END_ORIGINAL = 0x4BF593C1;  // bl 0x803083B8
+}  // namespace
+
+TEST(TrilogyNoScanSpotlightPatch, SkipsTheFanOnlyInEchoes)
+{
+  TrilogyGame game;
+  PatchScript script("no-scan-spotlight");
+  ASSERT_TRUE(script.Load(ReadPatch("R3ME01", "no-scan-spotlight"), game.env)) << script.Error();
+
+  // Prime's program has its own code there: left alone, no warning.
+  game.RunPrime();
+  game.Set(SPOTLIGHT_SITE, 0x981F0008);
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(SPOTLIGHT_SITE), 0x981F0008u);
+  EXPECT_FALSE(Warned(script, ""));
+
+  // Echoes: the fan is skipped, again after its program comes back unpatched, and restored when
+  // the patch stops.
+  game.Set(0x8018BC78, 0);
+  game.RunEchoes();
+  game.Set(SPOTLIGHT_SITE, SPOTLIGHT_ORIGINAL);
+  game.Set(SPOTLIGHT_END_CALL, SPOTLIGHT_END_ORIGINAL);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(SPOTLIGHT_SITE), SPOTLIGHT_SKIP);
+  game.Set(SPOTLIGHT_SITE, SPOTLIGHT_ORIGINAL);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(SPOTLIGHT_SITE), SPOTLIGHT_SKIP);
+  EXPECT_FALSE(Warned(script, ""));
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(SPOTLIGHT_SITE), SPOTLIGHT_ORIGINAL);
+}
+
+TEST(TrilogyNoScanSpotlightPatch, RefusesOtherCode)
+{
+  TrilogyGame game;
+  game.RunEchoes();
+  game.Set(SPOTLIGHT_SITE, SPOTLIGHT_ORIGINAL);
+  game.Set(SPOTLIGHT_END_CALL, 0x60000000);  // another layout
+  PatchScript script("no-scan-spotlight");
+  ASSERT_TRUE(script.Load(ReadPatch("R3ME01", "no-scan-spotlight"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(SPOTLIGHT_SITE), SPOTLIGHT_ORIGINAL);
+  EXPECT_TRUE(Warned(script, "not installed"));
+}
