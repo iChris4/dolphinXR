@@ -5,12 +5,13 @@
 // memory: the override flags they raise for the Sys profiles' entries (Prime, Echoes, Corruption,
 // the Trilogy).
 // Also Echoes' view patches: no morph ball or cutscene bars, no scan box highlight, smooth scan
-// lines.
+// lines; and the Trilogy's wide culling.
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <bit>
+#include <cmath>
 #include <map>
 #include <set>
 #include <string>
@@ -1165,4 +1166,175 @@ TEST(TrilogyNoScanSpotlightPatch, RefusesOtherCode)
   ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
   EXPECT_EQ(game.memory.Get32(SPOTLIGHT_SITE), SPOTLIGHT_ORIGINAL);
   EXPECT_TRUE(Warned(script, "not installed"));
+}
+
+namespace
+{
+// The calls of the frustum's constructor that the wide culling patch hooks, per game of the disc.
+struct CullSite
+{
+  u32 hook, original, after;
+};
+constexpr std::array<CullSite, 3> PRIME_CULL_SITES{{{0x8022C680, 0x480D0EE5, 0x807D0850},
+                                                    {0x8022C9D0, 0x480D0B95, 0x806D9C74},
+                                                    {0x8022DD38, 0x480CF82D, 0x806D9C74}}};
+constexpr std::array<CullSite, 3> ECHOES_CULL_SITES{{{0x8024567C, 0x480C1EB5, 0x387B2C14},
+                                                     {0x80245C44, 0x480C18ED, 0x387C2C14},
+                                                     {0x80247934, 0x480BFBFD, 0x387D2C14}}};
+constexpr std::array<CullSite, 1> CORRUPTION_CULL_SITES{{{0x800BC7A4, 0x482B0CD1, 0x80DF0014}}};
+constexpr u32 PRIME_FRUSTUM = 0x802FD564;
+constexpr u32 ECHOES_FRUSTUM = 0x80307530;
+constexpr u32 CORRUPTION_FRUSTUM = 0x8036D474;
+constexpr u32 CULL_SCRATCH = 0x80002970;
+constexpr u32 CULL_SCRATCH_SIZE = 0x280;
+constexpr u32 CULL_MODE = CULL_SCRATCH;
+constexpr u32 CULL_FOV = CULL_SCRATCH + 4;
+constexpr u32 CULL_HEAD = CULL_SCRATCH + 0x14;
+
+// Where a b / bl word at `from` goes; 0 when it is not one.
+u32 BranchTarget(u32 from, u32 word)
+{
+  if ((word & 0xFC000002) != 0x48000000)
+    return 0;
+  u32 offset = word & 0x03FFFFFC;
+  if (offset & 0x02000000)
+    offset -= 0x04000000;
+  return from + offset;
+}
+
+template <size_t N>
+void LoadCullSites(Memory& memory, const std::array<CullSite, N>& sites)
+{
+  for (const CullSite& site : sites)
+  {
+    memory.Set32(site.hook, site.original);
+    memory.Set32(site.hook + 4, site.after);
+  }
+}
+
+// Every site calls one routine in the scratch memory, which calls the constructor; or, when the
+// patch stopped, the original call.
+template <size_t N>
+void ExpectCullHooks(const Memory& memory, const std::array<CullSite, N>& sites, u32 constructor)
+{
+  const u32 routine = BranchTarget(sites[0].hook, memory.Get32(sites[0].hook));
+  ASSERT_GE(routine, CULL_SCRATCH);
+  ASSERT_LT(routine, CULL_SCRATCH + CULL_SCRATCH_SIZE);
+  for (const CullSite& site : sites)
+  {
+    const u32 word = memory.Get32(site.hook);
+    EXPECT_EQ(word & 1, 1u) << "a call, so that the routine returns after it";
+    EXPECT_EQ(BranchTarget(site.hook, word), routine);
+  }
+  bool calls_constructor = false;
+  for (u32 at = routine; at < CULL_SCRATCH + CULL_SCRATCH_SIZE; at += 4)
+    calls_constructor |= BranchTarget(at, memory.Get32(at)) == constructor;
+  EXPECT_TRUE(calls_constructor);
+}
+
+template <size_t N>
+void ExpectCullOriginals(const Memory& memory, const std::array<CullSite, N>& sites)
+{
+  for (const CullSite& site : sites)
+    EXPECT_EQ(memory.Get32(site.hook), site.original);
+}
+
+std::string ReadCullPatch()
+{
+  return ReadPatch("R3ME01", "wide-culling");
+}
+}  // namespace
+
+TEST(TrilogyWideCullingPatch, ManifestIsValid)
+{
+  const std::string source = ReadCullPatch();
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/R3ME01/wide-culling.lua is missing";
+  const auto read = ReadManifest(source, "wide-culling");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"R3ME01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, CULL_SCRATCH_SIZE);
+  EXPECT_TRUE(manifest.reserve.empty());
+  EXPECT_NE(manifest.FindSetting("mode"), nullptr);
+  EXPECT_NE(manifest.FindSetting("fov"), nullptr);
+  EXPECT_NE(manifest.FindSetting("follow_head"), nullptr);
+}
+
+TEST(TrilogyWideCullingPatch, HooksEachGameAndRestores)
+{
+  TrilogyGame game;
+  game.env.scratch_base = CULL_SCRATCH;
+  game.env.scratch_size = CULL_SCRATCH_SIZE;
+  PatchScript script("wide-culling");
+  ASSERT_TRUE(script.Load(ReadCullPatch(), game.env)) << script.Error();
+
+  // The Trilogy's menus: no game's code, nothing written there.
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(PRIME_CULL_SITES[0].hook), 0u);
+
+  // Prime: its three frustums of the world view, wide by default (115 degrees).
+  LoadCullSites(game.memory, PRIME_CULL_SITES);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  ExpectCullHooks(game.memory, PRIME_CULL_SITES, PRIME_FRUSTUM);
+  EXPECT_EQ(game.memory.Get32(CULL_MODE), 1u);
+  EXPECT_NEAR(GetF32(game.memory, CULL_FOV), 115.0f * 3.14159265f / 180.0f, 1e-5f);
+
+  // Echoes replaces Prime's program, then Corruption replaces Echoes'.
+  for (const CullSite& site : PRIME_CULL_SITES)
+    game.Set(site.hook + 4, 0);
+  LoadCullSites(game.memory, ECHOES_CULL_SITES);
+  game.env.field = 60;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  ExpectCullHooks(game.memory, ECHOES_CULL_SITES, ECHOES_FRUSTUM);
+  for (const CullSite& site : ECHOES_CULL_SITES)
+    game.Set(site.hook + 4, 0);
+  LoadCullSites(game.memory, CORRUPTION_CULL_SITES);
+  game.env.field = 120;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  ExpectCullHooks(game.memory, CORRUPTION_CULL_SITES, CORRUPTION_FRUSTUM);
+
+  // Stopped: the game's own calls, and the routine off for a savestate that kept the hooks.
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  ExpectCullOriginals(game.memory, CORRUPTION_CULL_SITES);
+  EXPECT_EQ(game.memory.Get32(CULL_MODE), 0u);
+  EXPECT_FALSE(Warned(script, ""));
+}
+
+TEST(TrilogyWideCullingPatch, TurnsWithTheHeadOrDropsThePlanes)
+{
+  TrilogyGame game;
+  game.env.scratch_base = CULL_SCRATCH;
+  game.env.scratch_size = CULL_SCRATCH_SIZE;
+  LoadCullSites(game.memory, CORRUPTION_CULL_SITES);
+  PatchScript script("wide-culling");
+  ASSERT_TRUE(script.Load(ReadCullPatch(), game.env)) << script.Error();
+  const auto head = [&](std::array<float, 9> expected) {
+    for (u32 i = 0; i < 9; ++i)
+      EXPECT_NEAR(GetF32(game.memory, CULL_HEAD + i * 4), expected[i], 1e-5f) << "element " << i;
+  };
+
+  // The head turned 90 degrees right: the frustum looks along the camera's +X (row-major, the
+  // columns are the head's right, forward and up axes in the camera's).
+  const float s = std::sqrt(0.5f);
+  game.input.head_view = {true, {0.0f, 0.0f, 0.0f}, {0.0f, -s, 0.0f, s}};
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(CULL_MODE), 1u);
+  head({0, 1, 0, -1, 0, 0, 0, 0, 1});
+
+  // Without a head pose (flat screen), or not following it: the game camera's direction.
+  game.input.head_view.valid = false;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  head({1, 0, 0, 0, 1, 0, 0, 0, 1});
+  game.input.head_view.valid = true;
+  const Manifest& manifest = script.GetManifest();
+  ASSERT_TRUE(script.SetSettingValue(*manifest.FindSetting("follow_head"), 0));
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  head({1, 0, 0, 0, 1, 0, 0, 0, 1});
+
+  // No culling: the routine leaves the frustum without planes.
+  ASSERT_TRUE(script.SetSettingValue(*manifest.FindSetting("mode"), 1));
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(CULL_MODE), 2u);
+  ExpectCullHooks(game.memory, CORRUPTION_CULL_SITES, CORRUPTION_FRUSTUM);
 }
