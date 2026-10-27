@@ -1529,3 +1529,246 @@ TEST(StandaloneWideCullingPatch, LeavesGameTestsAlone)
     EXPECT_EQ(line.level, 0) << line.text;
   }
 }
+
+// ---- The Trilogy: turn with the right thumbstick ----
+
+namespace
+{
+constexpr u32 TRILOGY_TURN_SCRATCH = 0x800028B0;
+constexpr u32 TRILOGY_TURN_CAVE = TRILOGY_TURN_SCRATCH + 0x20;
+
+// Per game: the control mapper's function and the word that tells its code apart, the player's
+// mapper, the register of the control number, the turn left and right and look up and down
+// controls, and the camera's transform.
+struct TurnGameInfo
+{
+  u32 function, check_offset, check_word, player_mapper, control_register;
+  u32 left, right, up, down, camera_xf;
+};
+constexpr TurnGameInfo PRIME_TURN{0x80075F68, 0x14, 0xC3E28944, 0xA40, 4,
+                                  3,          4,    9,          0xA,   0x80C00000 + 0x2C};
+constexpr TurnGameInfo ECHOES_TURN{0x8006FE1C, 0x18, 0x48248589, 0x13BC, 5,
+                                   3,          4,    9,          0xA,    0x80C00000 + 0x20};
+constexpr TurnGameInfo CORRUPTION_TURN{0x800618B0, 0x14, 0xC3E288C4, 0x35D8, 4,
+                                       2,          3,    0x37,       0x38,   0x80C00000 + 0x3C};
+
+// The Trilogy's games with their control mappers and cameras (the camera object at 0x80C00000).
+struct TrilogyTurnGame : TrilogyGame
+{
+  TrilogyTurnGame()
+  {
+    for (const TurnGameInfo& g : {PRIME_TURN, ECHOES_TURN, CORRUPTION_TURN})
+    {
+      memory.Set32(g.function, 0x9421FFC0);  // stwu sp, -0x40(sp)
+      memory.Set32(g.function + g.check_offset, g.check_word);
+    }
+    // Prime and Echoes: camera manager -> object id 0x403 -> the object list.
+    memory.Set32(0x804BF420 + 0x868, 0x80C10000);
+    memory.Set32(0x80C10000, 0x04030000);
+    memory.Set32(0x804BF420 + 0x810, 0x80C20000);
+    memory.Set32(0x80C20000 + 3 * 8 + 4, 0x80C00000);
+    memory.Set32(0x804E72E8 + 0x1514, 0x80C30000);
+    memory.Set32(0x80C30000 + 0x10, 0x04030000);
+    memory.Set32(0x804E72E8 + 0x810, 0x80C20000);
+    // Corruption: [[[0x805C6C78] + 0x34] + 0x20].
+    memory.Set32(0x805C6C78, 0x80C40000);
+    memory.Set32(0x80C40000 + 0x34, 0x80C50000);
+    memory.Set32(0x80C50000 + 0x20, 0x80C00000);
+    input.hands[1].connected = true;
+    env.pad = &pad;
+    env.is_wii = true;
+    env.scratch_base = TRILOGY_TURN_SCRATCH;
+    env.scratch_size = 0x80;
+  }
+
+  // The previous game's program is gone (each arm cannon hook's next instruction).
+  void Leave()
+  {
+    for (const u32 next : {0x8018BC78u, 0x8018ACB4u, 0x80183C2Cu})
+      memory.Set32(next, 0);
+  }
+
+  WiimoteButtons pad;
+};
+
+std::string ReadTrilogyTurnPatch()
+{
+  return ReadPatch("R3ME01", "stick-turn");
+}
+
+// Whether a cave word compares the control register with a control number (cmplwi).
+bool CaveCompares(const Memory& memory, u32 control_register, u32 control)
+{
+  const u32 word = 0x28000000u | (control_register << 16) | control;
+  for (u32 a = TRILOGY_TURN_CAVE; a < TRILOGY_TURN_SCRATCH + 0x80; a += 4)
+  {
+    if (memory.Get32(a) == word)
+      return true;
+  }
+  return false;
+}
+
+// One game of the disc: its mapper branches to the cave, which answers its controls for the
+// player's mapper and otherwise runs the game's function; the thumbstick feeds the turn.
+void ExpectTurns(TrilogyTurnGame& game, PatchScript& script, const TurnGameInfo& g)
+{
+  Memory& m = game.memory;
+  game.input.hands[1].thumbstick_x = 0.6f;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(g.function), 0x48000000u | ((TRILOGY_TURN_CAVE - g.function) & 0x03FFFFFC));
+  for (const u32 control : {g.left, g.right, g.up, g.down})
+    EXPECT_TRUE(CaveCompares(m, g.control_register, control)) << std::hex << control;
+  u32 back = 0;
+  for (u32 a = TRILOGY_TURN_CAVE; a < TRILOGY_TURN_SCRATCH + 0x80; a += 4)
+  {
+    if (m.Get32(a) == (0x48000000u | ((g.function + 4 - a) & 0x03FFFFFC)))
+      back = a;
+  }
+  ASSERT_NE(back, 0u) << "the cave's branch back is not inside the scratch memory";
+  EXPECT_EQ(m.Get32(back - 4), 0x9421FFC0u);
+  // Right past the dead zone (0.2): turn right at half speed, for the player's mapper.
+  EXPECT_EQ(m.Get32(TRILOGY_TURN_SCRATCH), TRILOGY_PLAYER + g.player_mapper);
+  EXPECT_NEAR(GetF32(m, TRILOGY_TURN_SCRATCH + 8), 0.0f, 1e-6f);
+  EXPECT_NEAR(GetF32(m, TRILOGY_TURN_SCRATCH + 0xC), 0.5f, 1e-5f);
+  // While playing in first person the VR view removes the camera's pitch and the pointer stays
+  // on the screen.
+  EXPECT_EQ(script.GetCameraPitchSource(), g.camera_xf + 0x24);
+  EXPECT_TRUE(script.KeepsPointerOnScreen());
+}
+}  // namespace
+
+TEST(TrilogyStickTurnPatch, ManifestIsValid)
+{
+  const std::string source = ReadTrilogyTurnPatch();
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/R3ME01/stick-turn.lua is missing";
+  const auto read = ReadManifest(source, "stick-turn");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"R3ME01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, 0x80u);
+  EXPECT_TRUE(manifest.reserve.empty());
+  for (const char* name :
+       {"speed", "deadzone", "edge_tilt", "visor_button", "plus_button", "test_stick"})
+  {
+    EXPECT_NE(manifest.FindSetting(name), nullptr) << name;
+  }
+}
+
+TEST(TrilogyStickTurnPatch, TurnsInEachGameAndRestores)
+{
+  TrilogyTurnGame game;
+  Memory& m = game.memory;
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTrilogyTurnPatch(), game.env)) << script.Error();
+
+  // The disc's menu: nothing written in the games' code.
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(PRIME_TURN.function), 0x9421FFC0u);
+  EXPECT_EQ(m.Get32(TRILOGY_TURN_SCRATCH), 0u);
+
+  game.RunPrime();
+  ExpectTurns(game, script, PRIME_TURN);
+  // Full left; inside the dead zone nothing.
+  game.input.hands[1].thumbstick_x = -1.0f;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_NEAR(GetF32(m, TRILOGY_TURN_SCRATCH + 8), 1.0f, 1e-6f);
+  EXPECT_NEAR(GetF32(m, TRILOGY_TURN_SCRATCH + 0xC), 0.0f, 1e-6f);
+  game.input.hands[1].thumbstick_x = 0.15f;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_NEAR(GetF32(m, TRILOGY_TURN_SCRATCH + 0xC), 0.0f, 1e-6f);
+
+  // While playing, - follows the right grip and + the right B; on the map the user's bindings
+  // are back.
+  game.input.hands[1].squeeze_button = true;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(Held(script, "-"), 1.0);
+  EXPECT_EQ(Held(script, "+"), 0.0);
+  game.Set(game.menu, 1);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(Held(script, "-"), -1.0);
+  EXPECT_EQ(Held(script, "+"), -1.0);
+  // Prime's map: its camera is shown as drawn, the pointer as usual.
+  EXPECT_FALSE(script.GetCameraPitchSource());
+  EXPECT_FALSE(script.KeepsPointerOnScreen());
+  game.Set(game.menu, 0);
+  game.input.hands[1].squeeze_button = false;
+
+  // Echoes replaces Prime's program (its mapper takes the control in r5), then Corruption.
+  game.Leave();
+  game.RunEchoes();
+  game.env.field = 60;
+  ExpectTurns(game, script, ECHOES_TURN);
+  game.Leave();
+  game.RunCorruption();
+  game.env.field = 120;
+  ExpectTurns(game, script, CORRUPTION_TURN);
+
+  // No player (a load): disarmed.
+  m.Set32(0x80A00000 + 0x2184, 0);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(TRILOGY_TURN_SCRATCH), 0u);
+  EXPECT_FALSE(script.GetCameraPitchSource());
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+
+  // Disabled: the game's code is back.
+  m.Set32(0x80A00000 + 0x2184, TRILOGY_PLAYER);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(CORRUPTION_TURN.function), 0x9421FFC0u);
+  EXPECT_EQ(m.Get32(TRILOGY_TURN_SCRATCH), 0u);
+}
+
+// Corruption's camera goes back to level on its map; the morph ball's camera is shown as it is;
+// with the edges off, look up and down read 0 and the pitch is still removed.
+TEST(TrilogyStickTurnPatch, LevelsTheView)
+{
+  TrilogyTurnGame game;
+  Memory& m = game.memory;
+  game.RunCorruption();
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTrilogyTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+
+  frame();
+  EXPECT_EQ(m.Get32(TRILOGY_TURN_SCRATCH + 4), 0u);
+  EXPECT_EQ(script.GetCameraPitchSource(), CORRUPTION_TURN.camera_xf + 0x24);
+
+  m.Set32(TRILOGY_PLAYER + 0x784, std::bit_cast<u32>(0.5f));
+  game.Set(game.menu, 1);
+  frame();
+  EXPECT_EQ(GetF32(m, TRILOGY_PLAYER + 0x784), 0.0f);
+  EXPECT_EQ(script.GetCameraPitchSource(), CORRUPTION_TURN.camera_xf + 0x24);
+  EXPECT_FALSE(script.KeepsPointerOnScreen());
+  game.Set(game.menu, 0);
+
+  game.Set(game.ball, 1);
+  frame();
+  EXPECT_FALSE(script.GetCameraPitchSource());
+  EXPECT_FALSE(script.KeepsPointerOnScreen());
+  game.Set(game.ball, 0);
+
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("edge_tilt"), 0));
+  frame();
+  EXPECT_EQ(m.Get32(TRILOGY_TURN_SCRATCH + 4), 1u);
+  EXPECT_EQ(script.GetCameraPitchSource(), CORRUPTION_TURN.camera_xf + 0x24);
+  // Echoes stops turning two seconds after the pointer leaves the screen: kept on it anyway.
+  EXPECT_TRUE(script.KeepsPointerOnScreen());
+}
+
+TEST(TrilogyStickTurnPatch, RefusesOtherCode)
+{
+  TrilogyTurnGame game;
+  game.RunPrime();
+  game.Set(PRIME_TURN.function + PRIME_TURN.check_offset, 0x60000000);  // another build
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTrilogyTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(PRIME_TURN.function), 0x9421FFC0u);
+  EXPECT_EQ(game.memory.Get32(TRILOGY_TURN_CAVE), 0u);
+  EXPECT_EQ(game.memory.Get32(TRILOGY_TURN_SCRATCH), 0u);
+  EXPECT_TRUE(Warned(script, "not installed"));
+}

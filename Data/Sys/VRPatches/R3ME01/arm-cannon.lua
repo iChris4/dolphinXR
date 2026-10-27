@@ -6,18 +6,22 @@
 -- updaters come from PrimeHack's R3ME01 tables (shiiion/dolphin). The hook points, the gun and
 -- camera chains and the cave are this patch's own.
 --
+-- When the VR view removes the game camera's pitch (stick-turn.lua lets the pointer's edges tilt
+-- the camera), the cannon is placed in the camera's level frame, so that it stays in the hand
+-- whatever that pitch.
+--
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
 patch = {
   title = "Arm cannon follows the controller",
   author = "DolphinXR, after PrimedGun (Nobbie), with PrimeHack's addresses",
-  version = "1.1",
+  version = "1.2",
   description = "The arm cannon is aimed and placed by your VR controller, and shots and missiles "
     .. "leave it where it points; the scan visors of Metroid Prime and Echoes scan what their "
     .. "lens shows. For the three games of Metroid Prime Trilogy NTSC-U.",
   games = {"R3ME01"},
   revision = 0,
-  scratch = 0x400,
+  scratch = 0x440,
   -- The profile's Controller Anchor of the cannon textures would move the cannon twice.
   conflicts = {texture = {"Arm Cannon"}},
   settings = {
@@ -191,6 +195,9 @@ local CAVES = S + 0x50    -- the caves, one per site
 -- 6 floats: the aim ray's origin and direction in the camera's axes, game units. At the end, so
 -- that the caves of a savestate from version 1.0 (at CAVES too) stay where they were.
 local RAY = S + 0x3E8
+local LEVEL = S + 0x400     -- 1: from the camera's level frame (the VR view removes its pitch)
+local ONE = S + 0x404       -- 1.0
+local LEVEL_XF = S + 0x408  -- the camera's level frame (3x4), written by the caves
 local MAX_SITES = 3
 local AIM_LENGTH = 1.25   -- the length of the aim rays' direction (the games')
 
@@ -205,13 +212,33 @@ end
 -- position + its rotation * OFFSET (a ray: direction = the camera's rotation * RAY's direction,
 -- origin = the camera's position + its rotation * RAY's origin), written where the game is about
 -- to take them; then the replaced instruction.
+--
+-- With LEVEL set, the camera's level frame takes the camera's place: its right axis (horizontal,
+-- as a pitch turns about it), the horizontal forward (up x right) and world up, at the camera's
+-- position. The pose is then given in that frame. Only the registers the rest of the cave writes.
 local function cave_words(g, site, index, address)
   local guard = GUARDS - S + (index - 1) * 4
   local base = site.base
   local origin = (site.direction and RAY or OFFSET) - S
   local t = {load_address("r11", S),
              string.format("lwz r12, 0x%X(r11)\ncmplw r12, %s\nbne done\n", guard, site.guard_reg),
-             "lwz r12, 0x30(r11)\n"}
+             string.format("lwz r12, 0x%X(r11)\ncmpwi r12, 0\nlwz r12, 0x30(r11)\nbeq camera\n",
+                           LEVEL - S),
+             string.format("lfs f1, 0(r12)\nlfs f2, 0x10(r12)\nfneg f3, f2\nlfs f11, 0x%X(r11)\n",
+                           ONE - S),
+             "fsubs f10, f11, f11\n"}
+  -- Rows of the level frame: (rx, -ry, 0), (ry, rx, 0), (0, 0, 1), then the camera's position.
+  local rows = {{"f1", "f3", "f10"}, {"f2", "f1", "f10"}, {"f10", "f10", "f11"}}
+  for row = 0, 2 do
+    local o = row * 0x10
+    for col = 0, 2 do
+      t[#t + 1] = string.format("stfs %s, 0x%X(r11)\n", rows[row + 1][col + 1],
+                                LEVEL_XF - S + o + col * 4)
+    end
+    t[#t + 1] = string.format("lfs f12, 0x%X(r12)\nstfs f12, 0x%X(r11)\n", o + 0xC,
+                              LEVEL_XF - S + o + 0xC)
+  end
+  t[#t + 1] = string.format("addi r12, r11, 0x%X\ncamera:\n", LEVEL_XF - S)
   if site.direction then
     t[#t + 1] = string.format("lfs f1, 0x%X(r11)\nlfs f2, 0x%X(r11)\nlfs f3, 0x%X(r11)\n",
                               origin + 0xC, origin + 0x10, origin + 0x14)
@@ -388,14 +415,15 @@ local function stop_tracking()
   end
 end
 
--- The controller's pose seen from the game camera (OpenXR view space: +X right, +Y up,
--- -Z forward, meters), or the test pose.
-local function hand_pose()
+-- The controller's pose seen from the game camera, or from its level frame when the VR view
+-- removes the camera's pitch (OpenXR view space: +X right, +Y up, -Z forward, meters), or the
+-- test pose.
+local function hand_pose(level)
   if settings.test_pitch ~= 0 then
     local h = rad(settings.test_pitch) * 0.5
     return true, 0.2, -0.25, -0.35, sin(h), 0, 0, cos(h)
   end
-  return raw_pose(settings.hand, "view")
+  return raw_pose(settings.hand, level and "level_view" or "view")
 end
 
 -- The virtual screen, in the game camera's view space (meters): 16:9, centred ScreenDistance
@@ -425,8 +453,17 @@ local function lens_ray(upm)
   return ex * upm, -ez * upm, ey * upm, x * length, -z * length, y * length
 end
 
+-- A vector of the camera's axes in its level frame's: turned about the right axis by the camera's
+-- pitch (the sine is its forward up component).
+local function to_level(camera, y, z)
+  local s = mem.f32(camera + 0x24) or 0
+  local c = sqrt(math.max(0, 1 - s * s))
+  return c * y - s * z, s * y + c * z
+end
+
 local function track(g)
-  local ok, px, py, pz, qx, qy, qz, qw = hand_pose()
+  local level = vr.camera_pitch_source() ~= nil
+  local ok, px, py, pz, qx, qy, qz, qw = hand_pose(level)
   local player = ok and g.player()
   local gun = player and g.gun(player)
   local camera = gun and g.camera()
@@ -469,6 +506,11 @@ local function track(g)
   local rx, ry, rz, dx, dy, dz
   if g.scanning and settings.test_pitch == 0 and g.scanning(player) then
     rx, ry, rz, dx, dy, dz = lens_ray(vr.units_per_meter())
+    -- The lens is on the virtual screen, which follows the camera's pitch.
+    if rx and level then
+      ry, rz = to_level(camera, ry, rz)
+      dy, dz = to_level(camera, dy, dz)
+    end
   end
   if not rx then
     rx, ry, rz = ox, oy, oz
@@ -476,7 +518,8 @@ local function track(g)
   end
   if not write_f32s(BASIS, b00, b01, b02, b10, b11, b12, b20, b21, b22) or
      not write_f32s(OFFSET, ox, oy, oz) or not write_f32s(RAY, rx, ry, rz, dx, dy, dz) or
-     not mem.write_u32(CAMERA, camera) then
+     not mem.write_u32(CAMERA, camera) or not write_f32s(ONE, 1) or
+     not mem.write_u32(LEVEL, level and 1 or 0) then
     stop_tracking()
     return
   end

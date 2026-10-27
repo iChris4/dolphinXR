@@ -742,8 +742,8 @@ TEST(CorruptionArmCannonPatch, RefusesOtherCode)
 
 namespace
 {
-constexpr u32 TRILOGY_SCRATCH = 0x80002BF0;
-constexpr u32 TRILOGY_SCRATCH_SIZE = 0x400;
+constexpr u32 TRILOGY_SCRATCH = 0x80002BB0;
+constexpr u32 TRILOGY_SCRATCH_SIZE = 0x440;
 constexpr u32 TRILOGY_CAMERA_XF = TRILOGY_SCRATCH + 0x30;
 constexpr u32 TRILOGY_BASIS = TRILOGY_SCRATCH;
 constexpr u32 TRILOGY_OFFSET = TRILOGY_SCRATCH + 0x24;
@@ -751,6 +751,8 @@ constexpr u32 TRILOGY_GUARDS = TRILOGY_SCRATCH + 0x34;
 constexpr u32 TRILOGY_CAVES = TRILOGY_SCRATCH + 0x50;
 // The aim ray's origin and direction, in the camera's axes.
 constexpr u32 TRILOGY_RAY = TRILOGY_SCRATCH + 0x3E8;
+// 1 while the VR view removes the camera's pitch, then 1.0.
+constexpr u32 TRILOGY_LEVEL = TRILOGY_SCRATCH + 0x400;
 
 // Metroid Prime: the end of the cannon updater and the aim ray, each with its next instruction.
 constexpr u32 PRIME_CANNON_HOOK = 0x8018BC74;
@@ -988,6 +990,60 @@ TEST(TrilogyArmCannonPatch, ScanVisorAimsThroughTheLens)
   m.Write32(0x80A50000 + 0x18, 0);
   ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
   EXPECT_TRUE(along_the_cannon());
+}
+
+// When the VR view removes the camera's pitch (stick-turn), the hand comes from the camera's
+// level frame, which the caves build; the scan lens's ray, computed in the pitched camera's axes
+// (the virtual screen follows the pitch), is turned into the level frame's.
+TEST(TrilogyArmCannonPatch, UsesTheLevelFrameWithoutThePitch)
+{
+  TrilogyGame game;
+  game.LoadPrime();
+  game.TrackRightHand();
+  HandInput& hand = game.input.hands[1];
+  hand.level_view = {true, {0.2f, -0.3f, -0.4f}, {0, 0, 0, 1}};
+  hand.screen_hit_valid = true;
+  hand.screen_u = 0.0f;
+  hand.screen_v = 0.0f;
+  game.input.head_view = {true, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 1.0f}};
+  Memory& m = game.memory;
+  // The camera pitched up 30 degrees: its forward up component (row 2, col 1).
+  m.SetF32(PRIME_CAMERA + 0x2C + 0x24, 0.5f);
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadTrilogyPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(TRILOGY_LEVEL), 0u);
+
+  VR::CameraPitch::SetSource(PRIME_CAMERA + 0x2C + 0x24);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(TRILOGY_LEVEL), 1u);
+  EXPECT_FLOAT_EQ(m.GetF32(TRILOGY_LEVEL + 4), 1.0f);
+  // The level pose (no rotation): the basis tends to identity (smoothing keeps 0.24 of the last).
+  EXPECT_GT(m.GetF32(TRILOGY_BASIS), 0.9f);
+  // Each cave reads the flag (lwz r12, 0x400(r11)) to build the level frame.
+  for (const u32 hook : {PRIME_CANNON_HOOK, PRIME_AIM_HOOK})
+  {
+    u32 cave = 0;
+    for (u32 a = TRILOGY_CAVES; a < TRILOGY_RAY && !cave; a += 4)
+    {
+      if (m.Get32(a) == 0x818B0400u && m.Get32(hook) == Branch(hook, a - 0x14, false))
+        cave = a;
+    }
+    EXPECT_NE(cave, 0u) << std::hex << hook;
+  }
+
+  // The scan visor: the ray to the screen's centre, straight ahead of the pitched camera, is
+  // 30 degrees up in the level frame.
+  m.Write32(0x804BFCD4, 0x80A50000);
+  m.Write32(0x80A50000 + 0x18, 2);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  VR::CameraPitch::SetSource(std::nullopt);
+  const float c = std::sqrt(0.75f);
+  EXPECT_NEAR(m.GetF32(TRILOGY_RAY + 0xC), 0.0f, 1e-5f);
+  EXPECT_NEAR(m.GetF32(TRILOGY_RAY + 0x10), 1.25f * c, 1e-5f);
+  EXPECT_NEAR(m.GetF32(TRILOGY_RAY + 0x14), 1.25f * 0.5f, 1e-5f);
 }
 
 TEST(TrilogyArmCannonPatch, WaitsOutsideTheGames)
