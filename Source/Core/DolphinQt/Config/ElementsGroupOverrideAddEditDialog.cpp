@@ -265,6 +265,11 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
          "one-layer texture partially updated from a stereo EFB copy.\n"
          "Enable this only for effects that incorrectly duplicate the left eye into the right "
          "eye."));
+  m_mono_efb_copy_check = new QCheckBox(tr("Left Eye EFB Copies"));
+  m_mono_efb_copy_check->setToolTip(
+      tr("Show the left eye's picture in both eyes when this draw samples a copy of the screen, "
+         "for a frozen screen shown as a flat picture (a pause menu's background).\n"
+         "The copy stays that way for every draw that samples it afterwards."));
 
   m_screen_pane_depth_label = new QLabel(tr("Screen Pane Depth:"));
   m_screen_pane_depth_combo = new QComboBox;
@@ -544,6 +549,7 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
   form->addRow(m_profile_layers_label, m_profile_layers_list);
   form->addRow(tr("Handling:"), m_handling_combo);
   form->addRow(QString(), m_preserve_stereo_efb_check);
+  form->addRow(QString(), m_mono_efb_copy_check);
   form->addRow(m_screen_pane_depth_label, m_screen_pane_depth_combo);
   form->addRow(m_screen_pane_reference_label, m_screen_pane_reference_spin);
   form->addRow(m_screen_pane_strength_label, m_screen_pane_strength_spin);
@@ -681,6 +687,7 @@ ElementsGroupOverrideAddEditDialog::ElementsGroupOverrideAddEditDialog(
         m_handling_combo->setCurrentIndex(handling_idx);
     }
     m_preserve_stereo_efb_check->setChecked(edit_override->preserve_stereo_efb);
+    m_mono_efb_copy_check->setChecked(edit_override->mono_efb_copy);
     {
       const int depth_idx =
           m_screen_pane_depth_combo->findData(static_cast<int>(edit_override->screen_pane_depth));
@@ -784,6 +791,9 @@ ElementsGroupManager::ElementGroupOverride ElementsGroupOverrideAddEditDialog::G
   result.preserve_stereo_efb =
       result.handling == ElementsGroupManager::HandlingType::Fullscreen &&
       m_preserve_stereo_efb_check->isChecked();
+  result.mono_efb_copy = result.handling != ElementsGroupManager::HandlingType::Skip &&
+                         result.handling != ElementsGroupManager::HandlingType::Flag &&
+                         m_mono_efb_copy_check->isChecked();
   result.screen_pane_depth = static_cast<ElementsGroupManager::ScreenPaneDepthMode>(
       m_screen_pane_depth_combo->currentData().toInt());
   result.screen_pane_reference_depth =
@@ -1029,6 +1039,8 @@ void ElementsGroupOverrideAddEditDialog::RefreshHandlingUi()
   m_screen_pane_strength_label->setVisible(show_screen_pane_3d);
   m_screen_pane_strength_spin->setVisible(show_screen_pane_3d);
   m_preserve_stereo_efb_check->setVisible(show_preserve_stereo_efb);
+  m_mono_efb_copy_check->setVisible(handling != ElementsGroupManager::HandlingType::Skip &&
+                                    !is_flag);
   m_units_per_meter_label->setVisible(show_units_per_meter);
   m_units_per_meter_spin->setVisible(show_units_per_meter);
   m_passthrough_opacity_label->setVisible(show_passthrough);

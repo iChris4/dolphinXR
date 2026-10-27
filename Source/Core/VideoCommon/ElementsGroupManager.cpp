@@ -847,6 +847,8 @@ LoadElementGroupOverridesFromINIFile(const std::string& path)
                              HandlingType::Skip;
     else if (key == "preserve_stereo_efb")
       current.preserve_stereo_efb = (value == "1" || value == "true");
+    else if (key == "mono_efb_copy")
+      current.mono_efb_copy = (value == "1" || value == "true");
     // "layer" (manual depth layer) was removed along with Auto Layer Spread / Layer Offset —
     // silently ignored so older INIs still load. (Note: "sig_layer" is a different, still
     // supported key — it is part of the element signature, not the depth layering.)
@@ -1086,6 +1088,8 @@ void ElementsGroupManager::SaveOverridesToINI(const std::string& game_id,
     out << "handling=" << GetHandlingName(entry.handling) << "\n";
     if (entry.handling == HandlingType::Fullscreen && entry.preserve_stereo_efb)
       out << "preserve_stereo_efb=1\n";
+    if (entry.mono_efb_copy)
+      out << "mono_efb_copy=1\n";
     if (entry.element_depth >= 0.0f)
       out << "element_depth=" << entry.element_depth << "\n";
     if (entry.units_per_meter > 0.0f)
@@ -2336,6 +2340,7 @@ ElementsGroupManager::DrawResolution ElementsGroupManager::ResolveOverrides(cons
   {
     const ElementGroupOverride* handling_entry = nullptr;
     result.handling = GetOverrideHandlingLocked(draw, &result.preserve_stereo_efb, &handling_entry);
+    result.mono_efb_copy = handling_entry && handling_entry->mono_efb_copy;
     switch (result.handling)
     {
     case HandlingType::ScreenPane:

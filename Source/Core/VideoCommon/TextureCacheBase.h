@@ -191,6 +191,8 @@ struct TCacheEntry
   bool should_force_safe_hashing = false;  // for XFB
   bool is_xfb_copy = false;
   bool is_xfb_container = false;
+  // DolphinXR: every layer of this EFB copy holds the left eye's picture (ApplyVRMonoEFBCopy).
+  bool vr_mono_layers = false;
   u64 id = 0;
   u32 content_semaphore = 0;  // Counts up
 
@@ -406,6 +408,9 @@ public:
   // Fullscreen override opt-in: repair a one-layer texture which was partially updated from a
   // same-address stereo EFB copy, then rebind the promoted texture for the current draw.
   bool ApplyVRPreserveStereoEFBFix(u32 stage);
+  // Override opt-in (mono_efb_copy): a stereo EFB copy bound at this stage takes its left eye's
+  // picture in every layer, once per copy, and is rebound for the current draw.
+  bool ApplyVRMonoEFBCopy(u32 stage);
   void CopyRenderTargetToTexture(FramebufferCopyResolvedData& resolved_data);
 
   void ScaleTextureCacheEntryTo(RcTcacheEntry& entry, u32 new_width, u32 new_height);

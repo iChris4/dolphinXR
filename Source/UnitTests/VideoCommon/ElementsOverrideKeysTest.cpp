@@ -80,6 +80,7 @@ TEST(ElementsOverrideKeys, SavesLoadAndHudKeys)
   body.runtime_element.any_alpha_update = true;
   body.runtime_element.any_alpha_ref = true;
   body.runtime_element.efb_copy = 0;
+  body.mono_efb_copy = true;
   ElementsGroupManager::ElementGroupOverride plain = parsed[0];
   plain.name = "Plain";
   plain.headlocked.reset();
@@ -103,17 +104,20 @@ TEST(ElementsOverrideKeys, SavesLoadAndHudKeys)
   EXPECT_TRUE(saved[0].runtime_element.any_alpha_update);
   EXPECT_TRUE(saved[0].runtime_element.any_alpha_ref);
   EXPECT_EQ(saved[0].runtime_element.efb_copy, 0);
+  EXPECT_TRUE(saved[0].mono_efb_copy);
   // An entry without the keys is saved without them, as before they existed.
   EXPECT_FALSE(saved[1].headlocked);
   EXPECT_FALSE(saved[1].runtime_element.use_load);
   EXPECT_FALSE(saved[1].runtime_element.any_alpha_update);
   EXPECT_FALSE(saved[1].runtime_element.any_alpha_ref);
   EXPECT_EQ(saved[1].runtime_element.efb_copy, -1);
+  EXPECT_FALSE(saved[1].mono_efb_copy);
   EXPECT_EQ(text.find("sig_use_load"), text.rfind("sig_use_load"));
   EXPECT_EQ(text.find("headlocked_mode"), text.rfind("headlocked_mode"));
   EXPECT_EQ(text.find("sig_any_alpha_write"), text.rfind("sig_any_alpha_write"));
   EXPECT_EQ(text.find("sig_any_alpha_ref"), text.rfind("sig_any_alpha_ref"));
   EXPECT_EQ(text.find("sig_efb_copy"), text.rfind("sig_efb_copy"));
+  EXPECT_EQ(text.find("mono_efb_copy"), text.rfind("mono_efb_copy"));
 }
 
 // The entry that gives the draw its handling supplies the HUD parameters, and the projection load
@@ -124,7 +128,7 @@ TEST(ElementsOverrideKeys, ResolvesHudParametersOfTheMatchingEntry)
       WriteTemp(std::string("[ElementsGroupOverride]\n") + HUD_BODY +
                 "\n$Helmet\nformat=element_only_v6\nhandling=headlocked\n"
                 "headlocked_mode=perspective\nhud_scale=100\nhud_width=1.7\nhud_height=1.7\n"
-                "sig_perspective=1\nsig_use_projection_type=1\n"
+                "mono_efb_copy=1\nsig_perspective=1\nsig_use_projection_type=1\n"
                 "sig_use_load=1\nsig_load_min=0\nsig_load_max=1\n"));
   ASSERT_EQ(entries.size(), 2u);
   auto& manager = ElementsGroupManager::GetInstance();
@@ -140,12 +144,14 @@ TEST(ElementsOverrideKeys, ResolvesHudParametersOfTheMatchingEntry)
   ASSERT_TRUE(result.headlocked);
   EXPECT_FLOAT_EQ(result.headlocked->scale, 100.0f);
   EXPECT_FALSE(result.headlocked->anchor);
+  EXPECT_TRUE(result.mono_efb_copy);
 
   draw.signature.projection_load = 5;
   result = manager.ResolveOverrides(draw);
   ASSERT_TRUE(result.headlocked);
   EXPECT_FLOAT_EQ(result.headlocked->scale, 30.0f);
   EXPECT_TRUE(result.headlocked->anchor);
+  EXPECT_FALSE(result.mono_efb_copy);
 
   // An orthographic draw matches neither.
   draw.signature.perspective = false;

@@ -65,6 +65,7 @@ private:
   QListWidget* m_profile_layers_list = nullptr;
   QComboBox* m_handling_combo = nullptr;
   QCheckBox* m_preserve_stereo_efb_check = nullptr;
+  QCheckBox* m_mono_efb_copy_check = nullptr;
   QLabel* m_screen_pane_depth_label = nullptr;
   QComboBox* m_screen_pane_depth_combo = nullptr;
   QLabel* m_screen_pane_reference_label = nullptr;

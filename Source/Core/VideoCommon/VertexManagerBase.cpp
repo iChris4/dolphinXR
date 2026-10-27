@@ -1748,6 +1748,7 @@ void VertexManagerBase::Flush()
             // server's draw capture.
             [[maybe_unused]] u8 handling_source = 0;
             bool preserve_stereo_efb = false;
+            bool mono_efb_copy = false;
             float element_depth = -1.0f;
             float units_per_meter = -1.0f;
             float passthrough_opacity = 0.0f;
@@ -1759,6 +1760,7 @@ void VertexManagerBase::Flush()
             {
               handling = element_overrides.handling;
               preserve_stereo_efb = element_overrides.preserve_stereo_efb;
+              mono_efb_copy = element_overrides.mono_efb_copy;
             }
             if (handling != ShaderHunter::HandlingType::Skip)
             {
@@ -1856,6 +1858,12 @@ void VertexManagerBase::Flush()
             {
               for (const u32 i : used_textures)
                 g_texture_cache->ApplyVRPreserveStereoEFBFix(i);
+            }
+            // A frozen screen shown as a flat picture (a pause menu's background): one eye's.
+            if (mono_efb_copy)
+            {
+              for (const u32 i : used_textures)
+                g_texture_cache->ApplyVRMonoEFBCopy(i);
             }
 
             if (handling == ShaderHunter::HandlingType::Screen)

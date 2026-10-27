@@ -112,6 +112,10 @@ public:
     // updated from a stereo EFB copy. Opt-in because most fullscreen effects are intentionally
     // mono and do not need the extra texture allocation/copies.
     bool preserve_stereo_efb = false;
+    // Any handling: the EFB copies the draw samples show the left eye's picture in both eyes, for
+    // a frozen screen shown on the virtual screen (a pause menu's background). Opt-in because the
+    // copy's texture changes for every draw that samples it afterwards.
+    bool mono_efb_copy = false;
     RuntimeElementSignature runtime_element;
     MetroidElementProfile profile_id = MetroidElementProfile::None;
     std::vector<MetroidElementLayer> profile_layers;
@@ -303,6 +307,8 @@ public:
     ControllerAnchorParams controller_anchor;
     // HeadLocked handling: the parameters of the entry that chose it, when it has any.
     std::optional<ShaderHunter::HeadLockedParams> headlocked;
+    // The entry that chose the handling has mono_efb_copy.
+    bool mono_efb_copy = false;
   };
   DrawResolution ResolveOverrides(const DrawRecord& draw);
 

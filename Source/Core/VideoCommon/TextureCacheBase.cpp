@@ -1591,6 +1591,56 @@ bool TextureCacheBase::ApplyVRPreserveStereoEFBFix(u32 stage)
   return true;
 }
 
+bool TextureCacheBase::ApplyVRMonoEFBCopy(u32 stage)
+{
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || stage >= m_bound_textures.size() ||
+      !m_bound_textures[stage])
+  {
+    return false;
+  }
+
+  RcTcacheEntry& entry = m_bound_textures[stage];
+  // A shared cache entry may be bound at more than one stage: once an earlier stage made it
+  // mono, this stage must not keep the old texture bound.
+  if (entry->vr_mono_layers)
+  {
+    g_gfx->SetTexture(stage, entry->texture.get());
+    return false;
+  }
+  if (!entry->is_efb_copy || entry->is_xfb_copy || entry->GetNumLayers() < 2 || entry->IsLocked())
+    return false;
+
+  // A texture cannot be both the source and the destination of a copy on every backend: build
+  // the mono picture in another texture of the same kind and swap it in.
+  const TextureConfig config = entry->texture->GetConfig();
+  std::optional<TexPoolEntry> mono = AllocateTexture(config);
+  if (!mono)
+  {
+    WARN_LOG_FMT(VIDEO, "VR_MONO_EFB_COPY: stage={} failed to allocate a {}x{} texture", stage,
+                 config.width, config.height);
+    return false;
+  }
+  for (u32 layer = 0; layer < config.layers; ++layer)
+  {
+    for (u32 level = 0; level < config.levels; ++level)
+    {
+      const MathUtil::Rectangle<int> rect = config.GetMipRect(level);
+      mono->texture->CopyRectangleFromTexture(entry->texture.get(), rect, 0, level, rect, layer,
+                                              level);
+    }
+  }
+  mono->texture->FinishedRendering();
+
+  entry->texture.swap(mono->texture);
+  entry->framebuffer.swap(mono->framebuffer);
+  // mono now holds the stereo allocation, which the pool can reuse.
+  m_texture_pool.emplace(config,
+                         TexPoolEntry(std::move(mono->texture), std::move(mono->framebuffer)));
+  entry->vr_mono_layers = true;
+  g_gfx->SetTexture(stage, entry->texture.get());
+  return true;
+}
+
 bool TextureCacheBase::IsBoundMetroidPrime2DarkTexture(u32 stage) const
 {
   if (stage >= m_bound_textures.size() || !m_bound_textures[stage])
