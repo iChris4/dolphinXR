@@ -1020,8 +1020,8 @@ TEST(TrilogyStatePatch, RaisesEachGamesState)
   EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_xray", "mp1_visor_xray"}));
   // Leaving the X-ray visor: its view fades out while the next visor is already combat.
   game.Set(game.next_visor, 0);
-  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_combat", "mp1_visor_combat",
-                            "mp_visor_xray", "mp1_visor_xray"}));
+  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_combat", "mp1_visor_combat", "mp_visor_xray",
+                            "mp1_visor_xray"}));
   game.SetVisor(3);
   EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_thermal", "mp1_visor_thermal"}));
   game.SetVisor(2);
