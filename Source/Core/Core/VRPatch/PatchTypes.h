@@ -143,6 +143,8 @@ struct VRInputFrame
   // poses as frozen, like for the emulated controllers.
   bool menu_open = false;
   PoseInput head;
+  // The center of the eyes relative to the game camera (meters, the axes of HandInput::view).
+  PoseInput head_view;
   std::array<HandInput, 2> hands{};
 };
 

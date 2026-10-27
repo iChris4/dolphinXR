@@ -100,6 +100,9 @@ struct OpenXRInputSnapshot
 {
   std::array<OpenXRControllerState, 2> controllers{};
   OpenXRPoseState head_pose;  // HMD head orientation for IR pointer reference
+  // The center of the eyes relative to the game camera, in meters, by the chain of
+  // OpenXRControllerState::view_pose: where the eyes render from. Invalid in flat-screen mode.
+  OpenXRPoseState head_view_pose;
   bool runtime_active = false;
   uint64_t generation = 0;
   std::array<std::string, 2> interaction_profiles;  // Active profile path per hand
@@ -180,6 +183,7 @@ public:
   static void SetControllers(const std::array<OpenXRControllerState, 2>& controllers,
                              bool runtime_active,
                              const OpenXRPoseState& head_pose,
+                             const OpenXRPoseState& head_view_pose,
                              const std::array<std::string, 2>& profiles,
                              bool focused,
                              int64_t sample_time_ns = 0,
@@ -193,6 +197,7 @@ public:
     s_state.menu = menu;
     s_state.controllers = controllers;
     s_state.head_pose = head_pose;
+    s_state.head_view_pose = head_view_pose;
     s_state.runtime_active = runtime_active;
     s_state.interaction_profiles = profiles;
     s_state.session_focused = focused;

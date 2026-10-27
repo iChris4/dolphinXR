@@ -506,7 +506,7 @@ local function make_pose(ok, px, py, pz, qx, qy, qz, qw)
   if not ok then return nil end
   return pose(new_vec3(px, py, pz), new_quat(qx, qy, qz, qw))
 end
-function vr.head() return make_pose(raw_pose("head")) end
+function vr.head(kind) return make_pose(raw_pose("head", kind)) end
 function vr.hand(hand, kind) return make_pose(raw_pose(hand, kind or "aim")) end
 function vr.hand_in_head_space(hand, kind)
   local head, p = vr.head(), vr.hand(hand, kind)

@@ -459,6 +459,7 @@ TEST(VRPatch, ReadsVRInput)
   Harness h;
   h.input.runtime_active = true;
   h.input.head = {true, {0.0f, 1.6f, 0.0f}, {0.0f, 0.0f, 0.0f, 1.0f}};
+  h.input.head_view = {true, {0.0f, 0.1f, 0.05f}, {0.0f, 0.0f, 0.0f, 1.0f}};
   HandInput& right = h.input.hands[1];
   right.connected = true;
   right.primary = true;
@@ -480,6 +481,9 @@ TEST(VRPatch, ReadsVRInput)
       assert(vr.hand("left") == nil and vr.hand("right", "grip") == nil)
       local rel = assert(vr.hand_in_head_space("right"))
       assert(near(rel.pos.y, -0.4) and near(rel.pos.z, -0.4))
+      assert(near(vr.head().pos.y, 1.6) and near(vr.head("view").pos.y, 0.1))
+      local ok, _, _, z = vr.raw_pose("head", "view")
+      assert(ok and near(z, 0.05))
       local linear, angular = vr.velocity("right")
       assert(linear.x == 1 and angular == nil)
       assert(vr.units_per_meter() == 1.5 and game.id() == "GTEST1" and game.field() == 42)

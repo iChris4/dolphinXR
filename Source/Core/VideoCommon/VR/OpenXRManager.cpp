@@ -2850,11 +2850,14 @@ void OpenXRManager::UpdateInputActions()
   // Use left eye orientation as a proxy for head center (negligible difference from averaged).
   // This runs on the pacing thread, so read LocateViews' snapshot rather than m_eye_views.
   XrPosef eye_pose;
+  XrPosef eye_center;
   {
     std::lock_guard lock(m_input_head_pose_mutex);
     eye_pose = m_input_head_pose;
+    eye_center = m_input_head_center;
   }
   Common::VR::OpenXRPoseState head_pose;
+  Common::VR::OpenXRPoseState head_view_pose;
   if (eye_pose.orientation.w != 0.0f || eye_pose.orientation.x != 0.0f ||
       eye_pose.orientation.y != 0.0f || eye_pose.orientation.z != 0.0f)
   {
@@ -2862,6 +2865,11 @@ void OpenXRManager::UpdateInputActions()
     head_pose.orientation = {eye_pose.orientation.x, eye_pose.orientation.y, eye_pose.orientation.z,
                              eye_pose.orientation.w};
     head_pose.position = {eye_pose.position.x, eye_pose.position.y, eye_pose.position.z};
+    // For VR game patches: the eyes' center seen from the game camera, e.g. to cast a ray from
+    // the eyes through a point of the virtual screen.
+    Common::VR::OpenXRPoseState center = head_pose;
+    center.position = {eye_center.position.x, eye_center.position.y, eye_center.position.z};
+    ComputeViewPose(center, &head_view_pose);
   }
 
   std::array<std::string, 2> profile_strings;
@@ -2870,7 +2878,7 @@ void OpenXRManager::UpdateInputActions()
 
   UpdateMenuGate(controllers);
 
-  Common::VR::OpenXRInputState::SetControllers(controllers, true, head_pose,
+  Common::VR::OpenXRInputState::SetControllers(controllers, true, head_pose, head_view_pose,
                                                profile_strings, m_session_focused,
                                                input_time, m_menu_gate.input);
 

@@ -52,12 +52,16 @@ int PushPose(lua_State* L, const PoseInput& pose)
 }
 
 // vr.raw_pose(which, kind) -> valid, px, py, pz, qx, qy, qz, qw. which: "head" or a hand; kind:
-// "aim" (default), "grip", "pointer", "view" or "level_view".
+// "aim" (default), "grip", "pointer", "view" or "level_view"; the head has "view" (its eyes'
+// center) and otherwise its reference-space pose.
 int VRRawPose(lua_State* L)
 {
   const VRInputFrame& input = Input(L);
   if (lua_type(L, 1) == LUA_TSTRING && std::strcmp(lua_tostring(L, 1), "head") == 0)
-    return PushPose(L, input.head);
+  {
+    const char* kind = luaL_optstring(L, 2, "aim");
+    return PushPose(L, std::strcmp(kind, "view") == 0 ? input.head_view : input.head);
+  }
   const HandInput& hand = input.hands[CheckHand(L, 1)];
   const char* kind = luaL_optstring(L, 2, "aim");
   if (std::strcmp(kind, "aim") == 0)

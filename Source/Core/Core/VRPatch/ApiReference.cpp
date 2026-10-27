@@ -84,7 +84,10 @@ asm
 
 constexpr std::string_view VR = R"(
 vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "left"/"right"/0/1)
-  vr.head() -> pose or nil
+  vr.head([kind]) -> pose or nil   -- kind "view": the center of the eyes relative to the game
+                                      camera as DolphinXR renders them (the axes of a hand's
+                                      "view"), e.g. to cast a ray from the eyes through a point
+                                      of the virtual screen; nil in flat-screen mode
   vr.hand(hand [, kind]) -> pose or nil   -- kind: "aim" (default, predicted to the display time),
                                              "grip", "pointer" (aim sampled now), or "view": the
                                              aim relative to the game camera as DolphinXR renders

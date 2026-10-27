@@ -380,6 +380,7 @@ ToolResult GetInput(const ToolArgs&)
                   s.runtime_active ? "active" : "inactive", s.session_focused ? "yes" : "no",
                   s.menu.input_withheld ? "open (input withheld)" : "closed");
   text += "head: " + FormatPose(s.head_pose) + "\n";
+  text += "head view (eyes' center from the game camera): " + FormatPose(s.head_view_pose) + "\n";
   for (size_t hand = 0; hand < 2; ++hand)
   {
     const Common::VR::OpenXRControllerState& c = s.controllers[hand];
