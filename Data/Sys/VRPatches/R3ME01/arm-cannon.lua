@@ -11,9 +11,10 @@
 patch = {
   title = "Arm cannon follows the controller",
   author = "DolphinXR, after PrimedGun (Nobbie), with PrimeHack's addresses",
-  version = "1.0",
+  version = "1.1",
   description = "The arm cannon is aimed and placed by your VR controller, and shots and missiles "
-    .. "leave it where it points. For the three games of Metroid Prime Trilogy NTSC-U.",
+    .. "leave it where it points; the scan visors of Metroid Prime and Echoes scan what their "
+    .. "lens shows. For the three games of Metroid Prime Trilogy NTSC-U.",
   games = {"R3ME01"},
   revision = 0,
   scratch = 0x400,
@@ -73,12 +74,17 @@ end
 --
 -- Corruption fires along the cannon's transform. The Wii versions of Metroid Prime and Echoes fire
 -- at the point the aim ray hits, cast from the camera through the pointer. Their second site is a
--- ray: the cave puts the cannon's position at base + position[1..3] (where the camera's position
--- was) and its forward axis times AIM_LENGTH at base + direction[1..3], before the game casts
--- it. Shots, the lock-on and the scan visor then aim where the cannon points.
+-- ray: the cave puts the ray's origin at base + position[1..3] (where the camera's position was)
+-- and its direction at base + direction[1..3], before the game casts it. The ray is the cannon's
+-- (its position, its forward axis times AIM_LENGTH): shots and the lock-on aim where the cannon
+-- points. While the scan visor is on, it goes from the eyes through the scan lens instead, which
+-- the game draws at the pointer, on the virtual screen: the scan picks what the lens shows,
+-- however far it is (along the cannon, the zone sat above the lens, the hand being below the
+-- eyes).
 --
 -- player() returns the player when it is in first person and not morphed, gun(player) the gun,
--- camera() the camera's transform in world space; nil when there is none.
+-- camera() the camera's transform in world space, scanning(player) whether the scan visor is on;
+-- nil when there is none.
 local GAMES = {
   {
     name = "Metroid Prime",
@@ -106,6 +112,12 @@ local GAMES = {
     gun = function(player) return mem.ptr(player + 0x480) end,
     camera = function()
       return object_camera(0x804BF420, function() return mem.ptr(0x804BF420 + 0x868) end, 0x2C)
+    end,
+    -- The visor on screen and the one it switches to (2 = scan), as in metroid-state.lua.
+    scanning = function()
+      local powerups = mem.ptr(0x804BFCD4)
+      return powerups ~= nil and
+             (mem.u32(powerups + 0x18) == 2 or mem.u32(powerups + 0x1C) == 2)
     end,
   },
   {
@@ -136,6 +148,10 @@ local GAMES = {
         local manager = mem.ptr(0x804E72E8 + 0x1514)
         return manager and manager + 0x10
       end, 0x20)
+    end,
+    scanning = function(player)
+      local visors = mem.ptr(player + 0x12EC)
+      return visors ~= nil and mem.u32(visors + 0x34) == 2
     end,
   },
   {
@@ -171,9 +187,12 @@ local BASIS = S + 0x00    -- 3x3 row-major: the hand's rotation in the camera's 
 local OFFSET = S + 0x24   -- 3 floats: the hand's position from the camera, its axes, game units
 local CAMERA = S + 0x30   -- the camera's transform (3x4)
 local GUARDS = S + 0x34   -- per site, the guard_reg value the pose is for; 0 = not tracked
-local AIM_LENGTH = S + 0x40  -- float: the length of the aim rays' direction (the games': 1.25)
 local CAVES = S + 0x50    -- the caves, one per site
+-- 6 floats: the aim ray's origin and direction in the camera's axes, game units. At the end, so
+-- that the caves of a savestate from version 1.0 (at CAVES too) stay where they were.
+local RAY = S + 0x3E8
 local MAX_SITES = 3
+local AIM_LENGTH = 1.25   -- the length of the aim rays' direction (the games')
 
 local function load_address(register, address)
   local hi = (address >> 16) & 0xFFFF
@@ -182,21 +201,20 @@ local function load_address(register, address)
                        address & 0xFFFF)
 end
 
--- When the gun is tracked: rotation = the camera's rotation * BASIS (a ray: the camera's rotation
--- * BASIS's forward column * AIM_LENGTH), position = the camera's position + its rotation *
--- OFFSET, written where the game is about to take them; then the replaced instruction.
+-- When the gun is tracked: rotation = the camera's rotation * BASIS, position = the camera's
+-- position + its rotation * OFFSET (a ray: direction = the camera's rotation * RAY's direction,
+-- origin = the camera's position + its rotation * RAY's origin), written where the game is about
+-- to take them; then the replaced instruction.
 local function cave_words(g, site, index, address)
   local guard = GUARDS - S + (index - 1) * 4
   local base = site.base
+  local origin = (site.direction and RAY or OFFSET) - S
   local t = {load_address("r11", S),
              string.format("lwz r12, 0x%X(r11)\ncmplw r12, %s\nbne done\n", guard, site.guard_reg),
              "lwz r12, 0x30(r11)\n"}
   if site.direction then
-    t[#t + 1] = string.format("lfs f4, 0x%X(r11)\n", AIM_LENGTH - S)
-    for i = 0, 2 do
-      t[#t + 1] = string.format("lfs f%d, 0x%X(r11)\nfmuls f%d, f%d, f4\n", i + 1, i * 0xC + 4,
-                                i + 1, i + 1)
-    end
+    t[#t + 1] = string.format("lfs f1, 0x%X(r11)\nlfs f2, 0x%X(r11)\nlfs f3, 0x%X(r11)\n",
+                              origin + 0xC, origin + 0x10, origin + 0x14)
     for row = 0, 2 do
       local o = row * 0x10
       t[#t + 1] = string.format(
@@ -219,7 +237,8 @@ local function cave_words(g, site, index, address)
       end
     end
   end
-  t[#t + 1] = "lfs f1, 0x24(r11)\nlfs f2, 0x28(r11)\nlfs f3, 0x2C(r11)\n"
+  t[#t + 1] = string.format("lfs f1, 0x%X(r11)\nlfs f2, 0x%X(r11)\nlfs f3, 0x%X(r11)\n", origin,
+                            origin + 4, origin + 8)
   for row = 0, 2 do
     local o = row * 0x10
     t[#t + 1] = string.format(
@@ -230,8 +249,7 @@ local function cave_words(g, site, index, address)
   t[#t + 1] = "done:\n" .. site.replaced .. string.format("b `0x%X`\n", site.hook + 4)
   local words, err = asm.assemble(table.concat(t), address)
   if not words then error("assembling a cave for " .. g.name .. ": " .. err) end
-  assert(address + #words * 4 <= S + mem.scratch_size,
-         "the caves do not fit in the scratch memory")
+  assert(address + #words * 4 <= RAY, "the caves do not fit in the scratch memory")
   return words
 end
 
@@ -298,7 +316,6 @@ local function install()
     return
   end
   caves[g] = caves[g] or build_caves(g)
-  mem.write_f32(AIM_LENGTH, 1.25)
   local changed = false
   for i, site in ipairs(g.sites) do
     local address, words = caves[g][i][1], caves[g][i][2]
@@ -333,8 +350,8 @@ end
 
 -- The per-field code uses plain numbers, not the math objects (each is a Lua table, which the
 -- Quest's garbage collector would have to free).
-local sin, cos, rad = math.sin, math.cos, math.rad
-local raw_pose, write_f32s = vr.raw_pose, mem.write_f32s
+local sin, cos, rad, sqrt = math.sin, math.cos, math.rad, math.sqrt
+local raw_pose, screen_hit, write_f32s = vr.raw_pose, vr.screen_hit, mem.write_f32s
 
 -- The Hamilton product a * b of two quaternions (x, y, z, w).
 local function qmul(ax, ay, az, aw, bx, by, bz, bw)
@@ -381,6 +398,33 @@ local function hand_pose()
   return raw_pose(settings.hand, "view")
 end
 
+-- The virtual screen, in the game camera's view space (meters): 16:9, centred ScreenDistance
+-- ahead, ScreenSize high. Read again every second (the VR menu changes them live).
+local screen_half_height, screen_distance = 0.75, 2.0
+
+local function read_screen()
+  screen_half_height = (tonumber(vr.setting("ScreenSize")) or 1.5) * 0.5
+  screen_distance = tonumber(vr.setting("ScreenDistance")) or 2.0
+end
+
+-- The ray from the eyes through the point where the hand's aim meets the virtual screen, where the
+-- Wii pointer is and the game draws the scan lens (the pointer maps the screen 1:1 and stops at
+-- its edges): origin then direction (AIM_LENGTH long), the camera's axes, game units. Nil when
+-- the aim misses the screen.
+local function lens_ray(upm)
+  local u, v = screen_hit(settings.hand)
+  local ok, ex, ey, ez = raw_pose("head", "view")
+  if not u or not ok then return nil end
+  u = u < -1 and -1 or (u > 1 and 1 or u)
+  v = v < -1 and -1 or (v > 1 and 1 or v)
+  local x = u * screen_half_height * 16 / 9 - ex
+  local y = v * screen_half_height - ey
+  local z = -screen_distance - ez
+  local length = AIM_LENGTH / sqrt(x * x + y * y + z * z)
+  -- From OpenXR's view axes (+X right, +Y up, -Z forward) to the camera's (+Y forward, +Z up).
+  return ex * upm, -ez * upm, ey * upm, x * length, -z * length, y * length
+end
+
 local function track(g)
   local ok, px, py, pz, qx, qy, qz, qw = hand_pose()
   local player = ok and g.player()
@@ -419,10 +463,19 @@ local function track(g)
   -- The cannon's origin: the hand, plus the model offset along the cannon.
   local mx, my, mz = settings.model_x * scale, (BASE_MODEL_FORWARD + settings.model_y) * scale,
                      settings.model_z * scale
+  local ox, oy, oz = s[10] + b00 * mx + b01 * my + b02 * mz, s[11] + b10 * mx + b11 * my + b12 * mz,
+                     s[12] + b20 * mx + b21 * my + b22 * mz
+  -- The aim ray: along the cannon, or while scanning through the lens.
+  local rx, ry, rz, dx, dy, dz
+  if g.scanning and settings.test_pitch == 0 and g.scanning(player) then
+    rx, ry, rz, dx, dy, dz = lens_ray(vr.units_per_meter())
+  end
+  if not rx then
+    rx, ry, rz = ox, oy, oz
+    dx, dy, dz = b01 * AIM_LENGTH, b11 * AIM_LENGTH, b21 * AIM_LENGTH
+  end
   if not write_f32s(BASIS, b00, b01, b02, b10, b11, b12, b20, b21, b22) or
-     not write_f32s(OFFSET, s[10] + b00 * mx + b01 * my + b02 * mz,
-                    s[11] + b10 * mx + b11 * my + b12 * mz,
-                    s[12] + b20 * mx + b21 * my + b22 * mz) or
+     not write_f32s(OFFSET, ox, oy, oz) or not write_f32s(RAY, rx, ry, rz, dx, dy, dz) or
      not mem.write_u32(CAMERA, camera) then
     stop_tracking()
     return
@@ -438,6 +491,7 @@ end
 
 function on_load()
   clear_guards()
+  read_screen()
   install()
 end
 
@@ -451,6 +505,7 @@ end
 
 function on_frame()
   -- Another game of the disc may have started: its executable replaced the hooked one.
+  if game.field() % 60 == 0 then read_screen() end
   if game.field() % 60 == 0 or not current or not present(current) then install() end
   if not current then
     stop_tracking()

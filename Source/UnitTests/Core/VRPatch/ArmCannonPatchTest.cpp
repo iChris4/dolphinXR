@@ -745,9 +745,12 @@ namespace
 constexpr u32 TRILOGY_SCRATCH = 0x80002BF0;
 constexpr u32 TRILOGY_SCRATCH_SIZE = 0x400;
 constexpr u32 TRILOGY_CAMERA_XF = TRILOGY_SCRATCH + 0x30;
+constexpr u32 TRILOGY_BASIS = TRILOGY_SCRATCH;
+constexpr u32 TRILOGY_OFFSET = TRILOGY_SCRATCH + 0x24;
 constexpr u32 TRILOGY_GUARDS = TRILOGY_SCRATCH + 0x34;
-constexpr u32 TRILOGY_AIM_LENGTH = TRILOGY_SCRATCH + 0x40;
 constexpr u32 TRILOGY_CAVES = TRILOGY_SCRATCH + 0x50;
+// The aim ray's origin and direction, in the camera's axes.
+constexpr u32 TRILOGY_RAY = TRILOGY_SCRATCH + 0x3E8;
 
 // Metroid Prime: the end of the cannon updater and the aim ray, each with its next instruction.
 constexpr u32 PRIME_CANNON_HOOK = 0x8018BC74;
@@ -901,13 +904,19 @@ TEST(TrilogyArmCannonPatch, HooksTheRunningGame)
   EXPECT_EQ(m.Get32(TRILOGY_GUARDS + 4), 0u);
 
   // Armed for the gun (the updater's r25) and the player (the aim ray's r31), with the camera's
-  // transform to read and the aim rays' length.
+  // transform to read and the aim ray: the cannon's position and its forward axis, 1.25 long.
   game.TrackRightHand();
   ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
   EXPECT_EQ(m.Get32(TRILOGY_GUARDS), PRIME_GUN);
   EXPECT_EQ(m.Get32(TRILOGY_GUARDS + 4), PRIME_PLAYER);
   EXPECT_EQ(m.Get32(TRILOGY_CAMERA_XF), PRIME_CAMERA + 0x2C);
-  EXPECT_FLOAT_EQ(m.GetF32(TRILOGY_AIM_LENGTH), 1.25f);
+  for (u32 i = 0; i < 3; ++i)
+  {
+    EXPECT_FLOAT_EQ(m.GetF32(TRILOGY_RAY + i * 4), m.GetF32(TRILOGY_OFFSET + i * 4)) << i;
+    EXPECT_NEAR(m.GetF32(TRILOGY_RAY + 0xC + i * 4),
+                m.GetF32(TRILOGY_BASIS + (i * 3 + 1) * 4) * 1.25f, 1e-6f)
+        << i;
+  }
 
   // Morph ball: the patch stops feeding the cannon.
   m.Write32(PRIME_PLAYER + 0x2F4, 1);
@@ -931,6 +940,54 @@ TEST(TrilogyArmCannonPatch, HooksTheRunningGame)
   // Disabled: the game's code is back.
   ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
   EXPECT_EQ(m.Get32(TRILOGY_CORRUPTION_HOOK), TRILOGY_CORRUPTION_ORIGINAL);
+}
+
+TEST(TrilogyArmCannonPatch, ScanVisorAimsThroughTheLens)
+{
+  TrilogyGame game;
+  game.LoadPrime();
+  game.TrackRightHand();
+  game.input.head_view = {true, {0.05f, 0.1f, 0.2f}, {0.0f, 0.0f, 0.0f, 1.0f}};
+  HandInput& hand = game.input.hands[1];
+  hand.screen_hit_valid = true;
+  hand.screen_u = 0.5f;
+  hand.screen_v = -1.5f;  // past the bottom edge, where the pointer stops
+  // The scan visor ([0x804BFCD4] + 0x18 = 2).
+  Memory& m = game.memory;
+  m.Write32(0x804BFCD4, 0x80A50000);
+  m.Write32(0x80A50000 + 0x18, 2);
+  PatchScript script("arm-cannon");
+  ASSERT_TRUE(script.Load(ReadTrilogyPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+
+  // From the eyes to the lens on the default screen (1.5 m high, 16:9, 2 m ahead), in the
+  // camera's axes (+Y forward, +Z up), game units (1.5 per meter).
+  const float x = 0.5f * 0.75f * 16 / 9 - 0.05f, y = -0.75f - 0.1f, z = -2.0f - 0.2f;
+  const float length = 1.25f / std::sqrt(x * x + y * y + z * z);
+  const std::array<float, 6> lens = {0.05f * 1.5f, -0.2f * 1.5f, 0.1f * 1.5f,
+                                     x * length,   -z * length,  y * length};
+  for (u32 i = 0; i < 6; ++i)
+    EXPECT_NEAR(m.GetF32(TRILOGY_RAY + i * 4), lens[i], 1e-5f) << i;
+
+  // The aim misses the screen, or the combat visor: along the cannon.
+  const auto along_the_cannon = [&m] {
+    for (u32 i = 0; i < 3; ++i)
+    {
+      if (m.GetF32(TRILOGY_RAY + i * 4) != m.GetF32(TRILOGY_OFFSET + i * 4))
+        return false;
+    }
+    return true;
+  };
+  hand.screen_hit_valid = false;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_TRUE(along_the_cannon());
+  hand.screen_hit_valid = true;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_FALSE(along_the_cannon());
+  m.Write32(0x80A50000 + 0x18, 0);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_TRUE(along_the_cannon());
 }
 
 TEST(TrilogyArmCannonPatch, WaitsOutsideTheGames)
