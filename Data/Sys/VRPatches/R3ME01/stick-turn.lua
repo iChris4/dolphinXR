@@ -40,7 +40,7 @@ local BUTTONS = {"Keep my bindings", "Right grip", "Right B", "Right thumbstick 
 patch = {
   title = "Turn with the right thumbstick",
   author = "DolphinXR",
-  version = "1.0",
+  version = "1.1",
   description = "Turns left and right with the right thumbstick instead of pointing at the edges "
     .. "of the screen, and keeps the view level (look up and down with your head): pointing at "
     .. "the top or bottom edge tilts the game's camera, which moves the pointer's screen instead "
@@ -61,9 +61,10 @@ patch = {
        .. "screen the pointer moves on goes up or down, and aiming past its edge keeps the pointer "
        .. "at that edge. Off: those edges do nothing."},
     {name = "visor_button", label = "Visor menu (Wii Remote -)", type = "choice",
-     options = BUTTONS, default = 1,
-     description = "Held to choose a visor while playing. Keep my bindings: the thumbstick's "
-       .. "left still presses - when your profile binds it there."},
+     options = BUTTONS, default = 3,
+     description = "Held to choose a visor while playing (the stock profile leaves the thumbstick "
+       .. "click free). Keep my bindings: the thumbstick's left still presses - when your "
+       .. "profile binds it there."},
     {name = "plus_button", label = "Beam menu, hypermode (Wii Remote +)", type = "choice",
      options = BUTTONS, default = 2,
      description = "Held to choose a beam in Metroid Prime and Echoes, and for hypermode in "

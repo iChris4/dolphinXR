@@ -729,9 +729,9 @@ TEST(CorruptionStickTurnPatch, TurnsWithTheThumbstickAndRestores)
   EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 8), 0.0f, 1e-6f);
   EXPECT_NEAR(GetF32(m, TURN_SCRATCH + 0xC), 0.0f, 1e-6f);
 
-  // While playing, - follows the right grip and + the right B (and the thumbstick no longer
-  // presses them); on the map the user's bindings are back.
-  game.input.hands[1].squeeze_button = true;
+  // While playing, - follows the right thumbstick click and + the right B (and the thumbstick no
+  // longer presses them); on the map the user's bindings are back.
+  game.input.hands[1].thumbstick_button = true;
   frame();
   EXPECT_EQ(Held(script, "-"), 1.0);
   EXPECT_EQ(Held(script, "+"), 0.0);
@@ -1678,9 +1678,9 @@ TEST(TrilogyStickTurnPatch, TurnsInEachGameAndRestores)
   ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
   EXPECT_NEAR(GetF32(m, TRILOGY_TURN_SCRATCH + 0xC), 0.0f, 1e-6f);
 
-  // While playing, - follows the right grip and + the right B; on the map the user's bindings
-  // are back.
-  game.input.hands[1].squeeze_button = true;
+  // While playing, - follows the right thumbstick click and + the right B; on the map the user's
+  // bindings are back.
+  game.input.hands[1].thumbstick_button = true;
   ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
   EXPECT_EQ(Held(script, "-"), 1.0);
   EXPECT_EQ(Held(script, "+"), 0.0);
@@ -1692,7 +1692,7 @@ TEST(TrilogyStickTurnPatch, TurnsInEachGameAndRestores)
   EXPECT_FALSE(script.GetCameraPitchSource());
   EXPECT_FALSE(script.KeepsPointerOnScreen());
   game.Set(game.menu, 0);
-  game.input.hands[1].squeeze_button = false;
+  game.input.hands[1].thumbstick_button = false;
 
   // Echoes replaces Prime's program (its mapper takes the control in r5), then Corruption.
   game.Leave();

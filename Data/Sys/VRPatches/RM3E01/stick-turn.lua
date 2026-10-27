@@ -41,7 +41,7 @@ local BUTTONS = {"Keep my bindings", "Right grip", "Right B", "Right thumbstick 
 patch = {
   title = "Turn with the right thumbstick",
   author = "DolphinXR",
-  version = "1.1",
+  version = "1.2",
   description = "Turns left and right with the right thumbstick instead of pointing at the edges "
     .. "of the screen, and keeps the view level (look up and down with your head): pointing at "
     .. "the top or bottom edge tilts the game's camera, which moves the pointer's screen instead "
@@ -65,9 +65,10 @@ patch = {
      description = "The green crosshair drawn under the pointer (the profile's \"Crosshair\" "
        .. "entry)."},
     {name = "visor_button", label = "Visor menu (Wii Remote -)", type = "choice",
-     options = BUTTONS, default = 1,
-     description = "Held to choose a visor while playing. Keep my bindings: the thumbstick's "
-       .. "left still presses - when your profile binds it there."},
+     options = BUTTONS, default = 3,
+     description = "Held to choose a visor while playing (the stock profile leaves the thumbstick "
+       .. "click free). Keep my bindings: the thumbstick's left still presses - when your "
+       .. "profile binds it there."},
     {name = "hyper_button", label = "Hypermode (Wii Remote +)", type = "choice",
      options = BUTTONS, default = 2},
     {name = "test_stick", label = "Test thumbstick", default = 0, min = -1, max = 1, step = 0.1,
