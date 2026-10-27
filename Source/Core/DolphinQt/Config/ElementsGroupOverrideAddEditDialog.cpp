@@ -100,6 +100,11 @@ QString FormatRuntimeElementSummary(const ShaderHunter::RuntimeElementSignature&
                .arg(sig.any_alpha_update   ? QObject::tr("any alpha") :
                     sig.blend_alpha_update ? QObject::tr("alpha") :
                                              QObject::tr("-"));
+  if (sig.efb_copy >= 0)
+  {
+    parts << (sig.efb_copy ? QObject::tr("Only draws sampling an EFB copy") :
+                             QObject::tr("Only draws sampling no EFB copy"));
+  }
 
   return parts.join(QStringLiteral("\n"));
 }

@@ -179,6 +179,8 @@ bool ParseRuntimeElementSignatureField(ShaderHunter::RuntimeElementSignature* si
     signature->any_alpha_update = (value == "1" || value == "true");
   else if (key == "sig_any_alpha_ref")
     signature->any_alpha_ref = (value == "1" || value == "true");
+  else if (key == "sig_efb_copy")
+    signature->efb_copy = std::clamp(ParseGroupedInt(value), -1, 1);
   else
     return false;
 
@@ -231,6 +233,8 @@ void SaveRuntimeElementSignature(std::ostringstream& out,
     out << prefix << "sig_any_alpha_write=1\n";
   if (sig.any_alpha_ref)
     out << prefix << "sig_any_alpha_ref=1\n";
+  if (sig.efb_copy >= 0)
+    out << prefix << "sig_efb_copy=" << sig.efb_copy << "\n";
 }
 
 constexpr std::array<std::string_view, 3> HUD_CONTEXT_NAMES = {"default", "combat", "menu"};
@@ -428,6 +432,7 @@ size_t ComputeRuntimeElementKey(const ShaderHunter::RuntimeElementSignature& sig
   HashCombineValue(seed, sig.blend_alpha_update);
   HashCombineValue(seed, sig.any_alpha_update);
   HashCombineValue(seed, sig.any_alpha_ref);
+  HashCombineValue(seed, sig.efb_copy);
   HashCombineValue(seed, texture_excluded);
   for (const u64 texture_hash : texture_hashes)
     HashCombineValue(seed, texture_hash);
@@ -468,7 +473,8 @@ bool SignaturesEqual(const ShaderHunter::RuntimeElementSignature& lhs,
          lhs.zupdate == rhs.zupdate && lhs.zfunc == rhs.zfunc &&
          lhs.blend_color_update == rhs.blend_color_update &&
          lhs.blend_alpha_update == rhs.blend_alpha_update &&
-         lhs.any_alpha_update == rhs.any_alpha_update && lhs.any_alpha_ref == rhs.any_alpha_ref;
+         lhs.any_alpha_update == rhs.any_alpha_update && lhs.any_alpha_ref == rhs.any_alpha_ref &&
+         lhs.efb_copy == rhs.efb_copy;
 }
 
 bool StableSubMatchSignaturesEqual(const ElementsGroupManager::StableSubMatchSignature& lhs,
@@ -632,6 +638,8 @@ ElementsGroupManager::MakeSelectedMatchFilterSignature(
   filter.use_viewport = true;
   filter.use_scissor = true;
   filter.use_render_state = true;
+  // Whether the draw samples an EFB copy is not one of the groups: match either.
+  filter.efb_copy = -1;
   return filter;
 }
 
@@ -1361,6 +1369,7 @@ ElementsGroupManager::RuntimeElementSignature ElementsGroupManager::GetMaskedSee
   masked.use_viewport = m_group_mask.viewport;
   masked.use_scissor = m_group_mask.scissor;
   masked.use_render_state = m_group_mask.render_state;
+  masked.efb_copy = -1;
   return masked;
 }
 

@@ -107,6 +107,28 @@ TEST(RuntimeElementMatcher, AlphaTestReferencesCanBeIgnored)
   EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, candidate));
 }
 
+TEST(RuntimeElementMatcher, EfbCopySamplingCanBeRequired)
+{
+  auto pattern = MakePerspectiveSignature();
+  auto text = pattern;
+  text.efb_copy = 0;
+  auto blur = pattern;  // the same state, sampling a copy of the frame
+  blur.efb_copy = 1;
+  // By default an entry takes both.
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, text));
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, blur));
+
+  pattern.efb_copy = 0;
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, text));
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, blur));
+  pattern.efb_copy = 1;
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, text));
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, blur));
+  // Whatever the groups the entry matches.
+  pattern.use_projection = pattern.use_render_state = false;
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, text));
+}
+
 TEST(RuntimeElementMatcher, ProjectionLoadMatchesItsRange)
 {
   const auto exact = MakeLoadPattern(4, 4);

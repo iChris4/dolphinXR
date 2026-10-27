@@ -79,6 +79,7 @@ TEST(ElementsOverrideKeys, SavesLoadAndHudKeys)
   ElementsGroupManager::ElementGroupOverride body = parsed[0];
   body.runtime_element.any_alpha_update = true;
   body.runtime_element.any_alpha_ref = true;
+  body.runtime_element.efb_copy = 0;
   ElementsGroupManager::ElementGroupOverride plain = parsed[0];
   plain.name = "Plain";
   plain.headlocked.reset();
@@ -101,15 +102,18 @@ TEST(ElementsOverrideKeys, SavesLoadAndHudKeys)
   EXPECT_EQ(saved[0].headlocked->context, 1);
   EXPECT_TRUE(saved[0].runtime_element.any_alpha_update);
   EXPECT_TRUE(saved[0].runtime_element.any_alpha_ref);
+  EXPECT_EQ(saved[0].runtime_element.efb_copy, 0);
   // An entry without the keys is saved without them, as before they existed.
   EXPECT_FALSE(saved[1].headlocked);
   EXPECT_FALSE(saved[1].runtime_element.use_load);
   EXPECT_FALSE(saved[1].runtime_element.any_alpha_update);
   EXPECT_FALSE(saved[1].runtime_element.any_alpha_ref);
+  EXPECT_EQ(saved[1].runtime_element.efb_copy, -1);
   EXPECT_EQ(text.find("sig_use_load"), text.rfind("sig_use_load"));
   EXPECT_EQ(text.find("headlocked_mode"), text.rfind("headlocked_mode"));
   EXPECT_EQ(text.find("sig_any_alpha_write"), text.rfind("sig_any_alpha_write"));
   EXPECT_EQ(text.find("sig_any_alpha_ref"), text.rfind("sig_any_alpha_ref"));
+  EXPECT_EQ(text.find("sig_efb_copy"), text.rfind("sig_efb_copy"));
 }
 
 // The entry that gives the draw its handling supplies the HUD parameters, and the projection load

@@ -109,6 +109,9 @@ bool Matches(const ShaderHunter::RuntimeElementSignature& pattern,
     }
   }
 
+  if (pattern.efb_copy >= 0 && pattern.efb_copy != candidate.efb_copy)
+    return false;
+
   return true;
 }
 }  // namespace RuntimeElementMatcher

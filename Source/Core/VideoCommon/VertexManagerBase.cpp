@@ -90,12 +90,14 @@ struct MetroidHydraHudSettings
 
 ShaderHunter::RuntimeElementSignature BuildRuntimeElementSignature(const XFMemory& xf_memory,
                                                                    const BPMemory& bp_memory,
-                                                                   u32 projection_load)
+                                                                   u32 projection_load,
+                                                                   bool samples_efb_copy)
 {
   ShaderHunter::RuntimeElementSignature signature;
   signature.valid = true;
   signature.perspective = xf_memory.projection.type == ProjectionType::Perspective;
   signature.projection_load = static_cast<int>(projection_load);
+  signature.efb_copy = samples_efb_copy ? 1 : 0;
 
   const float* projection = xf_memory.projection.rawProjection.data();
   if (signature.perspective)
@@ -1525,7 +1527,20 @@ void VertexManagerBase::Flush()
           ShaderHunter::RuntimeElementSignature draw_signature{};
           if (hunter_enabled || elements_runtime_active)
           {
-            draw_signature = BuildRuntimeElementSignature(xfmem, bpmem, projection_load);
+            // Whether a bound texture was copied from the EFB (the textures are bound above).
+            bool samples_efb_copy = false;
+            for (const u32 i : used_textures)
+            {
+              u32 copy_width = 0;
+              u32 copy_height = 0;
+              if (g_texture_cache->IsBoundEfbCopy(i, &copy_width, &copy_height))
+              {
+                samples_efb_copy = true;
+                break;
+              }
+            }
+            draw_signature =
+                BuildRuntimeElementSignature(xfmem, bpmem, projection_load, samples_efb_copy);
             if (hunter_enabled)
               hunter.SetCurrentDrawSignature(draw_signature);
           }

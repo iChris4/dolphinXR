@@ -184,6 +184,10 @@ public:
     // Pattern only: the alpha test matches by its compare functions and logic, whatever its two
     // reference values, for effects that animate them (the Metroid Prime scan lens).
     bool any_alpha_ref = false;
+    // A draw: 1 when it samples a texture copied from the EFB, else 0. A pattern: -1 matches
+    // either, 0 or 1 only that, so a generic 2D entry can leave the EFB effects (blur, bloom) to
+    // AutoNativeEfbEffects.
+    int efb_copy = -1;
   };
 
   struct HighlightedDraw
