@@ -1772,3 +1772,112 @@ TEST(TrilogyStickTurnPatch, RefusesOtherCode)
   EXPECT_EQ(game.memory.Get32(TRILOGY_TURN_SCRATCH), 0u);
   EXPECT_TRUE(Warned(script, "not installed"));
 }
+
+// ---- The Trilogy: change visors next to the head ----
+
+namespace
+{
+std::string ReadTrilogyVisorPatch()
+{
+  return ReadPatch("R3ME01", "visor-gesture");
+}
+
+// The left hand next to the head pushes its thumbstick one way, then back to the centre.
+void Push(TrilogyTurnGame& game, PatchScript& script, float x, float y)
+{
+  HandInput& hand = game.input.hands[0];
+  hand.thumbstick_x = x;
+  hand.thumbstick_y = y;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  hand.thumbstick_x = 0.0f;
+  hand.thumbstick_y = 0.0f;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+}
+}  // namespace
+
+TEST(TrilogyVisorGesturePatch, ManifestIsValid)
+{
+  const std::string source = ReadTrilogyVisorPatch();
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/R3ME01/visor-gesture.lua is missing";
+  const auto read = ReadManifest(source, "visor-gesture");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"R3ME01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, 0u);
+}
+
+// The directions follow each game's visor menu: up scan, left and right its other two visors,
+// down combat; a visor whose powerup is not owned is skipped. Prime and Echoes lower the arm
+// cannon for the scan visor.
+TEST(TrilogyVisorGesturePatch, PicksEachGamesVisors)
+{
+  TrilogyTurnGame game;
+  Memory& m = game.memory;
+  game.input.head = {true, {0.0f, 1.6f, 0.0f}};
+  HandInput& hand = game.input.hands[0];
+  hand.connected = true;
+  hand.aim = {true, {0.6f, 1.2f, -0.4f}};  // away from the head
+  PatchScript script("visor-gesture");
+  ASSERT_TRUE(script.Load(ReadTrilogyVisorPatch(), game.env)) << script.Error();
+
+  // Prime: 0 combat, 1 X-ray, 2 scan, 3 thermal; the X-ray visor (item 0x0D) is not owned.
+  game.RunPrime();
+  for (const u32 item : {0x11u, 0x05u, 0x09u})
+    m.Set32(TRILOGY_POWERUPS + item * 8 + 0x30, 1);
+  const u32 prime_visor = TRILOGY_POWERUPS + 0x1C;
+  // Away from the head the thumbstick walks as usual.
+  Push(game, script, 0.0f, 1.0f);
+  EXPECT_EQ(m.Get32(prime_visor), 0u);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  hand.aim = {true, {-0.12f, 1.55f, -0.05f}};
+  Push(game, script, 0.0f, 1.0f);
+  EXPECT_EQ(m.Get32(prime_visor), 2u);
+  EXPECT_EQ(m.Get32(TRILOGY_PLAYER + 0x488), 3u);  // the cannon's holster
+  EXPECT_EQ(GetF32(m, TRILOGY_PLAYER + 0x48C), 0.2f);
+  Push(game, script, -1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(prime_visor), 3u);
+  Push(game, script, 1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(prime_visor), 3u);
+  Push(game, script, 0.0f, -1.0f);
+  EXPECT_EQ(m.Get32(prime_visor), 0u);
+
+  // Echoes: 0 combat, 1 echo, 2 scan, 3 dark, at [player + 0x12EC] + 0x34.
+  game.Leave();
+  game.RunEchoes();
+  for (const u32 item : {0x08u, 0x09u, 0x0Au, 0x0Bu})
+    m.Set32(TRILOGY_POWERUPS + item * 12 + 0x5C, 1);
+  m.Set32(TRILOGY_PLAYER + 0xEA8, 0x80B20000);  // the gun
+  const u32 echoes_visor = TRILOGY_POWERUPS + 0x34;
+  Push(game, script, 0.0f, 1.0f);
+  EXPECT_EQ(m.Get32(echoes_visor), 2u);
+  EXPECT_EQ(m.Get32(0x80B20000 + 0x3A4), 3u);
+  EXPECT_EQ(GetF32(m, 0x80B20000 + 0x3A4 - 0x20), 0.2f);
+  Push(game, script, -1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(echoes_visor), 3u);
+  Push(game, script, 1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(echoes_visor), 1u);
+
+  // Corruption: 0 combat, 1 scan, 2 command, 3 X-ray, at [player + 0x35A8] + 0x34.
+  game.Leave();
+  game.RunCorruption();
+  for (const u32 item : {0x0Bu, 0x0Cu, 0x0Du, 0x0Eu})
+    m.Set32(TRILOGY_POWERUPS + item * 12 + 0x58, 1);
+  m.Set32(TRILOGY_POWERUPS + 0x34, 0);
+  Push(game, script, 0.0f, 1.0f);
+  EXPECT_EQ(m.Get32(TRILOGY_POWERUPS + 0x34), 1u);
+  Push(game, script, -1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(TRILOGY_POWERUPS + 0x34), 3u);
+  Push(game, script, 1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(TRILOGY_POWERUPS + 0x34), 2u);
+  Push(game, script, 0.0f, -1.0f);
+  EXPECT_EQ(m.Get32(TRILOGY_POWERUPS + 0x34), 0u);
+
+  // On the map nothing changes and the stick is the user's again.
+  game.Set(game.menu, 1);
+  Push(game, script, 0.0f, 1.0f);
+  EXPECT_EQ(m.Get32(TRILOGY_POWERUPS + 0x34), 0u);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+}
