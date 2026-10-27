@@ -16,6 +16,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "Common/CommonPaths.h"
@@ -1880,4 +1881,233 @@ TEST(TrilogyVisorGesturePatch, PicksEachGamesVisors)
   EXPECT_TRUE(script.GetPadHolds().empty());
   for (const LogLine& line : script.TakeLog())
     EXPECT_NE(line.level, 1) << line.text;
+}
+
+// ---- Prime and Echoes on the GameCube: strafe with the left thumbstick, turn with the right ----
+
+namespace
+{
+// The GameCube controller's sticks and D-pad by their names.
+class GameCubePad final : public PadResolver
+{
+public:
+  std::vector<PadControl> Resolve(PadDevice device, u8, PadControlKind kind, std::string_view name,
+                                  std::string* error) override
+  {
+    if (device == PadDevice::GCPad && kind == PadControlKind::Stick &&
+        (name == "Main Stick" || name == "C-Stick"))
+    {
+      return {{std::string(name), "X"}, {std::string(name), "Y"}};
+    }
+    if (device == PadDevice::GCPad && kind == PadControlKind::Button && name.starts_with("D-Pad/"))
+      return {{"D-Pad", std::string(name.substr(6))}};
+    *error = "unknown";
+    return {};
+  }
+};
+
+constexpr u32 DUAL_STICK_SCRATCH = 0x80002850;
+constexpr u32 DUAL_STICK_PLAYER = 0x80A00000;
+
+// The sites of one disc's code and its state manager.
+struct DualStickRevision
+{
+  u32 strafe_site, strafe_original, strafe_input, force_site, force_original, force_resume, damped;
+  u32 state_manager, menu, player_offset, camera, ball, scratch_size;
+};
+constexpr DualStickRevision PRIME_100_DUAL{
+    0x80286C80, 0x801E0304,         0x80286C50, 0x80287590, 0xC002BDA0, 0x802875BC, 0x802884F0,
+    0x8045A1A8, 0x8045A1A8 + 0xF90, 0x84C,      0x2F4,      0x2F8,      0x220};
+constexpr DualStickRevision PRIME_102_DUAL{
+    0x8028760C, 0x801E0314,         0x802875DC, 0x80287F1C, 0xC002BDA8, 0x80287F48, 0x80288EA4,
+    0x8045B208, 0x8045B208 + 0xF90, 0x84C,      0x304,      0x308,      0x220};
+// Echoes: no force site nor damped velocity function.
+constexpr DualStickRevision ECHOES_DUAL{
+    0x801880FC, 0x801E03A4,          0,      0,     0,     0,   0,
+    0x803DB6E0, 0x803DB6E0 + 0x2470, 0x14FC, 0x388, 0x38C, 0x40};
+
+struct DualStickGame
+{
+  DualStickGame(std::string_view game_id, const DualStickRevision& r)
+  {
+    memory.Set32(r.strafe_site, r.strafe_original);
+    memory.Set32(r.strafe_site + 4, 0x2C000000);  // cmpwi r0, 0
+    if (r.force_site)
+    {
+      memory.Set32(r.force_site, r.force_original);
+      memory.Set32(r.force_site + 4, 0xEC21002A);  // fadds f1, f1, f0
+      // The damped velocity function: its prologue, then words to tell apart.
+      for (u32 i = 0; i < 0x80; ++i)
+        memory.Set32(r.damped + i * 4, 0x60000000 + i);
+      memory.Set32(r.damped, 0x9421FFB0);
+      memory.Set32(r.damped + 4, 0x7C0802A6);
+      memory.Set32(r.damped + 8, 0x90010054);
+    }
+    memory.Set32(r.state_manager + r.player_offset, DUAL_STICK_PLAYER);
+    input.hands[0].connected = true;
+    input.hands[1].connected = true;
+    env.memory = &memory;
+    env.input = &input;
+    env.pad = &pad;
+    env.game_id = game_id;
+    env.scratch_base = DUAL_STICK_SCRATCH;
+    env.scratch_size = r.scratch_size;
+  }
+
+  void Sticks(float lx, float ly, float rx, float ry)
+  {
+    input.hands[0].thumbstick_x = lx;
+    input.hands[0].thumbstick_y = ly;
+    input.hands[1].thumbstick_x = rx;
+    input.hands[1].thumbstick_y = ry;
+  }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+  GameCubePad pad;
+};
+
+double PadHeld(PatchScript& script, const std::string& group, const std::string& control)
+{
+  const PadHolds& holds = script.GetPadHolds();
+  const auto it = holds.find(PadHoldKey{PadDevice::GCPad, 0, group, control});
+  return it == holds.end() ? -2.0 : it->second;
+}
+
+// Installs, drives the sticks, gives the right thumbstick back while the beam button is held,
+// releases on the map and in morph ball, and restores the game's code.
+void ExpectDualStick(std::string_view game_id, const DualStickRevision& r)
+{
+  DualStickGame game(game_id, r);
+  Memory& m = game.memory;
+  PatchScript script("dual-stick");
+  ASSERT_TRUE(script.Load(ReadPatch(std::string(game_id), "dual-stick"), game.env))
+      << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+
+  // StrafeInput's orbit test branches to the cave, which answers from the scratch memory or goes
+  // back after the test.
+  const u32 strafe_cave = BranchTarget(r.strafe_site, m.Get32(r.strafe_site));
+  ASSERT_GE(strafe_cave, DUAL_STICK_SCRATCH);
+  ASSERT_LT(strafe_cave, DUAL_STICK_SCRATCH + r.scratch_size);
+  bool back = false;
+  for (u32 a = strafe_cave; a < DUAL_STICK_SCRATCH + r.scratch_size; a += 4)
+    back |= BranchTarget(a, m.Get32(a)) == r.strafe_site + 4;
+  EXPECT_TRUE(back);
+  if (r.force_site)
+  {
+    // The force cave calls StrafeInput and resumes at the game's turn torque; the damped velocity
+    // function is the patch's.
+    const u32 force_cave = BranchTarget(r.force_site, m.Get32(r.force_site));
+    ASSERT_GE(force_cave, DUAL_STICK_SCRATCH);
+    bool calls_strafe = false, resumes = false;
+    for (u32 a = force_cave; a < DUAL_STICK_SCRATCH + r.scratch_size; a += 4)
+    {
+      calls_strafe |= BranchTarget(a, m.Get32(a)) == r.strafe_input && (m.Get32(a) & 1);
+      resumes |= BranchTarget(a, m.Get32(a)) == r.force_resume && !(m.Get32(a) & 1);
+    }
+    EXPECT_TRUE(calls_strafe);
+    EXPECT_TRUE(resumes);
+    EXPECT_EQ(m.Get32(r.damped), 0x9421FFB8u);  // stwu r1, -0x48(r1)
+  }
+
+  // Playing: the control stick at the right thumbstick's X and the left one's Y, the strafe input
+  // at the left one's X past the dead zone (0.2), the C-stick and D-pad held released.
+  game.Sticks(0.6f, 0.8f, -1.0f, 0.3f);
+  frame();
+  EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), DUAL_STICK_PLAYER);
+  EXPECT_NEAR(GetF32(m, DUAL_STICK_SCRATCH + 4), 0.5f, 1e-5f);
+  EXPECT_NEAR(PadHeld(script, "Main Stick", "X"), -1.0, 1e-5);
+  EXPECT_NEAR(PadHeld(script, "Main Stick", "Y"), 0.8, 1e-5);
+  EXPECT_EQ(PadHeld(script, "C-Stick", "X"), 0.0);
+  EXPECT_EQ(PadHeld(script, "D-Pad", "Left"), 0.0);
+
+  // Right B held: the right thumbstick is the profile's again, and does not turn.
+  game.input.hands[1].secondary = true;
+  frame();
+  EXPECT_EQ(PadHeld(script, "Main Stick", "X"), 0.0);
+  EXPECT_EQ(PadHeld(script, "C-Stick", "X"), -2.0);
+  EXPECT_EQ(PadHeld(script, "D-Pad", "Left"), -2.0);
+  game.input.hands[1].secondary = false;
+
+  // The map: the game's own movement and the user's bindings.
+  m.Set32(r.menu, 1);
+  frame();
+  EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), 0u);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  m.Set32(r.menu, 0);
+  // Morph ball as well.
+  m.Set32(DUAL_STICK_PLAYER + r.ball, 1);
+  frame();
+  EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), 0u);
+  m.Set32(DUAL_STICK_PLAYER + r.ball, 0);
+  frame();
+  EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), DUAL_STICK_PLAYER);
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+
+  // Disabled: the game's code is back, the damped velocity function too.
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(r.strafe_site), r.strafe_original);
+  if (r.force_site)
+  {
+    EXPECT_EQ(m.Get32(r.force_site), r.force_original);
+    EXPECT_EQ(m.Get32(r.damped), 0x9421FFB0u);
+    EXPECT_EQ(m.Get32(r.damped + 0x40), 0x60000010u);
+  }
+  EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), 0u);
+}
+}  // namespace
+
+TEST(GameCubeDualStickPatch, ManifestsAreValid)
+{
+  for (const auto& [game_id, revision, scratch] :
+       {std::tuple{"GM8E01", -1, 0x220u}, std::tuple{"G2ME01", 0, 0x40u}})
+  {
+    SCOPED_TRACE(game_id);
+    const std::string source = ReadPatch(game_id, "dual-stick");
+    ASSERT_FALSE(source.empty());
+    const auto read = ReadManifest(source, "dual-stick");
+    ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+    const Manifest& manifest = std::get<Manifest>(read);
+    EXPECT_EQ(manifest.games, std::vector<std::string>{game_id});
+    if (revision < 0)
+      EXPECT_FALSE(manifest.revision);  // 1.00 and 1.02, recognized by their code
+    else
+      EXPECT_EQ(manifest.revision, revision);
+    EXPECT_EQ(manifest.scratch_bytes, scratch);
+    for (const char* name : {"turn_speed", "deadzone", "beam_button"})
+      EXPECT_NE(manifest.FindSetting(name), nullptr) << name;
+  }
+}
+
+TEST(GameCubeDualStickPatch, Prime100)
+{
+  ExpectDualStick("GM8E01", PRIME_100_DUAL);
+}
+
+TEST(GameCubeDualStickPatch, Prime102)
+{
+  ExpectDualStick("GM8E01", PRIME_102_DUAL);
+}
+
+TEST(GameCubeDualStickPatch, Echoes)
+{
+  ExpectDualStick("G2ME01", ECHOES_DUAL);
+}
+
+TEST(GameCubeDualStickPatch, RefusesOtherCode)
+{
+  DualStickGame game("GM8E01", PRIME_102_DUAL);
+  game.memory.Set32(PRIME_102_DUAL.force_site + 4, 0x60000000);  // another build
+  PatchScript script("dual-stick");
+  ASSERT_TRUE(script.Load(ReadPatch("GM8E01", "dual-stick"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(PRIME_102_DUAL.strafe_site), PRIME_102_DUAL.strafe_original);
+  EXPECT_EQ(game.memory.Get32(PRIME_102_DUAL.damped), 0x9421FFB0u);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  EXPECT_TRUE(Warned(script, "not installed"));
 }
