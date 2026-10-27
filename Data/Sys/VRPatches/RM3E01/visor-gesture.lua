@@ -2,8 +2,9 @@
 --
 -- A DolphinXR VR game patch, after PrimedGun's visor gesture for Metroid Prime (PrimedGun,
 -- created by Nobbie): bring a controller next to your head and push its thumbstick towards a
--- visor. The directions follow Prime 3's own visor menu: left the scan visor, up the command
--- visor, right the X-ray visor, down back to the combat visor.
+-- visor: left the scan visor, up the command visor, right the X-ray visor, down back to the combat
+-- visor. (The game's own visor menu has the scan visor up, the command visor right and the X-ray
+-- visor left; these directions are kept as players learned them.)
 --
 -- The visor is the player's powerups' word 0x34 (0 combat, 1 scan, 2 command, 3 X-ray) and a
 -- visor is owned when its powerup count (powerups + id * 12 + 0x58; ids 0x0B to 0x0E) is not 0:
