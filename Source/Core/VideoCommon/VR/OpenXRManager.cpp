@@ -2866,9 +2866,12 @@ void OpenXRManager::UpdateInputActions()
                              eye_pose.orientation.w};
     head_pose.position = {eye_pose.position.x, eye_pose.position.y, eye_pose.position.z};
     // For VR game patches: the eyes' center seen from the game camera, e.g. to cast a ray from
-    // the eyes through a point of the virtual screen.
+    // the eyes through a point of the virtual screen. Without tracking the eyes are rendered at
+    // the home orientation (GetTrackingAdjustedEyeViews), whatever the head does.
     Common::VR::OpenXRPoseState center = head_pose;
     center.position = {eye_center.position.x, eye_center.position.y, eye_center.position.z};
+    if (g_ActiveConfig.vr_tracking_mode == OpenXRTrackingMode::None)
+      center.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
     ComputeViewPose(center, &head_view_pose);
   }
 
