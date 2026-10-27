@@ -5,7 +5,7 @@
 // memory: the override flags they raise for the Sys profiles' entries (Prime, Echoes, Corruption,
 // the Trilogy).
 // Also Echoes' view patches: no morph ball or cutscene bars, no scan box highlight, smooth scan
-// lines; and the Trilogy's wide culling.
+// lines; and the wide culling of the Trilogy and of the three games' own discs.
 
 #include <gtest/gtest.h>
 
@@ -1239,9 +1239,9 @@ void ExpectCullOriginals(const Memory& memory, const std::array<CullSite, N>& si
     EXPECT_EQ(memory.Get32(site.hook), site.original);
 }
 
-std::string ReadCullPatch()
+std::string ReadCullPatch(const std::string& game_id = "R3ME01")
 {
-  return ReadPatch("R3ME01", "wide-culling");
+  return ReadPatch(game_id, "wide-culling");
 }
 }  // namespace
 
@@ -1337,4 +1337,195 @@ TEST(TrilogyWideCullingPatch, TurnsWithTheHeadOrDropsThePlanes)
   ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
   EXPECT_EQ(game.memory.Get32(CULL_MODE), 2u);
   ExpectCullHooks(game.memory, CORRUPTION_CULL_SITES, CORRUPTION_FRUSTUM);
+}
+
+// ---- The games' own discs: the same patch at their addresses ----
+
+namespace
+{
+constexpr std::array<CullSite, 3> PRIME_100_CULL_SITES{{{0x80047488, 0x482FDDCD, 0x807C0850},
+                                                        {0x800471EC, 0x482FE069, 0x806DA068},
+                                                        {0x80045E94, 0x482FF3C1, 0x806DA068}}};
+constexpr std::array<CullSite, 3> PRIME_102_CULL_SITES{{{0x80047774, 0x482FE579, 0x807C0850},
+                                                        {0x800474D8, 0x482FE815, 0x806DA088},
+                                                        {0x80046180, 0x482FFB6D, 0x806DA088}}};
+constexpr std::array<CullSite, 3> ECHOES_GC_CULL_SITES{{{0x8003B3B0, 0x482C7169, 0x387A2478},
+                                                        {0x8003B178, 0x482C73A1, 0x387C2478},
+                                                        {0x8003910C, 0x482C940D, 0x387D2478}}};
+constexpr std::array<CullSite, 1> CORRUPTION_WII_CULL_SITES{{{0x800BE128, 0x482B1585, 0x80DF0014}}};
+constexpr u32 PRIME_100_FRUSTUM = 0x80345254;
+constexpr u32 PRIME_102_FRUSTUM = 0x80345CEC;
+constexpr u32 ECHOES_GC_FRUSTUM = 0x80302518;
+constexpr u32 CORRUPTION_WII_FRUSTUM = 0x8036F6AC;
+
+// A test that the no-culling Action Replay codes replace with "li r3, 1; blr", with its first two
+// words.
+struct CullTest
+{
+  u32 address, first, second;
+};
+constexpr std::array<CullTest, 5> PRIME_100_CULL_TESTS{{{0x80344FCC, 0x80030000, 0x38630004},
+                                                        {0x8034502C, 0x80030000, 0x38630004},
+                                                        {0x80345098, 0x9421FFC0, 0x7C0802A6},
+                                                        {0x80345188, 0x9421FFF0, 0x7C0802A6},
+                                                        {0x803451D0, 0x9421FFE0, 0x7C0802A6}}};
+constexpr std::array<CullTest, 5> PRIME_102_CULL_TESTS{{{0x80345A64, 0x80030000, 0x38630004},
+                                                        {0x80345AC4, 0x80030000, 0x38630004},
+                                                        {0x80345B30, 0x9421FFC0, 0x7C0802A6},
+                                                        {0x80345C20, 0x9421FFF0, 0x7C0802A6},
+                                                        {0x80345C68, 0x9421FFE0, 0x7C0802A6}}};
+constexpr std::array<CullTest, 5> ECHOES_GC_CULL_TESTS{{{0x80302298, 0x80030000, 0x38630004},
+                                                        {0x803022F8, 0x80030000, 0x38630004},
+                                                        {0x80302364, 0x9421FFC0, 0x7C0802A6},
+                                                        {0x80302450, 0x9421FFF0, 0x7C0802A6},
+                                                        {0x80302498, 0x9421FFE0, 0x7C0802A6}}};
+constexpr std::array<CullTest, 1> CORRUPTION_WII_CULL_TESTS{{{0x80316A1C, 0xC003000C, 0xC0230000}}};
+
+struct CullGame
+{
+  explicit CullGame(std::string_view game_id)
+  {
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = game_id;
+    env.scratch_base = CULL_SCRATCH;
+    env.scratch_size = CULL_SCRATCH_SIZE;
+  }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+};
+
+// The tests as a no-culling code leaves them, or as the game has them.
+template <size_t N>
+void LoadCullTests(Memory& memory, const std::array<CullTest, N>& tests, bool replaced)
+{
+  for (const CullTest& test : tests)
+  {
+    memory.Set32(test.address, replaced ? 0x38600001 : test.first);
+    memory.Set32(test.address + 4, replaced ? 0x4E800020 : test.second);
+  }
+}
+
+template <size_t N>
+void ExpectCullTests(const Memory& memory, const std::array<CullTest, N>& tests)
+{
+  for (const CullTest& test : tests)
+  {
+    EXPECT_EQ(memory.Get32(test.address), test.first);
+    EXPECT_EQ(memory.Get32(test.address + 4), test.second);
+  }
+}
+
+bool Logged(PatchScript& script, std::string_view text)
+{
+  bool logged = false;
+  for (const LogLine& line : script.TakeLog())
+    logged |= line.text.find(text) != std::string::npos;
+  return logged;
+}
+
+// One disc: its sites hooked when the game's code is there, the tests a savestate brought back
+// with a no-culling code's change put back, a warning when the code is still on, and the game's
+// calls back when the patch stops.
+template <size_t S, size_t T>
+void ExpectStandaloneCulling(std::string_view game_id, const std::array<CullSite, S>& sites,
+                             u32 constructor, const std::array<CullTest, T>& tests)
+{
+  CullGame game(game_id);
+  PatchScript script("wide-culling");
+  ASSERT_TRUE(script.Load(ReadCullPatch(std::string(game_id)), game.env)) << script.Error();
+
+  // Before the game's code is in memory: nothing written.
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(sites[0].hook), 0u);
+
+  // A savestate made with the no-culling code on.
+  LoadCullSites(game.memory, sites);
+  LoadCullTests(game.memory, tests, true);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  ExpectCullHooks(game.memory, sites, constructor);
+  ExpectCullTests(game.memory, tests);
+  EXPECT_EQ(game.memory.Get32(CULL_MODE), 1u);
+  EXPECT_TRUE(Logged(script, "put back " + std::to_string(T) + " culling test"));
+
+  // The code still on writes its change again: a warning, once.
+  LoadCullTests(game.memory, tests, true);
+  game.env.field = 60;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_TRUE(Warned(script, "no-culling Action Replay code is on"));
+  game.env.field = 120;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_FALSE(Warned(script, "no-culling"));
+
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  ExpectCullOriginals(game.memory, sites);
+  EXPECT_EQ(game.memory.Get32(CULL_MODE), 0u);
+}
+}  // namespace
+
+TEST(StandaloneWideCullingPatch, ManifestsAreValid)
+{
+  for (const std::string game_id : {"GM8E01", "G2ME01", "RM3E01"})
+  {
+    SCOPED_TRACE(game_id);
+    const std::string source = ReadCullPatch(game_id);
+    ASSERT_FALSE(source.empty()) << "Sys/VRPatches/" << game_id << "/wide-culling.lua is missing";
+    const auto read = ReadManifest(source, "wide-culling");
+    ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+    const Manifest& manifest = std::get<Manifest>(read);
+    EXPECT_EQ(manifest.games, std::vector<std::string>{game_id});
+    // Metroid Prime: 1.00 and 1.02, recognized by their code.
+    if (game_id == "GM8E01")
+      EXPECT_FALSE(manifest.revision);
+    else
+      EXPECT_EQ(manifest.revision, 0);
+    EXPECT_EQ(manifest.scratch_bytes, CULL_SCRATCH_SIZE);
+    EXPECT_NE(manifest.FindSetting("mode"), nullptr);
+    EXPECT_NE(manifest.FindSetting("fov"), nullptr);
+    EXPECT_NE(manifest.FindSetting("follow_head"), nullptr);
+  }
+}
+
+TEST(StandaloneWideCullingPatch, Prime100)
+{
+  ExpectStandaloneCulling("GM8E01", PRIME_100_CULL_SITES, PRIME_100_FRUSTUM, PRIME_100_CULL_TESTS);
+}
+
+TEST(StandaloneWideCullingPatch, Prime102)
+{
+  ExpectStandaloneCulling("GM8E01", PRIME_102_CULL_SITES, PRIME_102_FRUSTUM, PRIME_102_CULL_TESTS);
+}
+
+TEST(StandaloneWideCullingPatch, EchoesGameCube)
+{
+  ExpectStandaloneCulling("G2ME01", ECHOES_GC_CULL_SITES, ECHOES_GC_FRUSTUM, ECHOES_GC_CULL_TESTS);
+}
+
+TEST(StandaloneWideCullingPatch, CorruptionWii)
+{
+  ExpectStandaloneCulling("RM3E01", CORRUPTION_WII_CULL_SITES, CORRUPTION_WII_FRUSTUM,
+                          CORRUPTION_WII_CULL_TESTS);
+}
+
+TEST(StandaloneWideCullingPatch, LeavesGameTestsAlone)
+{
+  // The tests as the game has them: nothing to put back, no warning.
+  CullGame game("GM8E01");
+  LoadCullSites(game.memory, PRIME_102_CULL_SITES);
+  LoadCullTests(game.memory, PRIME_102_CULL_TESTS, false);
+  PatchScript script("wide-culling");
+  ASSERT_TRUE(script.Load(ReadCullPatch("GM8E01"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  game.env.field = 60;
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  ExpectCullHooks(game.memory, PRIME_102_CULL_SITES, PRIME_102_FRUSTUM);
+  ExpectCullTests(game.memory, PRIME_102_CULL_TESTS);
+  const std::vector<LogLine> log = script.TakeLog();
+  for (const LogLine& line : log)
+  {
+    EXPECT_EQ(line.text.find("put back"), std::string::npos) << line.text;
+    EXPECT_EQ(line.level, 0) << line.text;
+  }
 }
