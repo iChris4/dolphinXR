@@ -5,7 +5,8 @@
 // memory: the override flags they raise for the Sys profiles' entries (Prime, Echoes, Corruption,
 // the Trilogy).
 // Also Echoes' view patches: no morph ball or cutscene bars, no scan box highlight, smooth scan
-// lines; and the wide culling of the Trilogy and of the three games' own discs.
+// lines; the wide culling of the Trilogy and of the three games' own discs; the Trilogy's and the
+// GameCube games' controls (stick turning, dual-stick, the visor gesture).
 
 #include <gtest/gtest.h>
 
@@ -23,6 +24,7 @@
 #include "Common/FileUtil.h"
 #include "Core/VRPatch/MemoryAccess.h"
 #include "Core/VRPatch/PatchScript.h"
+#include "VideoCommon/VR/PatchFlags.h"
 
 using namespace VRPatch;
 
@@ -2032,6 +2034,19 @@ void ExpectDualStick(std::string_view game_id, const DualStickRevision& r)
   EXPECT_EQ(PadHeld(script, "D-Pad", "Left"), -2.0);
   game.input.hands[1].secondary = false;
 
+  // The visor gesture uses a thumbstick next to the head: it neither moves nor turns.
+  VR::PatchFlags::Set({"thumbstick_left_gesture"});
+  frame();
+  EXPECT_EQ(PadHeld(script, "Main Stick", "Y"), 0.0);
+  EXPECT_NEAR(PadHeld(script, "Main Stick", "X"), -1.0, 1e-5);
+  EXPECT_EQ(GetF32(m, DUAL_STICK_SCRATCH + 4), 0.0f);
+  VR::PatchFlags::Set({"thumbstick_right_gesture"});
+  frame();
+  EXPECT_EQ(PadHeld(script, "Main Stick", "X"), 0.0);
+  EXPECT_NEAR(PadHeld(script, "Main Stick", "Y"), 0.8, 1e-5);
+  EXPECT_NEAR(GetF32(m, DUAL_STICK_SCRATCH + 4), 0.5f, 1e-5f);
+  VR::PatchFlags::Set({});
+
   // The map: the game's own movement and the user's bindings.
   m.Set32(r.menu, 1);
   frame();
@@ -2110,4 +2125,214 @@ TEST(GameCubeDualStickPatch, RefusesOtherCode)
   EXPECT_EQ(game.memory.Get32(PRIME_102_DUAL.damped), 0x9421FFB0u);
   EXPECT_TRUE(script.GetPadHolds().empty());
   EXPECT_TRUE(Warned(script, "not installed"));
+}
+
+// ---- Prime and Echoes on the GameCube: change visors next to the head ----
+
+namespace
+{
+constexpr u32 GC_VISOR_REF = 0x80B00000;
+constexpr u32 GC_VISOR_STATE = 0x80B10000;
+constexpr u32 GC_VISOR_GUN = 0x80B20000;
+constexpr u32 VISOR_FACTOR_DONE = 0x3E4CCCCD;  // 0.2f
+constexpr u32 VISOR_FACTOR_HALF = 0x3DCCCCCD;  // 0.1f
+
+// One disc: its code (as for dual-stick), and where its player state's visors and powerups are.
+struct VisorGestureCase
+{
+  const char* game_id;
+  const DualStickRevision& r;
+  bool echoes;
+  u32 visor, next_visor, factor, powerup_count, count, powerup_size, capacity;
+  // The visors of up, left, down and right, and their powerups.
+  std::array<u32, 4> visors, items;
+};
+const VisorGestureCase PRIME_100_VISORS{"GM8E01", PRIME_100_DUAL, false,        0x14,
+                                        0x18,     0x1C,           0x24,         41,
+                                        8,        0x2C,           {0, 2, 3, 1}, {17, 5, 9, 13}};
+const VisorGestureCase PRIME_102_VISORS{"GM8E01", PRIME_102_DUAL, false,        0x14,
+                                        0x18,     0x1C,           0x24,         41,
+                                        8,        0x2C,           {0, 2, 3, 1}, {17, 5, 9, 13}};
+const VisorGestureCase ECHOES_VISORS{"G2ME01", ECHOES_DUAL, true,         0x30,
+                                     0x34,     0x50,        0x58,         109,
+                                     12,       0x60,        {0, 2, 1, 3}, {0x08, 0x09, 0x0B, 0x0A}};
+
+bool Raised(PatchScript& script, const std::string& flag)
+{
+  return script.GetFlags().contains(flag);
+}
+
+// Picks the D-pad's visors next to the head, skips one not owned, waits for a visor change in
+// progress, lowers the arm cannon for the scan visor and leaves the thumbstick to the player away
+// from the head, or when the hand comes with it pushed.
+void ExpectVisorGesture(const VisorGestureCase& c)
+{
+  DualStickGame game(c.game_id, c.r);
+  Memory& m = game.memory;
+  const u32 player = DUAL_STICK_PLAYER;
+  const u32 state = GC_VISOR_STATE;
+  u32 holster;
+  if (c.echoes)
+  {
+    m.Set32(player + 0x1314, state);
+    m.Set32(player + 0xEBC, GC_VISOR_GUN);
+    holster = GC_VISOR_GUN + 0x3A8;
+  }
+  else
+  {
+    m.Set32(c.r.state_manager + 0x8B8, GC_VISOR_REF);
+    m.Set32(GC_VISOR_REF, state);
+    holster = player + 0x498 + (c.r.camera - 0x2F4);
+  }
+  m.Set32(state + c.powerup_count, c.count);
+  m.Set32(state + c.factor, VISOR_FACTOR_DONE);
+  m.Set32(holster, 2);  // drawn
+  // All but the right one's visor (X-ray, dark) are owned.
+  for (size_t i = 0; i < 3; ++i)
+    m.Set32(state + c.capacity + c.items[i] * c.powerup_size, 1);
+  game.input.head = {true, {0.0f, 1.6f, 0.0f}};
+  HandInput& hand = game.input.hands[0];
+  hand.aim = {true, {0.6f, 1.2f, -0.4f}};  // away from the head
+
+  PatchScript script("visor-gesture");
+  ASSERT_TRUE(script.Load(ReadPatch(c.game_id, "visor-gesture"), game.env)) << script.Error();
+  const auto frame = [&](float x, float y) {
+    hand.thumbstick_x = x;
+    hand.thumbstick_y = y;
+    ++game.env.field;
+    ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  };
+  // The game finishes the change.
+  const auto changed = [&] { m.Set32(state + c.visor, m.Get32(state + c.next_visor)); };
+
+  // Away from the head the thumbstick is the player's.
+  frame(-1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(state + c.next_visor), 0u);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  EXPECT_FALSE(Raised(script, "thumbstick_left_gesture"));
+  // A hand that comes next to the head with its thumbstick pushed keeps moving the player.
+  hand.aim = {true, {-0.12f, 1.55f, -0.05f}};
+  frame(-1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(state + c.next_visor), 0u);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  // Centred: the gesture's, the control stick held released.
+  frame(0.0f, 0.0f);
+  EXPECT_TRUE(Raised(script, "thumbstick_left_gesture"));
+  EXPECT_EQ(PadHeld(script, "Main Stick", "X"), 0.0);
+  EXPECT_EQ(PadHeld(script, "Main Stick", "Y"), 0.0);
+
+  // Left: the scan visor, and the cannon's holster (state 3, 0.2 s).
+  frame(-1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(state + c.next_visor), c.visors[1]);
+  EXPECT_EQ(m.Get32(holster), 3u);
+  EXPECT_EQ(GetF32(m, c.echoes ? GC_VISOR_GUN + 0x388 : holster + 4), 0.2f);
+  changed();
+  frame(-1.0f, 0.0f);
+  frame(0.0f, 0.0f);
+  // Right: not owned.
+  frame(1.0f, 0.0f);
+  EXPECT_EQ(m.Get32(state + c.next_visor), c.visors[1]);
+  frame(0.0f, 0.0f);
+  // Down while the scan visor still fades in: once it is done.
+  m.Set32(state + c.factor, VISOR_FACTOR_HALF);
+  frame(0.0f, -1.0f);
+  EXPECT_EQ(m.Get32(state + c.next_visor), c.visors[1]);
+  m.Set32(state + c.factor, VISOR_FACTOR_DONE);
+  frame(0.0f, -1.0f);
+  EXPECT_EQ(m.Get32(state + c.next_visor), c.visors[2]);
+  changed();
+  frame(0.0f, 0.0f);
+  if (!c.echoes)
+  {
+    // Prime: not while scanning.
+    const u32 scan = player + 0x3A8 + (c.r.camera - 0x2F4);
+    m.Set32(scan, 1);
+    frame(0.0f, 1.0f);
+    EXPECT_EQ(m.Get32(state + c.next_visor), c.visors[2]);
+    m.Set32(scan, 0);
+  }
+  // Up: combat.
+  frame(0.0f, 1.0f);
+  EXPECT_EQ(m.Get32(state + c.next_visor), c.visors[0]);
+  changed();
+  frame(0.0f, 0.0f);
+
+  // On the map the thumbstick is the player's again.
+  m.Set32(c.r.menu, 1);
+  frame(0.0f, 1.0f);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  EXPECT_FALSE(Raised(script, "thumbstick_left_gesture"));
+  m.Set32(c.r.menu, 0);
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+}
+}  // namespace
+
+TEST(GameCubeVisorGesturePatch, ManifestsAreValid)
+{
+  for (const auto& [game_id, revision] : {std::tuple{"GM8E01", -1}, std::tuple{"G2ME01", 0}})
+  {
+    SCOPED_TRACE(game_id);
+    const std::string source = ReadPatch(game_id, "visor-gesture");
+    ASSERT_FALSE(source.empty());
+    const auto read = ReadManifest(source, "visor-gesture");
+    ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+    const Manifest& manifest = std::get<Manifest>(read);
+    EXPECT_EQ(manifest.games, std::vector<std::string>{game_id});
+    if (revision < 0)
+      EXPECT_FALSE(manifest.revision);  // 1.00 and 1.02, recognized by their code
+    else
+      EXPECT_EQ(manifest.revision, revision);
+    EXPECT_EQ(manifest.scratch_bytes, 0u);
+    for (const char* name : {"hand", "radius", "haptics"})
+      EXPECT_NE(manifest.FindSetting(name), nullptr) << name;
+  }
+}
+
+TEST(GameCubeVisorGesturePatch, Prime100)
+{
+  ExpectVisorGesture(PRIME_100_VISORS);
+}
+
+TEST(GameCubeVisorGesturePatch, Prime102)
+{
+  ExpectVisorGesture(PRIME_102_VISORS);
+}
+
+TEST(GameCubeVisorGesturePatch, Echoes)
+{
+  ExpectVisorGesture(ECHOES_VISORS);
+}
+
+TEST(GameCubeVisorGesturePatch, RefusesOtherCode)
+{
+  DualStickGame game("GM8E01", PRIME_102_DUAL);
+  game.memory.Set32(PRIME_102_DUAL.force_site + 4, 0x60000000);  // another build
+  game.input.head = {true, {0.0f, 1.6f, 0.0f}};
+  game.input.hands[0].aim = {true, {-0.12f, 1.55f, -0.05f}};
+  game.env.field = 1000;
+  PatchScript script("visor-gesture");
+  ASSERT_TRUE(script.Load(ReadPatch("GM8E01", "visor-gesture"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  EXPECT_FALSE(game.memory.wrote);
+  EXPECT_TRUE(Warned(script, "visors unchanged"));
+}
+
+// The right hand: the C-stick and D-pad held released, the control stick left alone.
+TEST(GameCubeVisorGesturePatch, RightHand)
+{
+  DualStickGame game("G2ME01", ECHOES_DUAL);
+  game.memory.Set32(DUAL_STICK_PLAYER + 0x1314, GC_VISOR_STATE);
+  game.memory.Set32(GC_VISOR_STATE + 0x58, 109);
+  game.input.head = {true, {0.0f, 1.6f, 0.0f}};
+  game.input.hands[1].aim = {true, {0.12f, 1.55f, -0.05f}};
+  PatchScript script("visor-gesture");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "visor-gesture"), game.env)) << script.Error();
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("hand"), 1));
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_TRUE(Raised(script, "thumbstick_right_gesture"));
+  EXPECT_EQ(PadHeld(script, "C-Stick", "X"), 0.0);
+  EXPECT_EQ(PadHeld(script, "D-Pad", "Up"), 0.0);
+  EXPECT_EQ(PadHeld(script, "Main Stick", "X"), -2.0);
 }

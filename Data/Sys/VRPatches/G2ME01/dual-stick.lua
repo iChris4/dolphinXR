@@ -15,7 +15,9 @@
 -- The right thumbstick also selects beams (C-stick) and visors (D-pad) in the stock profile and
 -- the patch holds those released while playing; holding a button (setting) gives the right
 -- thumbstick back to them, and it does not turn meanwhile. The maps, pause screens and morph ball
--- keep the user's bindings.
+-- keep the user's bindings. While the visor gesture (visor-gesture.lua) uses a thumbstick next to
+-- the head (the flags thumbstick_left_gesture and thumbstick_right_gesture), that thumbstick does
+-- not move or turn the player.
 --
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -24,7 +26,7 @@ local BUTTONS = {"Right B", "Right grip", "Right thumbstick click", "Left X", "L
 patch = {
   title = "Strafe with the left thumbstick, turn with the right",
   author = "DolphinXR, after PrimeHack's strafing",
-  version = "1.0",
+  version = "1.1",
   description = "The left thumbstick moves forward, back and sideways and the right thumbstick "
     .. "turns, as in a first-person shooter. Hold a button to choose beams and visors with the "
     .. "right thumbstick. For Metroid Prime 2: Echoes NTSC-U (GameCube).",
@@ -200,8 +202,10 @@ function on_frame()
   end
   local button = CHOICE_BUTTONS[settings.beam_button]
   local beams = button and vr.button(button[1], button[2])
-  local turn = beams and 0 or dead(axis("right", "thumbstick_x")) * settings.turn_speed
-  pad.set_stick(1, "Main Stick", turn, axis("left", "thumbstick_y"))
+  local left = not vr.flag("thumbstick_left_gesture")
+  local turn = (beams or vr.flag("thumbstick_right_gesture")) and 0 or
+               dead(axis("right", "thumbstick_x")) * settings.turn_speed
+  pad.set_stick(1, "Main Stick", turn, left and axis("left", "thumbstick_y") or 0)
   holding = true
   if beams then
     release_right()
@@ -210,7 +214,7 @@ function on_frame()
     for _, name in ipairs(DPAD) do pad.set_value(1, name, 0) end
     holding_right = true
   end
-  mem.write_f32(STRAFE, dead(axis("left", "thumbstick_x")))
+  mem.write_f32(STRAFE, left and dead(axis("left", "thumbstick_x")) or 0)
   -- Last: arms the cave for this player.
   mem.write_u32(ACTIVE, player)
 end
