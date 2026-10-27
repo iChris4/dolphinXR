@@ -680,9 +680,16 @@ void GeometryShaderManager::RefreshVREyeRowCache()
   m_vr_eye_rows_generation = generation;
   m_vr_eye_rows_freelook = freelook;
   m_vr_pose_needs_refresh = false;
-  // The first draw of a frame (under the head-pose lock): the game camera has its pitch for
-  // this frame, which the new rows remove.
-  VR::g_openxr->LatchGameCameraPitch();
+  // The first draw of a game frame: the game camera has its pitch for this frame, which the rows
+  // remove. Only then: without the head-pose lock the rows are also rebuilt for each new head
+  // pose, in the middle of a frame, when the CPU thread may already have moved the camera for a
+  // later frame, and the draws after it would get that frame's pitch (parts of the world jumped
+  // while the camera tilted).
+  if (m_vr_camera_pitch_needs_latch)
+  {
+    VR::g_openxr->LatchGameCameraPitch();
+    m_vr_camera_pitch_needs_latch = false;
+  }
 }
 
 const GeometryShaderManager::VREyeRows& GeometryShaderManager::GetVREyeRows(float units_per_meter)
@@ -748,6 +755,12 @@ const std::array<std::array<float, 4>, 4>* GeometryShaderManager::GetVRCullProje
 #else
   return nullptr;
 #endif
+}
+
+void GeometryShaderManager::InvalidateVRGameCameraPitch()
+{
+  m_vr_camera_pitch_needs_latch = true;
+  m_vr_pose_needs_refresh = true;
 }
 
 void GeometryShaderManager::InvalidateVRHeadPose()

@@ -93,6 +93,10 @@ public:
   // XFB-copy boundary so a single game frame's draws all see one consistent pose.
   void InvalidateVRHeadPose();
 
+  // A game frame ended (its XFB copy, in FIFO order): the next eye rows read the game camera's
+  // pitch again (OpenXRManager::LatchGameCameraPitch).
+  void InvalidateVRGameCameraPitch();
+
   // VR head-cone CPU culling projection for the current pose at the base world scale (see
   // OpenXRManager::GetHeadCullProjection), built together with the eye rows that draws at that
   // scale render with. nullptr while there is no usable pose.
@@ -188,6 +192,8 @@ private:
   u64 m_vr_eye_rows_generation = 0;
   bool m_vr_eye_rows_freelook = false;
   bool m_vr_pose_needs_refresh = true;
+  // The game camera's pitch is read once per game frame, whatever rebuilds the rows in between.
+  bool m_vr_camera_pitch_needs_latch = true;
 
   // Shared reference depth for the headlocked perspective HUD (-3) path.  Stable body layers choose
   // the next frame's anchor; all coherent draws in a frame reuse one anchor so they share ONE

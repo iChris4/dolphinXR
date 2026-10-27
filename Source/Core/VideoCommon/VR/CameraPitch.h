@@ -7,8 +7,9 @@
 // game tilt its camera (Metroid Prime 3 does while the pointer is at the screen's top or bottom
 // edge) without moving the world names where the game keeps the sine of that pitch
 // (vr.set_camera_pitch_source): the virtual screen and the pointer turn with the game camera
-// instead. OpenXRManager reads it when a frame starts drawing (LatchGameCameraPitch), so the pitch
-// it removes is the one the frame was drawn with, even while the game eases its camera.
+// instead. OpenXRManager reads it when a frame starts drawing (LatchGameCameraPitch), once per game
+// frame (after its XFB copy, with or without the head-pose lock), so every draw of a frame has the
+// pitch removed that the frame was drawn with, even while the game eases its camera.
 
 #include <optional>
 

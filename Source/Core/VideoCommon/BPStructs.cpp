@@ -443,8 +443,9 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
         // one consistent head pose. Only applies when ImmediateXFB is off (see
         // VideoConfig::VRLockHeadPosePerFrame); with it on, the GS refetches per draw
         // and this invalidation is unnecessary.
-        if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
-            g_ActiveConfig.VRLockHeadPosePerFrame() && VR::g_openxr &&
+        // In both modes the game camera's pitch that the VR view removes
+        // (vr.set_camera_pitch_source) is read here, once per game frame.
+        if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
             VR::g_openxr->IsSessionRunning() && VR::g_openxr->ShouldRender())
         {
           // Debounce: some games emit multiple XFB copies per visual frame within
@@ -457,12 +458,16 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
               std::chrono::duration<double, std::milli>(now - s_last_locate_time).count();
           if (s_first_locate || ms_since_last >= 5.0)
           {
-            VR::g_openxr->LocateViews();
-            system.GetGeometryShaderManager().InvalidateVRHeadPose();
-            // Controller Anchor rides the same boundary: hand positions latch with the
-            // head pose so anchored elements never move mid-frame. (When the lock is off
-            // the controller cache is bypassed entirely, so this is the only site.)
-            VR::g_openxr->InvalidateControllerAnchorCache();
+            if (g_ActiveConfig.VRLockHeadPosePerFrame())
+            {
+              VR::g_openxr->LocateViews();
+              system.GetGeometryShaderManager().InvalidateVRHeadPose();
+              // Controller Anchor rides the same boundary: hand positions latch with the
+              // head pose so anchored elements never move mid-frame. (When the lock is off
+              // the controller cache is bypassed entirely, so this is the only site.)
+              VR::g_openxr->InvalidateControllerAnchorCache();
+            }
+            system.GetGeometryShaderManager().InvalidateVRGameCameraPitch();
             s_last_locate_time = now;
             s_first_locate = false;
           }
