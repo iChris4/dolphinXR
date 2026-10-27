@@ -89,7 +89,10 @@ QString FormatRuntimeElementSummary(const ShaderHunter::RuntimeElementSignature&
                .arg(sig.scissor_right)
                .arg(sig.scissor_bottom);
   parts << QObject::tr("State: alpha=%1 ztest=%2 zupdate=%3 zfunc=%4 blend=%5/%6")
-               .arg(QStringLiteral("0x%1").arg(sig.alpha_test_hex, 8, 16, QLatin1Char('0')))
+               .arg(sig.any_alpha_ref ?
+                        QStringLiteral("0x%1xxxx")
+                            .arg(sig.alpha_test_hex >> 16, 4, 16, QLatin1Char('0')) :
+                        QStringLiteral("0x%1").arg(sig.alpha_test_hex, 8, 16, QLatin1Char('0')))
                .arg(sig.ztest ? QObject::tr("on") : QObject::tr("off"))
                .arg(sig.zupdate ? QObject::tr("on") : QObject::tr("off"))
                .arg(sig.zfunc)

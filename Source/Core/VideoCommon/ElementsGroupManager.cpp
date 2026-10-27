@@ -177,6 +177,8 @@ bool ParseRuntimeElementSignatureField(ShaderHunter::RuntimeElementSignature* si
     signature->blend_alpha_update = (value == "1" || value == "true");
   else if (key == "sig_any_alpha_write")
     signature->any_alpha_update = (value == "1" || value == "true");
+  else if (key == "sig_any_alpha_ref")
+    signature->any_alpha_ref = (value == "1" || value == "true");
   else
     return false;
 
@@ -227,6 +229,8 @@ void SaveRuntimeElementSignature(std::ostringstream& out,
   out << prefix << "sig_blend_alpha=" << (sig.blend_alpha_update ? 1 : 0) << "\n";
   if (sig.any_alpha_update)
     out << prefix << "sig_any_alpha_write=1\n";
+  if (sig.any_alpha_ref)
+    out << prefix << "sig_any_alpha_ref=1\n";
 }
 
 constexpr std::array<std::string_view, 3> HUD_CONTEXT_NAMES = {"default", "combat", "menu"};
@@ -423,6 +427,7 @@ size_t ComputeRuntimeElementKey(const ShaderHunter::RuntimeElementSignature& sig
   HashCombineValue(seed, sig.blend_color_update);
   HashCombineValue(seed, sig.blend_alpha_update);
   HashCombineValue(seed, sig.any_alpha_update);
+  HashCombineValue(seed, sig.any_alpha_ref);
   HashCombineValue(seed, texture_excluded);
   for (const u64 texture_hash : texture_hashes)
     HashCombineValue(seed, texture_hash);
@@ -463,7 +468,7 @@ bool SignaturesEqual(const ShaderHunter::RuntimeElementSignature& lhs,
          lhs.zupdate == rhs.zupdate && lhs.zfunc == rhs.zfunc &&
          lhs.blend_color_update == rhs.blend_color_update &&
          lhs.blend_alpha_update == rhs.blend_alpha_update &&
-         lhs.any_alpha_update == rhs.any_alpha_update;
+         lhs.any_alpha_update == rhs.any_alpha_update && lhs.any_alpha_ref == rhs.any_alpha_ref;
 }
 
 bool StableSubMatchSignaturesEqual(const ElementsGroupManager::StableSubMatchSignature& lhs,

@@ -96,8 +96,12 @@ bool Matches(const ShaderHunter::RuntimeElementSignature& pattern,
 
   if (pattern.use_render_state)
   {
-    if (pattern.alpha_test_hex != candidate.alpha_test_hex || pattern.ztest != candidate.ztest ||
-        pattern.zupdate != candidate.zupdate || pattern.zfunc != candidate.zfunc ||
+    // The alpha test's two reference values are its low 16 bits.
+    const u32 alpha_test_mask = pattern.any_alpha_ref ? 0xFFFF0000u : 0xFFFFFFFFu;
+    if ((pattern.alpha_test_hex & alpha_test_mask) !=
+            (candidate.alpha_test_hex & alpha_test_mask) ||
+        pattern.ztest != candidate.ztest || pattern.zupdate != candidate.zupdate ||
+        pattern.zfunc != candidate.zfunc ||
         pattern.blend_color_update != candidate.blend_color_update ||
         (!pattern.any_alpha_update && pattern.blend_alpha_update != candidate.blend_alpha_update))
     {

@@ -91,6 +91,22 @@ TEST(RuntimeElementMatcher, AlphaWriteCanBeIgnored)
   EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, candidate));
 }
 
+TEST(RuntimeElementMatcher, AlphaTestReferencesCanBeIgnored)
+{
+  auto pattern = MakePerspectiveSignature();
+  pattern.alpha_test_hex = 0x0044000b;
+  auto candidate = pattern;
+  candidate.alpha_test_hex = 0x00440003;  // the same test, another reference
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, candidate));
+
+  pattern.any_alpha_ref = true;
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, candidate));
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, pattern));
+  // The compare functions and the logic still have to match.
+  candidate.alpha_test_hex = 0x007f0003;
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, candidate));
+}
+
 TEST(RuntimeElementMatcher, ProjectionLoadMatchesItsRange)
 {
   const auto exact = MakeLoadPattern(4, 4);

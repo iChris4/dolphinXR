@@ -181,6 +181,9 @@ public:
     // Pattern only: the render state matches whatever the draw's alpha write, for games that
     // turn it off in some scenes (Metroid Prime 2's dark world).
     bool any_alpha_update = false;
+    // Pattern only: the alpha test matches by its compare functions and logic, whatever its two
+    // reference values, for effects that animate them (the Metroid Prime scan lens).
+    bool any_alpha_ref = false;
   };
 
   struct HighlightedDraw
