@@ -18,6 +18,7 @@
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/PatchTypes.h"
 #include "Core/VRPatch/VRPatch.h"
+#include "VideoCommon/VR/PatchFlags.h"
 
 using namespace VRPatch;
 
@@ -663,6 +664,26 @@ TEST(VRPatch, RaisesOverrideFlags)
 
   EXPECT_FALSE(script.Call(Hook::OnLoad, h.env));
   EXPECT_NE(script.Error().find("flag name"), std::string::npos) << script.Error();
+}
+
+// vr.flag reads the flags the running patches raised, as the manager published them.
+TEST(VRPatch, ReadsPublishedFlags)
+{
+  Harness h;
+  PatchScript script("reader");
+  ASSERT_TRUE(h.Load(script, R"(
+    patch = {title = "R"}
+    function on_frame()
+      mem.write_u32(0x80400000, vr.flag("thumbstick_left_gesture") and 1 or 0)
+    end
+  )")) << script.Error();
+  VR::PatchFlags::Set({"thumbstick_left_gesture"});
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(h.memory.Get32(0x80400000), 1u);
+  VR::PatchFlags::Set({"mp_paused"});
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(h.memory.Get32(0x80400000), 0u);
+  VR::PatchFlags::Set({});
 }
 
 // A patch names where the game keeps its camera pitch's sine; nil stops it.

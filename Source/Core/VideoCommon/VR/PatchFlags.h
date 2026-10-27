@@ -9,6 +9,7 @@
 // the union of the running patches' flags here; ShaderHunter takes it at the end of a frame.
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Common/CommonTypes.h"
@@ -18,6 +19,8 @@ namespace VR::PatchFlags
 // Replaces the raised flags. Any thread.
 void Set(std::vector<std::string> flags);
 std::vector<std::string> Snapshot();
+// Whether a running patch raised `name`. Any thread.
+bool IsSet(std::string_view name);
 // Changes each time Set changes the flags.
 u64 GetGeneration();
 }  // namespace VR::PatchFlags

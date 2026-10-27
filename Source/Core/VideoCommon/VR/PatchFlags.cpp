@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <mutex>
 
 namespace VR::PatchFlags
@@ -31,6 +32,12 @@ std::vector<std::string> Snapshot()
 {
   std::lock_guard lock(s_mutex);
   return s_flags;
+}
+
+bool IsSet(std::string_view name)
+{
+  std::lock_guard lock(s_mutex);
+  return std::ranges::binary_search(s_flags, name, std::less<>{});
 }
 
 u64 GetGeneration()

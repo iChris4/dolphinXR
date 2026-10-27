@@ -24,9 +24,13 @@ TEST(PatchFlags, GenerationChangesOnlyWithTheFlags)
   VR::PatchFlags::Set({"mp_visor_scan", "mp_paused"});
   EXPECT_EQ(VR::PatchFlags::GetGeneration(), raised);
 
+  EXPECT_TRUE(VR::PatchFlags::IsSet("mp_paused"));
+  EXPECT_FALSE(VR::PatchFlags::IsSet("mp_visor"));
+
   VR::PatchFlags::Set({});
   EXPECT_NE(VR::PatchFlags::GetGeneration(), raised);
   EXPECT_TRUE(VR::PatchFlags::Snapshot().empty());
+  EXPECT_FALSE(VR::PatchFlags::IsSet("mp_paused"));
 }
 
 // An Elements entry conditioned on a flag a patch raises: the flag takes effect at the next end

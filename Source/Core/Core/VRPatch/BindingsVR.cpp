@@ -12,6 +12,7 @@
 #include "Core/VRPatch/ScriptContext.h"
 #include "Core/VRPatch/VRSettingsTable.h"
 #include "VideoCommon/VR/CameraPitch.h"
+#include "VideoCommon/VR/PatchFlags.h"
 
 namespace VRPatch
 {
@@ -305,6 +306,15 @@ int VRSetFlag(lua_State* L)
   return 0;
 }
 
+// vr.flag(name) -> bool: whether a running patch raised the flag (any patch's, as published
+// after the last field's hooks): lets one patch leave a control to another one.
+int VRFlag(lua_State* L)
+{
+  const char* name = luaL_checkstring(L, 1);
+  lua_pushboolean(L, VR::PatchFlags::IsSet(name));
+  return 1;
+}
+
 // vr.set_camera_pitch_source(address | nil): the f32 at `address` holds the sine of the game
 // camera's pitch (+ up); the VR view removes that pitch from each frame. nil: no more.
 int VRSetCameraPitchSource(lua_State* L)
@@ -372,6 +382,7 @@ void RegisterVRBindings(lua_State* L)
       {"set_setting", VRSettingSet},
       {"set_flag", VRSetFlag},
       {"clear_flags", VRClearFlags},
+      {"flag", VRFlag},
       {"set_camera_pitch_source", VRSetCameraPitchSource},
       {"camera_pitch_source", VRCameraPitchSource},
       {"keep_pointer_on_screen", VRKeepPointerOnScreen},

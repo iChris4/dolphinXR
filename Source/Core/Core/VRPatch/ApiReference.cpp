@@ -116,6 +116,10 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
       game's Shader, Elements and Texture overrides): raised until lowered with false or the
       patch stops; the overrides see a change from the next video frame. Names: 1 to 64 letters,
       digits, '_', '.', '-'. For the game's state read from memory (a visor, a menu).
+  vr.flag(name) -> bool   -- whether a running patch raised the flag, as of the end of the last
+      field's hooks (a patch's own change shows from the next field). For patches that share a
+      control: e.g. a gesture raises a flag while it uses a thumbstick, and a movement patch
+      leaves that thumbstick alone meanwhile.
   vr.set_camera_pitch_source(address | nil)   -- the f32 at address is the sine of the game
       camera's pitch (+ up), e.g. the up component of its forward axis in its matrix. The VR view
       removes that pitch from each frame (read when the frame starts drawing, so it matches the
