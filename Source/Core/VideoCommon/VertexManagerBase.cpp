@@ -177,8 +177,6 @@ MetroidElementProfile GetMetroidProfileForGameID(std::string_view game_id)
     return MetroidElementProfile::Prime1Wii;
   if (game_id.starts_with("R32"))
     return MetroidElementProfile::Prime2Wii;
-  if (game_id.starts_with("R3M") || game_id.starts_with("R3O"))
-    return MetroidElementProfile::TrilogyAuto;
 
   return MetroidElementProfile::None;
 }

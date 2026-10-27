@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 // The shipped Metroid Prime state patches (Data/Sys/VRPatches/<id>/metroid-state.lua) against fake
-// memory: the override flags they raise for the Sys profiles' entries (Prime, Echoes, Corruption).
+// memory: the override flags they raise for the Sys profiles' entries (Prime, Echoes, Corruption,
+// the Trilogy).
 // Also Echoes' view patches: no morph ball or cutscene bars, no scan box highlight, smooth scan
 // lines.
 
@@ -14,6 +15,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
@@ -27,9 +29,12 @@ namespace
 class Memory final : public MemoryAccess
 {
 public:
+  // MEM1, and the Wii's MEM2.
   bool IsRAM(u32 address, u32 size) const override
   {
-    return size != 0 && address >= 0x80000000 && static_cast<u64>(address) + size <= 0x81800000;
+    const u64 end = static_cast<u64>(address) + size;
+    return size != 0 && ((address >= 0x80000000 && end <= 0x81800000) ||
+                         (address >= 0x90000000 && end <= 0x94000000));
   }
   std::optional<u8> Read8(u32 a) const override { return Read<u8>(a); }
   std::optional<u16> Read16(u32 a) const override { return Read<u16>(a); }
@@ -251,17 +256,17 @@ constexpr u32 LINES_TEXTURE = 0x806FE5A0;
 using TextureWords = std::array<u32, 8>;
 constexpr TextureWords LINES = {0xFFFFFFFF, 0xFFFFFFFF, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, 0, 0};
 
-void SetTexture(Memory& memory, const TextureWords& words)
+void SetTexture(Memory& memory, const TextureWords& words, u32 address = LINES_TEXTURE)
 {
   for (u32 i = 0; i < words.size(); ++i)
-    memory.Set32(LINES_TEXTURE + i * 4, words[i]);
+    memory.Set32(address + i * 4, words[i]);
 }
 
-TextureWords GetTexture(const Memory& memory)
+TextureWords GetTexture(const Memory& memory, u32 address = LINES_TEXTURE)
 {
   TextureWords words;
   for (u32 i = 0; i < words.size(); ++i)
-    words[i] = memory.Get32(LINES_TEXTURE + i * 4);
+    words[i] = memory.Get32(address + i * 4);
   return words;
 }
 
@@ -905,4 +910,207 @@ TEST(CorruptionVisorGesturePatch, PicksVisorsNextToTheHead)
   EXPECT_TRUE(script.GetPadHolds().empty());
   for (const LogLine& line : script.TakeLog())
     EXPECT_NE(line.level, 1) << line.text;
+}
+
+// ---- Metroid Prime Trilogy ----
+
+namespace
+{
+constexpr u32 TRILOGY_PLAYER = 0x80B00000;
+constexpr u32 TRILOGY_POWERUPS = 0x80B10000;
+constexpr u32 TRILOGY_BRANCH = 0x48001000;  // b +0x1000, as the arm cannon patch installs
+
+// Each game of the disc in memory: the instruction its state patch recognizes it by (its arm
+// cannon hook and the next one), and its state.
+struct TrilogyGame
+{
+  TrilogyGame()
+  {
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "R3ME01";
+  }
+
+  // Loads one game's program: Prime, Echoes or Corruption, in play, first person, combat visor.
+  void RunPrime()
+  {
+    memory.Set32(0x8018BC74, 0x387904B0);
+    memory.Set32(0x8018BC78, 0x38810380);
+    memory.Set32(0x804BF420 + 0x84C, TRILOGY_PLAYER);
+    memory.Set32(0x804BFCD4, TRILOGY_POWERUPS);
+    visor = TRILOGY_POWERUPS + 0x18;
+    next_visor = TRILOGY_POWERUPS + 0x1C;
+    menu = 0x804BF420 + 0x117C;
+    camera = TRILOGY_PLAYER + 0x2F0;
+    ball = TRILOGY_PLAYER + 0x2F4;
+  }
+  void RunEchoes()
+  {
+    memory.Set32(0x8018ACB0, 0xC00102A0);
+    memory.Set32(0x8018ACB4, 0x387C03B0);
+    memory.Set32(0x804E72E8 + 0x14F4, TRILOGY_PLAYER);
+    memory.Set32(TRILOGY_PLAYER + 0x12EC, TRILOGY_POWERUPS);
+    visor = TRILOGY_POWERUPS + 0x34;
+    next_visor = 0;
+    menu = 0x804E72E8 + 0x2C0C;
+    camera = TRILOGY_PLAYER + 0x374;
+    ball = TRILOGY_PLAYER + 0x378;
+  }
+  void RunCorruption()
+  {
+    memory.Set32(0x80183C28, 0xC0010208);
+    memory.Set32(0x80183C2C, 0x7F83E378);
+    memory.Set32(0x805C6C68, 0x80A00000);
+    memory.Set32(0x80A00000 + 0x2184, TRILOGY_PLAYER);
+    memory.Set32(TRILOGY_PLAYER + 0x35A8, TRILOGY_POWERUPS);
+    visor = TRILOGY_POWERUPS + 0x34;
+    next_visor = 0;
+    menu = 0x805C6C68 + 0x32C;
+    camera = TRILOGY_PLAYER + 0x3C3C;
+    ball = TRILOGY_PLAYER + 0x358;
+    memory.Set32(camera, 1);
+  }
+
+  void Set(u32 address, u32 value) { memory.Set32(address, value); }
+  // A visor in use: Prime also has the visor it switches to.
+  void SetVisor(u32 value)
+  {
+    memory.Set32(visor, value);
+    if (next_visor != 0)
+      memory.Set32(next_visor, value);
+  }
+
+  u32 visor = 0, next_visor = 0, menu = 0, camera = 0, ball = 0;
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+};
+
+}  // namespace
+
+TEST(TrilogyStatePatch, ManifestIsValid)
+{
+  const std::string source = ReadStatePatch("R3ME01");
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/R3ME01/metroid-state.lua is missing";
+  const auto read = ReadManifest(source, "metroid-state");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"R3ME01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, 0u);
+  EXPECT_TRUE(manifest.conflicts.empty());
+}
+
+TEST(TrilogyStatePatch, RaisesEachGamesState)
+{
+  TrilogyGame game;
+  PatchScript script("metroid-state");
+  ASSERT_TRUE(script.Load(ReadStatePatch("R3ME01"), game.env)) << script.Error();
+  const auto frame = [&] {
+    EXPECT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+    return script.GetFlags();
+  };
+
+  // The Trilogy's menus: none of the three programs.
+  EXPECT_EQ(frame(), Flags{"mp_game_menu"});
+
+  game.RunPrime();
+  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_combat", "mp1_visor_combat"}));
+  game.SetVisor(1);
+  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_xray", "mp1_visor_xray"}));
+  // Leaving the X-ray visor: its view fades out while the next visor is already combat.
+  game.Set(game.next_visor, 0);
+  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_combat", "mp1_visor_combat",
+                            "mp_visor_xray", "mp1_visor_xray"}));
+  game.SetVisor(3);
+  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_thermal", "mp1_visor_thermal"}));
+  game.SetVisor(2);
+  // The arm cannon patch's branch at the hook: still Prime.
+  game.Set(0x8018BC74, TRILOGY_BRANCH);
+  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_scan", "mp1_visor_scan"}));
+  // The map, the pause screen and a save station's two dialogs.
+  for (const u32 menu : {1u, 2u, 4u, 5u})
+  {
+    game.Set(game.menu, menu);
+    EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_paused", "mp1_paused"})) << menu;
+  }
+  game.Set(game.menu, 3);
+  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_visor_scan", "mp1_visor_scan"}));
+  game.Set(game.menu, 0);
+  game.SetVisor(0);
+  game.Set(game.ball, 1);
+  game.Set(game.camera, 1);
+  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_morphball", "mp1_morphball", "mp_visor_combat",
+                            "mp1_visor_combat"}));
+  game.Set(game.ball, 0);
+  game.Set(game.camera, 4);  // a cutscene or an elevator
+  EXPECT_EQ(frame(), (Flags{"mp_game_prime", "mp_cinematic", "mp1_cinematic", "mp_visor_combat",
+                            "mp1_visor_combat"}));
+
+  // Echoes replaces Prime in memory: the same reads.
+  game.Set(0x8018BC78, 0);
+  game.RunEchoes();
+  game.Set(game.visor, 3);
+  EXPECT_EQ(frame(), (Flags{"mp_game_echoes", "mp_visor_dark", "mp2_visor_dark"}));
+  game.Set(game.visor, 1);
+  EXPECT_EQ(frame(), (Flags{"mp_game_echoes", "mp_visor_echo", "mp2_visor_echo"}));
+  game.Set(game.menu, 3);
+  EXPECT_EQ(frame(), (Flags{"mp_game_echoes", "mp_paused", "mp2_paused"}));
+  game.Set(game.menu, 0);
+  game.Set(game.camera, 5);
+  EXPECT_EQ(frame(), (Flags{"mp_game_echoes", "mp_cinematic", "mp2_cinematic", "mp_visor_echo",
+                            "mp2_visor_echo"}));
+
+  // Then Corruption.
+  game.Set(0x8018ACB4, 0);
+  game.RunCorruption();
+  game.Set(game.visor, 2);
+  EXPECT_EQ(frame(), (Flags{"mp_game_corruption", "mp_visor_command", "mp3_visor_command"}));
+  game.Set(game.menu, 3);  // the galaxy map
+  EXPECT_EQ(frame(), (Flags{"mp_game_corruption", "mp_paused", "mp3_paused"}));
+  game.Set(game.menu, 0);
+  game.Set(0x805C8D74, 1);  // a pointer dialog (the byte at 0x805C8D77)
+  EXPECT_EQ(frame(), (Flags{"mp_game_corruption", "mp_paused", "mp3_paused"}));
+  game.Set(0x805C8D74, 0);
+  game.Set(game.camera, 4);  // a conversation
+  EXPECT_EQ(frame(), (Flags{"mp_game_corruption", "mp_cinematic", "mp3_cinematic",
+                            "mp_visor_command", "mp3_visor_command"}));
+
+  // Back to the menus.
+  game.Set(0x80183C2C, 0);
+  EXPECT_EQ(frame(), Flags{"mp_game_menu"});
+  EXPECT_FALSE(game.memory.wrote);
+  // The profile's GazeRamCopies applies to the three games.
+  EXPECT_TRUE(script.TakeSettingRequests().empty());
+  EXPECT_FALSE(Warned(script, ""));
+}
+
+TEST(TrilogySmoothScanLinesPatch, FillsOnlyWhileEchoesRuns)
+{
+  constexpr u32 TRILOGY_LINES_TEXTURE = 0x902C96C0;
+  TrilogyGame game;
+  SetTexture(game.memory, LINES, TRILOGY_LINES_TEXTURE);
+  PatchScript script("smooth-scan-lines");
+  ASSERT_TRUE(script.Load(ReadPatch("R3ME01", "smooth-scan-lines"), game.env)) << script.Error();
+
+  // The Trilogy's menus, then Prime: not Echoes' memory.
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  game.RunPrime();
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(GetTexture(game.memory, TRILOGY_LINES_TEXTURE), LINES);
+
+  // Echoes before its texture is loaded: blank memory stays blank.
+  game.Set(0x8018BC78, 0);
+  game.RunEchoes();
+  SetTexture(game.memory, Filled(0), TRILOGY_LINES_TEXTURE);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(GetTexture(game.memory, TRILOGY_LINES_TEXTURE), Filled(0));
+
+  // Then the texture: the lines' average, and the lines back when the patch stops.
+  SetTexture(game.memory, LINES, TRILOGY_LINES_TEXTURE);
+  ASSERT_TRUE(script.Call(Hook::OnStateLoaded, game.env)) << script.Error();
+  EXPECT_EQ(GetTexture(game.memory, TRILOGY_LINES_TEXTURE), Filled(0x88888888));
+  EXPECT_FALSE(Warned(script, ""));
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(GetTexture(game.memory, TRILOGY_LINES_TEXTURE), LINES);
 }
