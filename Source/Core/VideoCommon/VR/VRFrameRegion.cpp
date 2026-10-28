@@ -431,20 +431,22 @@ std::array<float, 2> MapGameNDCToEyeViewNDC(const std::array<float, 6>& game_pro
   return {dot(eye.x) / w, dot(eye.y) / w};
 }
 
+bool IsVRCentredCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFrameRegion& frame)
+{
+  return frame.valid && std::abs(rect.left + rect.right - 2 * frame.left - frame.width) <= 4 &&
+         std::abs(rect.top + rect.bottom - 2 * frame.top - frame.height) <= 4 &&
+         rect.GetWidth() * 2 <= frame.width && rect.GetHeight() * 2 <= frame.height;
+}
+
 bool IsVRReticleCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFrameRegion& frame)
 {
   if (!frame.valid)
     return false;
-  const int width = rect.GetWidth();
-  const int height = rect.GetHeight();
-  const bool centred = std::abs(rect.left + rect.right - 2 * frame.left - frame.width) <= 4 &&
-                       std::abs(rect.top + rect.bottom - 2 * frame.top - frame.height) <= 4 &&
-                       width * 2 <= frame.width && height * 2 <= frame.height;
-  const bool small_inside = width * 4 <= frame.width && height * 4 <= frame.height &&
-                            rect.left > frame.left && rect.top > frame.top &&
-                            rect.right < frame.left + frame.width &&
+  const bool small_inside = rect.GetWidth() * 4 <= frame.width &&
+                            rect.GetHeight() * 4 <= frame.height && rect.left > frame.left &&
+                            rect.top > frame.top && rect.right < frame.left + frame.width &&
                             rect.bottom < frame.top + frame.height;
-  return centred || small_inside;
+  return IsVRCentredCopyRectangle(rect, frame) || small_inside;
 }
 
 namespace

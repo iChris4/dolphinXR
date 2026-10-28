@@ -139,7 +139,14 @@ static bool IsMetroidPrime3Wii()
 // where the eye's image shows that point of the game's screen: as if the head looked along the
 // game camera when the reticle is on a head-locked HUD (Prime 2), through the eye's real view when
 // it is drawn in the 3D scene (Prime 3).
-static std::optional<MathUtil::Rectangle<int>>
+struct VRGazeCopyRect
+{
+  MathUtil::Rectangle<int> rect;
+  // The block is centred on the scene (a reticle at the screen's centre).
+  bool centred;
+};
+
+static std::optional<VRGazeCopyRect>
 GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
 {
   const int mode = g_ActiveConfig.vr_gaze_ram_copies;
@@ -203,7 +210,7 @@ GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
   }
   if (moved == rect)
     return std::nullopt;
-  return moved;
+  return VRGazeCopyRect{.rect = moved, .centred = VR::IsVRCentredCopyRectangle(rect, scene)};
 }
 #endif
 
@@ -2869,9 +2876,14 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
 #ifdef ENABLE_VR
   // A reticle's block, read where the left eye shows it. The game may also draw it (the scan
   // box's magnified view of Metroid Prime Trilogy, or Metroid Prime's head-locked scan window):
-  // out of the 3D scene, its texture takes the same block, the left eye's in both eyes.
-  const std::optional<MathUtil::Rectangle<int>> gaze_rect = GetVRGazeRamCopyRect(resolved_data);
-  if (gaze_rect)
+  // out of the 3D scene, its texture takes the same block, the left eye's in both eyes. Only a
+  // centred block's (those scan views are centred, even when the Trilogy's pointer moves): Echoes'
+  // sun glare test copies a block around the sun and draws it back in place over its test quad,
+  // which a moved texture turned into a bright rectangle.
+  const std::optional<VRGazeCopyRect> gaze = GetVRGazeRamCopyRect(resolved_data);
+  const std::optional<MathUtil::Rectangle<int>> gaze_rect =
+      gaze ? std::optional(gaze->rect) : std::nullopt;
+  if (gaze && gaze->centred)
   {
     resolved_data.source_data.vr_vram_src_rect = gaze_rect;
     resolved_data.source_data.vr_vram_mono = true;

@@ -146,10 +146,14 @@ struct VREyeViewRows
 std::array<float, 2> MapGameNDCToEyeViewNDC(const std::array<float, 6>& game_projection,
                                             const VREyeViewRows& eye, float x, float y);
 
+// Whether an EFB copy rectangle is centred on the frame and at most half its size: the block under
+// a reticle at the screen's centre (Metroid Prime 2's scan, Metroid Prime's scan window).
+bool IsVRCentredCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFrameRegion& frame);
+
 // Whether an EFB copy rectangle looks like the block a game reads back under its reticle: centred
-// on the frame and at most half its size (Metroid Prime 2), or at most a quarter of it and clear
-// of the frame's edges (Metroid Prime 3's reticle moves with the pointer). Render-to-texture and
-// downscaled effect buffers sit at the frame's edges.
+// (IsVRCentredCopyRectangle), or at most a quarter of the frame and clear of its edges (Metroid
+// Prime 3's reticle moves with the pointer; also Echoes' sun glare test, a block around the sun).
+// Render-to-texture and downscaled effect buffers sit at the frame's edges.
 bool IsVRReticleCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFrameRegion& frame);
 
 // An EFB copy rectangle (native EFB pixels) moved by MapGameNDCToEyeNDC: its centre goes where

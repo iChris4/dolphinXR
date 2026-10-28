@@ -431,4 +431,20 @@ TEST(VRFrameRegion, ReticleCopyRectangles)
   EXPECT_FALSE(VR::IsVRReticleCopyRectangle({0, 0, 160, 112}, frame));
   EXPECT_FALSE(VR::IsVRReticleCopyRectangle({114, 86, 522, 372}, frame));
   EXPECT_FALSE(VR::IsVRReticleCopyRectangle({270, 204, 302, 236}, VR::VRFrameRegion{}));
+
+  // Centred: Echoes' scan blocks, the Trilogy's scan box views (Prime, Echoes); not the blocks
+  // under the Trilogy's or Corruption's pointer, nor Echoes' sun glare test (a block around the
+  // sun, restored in place by the game; GameCube, Trilogy).
+  EXPECT_TRUE(VR::IsVRCentredCopyRectangle({304, 192, 336, 256}, frame));
+  EXPECT_TRUE(VR::IsVRCentredCopyRectangle({216, 178, 424, 270}, frame));
+  EXPECT_TRUE(VR::IsVRCentredCopyRectangle({266, 176, 374, 272}, frame));
+  EXPECT_TRUE(VR::IsVRCentredCopyRectangle({276, 184, 364, 264}, frame));
+  EXPECT_FALSE(VR::IsVRCentredCopyRectangle({350, 206, 382, 270}, frame));
+  EXPECT_FALSE(VR::IsVRCentredCopyRectangle({270, 204, 302, 236}, frame));
+  EXPECT_FALSE(VR::IsVRCentredCopyRectangle({390, 76, 454, 140}, frame));
+  EXPECT_TRUE(VR::IsVRReticleCopyRectangle({390, 76, 454, 140}, frame));
+  EXPECT_FALSE(VR::IsVRCentredCopyRectangle({326, 92, 390, 156}, frame));
+  EXPECT_TRUE(VR::IsVRReticleCopyRectangle({326, 92, 390, 156}, frame));
+  EXPECT_FALSE(VR::IsVRCentredCopyRectangle({114, 86, 522, 372}, frame));
+  EXPECT_FALSE(VR::IsVRCentredCopyRectangle({304, 192, 336, 256}, VR::VRFrameRegion{}));
 }
