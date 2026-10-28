@@ -111,7 +111,8 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
   vr.screen_hit(hand) -> u, v, distance or nil (aim ray on the virtual screen, -1..1)
   vr.units_per_meter()   -- the profile's world scale (game units per meter)
   vr.haptic(hand, amplitude 0-1 [, seconds])
-  vr.setting(key) -> string; vr.set_setting(key, value)   -- the [Graphics.VR] keys, this session
+  vr.setting(key) -> string; vr.set_setting(key, value)   -- the [Graphics.VR] keys and
+      EFBToTextureEnable, this session (on_unload can put them back)
   vr.set_flag(name [, active]); vr.clear_flags()   -- override flags (condition=<name> in the
       game's Shader, Elements and Texture overrides): raised until lowered with false or the
       patch stops; the overrides see a change from the next video frame. Names: 1 to 64 letters,

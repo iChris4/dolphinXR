@@ -156,6 +156,12 @@ ToolResult SaveVRSettings(const ToolArgs& args)
     const VRSetting& setting = RequireSetting(key);
     if (*setting.note && std::string_view(setting.note).starts_with("global only"))
       throw ToolError(fmt::format("{} is a global setting, not a per-game one.", key));
+    if (setting.location.section != "VR")
+    {
+      throw ToolError(fmt::format("{} is a [{}] setting, not one of the VR profile: a game sets it "
+                                  "in its GameSettings.",
+                                  key, setting.location.section));
+    }
     locations.push_back(setting.location);
   }
 

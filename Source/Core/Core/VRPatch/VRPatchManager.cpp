@@ -700,6 +700,9 @@ void StopPatch(RunningPatch& patch, const ScriptEnvironment& env, PatchState sta
     if (!patch.script->Call(Hook::OnUnload, env))
       LogLineFor(patch.id, 2, "on_unload: " + patch.script->Error(), env.field);
     PublishLog(patch.id, patch.script->TakeLog());
+    // The settings it puts back. At emulation end the host drops the job, and the CurrentRun
+    // layer is cleared anyway.
+    ApplySettingRequests(patch);
   }
   patch.script.reset();
   patch.state = state;

@@ -3,8 +3,9 @@
 
 #pragma once
 
-// The [VR] settings a game's VR profile ([Graphics.VR] of GameSettingsVR) can set, with a parser
-// per type. Shared by the agent server's VR setting tools and vr.setting / vr.set_setting.
+// The [VR] settings a game's VR profile ([Graphics.VR] of GameSettingsVR) can set, and the
+// [Hacks] EFBToTextureEnable, with a parser per type. Shared by the agent server's VR setting tools
+// and vr.setting / vr.set_setting.
 
 #include <optional>
 #include <string>

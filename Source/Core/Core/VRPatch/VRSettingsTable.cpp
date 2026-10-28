@@ -34,7 +34,8 @@ VRSetting Entry(const Config::Info<T>& info, const char* note = "")
 }  // namespace
 
 // The keys a GameSettingsVR [Graphics.VR] section can set (the list ConfigManager.cpp's
-// ApplyGameVRConfigOverrides applies), plus a few global diagnostics.
+// ApplyGameVRConfigOverrides applies), plus a few global diagnostics and EFBToTextureEnable, which
+// a patch switches while the game needs EFB copies in its memory.
 const std::vector<VRSetting>& GetVRSettings()
 {
   static const std::vector<VRSetting> settings = {
@@ -102,6 +103,9 @@ const std::vector<VRSetting>& GetVRSettings()
       Entry(Config::GFX_VR_PASSTHROUGH_COVERAGE_MODE, "0 exact, 1 fast"),
       Entry(Config::GFX_VR_PERF_COUNTERS, "global only: VKPERF per-draw timing"),
       Entry(Config::GFX_VR_EFB_COPY_DIAGNOSTICS, "global only: EFBCopyRAM log lines"),
+      Entry(Config::GFX_HACK_SKIP_EFB_COPY_TO_RAM,
+            "Store EFB Copies to Texture Only, a [Hacks] setting: per game in GameSettings "
+            "[Video_Hacks], not in the VR profile"),
   };
   return settings;
 }

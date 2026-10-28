@@ -256,7 +256,7 @@ int VRSettingGet(lua_State* L)
   const char* key = luaL_checkstring(L, 1);
   ScriptContext* context = GetContext(L);
   if (!ReadSetting(context, key))
-    return luaL_argerror(L, 1, "unknown VR setting (the [Graphics.VR] keys)");
+    return luaL_argerror(L, 1, "unknown VR setting (the [Graphics.VR] keys, EFBToTextureEnable)");
   lua_pushlstring(L, context->text.data(), context->text.size());
   return 1;
 }
