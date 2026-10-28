@@ -5,10 +5,10 @@
 -- (CFrustumPlanes, built from the camera's transform, its vertical field of view and aspect
 -- ratio). In VR you see more than the game camera does, and you look around it with your head:
 -- objects pop in at the edges of the view. The patch hooks the calls that build the frustum of
--- the world view (the actors' pre-render, the world draw and the planes kept after it) and builds
--- it from your head's direction instead, with a wider angle: at least "Wide view angle" up and
--- down and left and right, and never narrower than the game's. "No culling" leaves the frustum
--- without planes, so that nothing is culled by it. The frustums of the reticles, the scan visor
+-- the world view (the actors' pre-render, the world draw, the planes kept after it and the list of
+-- objects drawn around the camera) and builds it from your head's direction instead, with a wider
+-- angle: at least "Wide view angle" up and down and left and right, and never narrower than the
+-- game's. "No culling" leaves the frustum without planes, so that nothing is culled by it. The frustums of the reticles, the scan visor
 -- and the shadows are left as they are. The Trilogy's patch (R3ME01/wide-culling.lua) at this
 -- disc's addresses.
 --
@@ -21,7 +21,7 @@
 patch = {
   title = "Wide culling",
   author = "DolphinXR",
-  version = "1.0",
+  version = "1.1",
   description = "Rooms and objects are culled for what the headset shows, around where you look, "
     .. "instead of the game camera's narrower view: no more geometry popping at the edges. "
     .. "Replaces the no-culling codes. For Metroid Prime 2: Echoes NTSC-U.",
@@ -59,6 +59,10 @@ local GAMES = {
       {hook = 0x8003B3B0, original = 0x482C7169, after = 0x387A2478},  -- actors' pre-render
       {hook = 0x8003B178, original = 0x482C73A1, after = 0x387C2478},  -- the world draw
       {hook = 0x8003910C, original = 0x482C940D, after = 0x387D2478},  -- the planes after it
+      -- The objects near the camera (a box around it) kept for drawing: the pre-render's other
+      -- frustum (zz_801e4c84, called by it with the camera and its transform). Without it a tall
+      -- block under the player was not drawn once it left the camera's view.
+      {hook = 0x801E4D78, original = 0x4811D7A1, after = 0x800100B4},
     },
     tests = {{0x80302298, 0x80030000, 0x38630004}, {0x803022F8, 0x80030000, 0x38630004},
              {0x80302364, 0x9421FFC0, 0x7C0802A6}, {0x80302450, 0x9421FFF0, 0x7C0802A6},

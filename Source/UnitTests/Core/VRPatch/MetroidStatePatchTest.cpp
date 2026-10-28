@@ -1353,9 +1353,10 @@ constexpr std::array<CullSite, 3> PRIME_100_CULL_SITES{{{0x80047488, 0x482FDDCD,
 constexpr std::array<CullSite, 3> PRIME_102_CULL_SITES{{{0x80047774, 0x482FE579, 0x807C0850},
                                                         {0x800474D8, 0x482FE815, 0x806DA088},
                                                         {0x80046180, 0x482FFB6D, 0x806DA088}}};
-constexpr std::array<CullSite, 3> ECHOES_GC_CULL_SITES{{{0x8003B3B0, 0x482C7169, 0x387A2478},
+constexpr std::array<CullSite, 4> ECHOES_GC_CULL_SITES{{{0x8003B3B0, 0x482C7169, 0x387A2478},
                                                         {0x8003B178, 0x482C73A1, 0x387C2478},
-                                                        {0x8003910C, 0x482C940D, 0x387D2478}}};
+                                                        {0x8003910C, 0x482C940D, 0x387D2478},
+                                                        {0x801E4D78, 0x4811D7A1, 0x800100B4}}};
 constexpr std::array<CullSite, 1> CORRUPTION_WII_CULL_SITES{{{0x800BE128, 0x482B1585, 0x80DF0014}}};
 constexpr u32 PRIME_100_FRUSTUM = 0x80345254;
 constexpr u32 PRIME_102_FRUSTUM = 0x80345CEC;
