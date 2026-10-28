@@ -22,14 +22,16 @@
 -- menu state is 1 on the map, 2 on the pause screen (4 and 5 at a save station), its camera state
 -- 4 in cutscenes and elevators; Echoes' menu state 1 on the map and 3 on the pause screen, its
 -- camera state 5 in cutscenes; Corruption's menu state 1 on the map and 3 on the galaxy map, its
--- player's word 0x3C3C 1 in first person and 4 in cutscenes and conversations.
+-- player's word 0x3C3C 1 in first person and 4 in cutscenes and conversations. As in Metroid
+-- Prime 3 (RM3E01), Corruption's menu state 4 is taken for the map a hint opens and its closing,
+-- 10 for an objective notice (not seen here in the Trilogy).
 --
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
 patch = {
   title = "Game state for the VR profile",
   author = "DolphinXR, with PrimeHack's addresses",
-  version = "1.0",
+  version = "1.1",
   description = "Reads which game of the trilogy runs, the current visor, the pause screens, "
     .. "morph ball and cutscenes from the game, so that the profile's VR overrides follow them: "
     .. "the visors, the maps and the pause screens of the three games.",
@@ -102,7 +104,8 @@ local GAMES = {
         player = player,
         visor = read_at(read_at(player, 0x35A8), 0x34),
         ball = read_at(player, 0x358),
-        paused = menu == 1 or menu == 3 or (dialog ~= nil and dialog ~= 0),
+        paused = menu == 1 or menu == 3 or menu == 4 or menu == 10 or
+          (dialog ~= nil and dialog ~= 0),
         cinematic = read_at(player, 0x3C3C) == 4,
       }
     end,
