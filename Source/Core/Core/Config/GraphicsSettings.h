@@ -295,7 +295,8 @@ extern const Info<bool> GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX;
 // EFB copies to RAM of small blocks of the screen, which some games read back to find what is
 // under their reticle (Metroid Prime 2's and 3's scan visors). In VR the screen they copy is the
 // left eye's view, wider than the game's and turned with the head, so the block is read where
-// that eye's image shows that point of the game's screen. Per game:
+// that eye's image shows that point of the game's screen; a copy to a texture of the same block
+// (a scan window's magnified view) shows that place too, the left eye's in both eyes. Per game:
 //   GFX_VR_GAZE_RAM_COPIES_HEAD: as if the head looked along the game camera, for a reticle on a
 //     head-locked HUD (Metroid Prime 2).
 //   GFX_VR_GAZE_RAM_COPIES_VIEW: through the eye's view, head turn included, for a reticle drawn

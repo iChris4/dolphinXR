@@ -2868,10 +2868,10 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
 
 #ifdef ENABLE_VR
   // A reticle's block, read where the left eye shows it. The game may also draw it (the scan
-  // box's magnified view of Metroid Prime Trilogy): out of the 3D scene, its texture takes the
-  // same block, the left eye's in both eyes.
+  // box's magnified view of Metroid Prime Trilogy, or Metroid Prime's head-locked scan window):
+  // out of the 3D scene, its texture takes the same block, the left eye's in both eyes.
   const std::optional<MathUtil::Rectangle<int>> gaze_rect = GetVRGazeRamCopyRect(resolved_data);
-  if (gaze_rect && g_ActiveConfig.vr_gaze_ram_copies == Config::GFX_VR_GAZE_RAM_COPIES_VIEW)
+  if (gaze_rect)
   {
     resolved_data.source_data.vr_vram_src_rect = gaze_rect;
     resolved_data.source_data.vr_vram_mono = true;
