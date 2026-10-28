@@ -1386,6 +1386,7 @@ void VertexManagerBase::Flush()
       UpdatePipelineObject();
       bool shader_hunter_force_pink = false;
       bool manual_screen_pane = false;
+      bool full_view_draw = false;
       auto screen_pane_depth = ElementsGroupManager::ScreenPaneDepthMode::Game;
       u64 screen_pane_group = 0;
       float screen_pane_reference_depth = -1.0f;
@@ -1910,10 +1911,12 @@ void VertexManagerBase::Flush()
             else if (handling == ShaderHunter::HandlingType::Fullscreen)
             {
               geometry_shader_manager.vr_stereo_override = 0.0f;
+              full_view_draw = true;
             }
             else if (handling == ShaderHunter::HandlingType::FullscreenMono)
             {
               geometry_shader_manager.vr_stereo_override = 0.0f;
+              full_view_draw = true;
             }
             else if (handling == ShaderHunter::HandlingType::HeadLocked)
             {
@@ -2330,6 +2333,12 @@ void VertexManagerBase::Flush()
           const bool pane_raster_overridden =
               manual_screen_pane &&
               BPFunctions::SetVRPaneScreenViewport(g_framebuffer_manager.get());
+          // A full-view 2D effect in a letterboxed band whose scene VR shows over the whole frame
+          // (Metroid Prime's morph ball under water): over the whole frame too.
+          const bool band_raster_overridden =
+              !pane_raster_overridden && full_view_draw &&
+              xfmem.projection.type == ProjectionType::Orthographic &&
+              BPFunctions::SetVRFullViewBandViewport(g_framebuffer_manager.get());
           RenderDrawCall(pixel_shader_manager, geometry_shader_manager, m_current_primitive_type,
                          m_current_pipeline_object);
           // A cone-only batch must have been rendered from the head (immersive route); anything
@@ -2340,7 +2349,7 @@ void VertexManagerBase::Flush()
             if (route < 0.5f || route > 1.5f)
               ++m_vr_cull_stats.misrouted;
           }
-          if (pane_raster_overridden)
+          if (pane_raster_overridden || band_raster_overridden)
           {
             BPFunctions::SetScissorAndViewport(g_framebuffer_manager.get(), bpmem.scissorTL,
                                                bpmem.scissorBR, bpmem.scissorOffset,

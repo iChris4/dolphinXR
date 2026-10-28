@@ -167,6 +167,10 @@ void SetScissorAndViewport(FramebufferManager* frame_buffer_manager, ScissorPos 
 // Temporarily install the full displayed-frame raster state for a manually screen-routed
 // perspective pane. Returns false when no XFB frame region is available yet.
 bool SetVRPaneScreenViewport(FramebufferManager* frame_buffer_manager);
+// Temporarily install the raster state the legacy cinematic-bar removal gives the scene for a
+// full-view 2D draw in a letterboxed full-width band: the full active area. Returns false when
+// the scene keeps its band (or the draw's viewport is not such a band).
+bool SetVRFullViewBandViewport(FramebufferManager* frame_buffer_manager);
 void SetDepthMode();
 void SetBlendMode();
 

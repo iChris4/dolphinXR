@@ -496,6 +496,44 @@ bool SetVRPaneScreenViewport(FramebufferManager* frame_buffer_manager)
   return true;
 }
 
+bool SetVRFullViewBandViewport(FramebufferManager* frame_buffer_manager)
+{
+  // Only where SetScissorAndViewport expands the scene's perspective draws (the legacy path).
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || !g_ActiveConfig.vr_remove_bars ||
+      g_ActiveConfig.vr_frame_size_from_xfb)
+  {
+    return false;
+  }
+  const int x_off = bpmem.scissorOffset.x << 1;
+  const int y_off = bpmem.scissorOffset.y << 1;
+  const Viewport& game_viewport = xfmem.viewport;
+  const int active_width =
+      static_cast<int>((game_viewport.xOrig - static_cast<float>(x_off)) * 2.0f);
+  int active_height = static_cast<int>((game_viewport.yOrig - static_cast<float>(y_off)) * 2.0f);
+  if (active_width < static_cast<int>(EFB_WIDTH) * 9 / 10 ||
+      std::fabs(game_viewport.wd) * 2.0f < static_cast<float>(active_width) * 0.9f)
+  {
+    return false;
+  }
+  if (s_vr_frame_active_height > active_height)
+    active_height = s_vr_frame_active_height;
+  // A band: the viewport is shorter than the active area.
+  if (active_height <= 0 || std::fabs(game_viewport.ht) * 2.0f >= active_height - 1.0f)
+    return false;
+
+  ScissorPos scissor_top_left = bpmem.scissorTL;
+  ScissorPos scissor_bottom_right = bpmem.scissorBR;
+  scissor_top_left.y = static_cast<u32>(y_off);
+  scissor_bottom_right.y = static_cast<u32>(y_off + active_height - 1);
+  Viewport viewport = game_viewport;
+  const float half = static_cast<float>(active_height) * 0.5f;
+  viewport.yOrig = static_cast<float>(y_off) + half;
+  viewport.ht = viewport.ht < 0 ? -half : half;
+  SetScissorAndViewport(frame_buffer_manager, scissor_top_left, scissor_bottom_right,
+                        bpmem.scissorOffset, viewport);
+  return true;
+}
+
 void SetDepthMode()
 {
   g_vertex_manager->SetDepthStateChanged();
