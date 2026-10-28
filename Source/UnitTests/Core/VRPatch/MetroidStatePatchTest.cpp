@@ -589,16 +589,15 @@ TEST(CorruptionStatePatch, RaisesTheGameState)
   EXPECT_EQ(frame(), Flags{"mp_visor_xray"});
   game.SetVisor(0);
 
-  // The map, the solar system map, the map a hint opens (still 4 through its closing, when the
-  // pointer dialog byte is already 0), an objective notice, a pointer dialog: no visor while
-  // paused. The ship's landing cutscene (11) is not a pause.
-  for (const u32 menu : {1u, 3u, 4u, 10u})
+  // Any screen of the game: the map, the solar system map, the map a hint opens (still 4 through
+  // its closing, when the pointer dialog byte is already 0), a save station's prompt and the
+  // notice after it, an objective notice, the ship landing; a pointer dialog. No visor while
+  // paused.
+  for (const u32 menu : {1u, 3u, 4u, 7u, 9u, 10u, 11u})
   {
     game.SetMenu(menu);
     EXPECT_EQ(frame(), Flags{"mp_paused"}) << menu;
   }
-  game.SetMenu(11);
-  EXPECT_EQ(frame(), Flags{"mp_visor_combat"});
   game.SetMenu(0);
   game.SetDialog(1);
   EXPECT_EQ(frame(), Flags{"mp_paused"});
@@ -1073,8 +1072,9 @@ TEST(TrilogyStatePatch, RaisesEachGamesState)
   game.RunCorruption();
   game.Set(game.visor, 2);
   EXPECT_EQ(frame(), (Flags{"mp_game_corruption", "mp_visor_command", "mp3_visor_command"}));
-  // The galaxy map, the map a hint opens (and its closing), an objective notice.
-  for (const u32 menu : {3u, 4u, 10u})
+  // The galaxy map, the map a hint opens (and its closing), a save station's prompt and notice,
+  // an objective notice.
+  for (const u32 menu : {3u, 4u, 7u, 9u, 10u})
   {
     game.Set(game.menu, menu);
     EXPECT_EQ(frame(), (Flags{"mp_game_corruption", "mp_paused", "mp3_paused"})) << menu;

@@ -9,18 +9,19 @@
 --   mp_cinematic    the camera is not the player's own (cutscenes, talking to someone)
 -- The state manager, the player, its ball state, its powerups and their visor (0 combat, 1 scan,
 -- 2 command, 3 X-ray), the menu state and the pointer dialog byte come from PrimeHack's tables
--- (shiiion/dolphin, PRIME_3_STANDALONE). The rest was found in the game: the menu state is 1 on
--- the map and 3 while the solar system map animates, 4 on the map a hint opens ("Press 1 to go to
--- the Map Screen") and through its closing (the pointer dialog byte is 0 then), 10 on an objective
--- notice; the player's word 0x3C2C is 1 in first person and 4 when a cutscene camera or a
--- conversation takes over.
+-- (shiiion/dolphin, PRIME_3_STANDALONE). The rest was found in the game: the menu state is not 0
+-- whenever a screen of the game takes over (PrimeHack turns its controls off then): 1 on the map,
+-- 3 while the solar system map animates, 4 on the map a hint opens ("Press 1 to go to the Map
+-- Screen") and through its closing (the pointer dialog byte is 0 then), 7 on a save station's
+-- prompt, 9 on the notice after it, 10 on an objective notice, 11 as the ship lands; the player's
+-- word 0x3C2C is 1 in first person and 4 when a cutscene camera or a conversation takes over.
 --
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
 patch = {
   title = "Game state for the VR profile",
   author = "DolphinXR, with PrimeHack's addresses",
-  version = "1.1",
+  version = "1.2",
   description = "Reads the current visor, the pause screens, morph ball and cutscenes from the "
     .. "game, so that the profile's VR overrides follow them: the command visor, the maps and "
     .. "the pause screens.",
@@ -31,7 +32,6 @@ patch = {
 local STATE_MANAGER = 0x805C4F98  -- -> the state manager
 local MENU_STATE = STATE_MANAGER + 0x32C
 local POINTER_DIALOG = 0x805C70C7  -- byte: the pointer drives a dialog or a menu
-local PAUSE_MENUS = {[1] = true, [3] = true, [4] = true, [10] = true}
 local VISORS = {[0] = "mp_visor_combat", "mp_visor_scan", "mp_visor_command", "mp_visor_xray"}
 local CAMERA_CINEMATIC = 4
 
@@ -50,7 +50,7 @@ function on_frame()
   local visor = read_at(read_at(player, 0x35A0), 0x34)
   local ball = read_at(player, 0x358)
   local camera = read_at(player, 0x3C2C)
-  local paused = PAUSE_MENUS[menu] or (dialog ~= nil and dialog ~= 0)
+  local paused = (menu ~= nil and menu ~= 0) or (dialog ~= nil and dialog ~= 0)
   local in_play = player ~= nil and player ~= 0 and not paused
 
   for id = 0, 3 do
