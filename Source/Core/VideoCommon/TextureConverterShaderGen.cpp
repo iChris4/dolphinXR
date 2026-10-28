@@ -63,6 +63,8 @@ static void WriteHeader(APIType api_type, ShaderCode& out)
             "  float pixel_height;\n"
             "  float vr_scene_alpha;\n"
             "  float vr_layer_scale;\n"
+            "  float vr_layer_offset_x;\n"
+            "  float vr_layer_offset_y;\n"
             "}};\n");
 }
 
@@ -108,9 +110,11 @@ ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data)
   out.Write("SAMPLER_BINDING(0) uniform sampler2DArray samp0;\n");
   if (uid_data->vr_passthrough)
     out.Write("SAMPLER_BINDING(1) uniform sampler2DArray samp1;\n");
+  // The right eye's layer may come from its own rectangle (vr_layer_offset, in UV).
   out.Write("uint4 SampleEFB(float3 uv, float y_offset) {{\n"
-            "  float4 tex_sample = texture(samp0, float3(uv.x, clamp(uv.y + (y_offset * "
-            "pixel_height), clamp_tb.x, clamp_tb.y), {}));\n",
+            "  float4 tex_sample = texture(samp0, float3(uv.x + uv.z * vr_layer_offset_x, "
+            "clamp(uv.y + (y_offset * pixel_height), clamp_tb.x, clamp_tb.y) + uv.z * "
+            "vr_layer_offset_y, {}));\n",
             mono_depth ? "0.0" : "uv.z * vr_layer_scale");
   if (uid_data->is_depth_copy)
   {

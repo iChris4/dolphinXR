@@ -449,6 +449,12 @@ bool IsVRReticleCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFram
   return IsVRCentredCopyRectangle(rect, frame) || small_inside;
 }
 
+bool IsVRPerEyeCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFrameRegion& frame)
+{
+  return frame.valid && rect.GetWidth() > 0 && rect.GetHeight() > 0 &&
+         rect.GetWidth() * 3 <= frame.width && rect.GetHeight() * 2 <= frame.height;
+}
+
 namespace
 {
 // Moves the rectangle so that its centre goes where map(game NDC) says, in the frame's pixels.

@@ -76,6 +76,7 @@ private:
   ConfigBool* m_ortho_scissor_fix = nullptr;
   ConfigBool* m_layered_palette_conversion_path = nullptr;
   ConfigChoiceMap<int>* m_gaze_ram_copies = nullptr;
+  ConfigBool* m_per_eye_screen_copies = nullptr;
   ConfigChoiceMap<OpenXRMirrorView>* m_mirror_view = nullptr;
   ConfigChoiceMap<int>* m_forced_vbi_frequency = nullptr;
   ConfigSlider* m_clear_efb_slider = nullptr;

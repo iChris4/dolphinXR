@@ -1834,9 +1834,11 @@ void VertexManagerBase::Flush()
               handling = ShaderHunter::HandlingType::Fullscreen;
               handling_source = 4;
             }
-            // The scene's projection, which TextureCacheBase needs to aim GazeRamCopies.
+            // The scene's projection, which TextureCacheBase needs to aim GazeRamCopies and
+            // PerEyeScreenCopies.
             if (handling == ShaderHunter::HandlingType::Skip &&
-                g_ActiveConfig.vr_gaze_ram_copies != Config::GFX_VR_GAZE_RAM_COPIES_OFF &&
+                (g_ActiveConfig.vr_gaze_ram_copies != Config::GFX_VR_GAZE_RAM_COPIES_OFF ||
+                 g_ActiveConfig.vr_per_eye_screen_copies) &&
                 xfmem.projection.type == ProjectionType::Perspective)
             {
               m_vr_scene_projection = xfmem.projection.rawProjection;
@@ -2339,6 +2341,32 @@ void VertexManagerBase::Flush()
               !pane_raster_overridden && full_view_draw &&
               xfmem.projection.type == ProjectionType::Orthographic &&
               BPFunctions::SetVRFullViewBandViewport(g_framebuffer_manager.get());
+#ifdef ENABLE_VR
+          // A block of the scene the game copied and draws back in place, distorted (indirect
+          // texturing: the warp around Metroid Prime's charged shots): the block taken where each
+          // eye sees it (PerEyeScreenCopies), drawn there in each eye, moved as far as its copy.
+          if (geometry_shader_manager.vr_stereo_override == 0.0f &&
+              g_ActiveConfig.vr_per_eye_screen_copies && bpmem.genMode.numindstages > 0 &&
+              xfmem.viewport.wd != 0.0f && xfmem.viewport.ht != 0.0f)
+          {
+            for (const u32 i : used_textures)
+            {
+              const auto offsets = g_texture_cache->ApplyVRPerEyeCopy(i);
+              if (!offsets)
+                continue;
+              geometry_shader_manager.vr_stereo_override =
+                  GeometryShaderManager::VR_STEREO_FULLSCREEN_PER_EYE;
+              for (size_t eye = 0; eye < 2; ++eye)
+              {
+                geometry_shader_manager.vr_fullscreen_eye_offsets[eye] = {
+                    (*offsets)[eye][0] / xfmem.viewport.wd, (*offsets)[eye][1] / xfmem.viewport.ht};
+              }
+              if (agent_record) [[unlikely]]
+                agent_record->stereo_override = geometry_shader_manager.vr_stereo_override;
+              break;
+            }
+          }
+#endif
           geometry_shader_manager.vr_hud_draw_depth = &draw_depth;
           RenderDrawCall(pixel_shader_manager, geometry_shader_manager, m_current_primitive_type,
                          m_current_pipeline_object);

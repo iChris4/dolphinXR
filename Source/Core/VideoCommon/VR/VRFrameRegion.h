@@ -156,6 +156,11 @@ bool IsVRCentredCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFram
 // Render-to-texture and downscaled effect buffers sit at the frame's edges.
 bool IsVRReticleCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFrameRegion& frame);
 
+// Whether an EFB copy rectangle is small enough to be a block a game draws back in place around a
+// point of its scene (PerEyeScreenCopies): at most a third of the frame wide and half of it high
+// (Metroid Prime's charged shot warp, 192x192 in 640x448).
+bool IsVRPerEyeCopyRectangle(const MathUtil::Rectangle<int>& rect, const VRFrameRegion& frame);
+
 // An EFB copy rectangle (native EFB pixels) moved by MapGameNDCToEyeNDC: its centre goes where
 // the eye's image shows the direction the game's screen shows there. It keeps its size and stays
 // inside the frame; unchanged when the frame or the projections are unusable.

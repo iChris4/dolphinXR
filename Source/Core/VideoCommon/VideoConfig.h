@@ -430,6 +430,8 @@ struct VideoConfig final
   bool vr_metroid_d3d_thermal_palette_fix = false;  // Layered MP1 thermal palette conversion on D3D11
   // Small EFB copies to RAM read where the left eye shows them (GFX_VR_GAZE_RAM_COPIES_*).
   int vr_gaze_ram_copies = 0;
+  // Small EFB copies drawn back in place follow each eye (GFX_VR_PER_EYE_SCREEN_COPIES).
+  bool vr_per_eye_screen_copies = false;
   bool vr_passthrough = false;  // Show the headset camera feed behind unrendered (transparent) areas
   // Show the headset camera feed around the flat screen (GFX_VR_FLAT_SCREEN_PASSTHROUGH).
   bool vr_flat_screen_passthrough = true;

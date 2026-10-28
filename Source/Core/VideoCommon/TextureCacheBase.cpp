@@ -146,6 +146,33 @@ struct VRGazeCopyRect
   bool centred;
 };
 
+// The part of the EFB a copy of the 3D scene comes from: copied with the main scene's viewport
+// (render-to-texture and downscaling passes draw with their own viewports). A letterboxed scene
+// keeps the game's viewport in VR (Prime in Metroid Prime Trilogy: 640x448 in a 640x480 frame), so
+// the eye's image fills that viewport: blocks are placed within it.
+static std::optional<VR::VRFrameRegion> GetVRCopyScene()
+{
+  const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
+  if (!frame.valid)
+    return std::nullopt;
+  const int x_off = bpmem.scissorOffset.x << 1;
+  const int y_off = bpmem.scissorOffset.y << 1;
+  const VR::VRViewportClass viewport_class =
+      VR::ClassifyVRViewport(xfmem.viewport, VR::GetVRScissor(), x_off, y_off);
+  if (viewport_class == VR::VRViewportClass::MainScene)
+    return frame;
+  if (viewport_class != VR::VRViewportClass::Letterboxed)
+    return std::nullopt;
+  return VR::VRFrameRegion{
+      .left = static_cast<int>(std::lround(xfmem.viewport.xOrig - std::fabs(xfmem.viewport.wd))) -
+              x_off,
+      .top = static_cast<int>(std::lround(xfmem.viewport.yOrig - std::fabs(xfmem.viewport.ht))) -
+             y_off,
+      .width = static_cast<int>(std::lround(2.0f * std::fabs(xfmem.viewport.wd))),
+      .height = static_cast<int>(std::lround(2.0f * std::fabs(xfmem.viewport.ht))),
+      .valid = true};
+}
+
 static std::optional<VRGazeCopyRect>
 GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
 {
@@ -157,37 +184,15 @@ GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
     return std::nullopt;
   }
   const std::optional<std::array<float, 6>>& projection = g_vertex_manager->GetVRSceneProjection();
-  const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
-  if (!projection || !frame.valid)
+  if (!projection)
     return std::nullopt;
 
-  // Only the reticle's block, copied from the main scene (render-to-texture and downscaling
-  // passes draw with their own viewports). A letterboxed scene keeps the game's viewport in VR
-  // (Prime in Metroid Prime Trilogy: 640x448 in a 640x480 frame), so the eye's image fills that
-  // viewport: the block is placed within it.
-  const int x_off = bpmem.scissorOffset.x << 1;
-  const int y_off = bpmem.scissorOffset.y << 1;
-  const VR::VRViewportClass viewport_class =
-      VR::ClassifyVRViewport(xfmem.viewport, VR::GetVRScissor(), x_off, y_off);
-  VR::VRFrameRegion scene = frame;
-  if (viewport_class == VR::VRViewportClass::Letterboxed)
-  {
-    scene = {
-        .left = static_cast<int>(std::lround(xfmem.viewport.xOrig - std::fabs(xfmem.viewport.wd))) -
-                x_off,
-        .top = static_cast<int>(std::lround(xfmem.viewport.yOrig - std::fabs(xfmem.viewport.ht))) -
-               y_off,
-        .width = static_cast<int>(std::lround(2.0f * std::fabs(xfmem.viewport.wd))),
-        .height = static_cast<int>(std::lround(2.0f * std::fabs(xfmem.viewport.ht))),
-        .valid = true};
-  }
+  // Only the reticle's block, copied from the main scene.
+  const std::optional<VR::VRFrameRegion> copy_scene = GetVRCopyScene();
   const MathUtil::Rectangle<int>& rect = resolved_data.source_data.src_rect;
-  if ((viewport_class != VR::VRViewportClass::MainScene &&
-       viewport_class != VR::VRViewportClass::Letterboxed) ||
-      !VR::IsVRReticleCopyRectangle(rect, scene))
-  {
+  if (!copy_scene || !VR::IsVRReticleCopyRectangle(rect, *copy_scene))
     return std::nullopt;
-  }
+  const VR::VRFrameRegion& scene = *copy_scene;
 
   // The RAM copy reads the EFB's first layer: the left eye.
   MathUtil::Rectangle<int> moved;
@@ -211,6 +216,41 @@ GetVRGazeRamCopyRect(const FramebufferCopyResolvedData& resolved_data)
   if (moved == rect)
     return std::nullopt;
   return VRGazeCopyRect{.rect = moved, .centred = VR::IsVRCentredCopyRectangle(rect, scene)};
+}
+
+// PerEyeScreenCopies: a small block of the 3D scene that the game may draw back in place,
+// distorted (the warp around Metroid Prime's charged shots: the square around the shot's point on
+// the game's screen). In VR each eye's image shows that point elsewhere, so each eye's block is
+// also taken where that eye sees it, head turn included: the left eye's and the right eye's
+// rectangles, of the copy's size.
+static std::optional<std::array<MathUtil::Rectangle<int>, 2>>
+GetVRPerEyeCopyRects(const FramebufferCopyResolvedData& resolved_data)
+{
+  const FramebufferCopyRawData& source = resolved_data.source_data;
+  if (!g_ActiveConfig.vr_per_eye_screen_copies || resolved_data.is_xfb ||
+      !resolved_data.copy_to_vram || source.is_depth_format ||
+      source.efbcopy_format != EFBCopyFormat::RGBA8 ||
+      g_ActiveConfig.stereo_mode != StereoMode::OpenXR || g_ActiveConfig.vr_flat_screen ||
+      !VR::g_openxr || !VR::g_openxr->IsSessionRunning())
+  {
+    return std::nullopt;
+  }
+  const std::optional<std::array<float, 6>>& projection = g_vertex_manager->GetVRSceneProjection();
+  const std::optional<VR::VRFrameRegion> scene = GetVRCopyScene();
+  if (!projection || !scene || !VR::IsVRPerEyeCopyRectangle(source.src_rect, *scene))
+    return std::nullopt;
+
+  std::array<std::array<float, 4>, 4> rows;
+  std::array<std::array<float, 4>, 2> z_rows;
+  VR::g_openxr->GetEyeProjectionRows(VR::g_openxr->GetEffectiveUnitsPerMeter(), rows, z_rows);
+  const std::array<MathUtil::Rectangle<int>, 2> rects{
+      VR::MapVRViewCopyRectangle(source.src_rect, *scene, *projection,
+                                 {.x = rows[0], .y = rows[1], .z = z_rows[0]}),
+      VR::MapVRViewCopyRectangle(source.src_rect, *scene, *projection,
+                                 {.x = rows[2], .y = rows[3], .z = z_rows[1]})};
+  if (rects[0] == source.src_rect && rects[1] == source.src_rect)
+    return std::nullopt;
+  return rects;
 }
 #endif
 
@@ -1484,6 +1524,48 @@ bool TextureCacheBase::IsBoundEfbCopy(u32 stage, u32* native_width, u32* native_
   *native_width = entry->native_width;
   *native_height = entry->native_height;
   return true;
+}
+
+std::optional<std::array<std::array<int, 2>, 2>> TextureCacheBase::ApplyVRPerEyeCopy(u32 stage)
+{
+  if (stage >= m_bound_textures.size() || !m_bound_textures[stage])
+    return std::nullopt;
+  const RcTcacheEntry& entry = m_bound_textures[stage];
+  if (!entry->vr_eye_offsets || !entry->vr_per_eye_texture)
+    return std::nullopt;
+  g_gfx->SetTexture(stage, entry->vr_per_eye_texture.get());
+  return entry->vr_eye_offsets;
+}
+
+void TextureCacheBase::CopyVRPerEyeBlock(RcTcacheEntry& entry,
+                                         const FramebufferCopyResolvedData& resolved_data,
+                                         const std::array<MathUtil::Rectangle<int>, 2>& rects)
+{
+  const TextureConfig config = entry->texture->GetConfig();
+  if (!entry->vr_per_eye_texture || entry->vr_per_eye_texture->GetConfig() != config)
+  {
+    std::optional<TexPoolEntry> allocated = AllocateTexture(config);
+    if (!allocated)
+      return;
+    entry->vr_per_eye_texture = std::move(allocated->texture);
+    entry->vr_per_eye_framebuffer = std::move(allocated->framebuffer);
+  }
+
+  // CopyEFBToCacheEntry writes the entry's texture: the per-eye one stands in for it.
+  entry->texture.swap(entry->vr_per_eye_texture);
+  entry->framebuffer.swap(entry->vr_per_eye_framebuffer);
+  const FramebufferCopyRawData& source = resolved_data.source_data;
+  CopyEFBToCacheEntry(entry, false, rects[0], source.half_scale, resolved_data.linear_filter,
+                      source.efbcopy_format, source.is_intensity_format, source.gamma,
+                      source.clamp_top, source.clamp_bottom,
+                      GetVRAMCopyFilterCoefficients(source.filter_coefficients), false, rects[1]);
+  entry->texture.swap(entry->vr_per_eye_texture);
+  entry->framebuffer.swap(entry->vr_per_eye_framebuffer);
+
+  const MathUtil::Rectangle<int>& rect = source.src_rect;
+  entry->vr_eye_offsets =
+      std::array<std::array<int, 2>, 2>{{{rects[0].left - rect.left, rects[0].top - rect.top},
+                                         {rects[1].left - rect.left, rects[1].top - rect.top}}};
 }
 
 std::optional<TextureCacheBase::BoundTextureSource>
@@ -2888,6 +2970,8 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
     resolved_data.source_data.vr_vram_src_rect = gaze_rect;
     resolved_data.source_data.vr_vram_mono = true;
   }
+  const std::optional<std::array<MathUtil::Rectangle<int>, 2>> per_eye_rects =
+      gaze && gaze->centred ? std::nullopt : GetVRPerEyeCopyRects(resolved_data);
 #endif
 
   RcTcacheEntry entry;
@@ -2896,7 +2980,14 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
     entry = SetupCopyEntry(g_framebuffer_manager.get(), resolved_data);
 
     if (entry)
+    {
       CopyRenderTargetToVRam(entry, g_framebuffer_manager.get(), resolved_data);
+#ifdef ENABLE_VR
+      entry->vr_eye_offsets.reset();
+      if (per_eye_rects)
+        CopyVRPerEyeBlock(entry, resolved_data, *per_eye_rects);
+#endif
+    }
   }
 
   if (resolved_data.copy_to_ram)
@@ -3483,13 +3574,11 @@ bool TextureCacheBase::CreateUtilityTextures()
   return true;
 }
 
-void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_copy,
-                                           const MathUtil::Rectangle<int>& src_rect,
-                                           bool scale_by_half, bool linear_filter,
-                                           EFBCopyFormat dst_format, bool is_intensity, float gamma,
-                                           bool clamp_top, bool clamp_bottom,
-                                           const std::array<u32, 3>& filter_coefficients,
-                                           bool vr_mono_layers)
+void TextureCacheBase::CopyEFBToCacheEntry(
+    RcTcacheEntry& entry, bool is_depth_copy, const MathUtil::Rectangle<int>& src_rect,
+    bool scale_by_half, bool linear_filter, EFBCopyFormat dst_format, bool is_intensity,
+    float gamma, bool clamp_top, bool clamp_bottom, const std::array<u32, 3>& filter_coefficients,
+    bool vr_mono_layers, const std::optional<MathUtil::Rectangle<int>>& vr_right_src_rect)
 {
   // Flush EFB pokes first, as they're expected to be included.
   g_framebuffer_manager->FlushEFBPokes();
@@ -3507,9 +3596,20 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
   const auto scaled_src_rect = g_framebuffer_manager->ConvertEFBRectangle(src_rect);
   const auto framebuffer_rect = g_gfx->ConvertFramebufferRectangle(
       scaled_src_rect, g_framebuffer_manager->GetEFBFramebuffer());
-  AbstractTexture* src_texture =
-      is_depth_copy ? g_framebuffer_manager->ResolveEFBDepthTexture(framebuffer_rect) :
-                      g_framebuffer_manager->ResolveEFBColorTexture(framebuffer_rect);
+  // VR: the right eye's layer from its own rectangle (PerEyeScreenCopies); both are resolved.
+  const auto right_framebuffer_rect =
+      vr_right_src_rect ? g_gfx->ConvertFramebufferRectangle(
+                              g_framebuffer_manager->ConvertEFBRectangle(*vr_right_src_rect),
+                              g_framebuffer_manager->GetEFBFramebuffer()) :
+                          framebuffer_rect;
+  const MathUtil::Rectangle<int> resolve_rect{
+      std::min(framebuffer_rect.left, right_framebuffer_rect.left),
+      std::min(framebuffer_rect.top, right_framebuffer_rect.top),
+      std::max(framebuffer_rect.right, right_framebuffer_rect.right),
+      std::max(framebuffer_rect.bottom, right_framebuffer_rect.bottom)};
+  AbstractTexture* src_texture = is_depth_copy ?
+                                     g_framebuffer_manager->ResolveEFBDepthTexture(resolve_rect) :
+                                     g_framebuffer_manager->ResolveEFBColorTexture(resolve_rect);
   AbstractTexture* coverage_texture = nullptr;
   if (!is_depth_copy && dst_format == EFBCopyFormat::XFB &&
       g_ActiveConfig.VRPassthroughEnabled())
@@ -3533,7 +3633,9 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
     float pixel_height;
     float vr_scene_alpha;
     float vr_layer_scale;
-    float padding[3];
+    float vr_layer_offset_x;
+    float vr_layer_offset_y;
+    float padding;
   };
   Uniforms uniforms = {};
   const float rcp_efb_width = 1.0f / static_cast<float>(g_framebuffer_manager->GetEFBWidth());
@@ -3560,6 +3662,10 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
                                 1.0f;
   // The source layer is the destination's times this: 0 copies the left eye into every layer.
   uniforms.vr_layer_scale = vr_mono_layers ? 0.0f : 1.0f;
+  // The source position is moved by the layer times this: the right eye's rectangle.
+  uniforms.vr_layer_offset_x =
+      (right_framebuffer_rect.left - framebuffer_rect.left) * rcp_efb_width;
+  uniforms.vr_layer_offset_y = (right_framebuffer_rect.top - framebuffer_rect.top) * rcp_efb_height;
   g_vertex_manager->UploadUtilityUniforms(&uniforms, sizeof(uniforms));
 
   // Use the copy pipeline to render the VRAM copy.
@@ -4114,7 +4220,7 @@ void TextureCacheBase::CopyRenderTargetToVRam(RcTcacheEntry& entry,
                         vram_linear_filter, source.efbcopy_format, source.is_intensity_format,
                         source.gamma, source.clamp_top, source.clamp_bottom,
                         GetVRAMCopyFilterCoefficients(source.filter_coefficients),
-                        source.vr_vram_mono);
+                        source.vr_vram_mono, std::nullopt);
   }
 
   if (g_ActiveConfig.bGraphicMods)

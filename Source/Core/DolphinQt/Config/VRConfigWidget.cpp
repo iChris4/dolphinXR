@@ -319,6 +319,8 @@ void VRConfigWidget::CreateWidgets()
   gaze_ram_copies_layout->addWidget(new QLabel(tr("Screen Read-Backs:")));
   gaze_ram_copies_layout->addWidget(gaze_ram_copies, 1);
   hacks_group_layout->addLayout(gaze_ram_copies_layout);
+  hacks_group_layout->addWidget(
+      make_bool(tr("Screen Copies Follow Each Eye"), Config::GFX_VR_PER_EYE_SCREEN_COPIES));
 
   auto* framerate_group = new QGroupBox(tr("Framerate"));
   auto* framerate_layout = new QGridLayout(framerate_group);

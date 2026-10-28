@@ -445,6 +445,17 @@ TEST(VRFrameRegion, ReticleCopyRectangles)
   EXPECT_TRUE(VR::IsVRReticleCopyRectangle({390, 76, 454, 140}, frame));
   EXPECT_FALSE(VR::IsVRCentredCopyRectangle({326, 92, 390, 156}, frame));
   EXPECT_TRUE(VR::IsVRReticleCopyRectangle({326, 92, 390, 156}, frame));
+
+  // Blocks drawn back in place (PerEyeScreenCopies): Metroid Prime's charged shot warp (192x192,
+  // also cut at the frame's edge), Echoes' sun glare test; not a quarter-size effect buffer nor a
+  // copy wider than a third of the frame.
+  EXPECT_TRUE(VR::IsVRPerEyeCopyRectangle({232, 140, 424, 332}, frame));
+  EXPECT_TRUE(VR::IsVRPerEyeCopyRectangle({0, 140, 100, 332}, frame));
+  EXPECT_TRUE(VR::IsVRPerEyeCopyRectangle({390, 76, 454, 140}, frame));
+  EXPECT_FALSE(VR::IsVRPerEyeCopyRectangle({0, 0, 320, 224}, frame));
+  EXPECT_FALSE(VR::IsVRPerEyeCopyRectangle({200, 140, 440, 332}, frame));
+  EXPECT_FALSE(VR::IsVRPerEyeCopyRectangle({232, 140, 232, 332}, frame));
+  EXPECT_FALSE(VR::IsVRPerEyeCopyRectangle({232, 140, 424, 332}, VR::VRFrameRegion{}));
   EXPECT_FALSE(VR::IsVRCentredCopyRectangle({114, 86, 522, 372}, frame));
   EXPECT_FALSE(VR::IsVRCentredCopyRectangle({304, 192, 336, 256}, VR::VRFrameRegion{}));
 }

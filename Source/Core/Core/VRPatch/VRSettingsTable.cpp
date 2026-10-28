@@ -85,6 +85,8 @@ const std::vector<VRSetting>& GetVRSettings()
       Entry(Config::GFX_VR_GAZE_RAM_COPIES,
             "0 off, 1 reticle on a head-locked HUD, 2 reticle in the 3D scene: small RAM copies "
             "read where the left eye shows them"),
+      Entry(Config::GFX_VR_PER_EYE_SCREEN_COPIES,
+            "small screen copies drawn back in place follow each eye (Metroid's charged shots)"),
       Entry(Config::GFX_VR_CLEAR_EFB_COPIES, "EFB copy width threshold, 0 = off"),
       Entry(Config::GFX_VR_GAMMA),
       Entry(Config::GFX_VR_USE_VULKAN_MULTIVIEW, "restart the game"),

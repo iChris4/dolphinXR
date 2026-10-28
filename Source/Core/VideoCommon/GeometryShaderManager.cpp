@@ -478,6 +478,16 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           constants.eye_z_row[0] = eye_z_row[0];
           constants.eye_z_row[1] = eye_z_row[1];
         }
+        // The fullscreen route projects nothing: each eye's first projection row carries its
+        // offset instead.
+        if (constants.stereoparams[3] == VR_STEREO_FULLSCREEN_PER_EYE)
+        {
+          for (size_t eye = 0; eye < 2; ++eye)
+          {
+            constants.eye_projection[eye * 2] = {vr_fullscreen_eye_offsets[eye][0],
+                                                 vr_fullscreen_eye_offsets[eye][1], 0.0f, 0.0f};
+          }
+        }
 
         const bool perspective_hud =
             perspective && VR::g_openxr && VR::g_openxr->IsSessionRunning() &&

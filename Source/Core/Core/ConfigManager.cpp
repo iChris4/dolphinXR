@@ -201,6 +201,7 @@ static void ClearAppliedVRSettings(bool emulation_started)
   ClearAppliedVRSetting("MetroidD3DThermalPaletteFix",
                         Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX);
   ClearAppliedVRSetting("GazeRamCopies", Config::GFX_VR_GAZE_RAM_COPIES);
+  ClearAppliedVRSetting("PerEyeScreenCopies", Config::GFX_VR_PER_EYE_SCREEN_COPIES);
   ClearAppliedVRSetting("ClearEFBCopies", Config::GFX_VR_CLEAR_EFB_COPIES);
   ClearAppliedVRSetting("Gamma", Config::GFX_VR_GAMMA);
   ClearAppliedVRSetting("UseVulkanMultiview", Config::GFX_VR_USE_VULKAN_MULTIVIEW);
@@ -320,6 +321,7 @@ static void ApplyGameVRConfigOverrides(std::string_view game_id, std::optional<u
     }
   }
   ApplyVRSetting(values, "GazeRamCopies", Config::GFX_VR_GAZE_RAM_COPIES);
+  ApplyVRSetting(values, "PerEyeScreenCopies", Config::GFX_VR_PER_EYE_SCREEN_COPIES);
   ApplyVRSetting(values, "ClearEFBCopies", Config::GFX_VR_CLEAR_EFB_COPIES);
   ApplyVRSetting(values, "Gamma", Config::GFX_VR_GAMMA);
   ApplyVRSetting(values, "UseVulkanMultiview", Config::GFX_VR_USE_VULKAN_MULTIVIEW);

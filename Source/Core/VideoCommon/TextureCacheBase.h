@@ -193,6 +193,14 @@ struct TCacheEntry
   bool is_xfb_container = false;
   // DolphinXR: every layer of this EFB copy holds the left eye's picture (ApplyVRMonoEFBCopy).
   bool vr_mono_layers = false;
+  // DolphinXR: the same block taken where each eye sees it, and per eye how far (native EFB
+  // pixels, x and y) from the game's rectangle (PerEyeScreenCopies). A fullscreen draw that
+  // distorts the block (the warp around Metroid Prime's charged shots) samples this one and is
+  // moved as far in each eye; others keep the game's copy (Echoes' sun glare test draws its
+  // block back over a quad it drew at the game's spot).
+  std::unique_ptr<AbstractTexture> vr_per_eye_texture;
+  std::unique_ptr<AbstractFramebuffer> vr_per_eye_framebuffer;
+  std::optional<std::array<std::array<int, 2>, 2>> vr_eye_offsets;
   u64 id = 0;
   u32 content_semaphore = 0;  // Counts up
 
@@ -405,6 +413,9 @@ public:
     bool efb_copy = false;
   };
   std::optional<BoundTextureSource> GetBoundTextureSource(u32 stage) const;
+  // PerEyeScreenCopies: binds the per-eye block of the EFB copy bound at this stage for the
+  // current draw and returns how far it was moved per eye (TCacheEntry::vr_eye_offsets).
+  std::optional<std::array<std::array<int, 2>, 2>> ApplyVRPerEyeCopy(u32 stage);
   // Fullscreen override opt-in: repair a one-layer texture which was partially updated from a
   // same-address stereo EFB copy, then rebind the promoted texture for the current draw.
   bool ApplyVRPreserveStereoEFBFix(u32 stage);
@@ -476,12 +487,13 @@ protected:
                        bool linear_filter, float y_scale, float gamma, bool clamp_top,
                        bool clamp_bottom, const std::array<u32, 3>& filter_coefficients);
   // vr_mono_layers: every layer of the copy takes the EFB's first layer (the left eye).
-  virtual void CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_copy,
-                                   const MathUtil::Rectangle<int>& src_rect, bool scale_by_half,
-                                   bool linear_filter, EFBCopyFormat dst_format, bool is_intensity,
-                                   float gamma, bool clamp_top, bool clamp_bottom,
-                                   const std::array<u32, 3>& filter_coefficients,
-                                   bool vr_mono_layers);
+  // vr_right_src_rect: the second layer (the right eye) is taken from this rectangle, of the same
+  // size as src_rect.
+  virtual void CopyEFBToCacheEntry(
+      RcTcacheEntry& entry, bool is_depth_copy, const MathUtil::Rectangle<int>& src_rect,
+      bool scale_by_half, bool linear_filter, EFBCopyFormat dst_format, bool is_intensity,
+      float gamma, bool clamp_top, bool clamp_bottom, const std::array<u32, 3>& filter_coefficients,
+      bool vr_mono_layers, const std::optional<MathUtil::Rectangle<int>>& vr_right_src_rect);
 
   alignas(16) u8* m_temp = nullptr;
   size_t m_temp_size = 0;
@@ -525,6 +537,10 @@ private:
 
   RcTcacheEntry AllocateCacheEntry(const TextureConfig& config);
   std::optional<TexPoolEntry> AllocateTexture(const TextureConfig& config);
+  // PerEyeScreenCopies: the copy's block taken again from each eye's rectangle into the entry's
+  // per-eye texture.
+  void CopyVRPerEyeBlock(RcTcacheEntry& entry, const FramebufferCopyResolvedData& resolved_data,
+                         const std::array<MathUtil::Rectangle<int>, 2>& rects);
   TexPool::iterator FindMatchingTextureFromPool(const TextureConfig& config);
   TexAddrCache::iterator GetTexCacheIter(TCacheEntry* entry);
 

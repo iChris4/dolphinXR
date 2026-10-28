@@ -77,6 +77,8 @@ public:
   // Same pane projection, but preserve the element's shared Z composition and write its physically
   // projected VR depth instead of reusing the game's original depth buffer values.
   static constexpr float VR_STEREO_SCREEN_PANE_3D_VR_DEPTH = 3.0f;
+  // A fullscreen draw moved in each eye by vr_fullscreen_eye_offsets (PerEyeScreenCopies).
+  static constexpr float VR_STEREO_FULLSCREEN_PER_EYE = 0.25f;
 
   void Init();
   void Dirty();
@@ -111,7 +113,11 @@ public:
   // -1.0 = force screen; 0.0 = force fullscreen; 1.0 = force perspective;
   // VR_STEREO_SCREEN_PANE_3D = force a world-fixed perspective pane.
   // VR_STEREO_SCREEN_PANE_3D_VR_DEPTH = same, with physically projected depth.
+  // VR_STEREO_FULLSCREEN_PER_EYE = fullscreen, moved in each eye by vr_fullscreen_eye_offsets.
   float vr_stereo_override = std::numeric_limits<float>::quiet_NaN();
+  // Per eye, the NDC offset (x, y up) of a VR_STEREO_FULLSCREEN_PER_EYE draw: a block of the
+  // scene the game copied and draws back in place, taken where each eye sees it.
+  std::array<std::array<float, 2>, 2> vr_fullscreen_eye_offsets{};
   // Detect Skybox's verdict for the next draw (IsSkyboxDraw), set by VertexManagerBase before
   // every draw.
   bool vr_skybox_draw = false;

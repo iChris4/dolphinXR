@@ -14,7 +14,7 @@
 
 namespace UberShader
 {
-static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 7;
+static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 8;
 
 VertexShaderUid GetVertexShaderUid()
 {

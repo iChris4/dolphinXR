@@ -270,6 +270,12 @@ private:
         "point: for a reticle that stays in front of your head (Prime 2) or one drawn in the "
         "game's world (Prime 3). Set it per game.",
         Config::GFX_VR_GAZE_RAM_COPIES, GAZE_RAM_COPIES, touched);
+    MenuWidgets::Checkbox(
+        "Screen Copies Follow Each Eye",
+        "Some effects copy a small block of the screen around a point of the 3D scene and draw it "
+        "back over it, distorted (the warp around Metroid Prime's charged shots). This takes and "
+        "draws each eye's block where that eye sees the point. Turn it on per game.",
+        Config::GFX_VR_PER_EYE_SCREEN_COPIES, touched);
   }
 
   static void DrawRendering(MenuWidgets::TouchedKeys* touched)

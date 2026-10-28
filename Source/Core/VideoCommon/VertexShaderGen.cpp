@@ -14,7 +14,7 @@
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
 
-static constexpr u32 VERTEX_SHADER_CODE_VERSION = 23;
+static constexpr u32 VERTEX_SHADER_CODE_VERSION = 24;
 
 VertexShaderUid GetVertexShaderUid()
 {
@@ -637,6 +637,13 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
   out.Write("\t\to.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");
   out.Write("\t\to.pos.xy = o.pos.xy - o.pos.w * " I_VR_PIXELCENTER ".xy;\n");
   out.Write("\t\tvr_pos_replaced = true;\n");
+  out.Write("\t}}\n");
+  // Fullscreen, moved in each eye (cstereo.w == 0.25, PerEyeScreenCopies): the eye's NDC offset
+  // is in its first projection row. The position keeps the console's convention: the trailing
+  // fixups still apply.
+  out.Write("\telse if (" I_STEREOPARAMS ".w > 0.125f)\n\t{{\n");
+  out.Write("\t\to.pos.xy += (right_eye ? " I_EYE_PROJ "[2].xy : " I_EYE_PROJ
+            "[0].xy) * o.pos.w;\n");
   out.Write("\t}}\n");
   out.Write("\t}}\n");
 }

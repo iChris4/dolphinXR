@@ -14,6 +14,7 @@
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/AbstractStagingTexture.h"
 #include "VideoCommon/AbstractTexture.h"
+#include "VideoCommon/GeometryShaderManager.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/TextureConfig.h"
 #include "VideoCommon/TextureDecoder.h"
@@ -449,6 +450,8 @@ std::string DescribeRoute(const DrawRecord& draw)
     return "virtual screen";
   if (route == 0.0f)
     return draw.handling == NO_HANDLING ? "fullscreen (auto EFB effect)" : "fullscreen";
+  if (route == GeometryShaderManager::VR_STEREO_FULLSCREEN_PER_EYE)
+    return "fullscreen, moved per eye (PerEyeScreenCopies)";
   if (route <= -2.0f)
     return "head-locked";
   return "screen pane";

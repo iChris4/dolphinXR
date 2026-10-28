@@ -305,6 +305,10 @@ extern const Info<int> GFX_VR_GAZE_RAM_COPIES;
 static constexpr int GFX_VR_GAZE_RAM_COPIES_OFF = 0;
 static constexpr int GFX_VR_GAZE_RAM_COPIES_HEAD = 1;
 static constexpr int GFX_VR_GAZE_RAM_COPIES_VIEW = 2;
+// Small EFB copies of the 3D scene that a game draws back in place, distorted (a screen-space warp
+// around a point: Metroid Prime's charged shots): each eye's block and draw are moved to where
+// that eye sees the block's centre, head turn included. Per game.
+extern const Info<bool> GFX_VR_PER_EYE_SCREEN_COPIES;
 extern const Info<bool> GFX_VR_PASSTHROUGH;
 // Passthrough around the flat screen. On by default; the in-game VR menu changes it for the
 // session only, and turning the flat screen off from the menu resets it.

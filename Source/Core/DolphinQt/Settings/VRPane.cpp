@@ -496,6 +496,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   auto* gaze_ram_copies_layout = new QHBoxLayout;
   gaze_ram_copies_layout->addWidget(new QLabel(tr("Screen Read-Backs:")));
   gaze_ram_copies_layout->addWidget(m_gaze_ram_copies, 1);
+  m_per_eye_screen_copies =
+      new ConfigBool(tr("Screen Copies Follow Each Eye"), Config::GFX_VR_PER_EYE_SCREEN_COPIES);
 
   hacks_group_layout->addWidget(m_use_vulkan_multiview);
   hacks_group_layout->addWidget(m_dont_clear_screen);
@@ -512,6 +514,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hacks_group_layout->addWidget(m_skip_background_fill);
   hacks_group_layout->addWidget(m_layered_palette_conversion_path);
   hacks_group_layout->addLayout(gaze_ram_copies_layout);
+  hacks_group_layout->addWidget(m_per_eye_screen_copies);
   hack_layout->addWidget(hacks_group);
   hack_layout->addWidget(framerate_group);
 
@@ -834,6 +837,13 @@ void VRPane::AddDescriptions()
       "head (Metroid Prime 2). <b>Reticle in the 3D Scene</b> follows the reticle where it is "
       "drawn in the game's world, head turn included (Metroid Prime 3). Set it per game."
       "<br><br><dolphin_emphasis>If unsure, select Off.</dolphin_emphasis>");
+  static constexpr char TR_PER_EYE_SCREEN_COPIES_DESCRIPTION[] = QT_TR_NOOP(
+      "Some effects copy a small block of the screen around a point of the 3D scene and draw it "
+      "back over it, distorted, such as the warp around Metroid Prime's charged shots. In VR each "
+      "eye sees that point elsewhere in its image, so the effect landed beside it."
+      "<br><br>This takes and draws each eye's block where that eye sees the point. Turn it on "
+      "per game."
+      "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static constexpr char TR_VR_GAMMA_DESCRIPTION[] = QT_TR_NOOP(
       "Adjusts gamma correction for VR eye output."
       "<br><br>1.0 = no correction (default). 2.2 = standard sRGB gamma. "
@@ -913,6 +923,7 @@ void VRPane::AddDescriptions()
   m_detect_skybox->SetDescription(tr(TR_DETECT_SKYBOX_DESCRIPTION));
   m_skip_background_fill->SetDescription(tr(TR_SKIP_BACKGROUND_FILL_DESCRIPTION));
   m_gaze_ram_copies->SetDescription(tr(TR_GAZE_RAM_COPIES_DESCRIPTION));
+  m_per_eye_screen_copies->SetDescription(tr(TR_PER_EYE_SCREEN_COPIES_DESCRIPTION));
   m_layered_palette_conversion_path->SetDescription(
       tr(TR_LAYERED_PALETTE_CONVERSION_PATH_DESCRIPTION));
   m_vr_gamma->SetDescription(tr(TR_VR_GAMMA_DESCRIPTION));
@@ -1060,6 +1071,8 @@ void VRPane::ResetGeneralSettings()
                            Config::GFX_VR_METROID_D3D_THERMAL_PALETTE_FIX.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_GAZE_RAM_COPIES,
                            Config::GFX_VR_GAZE_RAM_COPIES.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_PER_EYE_SCREEN_COPIES,
+                           Config::GFX_VR_PER_EYE_SCREEN_COPIES.GetDefaultValue());
 
   // Advanced tab
   Config::SetBaseOrCurrent(Config::GFX_VR_USE_VULKAN_MULTIVIEW,
