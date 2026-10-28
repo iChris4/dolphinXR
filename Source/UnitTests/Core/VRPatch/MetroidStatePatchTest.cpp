@@ -6,7 +6,7 @@
 // the Trilogy).
 // Also Echoes' view patches: no morph ball or cutscene bars, no scan box highlight, smooth scan
 // lines; the wide culling of the Trilogy and of the three games' own discs; the Trilogy's and the
-// GameCube games' controls (stick turning, dual-stick, the visor gesture).
+// GameCube games' controls (stick turning, dual-stick, the visor gesture, the beam quick swap).
 
 #include <gtest/gtest.h>
 
@@ -2052,6 +2052,16 @@ void ExpectDualStick(std::string_view game_id, const DualStickRevision& r)
   EXPECT_NEAR(GetF32(m, DUAL_STICK_SCRATCH + 4), 0.5f, 1e-5f);
   VR::PatchFlags::Set({});
 
+  // The beam quick swap pushes the C-stick: the patch leaves it to it, the D-pad still released.
+  VR::PatchFlags::Set({"c_stick_gesture"});
+  frame();
+  EXPECT_EQ(PadHeld(script, "C-Stick", "X"), -2.0);
+  EXPECT_EQ(PadHeld(script, "D-Pad", "Left"), 0.0);
+  EXPECT_NEAR(PadHeld(script, "Main Stick", "X"), -1.0, 1e-5);
+  VR::PatchFlags::Set({});
+  frame();
+  EXPECT_EQ(PadHeld(script, "C-Stick", "X"), 0.0);
+
   // The map: the game's own movement and the user's bindings.
   m.Set32(r.menu, 1);
   frame();
@@ -2348,6 +2358,221 @@ TEST(GameCubeVisorGesturePatch, RightHand)
   EXPECT_EQ(PadHeld(script, "C-Stick", "X"), 0.0);
   EXPECT_EQ(PadHeld(script, "D-Pad", "Up"), 0.0);
   EXPECT_EQ(PadHeld(script, "Main Stick", "X"), -2.0);
+}
+
+// ---- Prime 1 and 2 on the GameCube: the beam quick swap ----
+
+namespace
+{
+// One disc: its code and state manager (as for dual-stick) and the beams of up, right, down and
+// left.
+struct BeamSwapCase
+{
+  const char* game_id;
+  const DualStickRevision& r;
+  std::array<const char*, 4> beams;
+};
+const BeamSwapCase PRIME_100_BEAMS{"GM8E01", PRIME_100_DUAL, {"Power", "Wave", "Ice", "Plasma"}};
+const BeamSwapCase PRIME_102_BEAMS{"GM8E01", PRIME_102_DUAL, {"Power", "Wave", "Ice", "Plasma"}};
+const BeamSwapCase ECHOES_BEAMS{"G2ME01", ECHOES_DUAL, {"Power", "Dark", "Annihilator", "Light"}};
+
+constexpr std::array<float, 3> BEAM_HAND{0.2f, 1.3f, -0.35f};
+constexpr int BEAM_PUSH_FIELDS = 8;
+using StickPush = std::pair<double, double>;
+constexpr StickPush NO_PUSH{-2.0, -2.0};
+
+// The orientation turned right by `degrees` (about +Y, negative to the right).
+std::array<float, 4> TurnedRight(float degrees)
+{
+  const float half = -degrees * 0.5f * std::numbers::pi_v<float> / 180.0f;
+  return {0.0f, std::sin(half), 0.0f, std::cos(half)};
+}
+
+struct BeamSwapGame : DualStickGame
+{
+  explicit BeamSwapGame(const BeamSwapCase& c) : DualStickGame(c.game_id, c.r), script("beam-swap")
+  {
+    input.hands[1].aim = {true, BEAM_HAND};
+    EXPECT_TRUE(script.Load(ReadPatch(c.game_id, "beam-swap"), env)) << script.Error();
+  }
+
+  void Frame()
+  {
+    ++env.field;
+    ASSERT_TRUE(script.Call(Hook::OnFrame, env)) << script.Error();
+  }
+
+  // Presses right B where the hand is, moves it by (dx, dy) meters and turns it, then lets go.
+  void Gesture(float dx, float dy, float degrees = 0.0f)
+  {
+    HandInput& hand = input.hands[1];
+    hand.aim = {true, BEAM_HAND};
+    hand.secondary = true;
+    Frame();
+    hand.aim = {true, {BEAM_HAND[0] + dx, BEAM_HAND[1] + dy, BEAM_HAND[2]}, TurnedRight(degrees)};
+    Frame();
+    // Held: the C-stick is still the user's.
+    EXPECT_EQ(Push(), NO_PUSH);
+    hand.secondary = false;
+    Frame();
+  }
+
+  // The C-stick's push, or NO_PUSH when the patch does not hold it.
+  StickPush Push() { return {PadHeld(script, "C-Stick", "X"), PadHeld(script, "C-Stick", "Y")}; }
+
+  // The fields left of a push.
+  void FinishPush()
+  {
+    for (int i = 1; i < BEAM_PUSH_FIELDS; ++i)
+      Frame();
+  }
+
+  PatchScript script;
+};
+
+// Each direction's push after letting go, for a move or a turn of the hand; nothing for a small
+// move, back in the centre, while not playing or when the game is left meanwhile.
+void ExpectBeamSwap(const BeamSwapCase& c)
+{
+  BeamSwapGame game(c);
+  Memory& m = game.memory;
+  HandInput& hand = game.input.hands[1];
+
+  // Not held: the user's input.
+  game.Frame();
+  EXPECT_TRUE(game.script.GetPadHolds().empty());
+
+  // Moved 10 cm right: the right beam's push for 8 fields, with the flag for dual-stick.
+  game.Gesture(0.1f, 0.0f);
+  EXPECT_EQ(game.Push(), (StickPush{1.0, 0.0}));
+  EXPECT_TRUE(Raised(game.script, "c_stick_gesture"));
+  EXPECT_TRUE(Logged(game.script, std::string(c.beams[1]) + " Beam"));
+  game.FinishPush();
+  EXPECT_EQ(game.Push(), (StickPush{1.0, 0.0}));
+  game.Frame();
+  EXPECT_EQ(game.Push(), NO_PUSH);
+  EXPECT_FALSE(Raised(game.script, "c_stick_gesture"));
+
+  // Up, down and left; turns instead of moves; a move within the centre.
+  const std::array<std::tuple<float, float, float, StickPush>, 6> cases{{
+      {0.0f, 0.1f, 0.0f, {0.0, 1.0}},
+      {0.0f, -0.1f, 0.0f, {0.0, -1.0}},
+      {-0.1f, 0.0f, 0.0f, {-1.0, 0.0}},
+      {0.0f, 0.0f, 20.0f, {1.0, 0.0}},
+      {0.0f, 0.0f, -20.0f, {-1.0, 0.0}},
+      {0.03f, 0.02f, 0.0f, NO_PUSH},
+  }};
+  for (const auto& [dx, dy, degrees, push] : cases)
+  {
+    SCOPED_TRACE(testing::Message() << dx << ", " << dy << ", " << degrees << " deg");
+    game.Gesture(dx, dy, degrees);
+    EXPECT_EQ(game.Push(), push);
+    game.FinishPush();
+    game.Frame();
+  }
+
+  // Moved away and back to the centre before letting go: nothing.
+  hand.secondary = true;
+  game.Frame();
+  hand.aim.position = {BEAM_HAND[0], BEAM_HAND[1] + 0.1f, BEAM_HAND[2]};
+  game.Frame();
+  hand.aim.position = BEAM_HAND;
+  game.Frame();
+  hand.secondary = false;
+  game.Frame();
+  EXPECT_EQ(game.Push(), NO_PUSH);
+
+  // The map opens while the button is held: the gesture is dropped.
+  hand.secondary = true;
+  game.Frame();
+  hand.aim.position = {BEAM_HAND[0] + 0.1f, BEAM_HAND[1], BEAM_HAND[2]};
+  game.Frame();
+  m.Set32(c.r.menu, 1);
+  game.Frame();
+  hand.secondary = false;
+  m.Set32(c.r.menu, 0);
+  game.Frame();
+  EXPECT_EQ(game.Push(), NO_PUSH);
+  // Morph ball during a push: it stops, and no gesture there.
+  game.Gesture(0.1f, 0.0f);
+  EXPECT_EQ(game.Push(), (StickPush{1.0, 0.0}));
+  m.Set32(DUAL_STICK_PLAYER + c.r.ball, 1);
+  game.Frame();
+  EXPECT_EQ(game.Push(), NO_PUSH);
+  EXPECT_FALSE(Raised(game.script, "c_stick_gesture"));
+  game.Gesture(0.1f, 0.0f);
+  EXPECT_EQ(game.Push(), NO_PUSH);
+  m.Set32(DUAL_STICK_PLAYER + c.r.ball, 0);
+  for (const LogLine& line : game.script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+}
+}  // namespace
+
+TEST(GameCubeBeamSwapPatch, ManifestsAreValid)
+{
+  for (const auto& [game_id, revision] : {std::tuple{"GM8E01", -1}, std::tuple{"G2ME01", 0}})
+  {
+    SCOPED_TRACE(game_id);
+    const std::string source = ReadPatch(game_id, "beam-swap");
+    ASSERT_FALSE(source.empty());
+    const auto read = ReadManifest(source, "beam-swap");
+    ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+    const Manifest& manifest = std::get<Manifest>(read);
+    EXPECT_EQ(manifest.games, std::vector<std::string>{game_id});
+    if (revision < 0)
+      EXPECT_FALSE(manifest.revision);  // 1.00 and 1.02, recognized by their code
+    else
+      EXPECT_EQ(manifest.revision, revision);
+    EXPECT_EQ(manifest.scratch_bytes, 0u);
+    for (const char* name : {"hand", "button", "haptics"})
+      EXPECT_NE(manifest.FindSetting(name), nullptr) << name;
+  }
+}
+
+TEST(GameCubeBeamSwapPatch, Prime100)
+{
+  ExpectBeamSwap(PRIME_100_BEAMS);
+}
+
+TEST(GameCubeBeamSwapPatch, Prime102)
+{
+  ExpectBeamSwap(PRIME_102_BEAMS);
+}
+
+TEST(GameCubeBeamSwapPatch, Echoes)
+{
+  ExpectBeamSwap(ECHOES_BEAMS);
+}
+
+TEST(GameCubeBeamSwapPatch, RefusesOtherCode)
+{
+  BeamSwapGame game(PRIME_102_BEAMS);
+  game.memory.Set32(PRIME_102_DUAL.force_site + 4, 0x60000000);  // another build
+  game.env.field = 1000;
+  game.Gesture(0.1f, 0.0f);
+  EXPECT_TRUE(game.script.GetPadHolds().empty());
+  EXPECT_TRUE(Warned(game.script, "beams unchanged"));
+}
+
+// The left hand and its grip: the right hand's B does nothing then.
+TEST(GameCubeBeamSwapPatch, LeftHandGrip)
+{
+  BeamSwapGame game(ECHOES_BEAMS);
+  const Manifest& manifest = game.script.GetManifest();
+  ASSERT_TRUE(game.script.SetSettingValue(*manifest.FindSetting("hand"), 0));
+  ASSERT_TRUE(game.script.SetSettingValue(*manifest.FindSetting("button"), 1));
+  game.Gesture(0.0f, 0.1f);
+  EXPECT_TRUE(game.script.GetPadHolds().empty());
+  HandInput& left = game.input.hands[0];
+  left.aim = {true, BEAM_HAND};
+  left.squeeze_button = true;
+  game.Frame();
+  left.aim.position = {BEAM_HAND[0], BEAM_HAND[1] - 0.1f, BEAM_HAND[2]};
+  game.Frame();
+  left.squeeze_button = false;
+  game.Frame();
+  EXPECT_EQ(game.Push(), (StickPush{0.0, -1.0}));
+  EXPECT_TRUE(Logged(game.script, "Annihilator Beam"));
 }
 
 // ---- Prime on the GameCube: look to scan ----

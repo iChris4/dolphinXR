@@ -21,7 +21,8 @@
 -- next to the head (the flag thumbstick_left_gesture), it does not move the player; the right
 -- thumbstick still turns, also while the gesture uses it. The patch raises the flag
 -- main_stick_follows_gestures while it drives the control stick, so that the gesture leaves the
--- control stick to it.
+-- control stick to it. While the beam quick swap (beam-swap.lua) pushes the C-stick to change
+-- beams (the flag c_stick_gesture), the patch leaves the C-stick to it.
 --
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -30,7 +31,7 @@ local BUTTONS = {"Right B", "Right grip", "Right thumbstick click", "Left X", "L
 patch = {
   title = "Strafe with the left thumbstick, turn with the right",
   author = "DolphinXR, with PrimeHack's strafe movement",
-  version = "1.2",
+  version = "1.3",
   description = "The left thumbstick moves forward, back and sideways and the right thumbstick "
     .. "turns, as in a first-person shooter. Hold a button to choose beams and visors with the "
     .. "right thumbstick. For Metroid Prime NTSC-U 1.00 and 1.02 (GameCube).",
@@ -407,7 +408,11 @@ function on_frame()
   if beams then
     release_right()
   else
-    pad.set_stick(1, "C-Stick", 0, 0)
+    if vr.flag("c_stick_gesture") then
+      pad.release(1, "C-Stick")
+    else
+      pad.set_stick(1, "C-Stick", 0, 0)
+    end
     for _, name in ipairs(DPAD) do pad.set_value(1, name, 0) end
     holding_right = true
   end
