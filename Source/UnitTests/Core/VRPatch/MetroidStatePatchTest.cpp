@@ -7,6 +7,8 @@
 // Also Echoes' view patches: no morph ball or cutscene bars, no scan box highlight, smooth scan
 // lines; the wide culling of the Trilogy and of the three games' own discs; the Trilogy's and the
 // GameCube games' controls (stick turning, dual-stick, the visor gesture, the beam quick swap).
+// And the patch that stores EFB copies to RAM only while scanning (Echoes, Corruption, the
+// Trilogy).
 
 #include <gtest/gtest.h>
 
@@ -22,7 +24,9 @@
 #include <vector>
 
 #include "Common/CommonPaths.h"
+#include "Common/Config/Config.h"
 #include "Common/FileUtil.h"
+#include "Core/Config/GraphicsSettings.h"
 #include "Core/VRPatch/MemoryAccess.h"
 #include "Core/VRPatch/PatchScript.h"
 #include "VideoCommon/VR/PatchFlags.h"
@@ -2791,4 +2795,83 @@ TEST(GameCubeLookToScanPatch, RefusesOtherCode)
   EXPECT_EQ(game.memory.Get32(PRIME_102_LOOK.find + 0x20), 0x48000325u);
   EXPECT_EQ(game.Active(), 0u);
   EXPECT_TRUE(Warned(script, "not installed"));
+}
+
+// ---- EFB copies to RAM only while scanning: Echoes, Corruption, the Trilogy ----
+
+namespace
+{
+using Values = std::vector<std::string>;
+
+// The game's scan-ram-copies.lua over the state patch's flags (vr.flag): the values it asks for
+// EFBToTextureEnable, which the game's GameSettings set to False.
+void ExpectScanRamCopies(const std::string& game_id, const std::vector<std::string>& other_visors)
+{
+  Config::Init();
+  Config::SetCurrent(Config::GFX_HACK_SKIP_EFB_COPY_TO_RAM, false);
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+  env.memory = &memory;
+  env.input = &input;
+  env.game_id = game_id;
+  PatchScript script("scan-ram-copies");
+  ASSERT_TRUE(script.Load(ReadPatch(game_id, "scan-ram-copies"), env)) << script.Error();
+  EXPECT_EQ(script.GetManifest().games, std::vector<std::string>{game_id});
+  const auto requests = [&] {
+    Values values;
+    for (const SettingRequest& request : script.TakeSettingRequests())
+    {
+      EXPECT_EQ(request.key, "EFBToTextureEnable");
+      values.push_back(request.value);
+    }
+    return values;
+  };
+  const auto frame = [&](std::vector<std::string> flags) {
+    VR::PatchFlags::Set(std::move(flags));
+    EXPECT_TRUE(script.Call(Hook::OnFrame, env)) << script.Error();
+    return requests();
+  };
+
+  // No state (the title screens, the state patch off): the game's own value.
+  EXPECT_EQ(frame({}), Values{});
+  // Each other visor in play stores to texture only, the scan visor to RAM too.
+  for (const std::string& visor : other_visors)
+  {
+    EXPECT_EQ(frame({visor}), Values{"True"}) << visor;
+    EXPECT_EQ(frame({visor}), Values{}) << visor;  // asked once
+    EXPECT_EQ(frame({"mp_visor_scan"}), Values{"False"}) << visor;
+  }
+  // While switching, the scan visor wins; a pause screen is texture only.
+  EXPECT_EQ(frame({"mp_paused"}), Values{"True"});
+  EXPECT_EQ(frame({"mp_visor_combat", "mp_visor_scan"}), Values{"False"});
+  EXPECT_EQ(frame({"mp_paused"}), Values{"True"});
+  // The state gone: the game's own value again.
+  EXPECT_EQ(frame({}), Values{"False"});
+
+  // Stopped while texture only: the game's own value is put back.
+  EXPECT_EQ(frame({"mp_visor_combat"}), Values{"True"});
+  EXPECT_TRUE(script.Call(Hook::OnUnload, env)) << script.Error();
+  EXPECT_EQ(requests(), Values{"False"});
+  EXPECT_FALSE(memory.wrote);
+
+  VR::PatchFlags::Set({});
+  Config::ClearCurrentRunLayer();
+}
+}  // namespace
+
+TEST(ScanRamCopiesPatch, Echoes)
+{
+  ExpectScanRamCopies("G2ME01", {"mp_visor_combat", "mp_visor_echo", "mp_visor_dark"});
+}
+
+TEST(ScanRamCopiesPatch, Corruption)
+{
+  ExpectScanRamCopies("RM3E01", {"mp_visor_combat", "mp_visor_command", "mp_visor_xray"});
+}
+
+TEST(ScanRamCopiesPatch, Trilogy)
+{
+  ExpectScanRamCopies("R3ME01", {"mp_visor_combat", "mp_visor_xray", "mp_visor_thermal",
+                                 "mp_visor_echo", "mp_visor_dark", "mp_visor_command"});
 }
