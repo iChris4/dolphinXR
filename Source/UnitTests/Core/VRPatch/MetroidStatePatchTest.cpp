@@ -14,6 +14,7 @@
 #include <bit>
 #include <cmath>
 #include <map>
+#include <numbers>
 #include <set>
 #include <string>
 #include <string_view>
@@ -2347,4 +2348,215 @@ TEST(GameCubeVisorGesturePatch, RightHand)
   EXPECT_EQ(PadHeld(script, "C-Stick", "X"), 0.0);
   EXPECT_EQ(PadHeld(script, "D-Pad", "Up"), 0.0);
   EXPECT_EQ(PadHeld(script, "Main Stick", "X"), -2.0);
+}
+
+// ---- Prime on the GameCube: look to scan ----
+
+namespace
+{
+// One disc: its state manager, the player's fields and the hooks.
+struct LookRevision
+{
+  u32 state_manager, camera, ball, orbit, nearby;
+  u32 find, find_check, orient, camera_site, camera_skip;
+};
+constexpr LookRevision PRIME_100_LOOK{0x8045A1A8, 0x2F4,      0x2F8,      0x304,      0x344,
+                                      0x8017CC70, 0x38A40354, 0x8017EACC, 0x8000E71C, 0x8000E9C4};
+constexpr LookRevision PRIME_102_LOOK{0x8045B208, 0x304,      0x308,      0x314,      0x354,
+                                      0x8017D454, 0x38A40364, 0x8017F2B0, 0x8000E9D8, 0x8000EC80};
+constexpr u32 LOOK_SCRATCH = 0x80002850;
+constexpr u32 LOOK_PLAYER = 0x80A00000;
+constexpr u32 LOOK_STATE_REF = 0x80B00000;
+constexpr u32 LOOK_STATE = 0x80B10000;
+constexpr u32 LOOK_OBJECTS = 0x80C00000;
+constexpr u32 LOOK_CAMERAS = 0x80C10000;
+constexpr u32 LOOK_ITEMS = 0x80C20000;
+constexpr u32 LOOK_CAMERA = 0x80D00000;
+constexpr u32 LOOK_AHEAD = 0x80D10000;  // an object 20 units straight ahead
+constexpr u32 LOOK_RIGHT = 0x80D20000;  // and one 10 units to its right
+constexpr u16 CAMERA_UID = 0x0010;
+constexpr u16 AHEAD_UID = 0x1021;
+constexpr u16 RIGHT_UID = 0x2022;
+
+void SetObject(Memory& m, u16 uid, u32 obj, float x, float y, float z)
+{
+  m.Set32(LOOK_OBJECTS + (uid & 0x3FF) * 8 + 4, obj);
+  m.Set32(obj + 8, static_cast<u32>(uid) << 16);
+  // Identity rotation, then the translation.
+  const std::array<float, 12> transform{1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z};
+  for (size_t i = 0; i < transform.size(); ++i)
+    m.Set32(obj + 0x34 + static_cast<u32>(i) * 4, std::bit_cast<u32>(transform[i]));
+}
+
+struct LookGame
+{
+  explicit LookGame(const LookRevision& revision) : r(revision)
+  {
+    Memory& m = memory;
+    m.Set32(r.find, 0x9421FFF0);  // stwu r1, -0x10(r1)
+    m.Set32(r.find + 4, 0x7C0802A6);
+    m.Set32(r.find + 0xC, r.find_check);
+    m.Set32(r.find + 0x20, 0x48000325);  // bl FindBestOrbitableObject
+    m.Set32(r.orient, 0x9421FF80);       // stwu r1, -0x80(r1)
+    m.Set32(r.orient + 4, 0x7C0802A6);
+    m.Set32(r.orient + 0x14, 0x80030000 | r.ball);  // lwz r0, ball(r3)
+    m.Set32(r.orient + 0x18, 0x2C000000);           // cmpwi r0, 0
+    m.Set32(r.camera_site, 0x801E0000 | r.orbit);   // lwz r0, orbit(r30)
+    m.Set32(r.camera_site + 4, 0x2C000004);
+    m.Set32(r.camera_skip, 0x3861044C);
+    m.Set32(r.state_manager + 0x84C, LOOK_PLAYER);
+    m.Set32(r.state_manager + 0x8B8, LOOK_STATE_REF);
+    m.Set32(LOOK_STATE_REF, LOOK_STATE);
+    m.Set32(LOOK_STATE + 0x14, 2);  // the scan visor
+    m.Set32(r.state_manager + 0x810, LOOK_OBJECTS);
+    m.Set32(r.state_manager + 0x86C, LOOK_CAMERAS);
+    m.Set32(LOOK_CAMERAS, static_cast<u32>(CAMERA_UID) << 16);
+    SetObject(m, CAMERA_UID, LOOK_CAMERA, 0, 0, 0);
+    SetObject(m, AHEAD_UID, LOOK_AHEAD, 0, 20, 0);
+    SetObject(m, RIGHT_UID, LOOK_RIGHT, 10, 20, 0);
+    m.Set32(LOOK_PLAYER + r.nearby + 4, 2);
+    m.Set32(LOOK_PLAYER + r.nearby + 0xC, LOOK_ITEMS);
+    m.Set32(LOOK_ITEMS, static_cast<u32>(AHEAD_UID) << 16 | RIGHT_UID);
+    input.head_view = {true, {0, 0, 0}, {0, 0, 0, 1}};
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "GM8E01";
+    env.scratch_base = LOOK_SCRATCH;
+    env.scratch_size = 0x50;
+  }
+
+  // The head turned right by `degrees` (OpenXR: about +Y, negative to the right).
+  void Look(float degrees)
+  {
+    const float half = -degrees * 0.5f * std::numbers::pi_v<float> / 180.0f;
+    input.head_view.orientation = {0, std::sin(half), 0, std::cos(half)};
+  }
+
+  u16 Target() const { return static_cast<u16>(memory.Get32(LOOK_SCRATCH) >> 16); }
+  u32 Active() const { return memory.Get32(LOOK_SCRATCH + 4); }
+
+  const LookRevision& r;
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+};
+
+// Hooks the three sites, picks what the head looks at while the scan visor is on, leaves the
+// game's own targeting otherwise, and restores the code.
+void ExpectLookToScan(const LookRevision& r)
+{
+  LookGame game(r);
+  Memory& m = game.memory;
+  PatchScript script("look-to-scan");
+  ASSERT_TRUE(script.Load(ReadPatch("GM8E01", "look-to-scan"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  // Two fields: the patch picks every other field.
+  const auto frame = [&] {
+    for (int i = 0; i < 2; ++i)
+    {
+      ++game.env.field;
+      ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+    }
+  };
+  // Each site branches to its cave (the target call with a link), and each cave goes back: to
+  // FindBestOrbitableObject, after the morph ball load, after the orbit state load.
+  for (const u32 site : {r.find + 0x20, r.orient + 0x14, r.camera_site})
+  {
+    const u32 cave = BranchTarget(site, m.Get32(site));
+    EXPECT_GE(cave, LOOK_SCRATCH) << std::hex << site;
+    EXPECT_LT(cave, LOOK_SCRATCH + 0x50) << std::hex << site;
+  }
+  EXPECT_EQ(m.Get32(r.find + 0x20) & 1, 1u);
+  std::set<u32> back;
+  for (u32 a = LOOK_SCRATCH; a < LOOK_SCRATCH + 0x50; a += 4)
+    back.insert(BranchTarget(a, m.Get32(a)));
+  for (const u32 target : {r.find + 0x20 + 0x324, r.orient + 0x18, r.camera_site + 4})
+    EXPECT_TRUE(back.contains(target)) << std::hex << target;
+  // While the patch runs, the scan window's copy is read where the head looks.
+  bool head_copies = false;
+  for (const SettingRequest& request : script.TakeSettingRequests())
+    head_copies |= request.key == "GazeRamCopies" && request.value == "1";
+  EXPECT_TRUE(head_copies);
+
+  frame();
+  EXPECT_EQ(game.Active(), 5u);
+  EXPECT_EQ(game.Target(), AHEAD_UID);
+  // Looking at the other object (27 degrees right).
+  game.Look(26.57f);
+  frame();
+  EXPECT_EQ(game.Target(), RIGHT_UID);
+  // At nothing.
+  game.Look(90);
+  frame();
+  EXPECT_EQ(game.Target(), 0xFFFF);
+  EXPECT_EQ(game.Active(), 5u);
+
+  // Another visor, the map, morph ball: the game's own targeting.
+  game.Look(0);
+  m.Set32(LOOK_STATE + 0x14, 0);
+  frame();
+  EXPECT_EQ(game.Active(), 0u);
+  m.Set32(LOOK_STATE + 0x14, 2);
+  m.Set32(r.state_manager + 0xF90, 1);
+  frame();
+  EXPECT_EQ(game.Active(), 0u);
+  m.Set32(r.state_manager + 0xF90, 0);
+  m.Set32(LOOK_PLAYER + r.ball, 1);
+  frame();
+  EXPECT_EQ(game.Active(), 0u);
+  m.Set32(LOOK_PLAYER + r.ball, 0);
+  frame();
+  EXPECT_EQ(game.Target(), AHEAD_UID);
+  for (const LogLine& line : script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+
+  // Disabled: the game's code is back, GazeRamCopies too.
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_EQ(m.Get32(r.find + 0x20), 0x48000325u);
+  EXPECT_EQ(m.Get32(r.orient + 0x14), 0x80030000u | r.ball);
+  EXPECT_EQ(m.Get32(r.camera_site), 0x801E0000u | r.orbit);
+  EXPECT_EQ(game.Active(), 0u);
+  bool restored = false;
+  for (const SettingRequest& request : script.TakeSettingRequests())
+    restored |= request.key == "GazeRamCopies" && request.value != "1";
+  EXPECT_TRUE(restored);
+}
+}  // namespace
+
+TEST(GameCubeLookToScanPatch, ManifestIsValid)
+{
+  const std::string source = ReadPatch("GM8E01", "look-to-scan");
+  ASSERT_FALSE(source.empty());
+  const auto read = ReadManifest(source, "look-to-scan");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"GM8E01"});
+  EXPECT_FALSE(manifest.revision);  // 1.00 and 1.02, recognized by their code
+  EXPECT_EQ(manifest.scratch_bytes, 0x50u);
+  for (const char* name : {"cone", "range"})
+    EXPECT_NE(manifest.FindSetting(name), nullptr) << name;
+}
+
+TEST(GameCubeLookToScanPatch, Prime100)
+{
+  ExpectLookToScan(PRIME_100_LOOK);
+}
+
+TEST(GameCubeLookToScanPatch, Prime102)
+{
+  ExpectLookToScan(PRIME_102_LOOK);
+}
+
+TEST(GameCubeLookToScanPatch, RefusesOtherCode)
+{
+  LookGame game(PRIME_102_LOOK);
+  game.memory.Set32(PRIME_102_LOOK.camera_skip, 0x60000000);  // another build
+  game.env.field = 1000;
+  PatchScript script("look-to-scan");
+  ASSERT_TRUE(script.Load(ReadPatch("GM8E01", "look-to-scan"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+  EXPECT_EQ(game.memory.Get32(PRIME_102_LOOK.find + 0x20), 0x48000325u);
+  EXPECT_EQ(game.Active(), 0u);
+  EXPECT_TRUE(Warned(script, "not installed"));
 }
