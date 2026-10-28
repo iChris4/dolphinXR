@@ -16,15 +16,17 @@
 -- The thumbstick belongs to the gesture once it was centred next to the head (a hand that comes
 -- with its thumbstick pushed keeps moving the player): the patch then holds released what the
 -- stock profile puts on it (the control stick for the left hand, the C-stick and D-pad for the
--- right one) and raises the flag thumbstick_left_gesture or thumbstick_right_gesture, which the
--- dual-stick patch follows.
+-- right one) and raises the flag thumbstick_left_gesture or thumbstick_right_gesture. The
+-- dual-stick patch follows the left one and drives the control stick itself (it raises
+-- main_stick_follows_gestures): the gesture then leaves the control stick to it, so the right
+-- thumbstick still turns.
 --
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
 patch = {
   title = "Change visors next to your head",
   author = "DolphinXR, after PrimedGun (Nobbie)",
-  version = "1.0",
+  version = "1.1",
   description = "Bring a controller next to your head and push its thumbstick towards a visor, as "
     .. "on the D-pad: up combat, left scan, down thermal, right X-ray. For Metroid Prime NTSC-U "
     .. "1.00 and 1.02 (GameCube).",
@@ -145,6 +147,7 @@ local raw_pose, axis = vr.raw_pose, vr.axis
 
 local last_in_zone = nil   -- the field the hand was last next to the head
 local owned = nil          -- the hand whose thumbstick the gesture uses, or nil
+local holding_stick = false   -- the control stick held released (the left hand's)
 local armed = false        -- the thumbstick came back to the centre since the last pick
 local warned = false
 
@@ -152,14 +155,20 @@ local function hand_name()
   return settings.hand == 1 and "right" or "left"
 end
 
+-- The left hand's control stick held released, unless a patch drives it (dual-stick).
+local function hold_stick()
+  local hold = owned == "left" and not vr.flag("main_stick_follows_gestures")
+  if hold == holding_stick then return end
+  holding_stick = hold
+  if hold then pad.set_stick(1, "Main Stick", 0, 0) else pad.release(1, "Main Stick") end
+end
+
 -- The game's use of the hand's thumbstick held released, and the flag raised; or both undone.
 local function take(hand)
   if hand == owned then return end
   if owned then
     vr.set_flag("thumbstick_" .. owned .. "_gesture", false)
-    if owned == "left" then
-      pad.release(1, "Main Stick")
-    else
+    if owned == "right" then
       pad.release(1, "C-Stick")
       for _, name in ipairs(DPAD) do pad.release(1, name) end
     end
@@ -167,13 +176,12 @@ local function take(hand)
   owned = hand
   if hand then
     vr.set_flag("thumbstick_" .. hand .. "_gesture", true)
-    if hand == "left" then
-      pad.set_stick(1, "Main Stick", 0, 0)
-    else
+    if hand == "right" then
       pad.set_stick(1, "C-Stick", 0, 0)
       for _, name in ipairs(DPAD) do pad.set_value(1, name, 0) end
     end
   end
+  hold_stick()
 end
 
 local function near_head(field)
@@ -219,6 +227,7 @@ function on_frame()
     take(hand)
     armed = true
   end
+  hold_stick()
   if magnitude < REARM then
     armed = true
     return

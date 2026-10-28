@@ -17,9 +17,11 @@
 -- The right thumbstick also selects beams (C-stick) and visors (D-pad) in the stock profile and
 -- the patch holds those released while playing; holding a button (setting) gives the right
 -- thumbstick back to them, and it does not turn meanwhile. The maps, pause screens and morph ball
--- keep the user's bindings. While the visor gesture (visor-gesture.lua) uses a thumbstick next to
--- the head (the flags thumbstick_left_gesture and thumbstick_right_gesture), that thumbstick does
--- not move or turn the player.
+-- keep the user's bindings. While the visor gesture (visor-gesture.lua) uses the left thumbstick
+-- next to the head (the flag thumbstick_left_gesture), it does not move the player; the right
+-- thumbstick still turns, also while the gesture uses it. The patch raises the flag
+-- main_stick_follows_gestures while it drives the control stick, so that the gesture leaves the
+-- control stick to it.
 --
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -28,7 +30,7 @@ local BUTTONS = {"Right B", "Right grip", "Right thumbstick click", "Left X", "L
 patch = {
   title = "Strafe with the left thumbstick, turn with the right",
   author = "DolphinXR, with PrimeHack's strafe movement",
-  version = "1.1",
+  version = "1.2",
   description = "The left thumbstick moves forward, back and sideways and the right thumbstick "
     .. "turns, as in a first-person shooter. Hold a button to choose beams and visors with the "
     .. "right thumbstick. For Metroid Prime NTSC-U 1.00 and 1.02 (GameCube).",
@@ -355,6 +357,7 @@ end
 local function release()
   if holding then
     pad.release(1, "Main Stick")
+    vr.set_flag("main_stick_follows_gestures", false)
     holding = false
   end
   release_right()
@@ -397,9 +400,9 @@ function on_frame()
   local button = CHOICE_BUTTONS[settings.beam_button]
   local beams = button and vr.button(button[1], button[2])
   local left = not vr.flag("thumbstick_left_gesture")
-  local turn = (beams or vr.flag("thumbstick_right_gesture")) and 0 or
-               dead(axis("right", "thumbstick_x")) * settings.turn_speed
+  local turn = beams and 0 or dead(axis("right", "thumbstick_x")) * settings.turn_speed
   pad.set_stick(1, "Main Stick", turn, left and axis("left", "thumbstick_y") or 0)
+  vr.set_flag("main_stick_follows_gestures", true)
   holding = true
   if beams then
     release_right()

@@ -2034,7 +2034,11 @@ void ExpectDualStick(std::string_view game_id, const DualStickRevision& r)
   EXPECT_EQ(PadHeld(script, "D-Pad", "Left"), -2.0);
   game.input.hands[1].secondary = false;
 
-  // The visor gesture uses a thumbstick next to the head: it neither moves nor turns.
+  // The patch tells the visor gesture that it drives the control stick.
+  EXPECT_TRUE(script.GetFlags().contains("main_stick_follows_gestures"));
+
+  // The visor gesture uses the left thumbstick next to the head: it does not move, the right
+  // thumbstick still turns, also while the gesture uses that one.
   VR::PatchFlags::Set({"thumbstick_left_gesture"});
   frame();
   EXPECT_EQ(PadHeld(script, "Main Stick", "Y"), 0.0);
@@ -2042,7 +2046,7 @@ void ExpectDualStick(std::string_view game_id, const DualStickRevision& r)
   EXPECT_EQ(GetF32(m, DUAL_STICK_SCRATCH + 4), 0.0f);
   VR::PatchFlags::Set({"thumbstick_right_gesture"});
   frame();
-  EXPECT_EQ(PadHeld(script, "Main Stick", "X"), 0.0);
+  EXPECT_NEAR(PadHeld(script, "Main Stick", "X"), -1.0, 1e-5);
   EXPECT_NEAR(PadHeld(script, "Main Stick", "Y"), 0.8, 1e-5);
   EXPECT_NEAR(GetF32(m, DUAL_STICK_SCRATCH + 4), 0.5f, 1e-5f);
   VR::PatchFlags::Set({});
@@ -2052,6 +2056,7 @@ void ExpectDualStick(std::string_view game_id, const DualStickRevision& r)
   frame();
   EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), 0u);
   EXPECT_TRUE(script.GetPadHolds().empty());
+  EXPECT_TRUE(script.GetFlags().empty());
   m.Set32(r.menu, 0);
   // Morph ball as well.
   m.Set32(DUAL_STICK_PLAYER + r.ball, 1);
@@ -2220,6 +2225,13 @@ void ExpectVisorGesture(const VisorGestureCase& c)
   EXPECT_TRUE(Raised(script, "thumbstick_left_gesture"));
   EXPECT_EQ(PadHeld(script, "Main Stick", "X"), 0.0);
   EXPECT_EQ(PadHeld(script, "Main Stick", "Y"), 0.0);
+  // Unless the dual-stick patch drives it (then the right thumbstick still turns).
+  VR::PatchFlags::Set({"main_stick_follows_gestures"});
+  frame(0.0f, 0.0f);
+  EXPECT_EQ(PadHeld(script, "Main Stick", "X"), -2.0);
+  VR::PatchFlags::Set({});
+  frame(0.0f, 0.0f);
+  EXPECT_EQ(PadHeld(script, "Main Stick", "X"), 0.0);
 
   // Left: the scan visor, and the cannon's holster (state 3, 0.2 s).
   frame(-1.0f, 0.0f);
