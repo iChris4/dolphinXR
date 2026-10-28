@@ -2339,8 +2339,10 @@ void VertexManagerBase::Flush()
               !pane_raster_overridden && full_view_draw &&
               xfmem.projection.type == ProjectionType::Orthographic &&
               BPFunctions::SetVRFullViewBandViewport(g_framebuffer_manager.get());
+          geometry_shader_manager.vr_hud_draw_depth = &draw_depth;
           RenderDrawCall(pixel_shader_manager, geometry_shader_manager, m_current_primitive_type,
                          m_current_pipeline_object);
+          geometry_shader_manager.vr_hud_draw_depth = nullptr;
           // A cone-only batch must have been rendered from the head (immersive route); anything
           // else means the cone may have removed visible geometry.
           if (vr_cone_only)

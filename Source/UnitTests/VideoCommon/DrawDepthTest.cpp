@@ -208,6 +208,30 @@ TEST(DrawDepth, SourceComputesOnce)
   EXPECT_FALSE(DrawDepthSource().Get().valid);
 }
 
+TEST(DrawDepth, FewSamples)
+{
+  const PortableVertexDeclaration decl = MakeDecl(12, 0, 3);
+  const Matrices matrices = Identity();
+  std::vector<Vertex> vertices(1000, Vertex{0, 0, -20});
+  vertices[4].z = -2;     // Not on the sampling grid of 16 (step 63), on Get()'s (step 4).
+  vertices[999].z = -30;  // The last vertex is always read.
+  const std::vector<u8> buffer = MakeBuffer(decl, vertices);
+
+  const DrawDepthSource few_first(buffer.data(), 1000, 12, &decl, matrices.data(), 0);
+  EXPECT_TRUE(few_first.GetFew().sampled);
+  EXPECT_FLOAT_EQ(few_first.GetFew().min, 20.0f);
+  EXPECT_FLOAT_EQ(few_first.GetFew().max, 30.0f);
+  // Get() still reads its own samples.
+  EXPECT_FLOAT_EQ(few_first.Get().min, 2.0f);
+
+  // Once Get() was read, GetFew() gives its range.
+  const DrawDepthSource full_first(buffer.data(), 1000, 12, &decl, matrices.data(), 0);
+  EXPECT_FLOAT_EQ(full_first.Get().min, 2.0f);
+  EXPECT_FLOAT_EQ(full_first.GetFew().min, 2.0f);
+
+  EXPECT_FALSE(DrawDepthSource().GetFew().valid);
+}
+
 TEST(DrawDepth, DistanceRange)
 {
   const PortableVertexDeclaration decl = MakeDecl(12, 0, 3);

@@ -140,6 +140,22 @@ const DrawDepthRange& DrawDepthSource::Get() const
   return m_range;
 }
 
+const DrawDepthRange& DrawDepthSource::GetFew() const
+{
+  if (m_computed)
+    return m_range;
+  if (!m_few_computed)
+  {
+    if (m_decl != nullptr)
+    {
+      m_few_range = ComputeDrawDepthRange(m_vertices, m_count, m_stride, *m_decl, m_pos_matrices,
+                                          m_shared_matrix_index, DRAW_DISTANCE_MAX_SAMPLES);
+    }
+    m_few_computed = true;
+  }
+  return m_few_range;
+}
+
 const DrawDistanceRange& DrawDepthSource::GetDistance() const
 {
   if (!m_distance_computed)

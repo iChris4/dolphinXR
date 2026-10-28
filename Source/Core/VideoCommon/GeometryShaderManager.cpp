@@ -14,6 +14,7 @@
 #include "Common/CommonTypes.h"
 #include "Core/System.h"
 #include "VideoCommon/BPMemory.h"
+#include "VideoCommon/DrawDepth.h"
 #include "VideoCommon/FreeLookCamera.h"
 #include "VideoCommon/RenderState.h"
 #include "VideoCommon/VertexShaderManager.h"
@@ -556,6 +557,22 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           {
             const float depth_ratio = reference_view_z / shared_reference_z;
             depth_outlier = depth_ratio < 0.5f || depth_ratio > 2.0f;
+            // The origin is the model's, not always its geometry's: Metroid Prime 3's frame lines
+            // and counters and Metroid Prime's energy tanks have it 4 to 6 units in front of the
+            // camera, their vertices 16 to 22 units away with the rest of the HUD. Self-centred on
+            // the origin, those vertices went metres behind the HUD. A model whose vertices lie
+            // in the reference's depth band keeps the shared transform; Prime 3's hyper mode
+            // overlays, 0 to 7 units away, stay outliers.
+            if (depth_outlier && vr_hud_draw_depth)
+            {
+              const DrawDepthRange& depth = vr_hud_draw_depth->GetFew();
+              const float reference_depth = -shared_reference_z;
+              if (depth.valid && depth.min >= 0.4f * reference_depth &&
+                  depth.max <= 2.0f * reference_depth)
+              {
+                depth_outlier = false;
+              }
+            }
           }
           const float ref_for_transform =
               (self_center_layer || depth_outlier) ? reference_view_z : shared_reference_z;

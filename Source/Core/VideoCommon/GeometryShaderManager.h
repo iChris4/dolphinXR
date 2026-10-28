@@ -12,6 +12,7 @@
 #include "Common/CommonTypes.h"
 #include "VideoCommon/ConstantManager.h"
 
+class DrawDepthSource;
 class PointerWrap;
 enum class PrimitiveType : u32;
 
@@ -158,6 +159,10 @@ public:
   float vr_hud_anchor_z_min = -std::numeric_limits<float>::infinity();
   float vr_hud_anchor_z_max = std::numeric_limits<float>::infinity();
   int vr_hud_reference_context = 0;
+
+  // The vertices of the draw being rendered, set by VertexManagerBase::Flush around
+  // RenderDrawCall only: the 3D HUD reads their depth when a model's origin is a depth outlier.
+  const DrawDepthSource* vr_hud_draw_depth = nullptr;
 
 private:
   // OpenXR projection rows for one world scale, all built from the same pose.

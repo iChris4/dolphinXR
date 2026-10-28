@@ -37,7 +37,7 @@ constexpr u32 DRAW_DEPTH_MAX_SAMPLES = 256;
 // Detect Skybox reads the distance of every draw that sits at the camera, every frame, from
 // write-combined GPU memory (about 0.2 us per vertex on PC with D3D12, far less on the Quest): it
 // only needs the order of magnitude of the closest vertex (a sky is all far, a HUD at the camera
-// all near), so it reads fewer.
+// all near), so it reads fewer. So does the 3D HUD's depth band check (GetFew).
 constexpr u32 DRAW_DISTANCE_MAX_SAMPLES = 16;
 
 // `vertices` holds `count` vertices in the native format `decl` (positions are 2 or 3 floats;
@@ -68,6 +68,9 @@ public:
                   const float* pos_matrices, u32 shared_matrix_index);
 
   const DrawDepthRange& Get() const;
+  // The depth range from at most DRAW_DISTANCE_MAX_SAMPLES vertices (Get()'s when it was read
+  // already), computed on first use too.
+  const DrawDepthRange& GetFew() const;
   // The distance range from at most DRAW_DISTANCE_MAX_SAMPLES vertices, computed on first use too.
   const DrawDistanceRange& GetDistance() const;
 
@@ -86,6 +89,8 @@ private:
   u32 m_shared_matrix_index = 0;
   mutable bool m_computed = false;
   mutable DrawDepthRange m_range;
+  mutable bool m_few_computed = false;
+  mutable DrawDepthRange m_few_range;
   mutable bool m_distance_computed = false;
   mutable DrawDistanceRange m_distance;
 };
