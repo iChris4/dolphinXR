@@ -32,20 +32,33 @@
 -- them back. Its up and down (1 and 2: the map and the pause screen) are held released while it
 -- turns.
 --
+-- PrimedGun's jump, fire and missiles (settings, on by default). Jump: while playing in first
+-- person or screw attacking (which the games run as a morph ball state), pushing the right
+-- thumbstick up holds the Wii Remote's B, the jump, and the Wii Remote's 1 (the map, on the
+-- thumbstick's up in the stock profile) is held released: the Wii Remote reads the profile before
+-- the patch sees the thumbstick move. The map button (setting) presses 1 instead. Fire: while
+-- playing (also in the morph ball: bombs), the right trigger presses the Wii Remote's A, which is
+-- otherwise the user's (Echoes' scan descriptions close with it) unless a setting gives the right A
+-- to another button; B is held released but for the jump: the stock profiles put B on the trigger.
+-- Missiles: the D-pad's down, which the stock profiles leave unbound, follows a button (setting)
+-- while playing; a setting above that chose the same button then holds its Wii Remote button
+-- released. On the maps, the pause screens and the menus, the buttons are the user's.
+--
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
 local BUTTONS = {"Keep my bindings", "Right grip", "Right B", "Right thumbstick click", "Left X",
-                 "Left Y"}
+                 "Left Y", "Right A"}
 
 patch = {
-  title = "Turn with the right thumbstick",
+  title = "Modern controls",
   author = "DolphinXR",
-  version = "1.1",
+  version = "1.2",
   description = "Turns left and right with the right thumbstick instead of pointing at the edges "
     .. "of the screen, and keeps the view level (look up and down with your head): pointing at "
     .. "the top or bottom edge tilts the game's camera, which moves the pointer's screen instead "
-    .. "of your view. The pointer still aims, scans and drives the menus. For the three games of "
-    .. "Metroid Prime Trilogy NTSC-U.",
+    .. "of your view. The pointer still aims, scans and drives the menus. Options, as in "
+    .. "PrimedGun: jump with the right thumbstick up, fire with the right trigger, missiles on a "
+    .. "button such as the right grip. For the three games of Metroid Prime Trilogy NTSC-U.",
   games = {"R3ME01"},
   revision = 0,
   scratch = 0x80,
@@ -69,6 +82,23 @@ patch = {
      options = BUTTONS, default = 2,
      description = "Held to choose a beam in Metroid Prime and Echoes, and for hypermode in "
        .. "Corruption."},
+    {name = "jump", label = "Jump with the right thumbstick up", type = "bool", default = true,
+     description = "In first person and in the screw attack, pushing the right thumbstick up "
+       .. "jumps (Wii Remote B), as in PrimedGun. The morph ball, the maps and the menus keep "
+       .. "your binding of B."},
+    {name = "fire", label = "Fire with the right trigger", type = "bool", default = true,
+     description = "While playing, the right trigger also fires and drops bombs (Wii Remote A), as "
+       .. "in PrimedGun. B is then only the jump above (the stock profiles put B on the "
+       .. "trigger): use both. The maps and the menus keep your bindings."},
+    {name = "map_button", label = "Map (Wii Remote 1)", type = "choice", options = BUTTONS,
+     default = 5,
+     description = "Held to open the map while playing. With the jump above, the thumbstick's "
+       .. "up (1 in the stock profile) no longer opens it. Right A: with the fire option, A is "
+       .. "then only on the trigger."},
+    {name = "missile_button", label = "Missiles (Wii Remote D-pad down)", type = "choice",
+     options = BUTTONS, default = 1,
+     description = "Held to fire missiles while playing (the stock profiles leave the D-pad "
+       .. "unbound). It takes its button from the settings above that chose it."},
     {name = "test_stick", label = "Test thumbstick", default = 0, min = -1, max = 1, step = 0.1,
      description = "Not 0: turns as if the right thumbstick were held at this X, to check the "
        .. "patch without a headset."},
@@ -90,7 +120,9 @@ end
 -- metroid-state.lua), the control mapper's function with a word of its code and the register of
 -- the control number (r3 is the mapper), the player's mapper, the controls. state() returns the
 -- player (nil when there is none), whether it plays (no map, pause screen or dialog) and whether
--- it is in first person; camera() the camera's transform (3x4, row-major, world space).
+-- it is in first person; camera() the camera's transform (3x4, row-major, world space); screw
+-- the player's screw attack state (PrimeHack's screw_state: not 0 while screw attacking, a
+-- morph ball state for the game).
 local GAMES = {
   {
     name = "Metroid Prime",
@@ -111,7 +143,7 @@ local GAMES = {
     name = "Metroid Prime 2: Echoes",
     hook = 0x8018ACB0, original = 0xC00102A0, after = 0x387C03B0,
     mapper = 0x8006FE1C, check = {0x18, 0x48248589}, control = "r5",
-    player_mapper = 0x13BC, left = 3, right = 4, up = 9, down = 0xA,
+    player_mapper = 0x13BC, left = 3, right = 4, up = 9, down = 0xA, screw = 0x37C,
     state = function()
       local player = mem.ptr(0x804E72E8 + 0x14F4)
       if not player then return nil end
@@ -127,7 +159,7 @@ local GAMES = {
     name = "Metroid Prime 3: Corruption",
     hook = 0x80183C28, original = 0xC0010208, after = 0x7F83E378,
     mapper = 0x800618B0, check = {0x14, 0xC3E288C4}, control = "r4",
-    player_mapper = 0x35D8, left = 2, right = 3, up = 0x37, down = 0x38,
+    player_mapper = 0x35D8, left = 2, right = 3, up = 0x37, down = 0x38, screw = 0x35C,
     -- The look pitch (radians, + up): written 0 on the map, the pause screens and the dialogs.
     level_pitch = 0x784,
     state = function()
@@ -279,13 +311,17 @@ end
 -- The VR button of a setting's choice, or nil for "Keep my bindings".
 local CHOICE_BUTTONS = {
   [1] = {"right", "squeeze"}, [2] = {"right", "secondary"}, [3] = {"right", "thumbstick"},
-  [4] = {"left", "primary"}, [5] = {"left", "secondary"},
+  [4] = {"left", "primary"}, [5] = {"left", "secondary"}, [6] = {"right", "primary"},
 }
+local RIGHT_A = 6
+local MISSILE = "D-Pad/Down"
+local CHOICE_SETTINGS = {"visor_button", "plus_button", "map_button", "missile_button"}
 
-local held = {["-"] = false, ["+"] = false, ["1"] = false, ["2"] = false}
+local held = {["-"] = false, ["+"] = false, ["1"] = false, ["2"] = false, ["A"] = false,
+              ["B"] = false, [MISSILE] = false}
 
 -- While playing: the Wii Remote button follows the chosen VR button (and nothing else presses
--- it); otherwise the user's own bindings.
+-- it), unless the missile button took that VR button; otherwise the user's own bindings.
 local function drive_button(name, choice, playing)
   local button = CHOICE_BUTTONS[choice]
   if not button or not playing then
@@ -295,22 +331,64 @@ local function drive_button(name, choice, playing)
     end
     return
   end
-  wiimote.set_value(1, name, vr.button(button[1], button[2]) and 1 or 0)
+  local taken = name ~= MISSILE and choice == settings.missile_button
+  wiimote.set_value(1, name, not taken and vr.button(button[1], button[2]) and 1 or 0)
   held[name] = true
 end
 
--- While the thumbstick turns (pushed more sideways than up or down), its up and down (the Wii
--- Remote's 1 and 2 in the stock profile: the map and the pause screen) are held released, so a
--- diagonal push does not open them.
-local function guard_up_down(turning)
-  for _, name in ipairs({"1", "2"}) do
-    if turning then
-      wiimote.set_value(1, name, 0)
-      held[name] = true
-    elseif held[name] then
-      wiimote.release(1, name)
-      held[name] = false
-    end
+-- A Wii Remote button held released, or the user's again.
+local function guard(name, on)
+  if on then
+    wiimote.set_value(1, name, 0)
+    held[name] = true
+  elseif held[name] then
+    wiimote.release(1, name)
+    held[name] = false
+  end
+end
+
+-- The Wii Remote's 1 and 2 (the map and the pause screen: the thumbstick's up and down in the
+-- stock profile). While playing, 1 follows the map button (setting); otherwise it is held released
+-- while the thumbstick turns (pushed more sideways than up or down) or jumps, and 2 while it turns,
+-- so a push of the thumbstick does not open them.
+local function drive_map_pause(playing, turning, jump)
+  if playing and CHOICE_BUTTONS[settings.map_button] then
+    drive_button("1", settings.map_button, playing)
+  else
+    guard("1", turning or jump)
+  end
+  guard("2", turning)
+end
+
+-- PrimedGun's jump and fire: B held while the thumbstick is up (from 0.6 until it is back under
+-- 0.4); A pressed by the right trigger, otherwise the user's (held released when a setting gives
+-- the right A to another button), with B released but for the jump.
+local JUMP_PRESS, JUMP_RELEASE, TRIGGER_PRESS = 0.6, 0.4, 0.5
+local jumping = false
+
+local function right_a_taken()
+  for _, name in ipairs(CHOICE_SETTINGS) do
+    if settings[name] == RIGHT_A then return true end
+  end
+  return false
+end
+
+local function drive_fire_jump(jump, fire, y)
+  jumping = jump and (y >= JUMP_PRESS or (jumping and y >= JUMP_RELEASE))
+  local trigger = fire and (vr.axis("right", "trigger") or 0) >= TRIGGER_PRESS
+  if trigger or (fire and right_a_taken()) then
+    wiimote.set_value(1, "A", trigger and 1 or 0)
+    held["A"] = true
+  elseif held["A"] then
+    wiimote.release(1, "A")
+    held["A"] = false
+  end
+  if jumping or fire then
+    wiimote.set_value(1, "B", jumping and 1 or 0)
+    held["B"] = true
+  elseif held["B"] then
+    wiimote.release(1, "B")
+    held["B"] = false
   end
 end
 
@@ -388,11 +466,16 @@ function on_frame()
 
   drive_button("-", settings.visor_button, playing)
   drive_button("+", settings.plus_button, playing)
+  drive_button(MISSILE, settings.missile_button, playing)
   local raw_x, raw_y = 0, 0
   if not vr.menu_open() then
     raw_x, raw_y = vr.axis("right", "thumbstick_x") or 0, vr.axis("right", "thumbstick_y") or 0
   end
-  guard_up_down(playing and x ~= 0 and math.abs(raw_x) >= math.abs(raw_y))
+  local screw = g.screw and mem.u32(player + g.screw)
+  local jump = settings.jump and playing and (first_person or (screw or 0) ~= 0) and
+               not vr.menu_open()
+  drive_map_pause(playing, playing and x ~= 0 and math.abs(raw_x) >= math.abs(raw_y), jump)
+  drive_fire_jump(jump, settings.fire and playing and not vr.menu_open(), raw_y)
   level_view(g, player, playing, first_person)
 end
 

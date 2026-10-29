@@ -645,10 +645,12 @@ public:
                                   std::string* error) override
   {
     if (device == PadDevice::Wiimote && kind == PadControlKind::Button &&
-        (name == "-" || name == "+" || name == "1" || name == "2"))
+        (name == "-" || name == "+" || name == "1" || name == "2" || name == "A" || name == "B"))
     {
       return {{"Buttons", std::string(name)}};
     }
+    if (device == PadDevice::Wiimote && kind == PadControlKind::Button && name == "D-Pad/Down")
+      return {{"D-Pad", "Down"}};
     if (device == PadDevice::Attachment && kind == PadControlKind::Stick && name.empty())
       return {{"Stick", "X"}, {"Stick", "Y"}};
     *error = "unknown";
@@ -682,6 +684,21 @@ double Held(PatchScript& script, const std::string& button)
   const auto it = holds.find(PadHoldKey{PadDevice::Wiimote, 0, "Buttons", button});
   return it == holds.end() ? -1.0 : it->second;
 }
+
+// PrimedGun's jump, fire, map and missile buttons off (they are on by default).
+void WiiButtonsOff(PatchScript& script)
+{
+  for (const char* name : {"jump", "fire", "map_button", "missile_button"})
+    ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting(name), 0)) << name;
+}
+
+// The D-pad's down: the missiles.
+double HeldMissile(PatchScript& script)
+{
+  const PadHolds& holds = script.GetPadHolds();
+  const auto it = holds.find(PadHoldKey{PadDevice::Wiimote, 0, "D-Pad", "Down"});
+  return it == holds.end() ? -1.0 : it->second;
+}
 }  // namespace
 
 TEST(CorruptionStickTurnPatch, ManifestIsValid)
@@ -695,6 +712,16 @@ TEST(CorruptionStickTurnPatch, ManifestIsValid)
   EXPECT_EQ(manifest.revision, 0);
   EXPECT_EQ(manifest.scratch_bytes, 0x80u);
   EXPECT_TRUE(manifest.reserve.empty());
+  // PrimedGun's buttons by default: jump, fire, hypermode on right B, the map on left Y, the
+  // missiles on the right grip.
+  for (const auto& [name, value] :
+       {std::pair{"jump", 1.0}, std::pair{"fire", 1.0}, std::pair{"hyper_button", 2.0},
+        std::pair{"map_button", 5.0}, std::pair{"missile_button", 1.0}})
+  {
+    const SettingDef* setting = manifest.FindSetting(name);
+    ASSERT_NE(setting, nullptr) << name;
+    EXPECT_EQ(setting->default_value, value) << name;
+  }
 }
 
 TEST(CorruptionStickTurnPatch, TurnsWithTheThumbstickAndRestores)
@@ -703,6 +730,7 @@ TEST(CorruptionStickTurnPatch, TurnsWithTheThumbstickAndRestores)
   PatchScript script("stick-turn");
   ASSERT_TRUE(script.Load(ReadTurnPatch(), game.env)) << script.Error();
   ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  WiiButtonsOff(script);
   Memory& m = game.memory;
   const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
 
@@ -920,6 +948,185 @@ TEST(CorruptionVisorGesturePatch, PicksVisorsNextToTheHead)
   EXPECT_TRUE(script.GetPadHolds().empty());
   for (const LogLine& line : script.TakeLog())
     EXPECT_NE(line.level, 1) << line.text;
+}
+
+// PrimedGun's jump (on by default): the right thumbstick up holds B (jump) while playing in first
+// person, from 0.6 until it is under 0.4, with the stock profile's 1 (the map, the thumbstick's
+// up) held released meanwhile; in the morph ball and on the map, B is the user's.
+TEST(CorruptionStickTurnPatch, JumpsWithTheRightThumbstickUp)
+{
+  TurnGame game;
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  WiiButtonsOff(script);
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  HandInput& hand = game.input.hands[1];
+
+  hand.thumbstick_y = 1.0f;
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("jump"), 1));
+  frame();
+  EXPECT_EQ(Held(script, "B"), 1.0);
+  EXPECT_EQ(Held(script, "1"), 0.0);
+  hand.thumbstick_y = 0.5f;
+  frame();
+  EXPECT_EQ(Held(script, "B"), 1.0);
+  hand.thumbstick_y = 0.3f;
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+  hand.thumbstick_y = 0.5f;
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+  // 1 stays held released (the stock profile's thumbstick up would open the map); the map button
+  // (right A) presses it instead.
+  hand.thumbstick_y = 0.0f;
+  frame();
+  EXPECT_EQ(Held(script, "1"), 0.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("map_button"), 6));
+  hand.primary = true;
+  frame();
+  EXPECT_EQ(Held(script, "1"), 1.0);
+  hand.primary = false;
+  frame();
+  EXPECT_EQ(Held(script, "1"), 0.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("map_button"), 0));
+
+  hand.thumbstick_y = 1.0f;
+  game.SetBall(1);
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+  game.SetBall(0);
+  game.SetMenu(1);
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+  game.SetMenu(0);
+  frame();
+  EXPECT_EQ(Held(script, "B"), 1.0);
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_TRUE(script.GetPadHolds().empty());
+}
+
+// PrimedGun's fire (on by default): while playing, the right trigger presses A (bombs in the morph
+// ball), which is otherwise the user's (held released when the map button is right A), and B is
+// held released but for the jump (the stock profiles put B on the trigger); on the map both are the
+// user's.
+TEST(CorruptionStickTurnPatch, FiresWithTheRightTrigger)
+{
+  TurnGame game;
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  WiiButtonsOff(script);
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  HandInput& hand = game.input.hands[1];
+
+  hand.trigger = 1.0f;
+  frame();
+  EXPECT_EQ(Held(script, "A"), -1.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("fire"), 1));
+  frame();
+  EXPECT_EQ(Held(script, "A"), 1.0);
+  EXPECT_EQ(Held(script, "B"), 0.0);
+  hand.trigger = 0.2f;
+  frame();
+  EXPECT_EQ(Held(script, "A"), -1.0);
+  EXPECT_EQ(Held(script, "B"), 0.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("map_button"), 6));
+  frame();
+  EXPECT_EQ(Held(script, "A"), 0.0);
+  hand.trigger = 1.0f;
+  frame();
+  EXPECT_EQ(Held(script, "A"), 1.0);
+  hand.trigger = 0.0f;
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("map_button"), 0));
+  frame();
+  EXPECT_EQ(Held(script, "A"), -1.0);
+  // With the jump: B from the thumbstick's up only.
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("jump"), 1));
+  hand.thumbstick_y = 1.0f;
+  frame();
+  EXPECT_EQ(Held(script, "B"), 1.0);
+  hand.thumbstick_y = 0.0f;
+  // The morph ball: the trigger drops bombs.
+  game.SetBall(1);
+  hand.trigger = 1.0f;
+  frame();
+  EXPECT_EQ(Held(script, "A"), 1.0);
+  EXPECT_EQ(Held(script, "B"), 0.0);
+  game.SetBall(0);
+  game.SetMenu(1);
+  frame();
+  EXPECT_EQ(Held(script, "A"), -1.0);
+  EXPECT_EQ(Held(script, "B"), -1.0);
+}
+
+// The missile button (setting, the right grip by default) holds the D-pad's down while playing; a
+// setting that chose the same VR button (hypermode: right B by default) then holds its button
+// released.
+TEST(CorruptionStickTurnPatch, FiresMissilesWithAButton)
+{
+  TurnGame game;
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  WiiButtonsOff(script);
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  HandInput& hand = game.input.hands[1];
+
+  hand.squeeze_button = true;
+  frame();
+  EXPECT_EQ(HeldMissile(script), -1.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("missile_button"), 1));
+  frame();
+  EXPECT_EQ(HeldMissile(script), 1.0);
+  hand.squeeze_button = false;
+  frame();
+  EXPECT_EQ(HeldMissile(script), 0.0);
+
+  hand.secondary = true;
+  frame();
+  EXPECT_EQ(Held(script, "+"), 1.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("missile_button"), 2));
+  frame();
+  EXPECT_EQ(HeldMissile(script), 1.0);
+  EXPECT_EQ(Held(script, "+"), 0.0);
+  hand.secondary = false;
+
+  game.SetMenu(1);
+  frame();
+  EXPECT_EQ(HeldMissile(script), -1.0);
+  game.SetMenu(0);
+  frame();
+  EXPECT_EQ(HeldMissile(script), 0.0);
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_TRUE(script.GetPadHolds().empty());
+}
+
+// The screw attack is a morph ball state for the game (its screw state, the word after the ball
+// state, not 0): the right thumbstick's up jumps (B) there too, to chain it; in the morph ball, B
+// stays released (the fire option, on by default).
+TEST(CorruptionStickTurnPatch, JumpsInTheScrewAttack)
+{
+  TurnGame game;
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  game.input.hands[1].thumbstick_y = 1.0f;
+
+  game.SetBall(1);
+  frame();
+  EXPECT_EQ(Held(script, "B"), 0.0);
+  game.memory.Set32(CORRUPTION_PLAYER + 0x35C, 1);
+  game.SetCamera(0);
+  frame();
+  EXPECT_EQ(Held(script, "B"), 1.0);
+  EXPECT_EQ(Held(script, "1"), 0.0);
+  game.input.hands[1].thumbstick_y = 0.0f;
+  frame();
+  EXPECT_EQ(Held(script, "B"), 0.0);
 }
 
 // ---- Metroid Prime Trilogy ----
@@ -1668,6 +1875,16 @@ TEST(TrilogyStickTurnPatch, ManifestIsValid)
   {
     EXPECT_NE(manifest.FindSetting(name), nullptr) << name;
   }
+  // PrimedGun's buttons by default: jump, fire, + on right B, the map on left Y, the missiles on
+  // the right grip.
+  for (const auto& [name, value] :
+       {std::pair{"jump", 1.0}, std::pair{"fire", 1.0}, std::pair{"plus_button", 2.0},
+        std::pair{"map_button", 5.0}, std::pair{"missile_button", 1.0}})
+  {
+    const SettingDef* setting = manifest.FindSetting(name);
+    ASSERT_NE(setting, nullptr) << name;
+    EXPECT_EQ(setting->default_value, value) << name;
+  }
 }
 
 TEST(TrilogyStickTurnPatch, TurnsInEachGameAndRestores)
@@ -1786,6 +2003,169 @@ TEST(TrilogyStickTurnPatch, RefusesOtherCode)
   EXPECT_EQ(game.memory.Get32(TRILOGY_TURN_CAVE), 0u);
   EXPECT_EQ(game.memory.Get32(TRILOGY_TURN_SCRATCH), 0u);
   EXPECT_TRUE(Warned(script, "not installed"));
+}
+
+// PrimedGun's jump in the three games: B while the right thumbstick is up in first person; in the
+// morph ball and on the map, the user's.
+TEST(TrilogyStickTurnPatch, JumpsWithTheRightThumbstickUp)
+{
+  TrilogyTurnGame game;
+  game.RunPrime();
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTrilogyTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  WiiButtonsOff(script);
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  HandInput& hand = game.input.hands[1];
+
+  hand.thumbstick_y = 1.0f;
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("jump"), 1));
+  frame();
+  EXPECT_EQ(Held(script, "B"), 1.0);
+  EXPECT_EQ(Held(script, "1"), 0.0);
+  hand.thumbstick_y = 0.3f;
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+
+  hand.thumbstick_y = 1.0f;
+  game.Set(game.ball, 1);
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+  game.Set(game.ball, 0);
+  game.Set(game.menu, 1);
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+  game.Set(game.menu, 0);
+
+  // Echoes, then Corruption (first person: its camera state 1).
+  game.Leave();
+  game.RunEchoes();
+  frame();
+  EXPECT_EQ(Held(script, "B"), 1.0);
+  game.Leave();
+  game.RunCorruption();
+  frame();
+  EXPECT_EQ(Held(script, "B"), 1.0);
+  hand.thumbstick_y = 0.0f;
+  frame();
+  EXPECT_EQ(Held(script, "B"), -1.0);
+}
+
+// The screw attack in Echoes and Corruption, a morph ball state for the game (the screw state, the
+// word after the ball state, not 0): the right thumbstick's up jumps there too, to chain it. In
+// the morph ball, B stays released (the fire option, on by default); Prime has no screw attack.
+TEST(TrilogyStickTurnPatch, JumpsInTheScrewAttack)
+{
+  TrilogyTurnGame game;
+  game.RunPrime();
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTrilogyTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  game.input.hands[1].thumbstick_y = 1.0f;
+
+  game.Set(game.ball, 1);
+  frame();
+  EXPECT_EQ(Held(script, "B"), 0.0);
+  game.Set(game.ball, 0);
+  for (const auto run : {&TrilogyGame::RunEchoes, &TrilogyGame::RunCorruption})
+  {
+    game.Leave();
+    (game.*run)();
+    game.Set(game.ball, 2);
+    frame();
+    EXPECT_EQ(Held(script, "B"), 0.0);
+    game.Set(game.ball + 4, 1);
+    game.Set(game.camera, 4);
+    frame();
+    EXPECT_EQ(Held(script, "B"), 1.0);
+    game.Set(game.ball, 0);
+    game.Set(game.ball + 4, 0);
+  }
+}
+
+// PrimedGun's fire in the three games: the right trigger presses A while playing, which is
+// otherwise the user's (Echoes' scan descriptions close with it); B is the jump's.
+TEST(TrilogyStickTurnPatch, FiresWithTheRightTrigger)
+{
+  TrilogyTurnGame game;
+  game.RunPrime();
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTrilogyTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  HandInput& hand = game.input.hands[1];
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("fire"), 1));
+
+  hand.trigger = 1.0f;
+  frame();
+  EXPECT_EQ(Held(script, "A"), 1.0);
+  EXPECT_EQ(Held(script, "B"), 0.0);
+  game.Set(game.ball, 1);
+  frame();
+  EXPECT_EQ(Held(script, "A"), 1.0);
+  game.Set(game.ball, 0);
+  game.Set(game.menu, 1);
+  frame();
+  EXPECT_EQ(Held(script, "A"), -1.0);
+  EXPECT_EQ(Held(script, "B"), -1.0);
+  game.Set(game.menu, 0);
+  game.Leave();
+  game.RunEchoes();
+  hand.trigger = 0.0f;
+  frame();
+  EXPECT_EQ(Held(script, "A"), -1.0);
+  EXPECT_EQ(Held(script, "B"), 0.0);
+  game.Leave();
+  game.RunCorruption();
+  hand.trigger = 1.0f;
+  frame();
+  EXPECT_EQ(Held(script, "A"), 1.0);
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_TRUE(script.GetPadHolds().empty());
+}
+
+// The missile button in the three games, here the right grip, with the beam menu (+) on it too:
+// + is then held released.
+TEST(TrilogyStickTurnPatch, FiresMissilesWithAButton)
+{
+  TrilogyTurnGame game;
+  game.RunPrime();
+  PatchScript script("stick-turn");
+  ASSERT_TRUE(script.Load(ReadTrilogyTurnPatch(), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  WiiButtonsOff(script);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("plus_button"), 1));
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  HandInput& hand = game.input.hands[1];
+
+  hand.squeeze_button = true;
+  frame();
+  EXPECT_EQ(HeldMissile(script), -1.0);
+  EXPECT_EQ(Held(script, "+"), 1.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("missile_button"), 1));
+  frame();
+  EXPECT_EQ(HeldMissile(script), 1.0);
+  EXPECT_EQ(Held(script, "+"), 0.0);
+  game.Set(game.menu, 1);
+  frame();
+  EXPECT_EQ(HeldMissile(script), -1.0);
+  game.Set(game.menu, 0);
+  game.Leave();
+  game.RunEchoes();
+  frame();
+  EXPECT_EQ(HeldMissile(script), 1.0);
+  game.Leave();
+  game.RunCorruption();
+  frame();
+  EXPECT_EQ(HeldMissile(script), 1.0);
+  hand.squeeze_button = false;
+  frame();
+  EXPECT_EQ(HeldMissile(script), 0.0);
+  ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+  EXPECT_TRUE(script.GetPadHolds().empty());
 }
 
 // ---- The Trilogy: change visors next to the head ----
