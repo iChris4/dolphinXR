@@ -19,7 +19,7 @@ class QLabel;
 class QTableWidget;
 class QTimer;
 
-// The Patches tab of a game's VR properties: the game's VR patches (Core/VRPatch), on or off, with
+// The VR Patches pane of a game's properties: the game's VR patches (Core/VRPatch), on or off, with
 // their status and settings. Changes are saved in the user's GameSettingsVR/<GameID>.ini and reach
 // a running game at once.
 class VRPatchesWidget final : public QWidget

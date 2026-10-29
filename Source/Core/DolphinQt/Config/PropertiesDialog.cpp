@@ -26,6 +26,9 @@
 #include "DolphinQt/Config/ShaderOverrideWidget.h"
 #include "DolphinQt/Config/TextureElementOverrideWidget.h"
 #include "DolphinQt/Config/VerifyWidget.h"
+#ifdef ENABLE_VR
+#include "DolphinQt/Config/VRPatchesWidget.h"
+#endif
 #include "DolphinQt/QtUtils/WrapInScrollArea.h"
 
 #include "UICommon/GameFile.h"
@@ -72,6 +75,9 @@ PropertiesDialog::PropertiesDialog(QWidget* parent, const UICommon::GameFile& ga
   AddPane(game_config, tr("Game Config"));
   AddPane(vr_config, tr("VR Config"));
   AddPane(patches, tr("Patches"));
+#ifdef ENABLE_VR
+  AddPane(new VRPatchesWidget(game.GetGameID(), revision), tr("VR Patches"));
+#endif
   AddPane(ar, tr("AR Codes"));
   AddPane(gecko, tr("Gecko Codes"));
   AddWrappedPane(graphics_mod_list, tr("Graphics Mods"));
