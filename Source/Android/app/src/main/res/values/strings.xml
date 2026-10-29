@@ -832,6 +832,7 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_vr_patches_folder">Patches for it go in Android/data/&lt;app&gt;/files/VRPatches/%1$s/</string>
     <string name="quest_vr_patch_enabled">Enabled</string>
     <string name="quest_vr_patch_not_for_game">Not for this game or revision</string>
+    <string name="quest_vr_patch_save_failed">Could not save the change in GameSettingsVR/%1$s.ini: is the file read-only?</string>
     <string name="quest_enable_openxr">Enable OpenXR on Quest</string>
     <string name="quest_enable_openxr_description">Allows Quest launches to switch Dolphin into the OpenXR renderer.</string>
     <string name="quest_launch_in_vr">Launch games in VR</string>

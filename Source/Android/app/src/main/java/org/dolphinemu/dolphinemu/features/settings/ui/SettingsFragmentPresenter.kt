@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.TextUtils
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.collection.ArraySet
 import kotlinx.coroutines.CoroutineScope
@@ -407,6 +408,9 @@ class SettingsFragmentPresenter(
         }
         if (BuildConfig.IS_QUEST && !gameId.isNullOrEmpty()) {
             sl.add(SubmenuSetting(context, R.string.quest_vr_config, MenuTag.QUEST_VR_CONFIG))
+            sl.add(
+                SubmenuSetting(context, R.string.quest_vr_patches, MenuTag.QUEST_VR_CONFIG_PATCHES)
+            )
             sl.add(SubmenuSetting(context, R.string.quest_hide_objects, MenuTag.QUEST_HIDE_OBJECTS))
             sl.add(
                 SubmenuSetting(
@@ -2798,9 +2802,6 @@ class SettingsFragmentPresenter(
             )
         )
         sl.add(SubmenuSetting(context, R.string.quest_vr_debug, MenuTag.QUEST_VR_CONFIG_DEBUG))
-        sl.add(
-            SubmenuSetting(context, R.string.quest_vr_patches, MenuTag.QUEST_VR_CONFIG_PATCHES)
-        )
     }
 
     private fun addQuestGameVrPatchSettings(sl: ArrayList<SettingsItem>) {
@@ -2812,6 +2813,13 @@ class SettingsFragmentPresenter(
 
         sl.add(HeaderSetting(context, R.string.quest_vr_patches_description, 0))
         val patches = QuestVrPatches.load(currentGameId, revision)
+        val onSaveFailed = {
+            Toast.makeText(
+                context,
+                context.getString(R.string.quest_vr_patch_save_failed, currentGameId),
+                Toast.LENGTH_LONG
+            ).show()
+        }
         if (patches.isEmpty()) {
             sl.add(
                 HeaderSetting(
@@ -2835,7 +2843,12 @@ class SettingsFragmentPresenter(
                 .joinToString("\n")
             sl.add(
                 SwitchSetting(
-                    QuestVrPatchEnabledSetting(currentGameId, patch.id, patch.enabled),
+                    QuestVrPatchEnabledSetting(
+                        currentGameId,
+                        patch.id,
+                        patch.enabled,
+                        onSaveFailed
+                    ),
                     context.getString(R.string.quest_vr_patch_enabled),
                     about
                 )
@@ -2851,7 +2864,8 @@ class SettingsFragmentPresenter(
                                 patch.id,
                                 setting.name,
                                 setting.value != 0.0f,
-                                setting.defaultValue != 0.0f
+                                setting.defaultValue != 0.0f,
+                                onSaveFailed
                             ),
                             title,
                             setting.description
@@ -2879,7 +2893,8 @@ class SettingsFragmentPresenter(
                                     patch.id,
                                     setting.name,
                                     setting.value,
-                                    setting.defaultValue
+                                    setting.defaultValue,
+                                    onSaveFailed
                                 ),
                                 title,
                                 description,

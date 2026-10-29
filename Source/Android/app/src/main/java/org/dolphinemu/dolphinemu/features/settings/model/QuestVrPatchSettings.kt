@@ -8,7 +8,8 @@ import org.json.JSONArray
 /**
  * The VR game patches of a game (Core/VRPatch), read from the native side as JSON. Enabling a
  * patch and changing its settings go back through NativeLibrary, so the C++ code stays the only
- * writer of the game's GameSettingsVR file.
+ * writer of the game's GameSettingsVR file; onSaveFailed tells the user when it could not write it
+ * (a file pushed with adb belongs to the shell and is read-only for the app).
  */
 object QuestVrPatches {
     data class Setting(
@@ -89,7 +90,8 @@ object QuestVrPatches {
 class QuestVrPatchEnabledSetting(
     private val gameId: String,
     private val patchId: String,
-    private var value: Boolean
+    private var value: Boolean,
+    private val onSaveFailed: () -> Unit
 ) : AbstractBooleanSetting {
     override val isOverridden: Boolean = false
 
@@ -103,7 +105,7 @@ class QuestVrPatchEnabledSetting(
 
     override fun setBoolean(settings: Settings, newValue: Boolean) {
         value = newValue
-        NativeLibrary.SetVRPatchEnabled(gameId, patchId, newValue)
+        if (!NativeLibrary.SetVRPatchEnabled(gameId, patchId, newValue)) onSaveFailed()
     }
 }
 
@@ -113,7 +115,8 @@ class QuestVrPatchFloatSetting(
     private val patchId: String,
     private val name: String,
     private var value: Float,
-    private val defaultValue: Float
+    private val defaultValue: Float,
+    private val onSaveFailed: () -> Unit
 ) : AbstractFloatSetting {
     override val isOverridden: Boolean
         get() = value != defaultValue
@@ -130,7 +133,9 @@ class QuestVrPatchFloatSetting(
 
     override fun setFloat(settings: Settings, newValue: Float) {
         value = newValue
-        NativeLibrary.SetVRPatchSetting(gameId, patchId, name, newValue.toDouble())
+        if (!NativeLibrary.SetVRPatchSetting(gameId, patchId, name, newValue.toDouble())) {
+            onSaveFailed()
+        }
     }
 }
 
@@ -140,7 +145,8 @@ class QuestVrPatchBooleanSetting(
     private val patchId: String,
     private val name: String,
     private var value: Boolean,
-    private val defaultValue: Boolean
+    private val defaultValue: Boolean,
+    private val onSaveFailed: () -> Unit
 ) : AbstractBooleanSetting {
     override val isOverridden: Boolean
         get() = value != defaultValue
@@ -157,6 +163,8 @@ class QuestVrPatchBooleanSetting(
 
     override fun setBoolean(settings: Settings, newValue: Boolean) {
         value = newValue
-        NativeLibrary.SetVRPatchSetting(gameId, patchId, name, if (newValue) 1.0 else 0.0)
+        if (!NativeLibrary.SetVRPatchSetting(gameId, patchId, name, if (newValue) 1.0 else 0.0)) {
+            onSaveFailed()
+        }
     }
 }
