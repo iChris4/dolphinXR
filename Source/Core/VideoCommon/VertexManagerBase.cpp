@@ -2267,6 +2267,25 @@ void VertexManagerBase::Flush()
           }
         }
 
+        // Depth resets: an ortho quad that writes only depth, at the far plane and whatever was
+        // there, puts the depth back to far for the 3D drawn next (Red Steel draws its skybox
+        // first with depth writes, then resets the depth so the world draws over it, and again
+        // before the player's arm). On the virtual screen it would reset only the screen's
+        // rectangle, and the sky would hide the world around it: draw it in both eye layers.
+        if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !vr_flat_mode &&
+            g_ActiveConfig.vr_virtual_screen && !hunter_skip && !elements_skip && !texmgr_skip &&
+            std::isnan(geometry_shader_manager.vr_stereo_override) &&
+            xfmem.projection.type != ProjectionType::Perspective && !bpmem.blendmode.color_update &&
+            !bpmem.blendmode.alpha_update && bpmem.zmode.update_enable &&
+            bpmem.zmode.func == CompareMode::Always)
+        {
+          const float* p = xfmem.projection.rawProjection.data();
+          const float zfar = p[4] != 0.0f ? p[5] / p[4] : 0.0f;
+          const DrawDepthRange& depth = draw_depth.GetFew();
+          if (zfar > 0.0f && depth.valid && depth.min >= zfar * 0.999f)
+            geometry_shader_manager.vr_stereo_override = 0.0f;
+        }
+
         // Exact virtual-screen depth: swap in the depth-exporting PS variant for draws that land
         // on the VR virtual screen (Screen/HeadLocked overrides and natural ortho draws). The PS
         // then writes the game's flat-screen depth from the flat-interpolated VS capture,

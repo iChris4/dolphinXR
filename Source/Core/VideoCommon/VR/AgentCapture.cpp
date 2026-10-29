@@ -449,7 +449,14 @@ std::string DescribeRoute(const DrawRecord& draw)
   if (route == -1.0f)
     return "virtual screen";
   if (route == 0.0f)
-    return draw.handling == NO_HANDLING ? "fullscreen (auto EFB effect)" : "fullscreen";
+  {
+    if (draw.handling != NO_HANDLING)
+      return "fullscreen";
+    // VertexManagerBase's depth resets write only depth; its EFB effects write color.
+    return !draw.perspective && !draw.color_update && !draw.alpha_update && draw.zupdate ?
+               "fullscreen (auto depth reset)" :
+               "fullscreen (auto EFB effect)";
+  }
   if (route == GeometryShaderManager::VR_STEREO_FULLSCREEN_PER_EYE)
     return "fullscreen, moved per eye (PerEyeScreenCopies)";
   if (route <= -2.0f)
