@@ -2277,6 +2277,225 @@ TEST(TrilogyVisorGesturePatch, PicksEachGamesVisors)
     EXPECT_NE(line.level, 1) << line.text;
 }
 
+// ---- The Trilogy: the beam quick swap ----
+
+namespace
+{
+constexpr u32 TRILOGY_BEAM_REQUEST = TRILOGY_TURN_SCRATCH;
+constexpr u32 TRILOGY_BEAM_CAVE = TRILOGY_TURN_SCRATCH + 0x10;
+constexpr u32 TRILOGY_GUN = 0x80B20000;
+constexpr std::array<float, 3> TRILOGY_BEAM_HAND{0.2f, 1.3f, -0.35f};
+
+// One game's beam code: the instruction before its beam loop (the hook) and the next one, the
+// loop's end, the cave's word that puts the beam asked for in the loop's beam register, the
+// gun's beam, the powerups' stride and count offset, and the beams of up, left, right and down.
+struct BeamGameInfo
+{
+  u32 hook, original, after, done, beam_word, gun_offset, gun_beam, stride, count;
+  std::array<u32, 4> beams;
+
+  u32 Powerup(u32 beam) const { return TRILOGY_POWERUPS + beam * stride + count; }
+};
+// The beam words: addi r26, r3, -1 (Prime) and addi r31, r3, -1 (Echoes).
+constexpr BeamGameInfo TRILOGY_PRIME_BEAMS{0x8018E538, 0x3F608047,  0x3B000000, 0x8018E5AC,
+                                           0x3B43FFFF, 0x480,       0x310,      8,
+                                           0x30,       {2, 1, 3, 0}};
+constexpr BeamGameInfo TRILOGY_ECHOES_BEAMS{0x8018CC7C, 0x3F40804A,  0x3AC00000, 0x8018CCF4,
+                                            0x3BE3FFFF, 0xEA8,       0x768,      12,
+                                            0x5C,       {3, 1, 2, 0}};
+
+u32 Branch(u32 from, u32 to)
+{
+  return 0x48000000u | ((to - from) & 0x03FFFFFC);
+}
+
+struct TrilogyBeamGame : TrilogyTurnGame
+{
+  TrilogyBeamGame() : script("beam-swap")
+  {
+    env.scratch_size = 0x40;
+    input.hands[1].aim = {true, TRILOGY_BEAM_HAND};
+    EXPECT_TRUE(script.Load(ReadPatch("R3ME01", "beam-swap"), env)) << script.Error();
+  }
+
+  // One game's program: its beam code, the gun and the powerups of the beams in `owned`.
+  void Load(const BeamGameInfo& g, std::initializer_list<u32> owned)
+  {
+    for (const BeamGameInfo* other : {&TRILOGY_PRIME_BEAMS, &TRILOGY_ECHOES_BEAMS})
+    {
+      memory.Set32(other->hook, 0);
+      memory.Set32(other->hook + 4, 0);
+    }
+    memory.Set32(g.hook, g.original);
+    memory.Set32(g.hook + 4, g.after);
+    memory.Set32(TRILOGY_PLAYER + g.gun_offset, TRILOGY_GUN);
+    memory.Set32(TRILOGY_GUN + g.gun_beam, 0);
+    for (u32 beam = 0; beam < 4; ++beam)
+      memory.Set32(g.Powerup(beam), 0);
+    for (const u32 beam : owned)
+      memory.Set32(g.Powerup(beam), 1);
+  }
+
+  void Frame()
+  {
+    ++env.field;
+    ASSERT_TRUE(script.Call(Hook::OnFrame, env)) << script.Error();
+  }
+
+  // Presses right B where the hand is, moves it by (dx, dy) meters, then lets go.
+  void Gesture(float dx, float dy)
+  {
+    HandInput& hand = input.hands[1];
+    hand.aim = {true, TRILOGY_BEAM_HAND};
+    hand.secondary = true;
+    Frame();
+    hand.aim = {true, {TRILOGY_BEAM_HAND[0] + dx, TRILOGY_BEAM_HAND[1] + dy, TRILOGY_BEAM_HAND[2]}};
+    Frame();
+    hand.secondary = false;
+    Frame();
+  }
+
+  // The beam asked for, or -1.
+  int Request() { return static_cast<int>(memory.Get32(TRILOGY_BEAM_REQUEST)) - 1; }
+
+  PatchScript script;
+};
+
+// The hook branches to the cave, which takes the beam asked for into the loop's registers and
+// goes past the loop, or runs the game's instruction and its loop.
+void ExpectBeamCave(const Memory& m, const BeamGameInfo& g)
+{
+  EXPECT_EQ(m.Get32(g.hook), Branch(g.hook, TRILOGY_BEAM_CAVE));
+  bool beam_word = false, past_loop = false;
+  u32 end = 0;
+  for (u32 a = TRILOGY_BEAM_CAVE; a < TRILOGY_TURN_SCRATCH + 0x40; a += 4)
+  {
+    beam_word = beam_word || m.Get32(a) == g.beam_word;
+    past_loop = past_loop || m.Get32(a) == Branch(a, g.done);
+    if (m.Get32(a) == Branch(a, g.hook + 4))
+      end = a;
+  }
+  EXPECT_TRUE(beam_word);
+  EXPECT_TRUE(past_loop);
+  ASSERT_NE(end, 0u) << "the cave's branch back is not inside the scratch memory";
+  EXPECT_EQ(m.Get32(end - 4), g.original);
+}
+}  // namespace
+
+TEST(TrilogyBeamSwapPatch, ManifestIsValid)
+{
+  const std::string source = ReadPatch("R3ME01", "beam-swap");
+  ASSERT_FALSE(source.empty()) << "Sys/VRPatches/R3ME01/beam-swap.lua is missing";
+  const auto read = ReadManifest(source, "beam-swap");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read)) << std::get<std::string>(read);
+  const Manifest& manifest = std::get<Manifest>(read);
+  EXPECT_EQ(manifest.games, std::vector<std::string>{"R3ME01"});
+  EXPECT_EQ(manifest.revision, 0);
+  EXPECT_EQ(manifest.scratch_bytes, 0x40u);
+  EXPECT_TRUE(manifest.reserve.empty());
+  for (const char* name : {"hand", "button", "wii_button", "haptics"})
+    EXPECT_NE(manifest.FindSetting(name), nullptr) << name;
+  // The Wii Remote's +, which Modern controls puts on right B by default.
+  EXPECT_EQ(manifest.FindSetting("wii_button")->default_value, 4.0);
+}
+
+// The directions follow each game's beam menu (down: Power); only an owned beam other than the
+// current one is asked for, and a request the game does not take is dropped.
+TEST(TrilogyBeamSwapPatch, AsksEachGameForItsBeams)
+{
+  TrilogyBeamGame game;
+  Memory& m = game.memory;
+  for (const BeamGameInfo* g : {&TRILOGY_PRIME_BEAMS, &TRILOGY_ECHOES_BEAMS})
+  {
+    if (g == &TRILOGY_PRIME_BEAMS)
+      game.RunPrime();
+    else
+      game.RunEchoes();
+    game.Load(*g, {0, 1, 2, 3});
+    game.Frame();
+    ExpectBeamCave(m, *g);
+
+    const std::array<std::pair<float, float>, 4> moves{
+        {{0.0f, 0.1f}, {-0.1f, 0.0f}, {0.1f, 0.0f}, {0.0f, -0.1f}}};
+    for (size_t i = 0; i < moves.size(); ++i)
+    {
+      SCOPED_TRACE(testing::Message() << std::hex << g->hook << " direction " << i);
+      m.Set32(TRILOGY_GUN + g->gun_beam, 4);  // a beam none of the directions has
+      game.Gesture(moves[i].first, moves[i].second);
+      EXPECT_EQ(game.Request(), static_cast<int>(g->beams[i]));
+      m.Set32(TRILOGY_BEAM_REQUEST, 0);  // taken by the cave
+      game.Frame();
+    }
+
+    // The current beam, and a beam not owned: nothing asked.
+    m.Set32(TRILOGY_GUN + g->gun_beam, g->beams[2]);
+    game.Gesture(0.1f, 0.0f);
+    EXPECT_EQ(game.Request(), -1);
+    m.Set32(g->Powerup(g->beams[0]), 0);
+    game.Gesture(0.0f, 0.1f);
+    EXPECT_EQ(game.Request(), -1);
+
+    // Not taken (the game cannot change beams now): dropped after 10 fields.
+    game.Gesture(-0.1f, 0.0f);
+    EXPECT_EQ(game.Request(), static_cast<int>(g->beams[1]));
+    for (int i = 0; i < 10; ++i)
+      game.Frame();
+    EXPECT_EQ(game.Request(), -1);
+    game.Leave();
+  }
+  for (const LogLine& line : game.script.TakeLog())
+    EXPECT_NE(line.level, 1) << line.text;
+}
+
+// While playing, the Wii Remote's + (on right B with Modern controls) is held released, and a tap
+// of right B presses it; on the pause screens and in Corruption it is the user's. Disabled: the
+// game's code is back.
+TEST(TrilogyBeamSwapPatch, TapsTheButtonsOwnAction)
+{
+  TrilogyBeamGame game;
+  Memory& m = game.memory;
+  game.RunPrime();
+  game.Load(TRILOGY_PRIME_BEAMS, {0, 1, 2, 3});
+  game.Frame();
+  EXPECT_EQ(Held(game.script, "+"), 0.0);
+  // A gesture does not press it.
+  game.Gesture(0.1f, 0.0f);
+  EXPECT_EQ(Held(game.script, "+"), 0.0);
+  m.Set32(TRILOGY_BEAM_REQUEST, 0);
+  // A tap presses it for 6 fields.
+  game.Gesture(0.0f, 0.0f);
+  EXPECT_EQ(Held(game.script, "+"), 1.0);
+  for (int i = 0; i < 5; ++i)
+    game.Frame();
+  EXPECT_EQ(Held(game.script, "+"), 1.0);
+  game.Frame();
+  EXPECT_EQ(Held(game.script, "+"), 0.0);
+  // Paused (the tap's pause screen): the user's.
+  game.Set(game.menu, 1);
+  game.Frame();
+  EXPECT_EQ(Held(game.script, "+"), -1.0);
+  game.Gesture(0.1f, 0.0f);
+  EXPECT_EQ(game.Request(), -1);
+  game.Set(game.menu, 0);
+
+  // Corruption: no beams, nothing held.
+  game.Leave();
+  m.Set32(TRILOGY_PRIME_BEAMS.hook, 0);
+  m.Set32(TRILOGY_PRIME_BEAMS.hook + 4, 0);
+  game.RunCorruption();
+  game.Frame();
+  EXPECT_TRUE(game.script.GetPadHolds().empty());
+
+  // Back to Prime, then disabled.
+  game.RunPrime();
+  game.Load(TRILOGY_PRIME_BEAMS, {0});
+  game.Frame();
+  ExpectBeamCave(m, TRILOGY_PRIME_BEAMS);
+  ASSERT_TRUE(game.script.Call(Hook::OnUnload, game.env)) << game.script.Error();
+  EXPECT_EQ(m.Get32(TRILOGY_PRIME_BEAMS.hook), TRILOGY_PRIME_BEAMS.original);
+  EXPECT_TRUE(game.script.GetPadHolds().empty());
+}
+
 // ---- Prime and Echoes on the GameCube: strafe with the left thumbstick, turn with the right ----
 
 namespace
