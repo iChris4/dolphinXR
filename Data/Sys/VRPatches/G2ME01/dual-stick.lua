@@ -25,13 +25,15 @@
 -- PrimedGun's buttons (settings, off by default), in first person and in the morph ball while
 -- playing: the patch then holds the GameCube buttons they use, placed as in the stock Quest Touch
 -- profile (A on right A, B on right B, Y on left Y, L and R on the triggers) with their changes:
--- jump (B) also while the right thumbstick is up (first person), fire (A) on the right trigger
--- (the morph ball's bombs too, and R, the free aim and the spider ball, no longer on it), A and B
+-- jump (B) also while the right thumbstick is up (first person), fire (A) on the right trigger (the
+-- morph ball's bombs too, and R, the free aim and the spider ball, no longer on it), A and B
 -- swapped (jump on right A, fire on right B), missiles (Y, the morph ball's power bombs) on the
--- right grip, the spider ball (R) on the left trigger in the morph ball (L then released). While
--- the beam quick swap (beam-swap.lua) uses a button (its flag beam_swap_<hand>_<button>), that
--- button's action comes only from a tap of it (the flag beam_swap_tap): never when a gesture
--- starts. The maps and pause screens keep the user's bindings.
+-- right grip, the spider ball (R) on the left trigger in the morph ball (L then released). The jump
+-- also works in the screw attack, which the game runs as a morph ball state; the right thumbstick
+-- then neither turns nor selects beams and visors. While the beam quick swap (beam-swap.lua) uses a
+-- button (its flag beam_swap_<hand>_<button>), that button's action comes only from a tap of it
+-- (the flag beam_swap_tap): never when a gesture starts. The maps and pause screens keep the user's
+-- bindings.
 --
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -40,7 +42,7 @@ local BUTTONS = {"Right B", "Right grip", "Right thumbstick click", "Left X", "L
 patch = {
   title = "Modern controls",
   author = "DolphinXR, after PrimeHack's strafing",
-  version = "1.5",
+  version = "1.6",
   description = "The left thumbstick moves forward, back and sideways and the right thumbstick "
     .. "turns, as in a first-person shooter. Hold a button to choose beams and visors with the "
     .. "right thumbstick. Options, as in PrimedGun: jump with the right thumbstick up, fire with "
@@ -80,7 +82,9 @@ patch = {
 
 -- CPlayer::StrafeInput (this in r30): its orbit state test, the instruction after it and the
 -- function's epilogue. The state manager, the player and its camera and ball states as in
--- metroid-state.lua.
+-- metroid-state.lua; the screw attack state and the world (its word 4 is 4 once loaded, its word
+-- 8 its id) from PrimeHack's tables. The title screens play their intro, first person and morph
+-- ball included, in a world of their own, with a player: the patch leaves that world alone.
 local STRAFE_SITE = 0x801880FC
 local STRAFE_ORIGINAL = 0x801E03A4   -- lwz r0, 0x3A4(r30)
 local STRAFE_AFTER = 0x2C000000      -- cmpwi r0, 0
@@ -91,6 +95,9 @@ local MENU = STATE_MANAGER + 0x2470
 local PLAYER = STATE_MANAGER + 0x14FC
 local PLAYER_CAMERA = 0x388
 local PLAYER_BALL = 0x38C
+local PLAYER_SCREW = 0x390
+local WORLD = STATE_MANAGER + 0x1604
+local FRONT_END_WORLD = 0x69802220   -- the title screens' world
 
 -- ---- Scratch memory (mem.scratch) ----
 
@@ -191,12 +198,32 @@ local function release_right()
   end
 end
 
-local function release()
+-- The C-stick and D-pad held released, unless the beam button (beams) gives the right thumbstick
+-- back to them; the C-stick is the beam quick swap's while it pushes it.
+local function hold_right(beams)
+  if beams then
+    release_right()
+    return
+  end
+  if vr.flag("c_stick_gesture") then
+    pad.release(1, "C-Stick")
+  else
+    pad.set_stick(1, "C-Stick", 0, 0)
+  end
+  for _, name in ipairs(DPAD) do pad.set_value(1, name, 0) end
+  holding_right = true
+end
+
+local function release_main()
   if holding then
     pad.release(1, "Main Stick")
     vr.set_flag("main_stick_follows_gestures", false)
     holding = false
   end
+end
+
+local function release()
+  release_main()
   release_right()
 end
 
@@ -231,8 +258,9 @@ local function release_buttons()
   jumping = false
 end
 
--- The options' buttons in first person and in the morph ball (state "first_person" or "morph";
--- nil: the user's bindings). beams: the beam button gives the right thumbstick back.
+-- The options' buttons in first person, in the screw attack and in the morph ball (state
+-- "first_person", "screw" or "morph"; nil: the user's bindings). beams: the beam button gives the
+-- right thumbstick back.
 local function drive_buttons(state, beams)
   if not state then
     release_buttons()
@@ -267,12 +295,19 @@ local function drive_buttons(state, beams)
   end
 end
 
--- The player while playing (no map or pause screen) and its state: "first_person", "morph" (the
--- morph ball) or nil (another camera); nil without a player.
+-- The player while playing (a loaded world of the game, no map or pause screen) and its state:
+-- "first_person", "screw" (the screw attack), "morph" (the morph ball) or nil (another camera);
+-- nil without a player.
 local function player_state()
   local player = mem.ptr(PLAYER)
   if not player or mem.u32(MENU) ~= 0 then return nil end
-  if mem.u32(player + PLAYER_BALL) ~= 0 then return player, "morph" end
+  local world = mem.ptr(WORLD)
+  if not world or mem.u32(world + 4) ~= 4 or mem.u32(world + 8) == FRONT_END_WORLD then
+    return nil
+  end
+  if mem.u32(player + PLAYER_BALL) ~= 0 then
+    return player, mem.u32(player + PLAYER_SCREW) ~= 0 and "screw" or "morph"
+  end
   if mem.u32(player + PLAYER_CAMERA) ~= 0 then return player, nil end
   return player, "first_person"
 end
@@ -302,6 +337,13 @@ function on_frame()
   local button = CHOICE_BUTTONS[settings.beam_button]
   local beams = button and vr.button(button[1], button[2])
   drive_buttons(state, beams)
+  if state == "screw" then
+    -- The control stick steers the screw attack: the user's; the right thumbstick jumps.
+    mem.write_u32(ACTIVE, 0)
+    release_main()
+    hold_right(beams)
+    return
+  end
   if state ~= "first_person" then
     stop()
     return
@@ -311,17 +353,7 @@ function on_frame()
   pad.set_stick(1, "Main Stick", turn, left and axis("left", "thumbstick_y") or 0)
   vr.set_flag("main_stick_follows_gestures", true)
   holding = true
-  if beams then
-    release_right()
-  else
-    if vr.flag("c_stick_gesture") then
-      pad.release(1, "C-Stick")
-    else
-      pad.set_stick(1, "C-Stick", 0, 0)
-    end
-    for _, name in ipairs(DPAD) do pad.set_value(1, name, 0) end
-    holding_right = true
-  end
+  hold_right(beams)
   mem.write_f32(STRAFE, left and dead(axis("left", "thumbstick_x")) or 0)
   -- Last: arms the cave for this player.
   mem.write_u32(ACTIVE, player)

@@ -2529,6 +2529,9 @@ public:
 
 constexpr u32 DUAL_STICK_SCRATCH = 0x80002850;
 constexpr u32 DUAL_STICK_PLAYER = 0x80A00000;
+constexpr u32 DUAL_STICK_WORLD = 0x80E00000;
+constexpr u32 ECHOES_TEMPLE_GROUNDS = 0x3BFA3EFF;
+constexpr u32 ECHOES_FRONT_END = 0x69802220;  // the title screens' world
 
 // The sites of one disc's code and its state manager.
 struct DualStickRevision
@@ -2565,6 +2568,13 @@ struct DualStickGame
       memory.Set32(r.damped + 8, 0x90010054);
     }
     memory.Set32(r.state_manager + r.player_offset, DUAL_STICK_PLAYER);
+    // Echoes: a loaded world of the game (its load phase 4, its id).
+    if (game_id == "G2ME01")
+    {
+      memory.Set32(r.state_manager + 0x1604, DUAL_STICK_WORLD);
+      memory.Set32(DUAL_STICK_WORLD + 4, 4);
+      memory.Set32(DUAL_STICK_WORLD + 8, ECHOES_TEMPLE_GROUNDS);
+    }
     input.hands[0].connected = true;
     input.hands[1].connected = true;
     env.memory = &memory;
@@ -2765,6 +2775,72 @@ TEST(GameCubeDualStickPatch, Prime102)
 TEST(GameCubeDualStickPatch, Echoes)
 {
   ExpectDualStick("G2ME01", ECHOES_DUAL);
+}
+
+// Echoes' title screens play their intro, first person and morph ball included, in a world of
+// their own with a player: the patch leaves it alone (A, which the fire option would take, is the
+// user's), as it does while a world loads.
+TEST(GameCubeDualStickPatch, EchoesLeavesTheTitleScreensAlone)
+{
+  DualStickGame game("G2ME01", ECHOES_DUAL);
+  Memory& m = game.memory;
+  PatchScript script("dual-stick");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "dual-stick"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("fire"), 1));
+  game.Sticks(0.5f, 0.5f, 0.5f, 0.0f);
+
+  frame();
+  EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), DUAL_STICK_PLAYER);
+  EXPECT_EQ(PadHeld(script, "Buttons", "A"), 0.0);
+  m.Set32(DUAL_STICK_WORLD + 8, ECHOES_FRONT_END);
+  frame();
+  EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), 0u);
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  // The intro's morph ball.
+  m.Set32(DUAL_STICK_PLAYER + ECHOES_DUAL.ball, 1);
+  frame();
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  m.Set32(DUAL_STICK_PLAYER + ECHOES_DUAL.ball, 0);
+  // A world of the game, loading.
+  m.Set32(DUAL_STICK_WORLD + 8, ECHOES_TEMPLE_GROUNDS);
+  m.Set32(DUAL_STICK_WORLD + 4, 3);
+  frame();
+  EXPECT_TRUE(script.GetPadHolds().empty());
+  m.Set32(DUAL_STICK_WORLD + 4, 4);
+  frame();
+  EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), DUAL_STICK_PLAYER);
+}
+
+// Echoes' screw attack, a morph ball state for the game (ball state 2, screw state 1, measured):
+// the right thumbstick's up jumps (B) to chain it; the control stick, which steers it, is the
+// user's, and the right thumbstick does not select beams and visors (C-stick and D-pad held
+// released). In the morph ball, no jump.
+TEST(GameCubeDualStickPatch, EchoesJumpsInTheScrewAttack)
+{
+  DualStickGame game("G2ME01", ECHOES_DUAL);
+  Memory& m = game.memory;
+  PatchScript script("dual-stick");
+  ASSERT_TRUE(script.Load(ReadPatch("G2ME01", "dual-stick"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("jump"), 1));
+  game.Sticks(0.0f, 0.0f, 0.0f, 1.0f);
+
+  m.Set32(DUAL_STICK_PLAYER + ECHOES_DUAL.camera, 4);
+  m.Set32(DUAL_STICK_PLAYER + ECHOES_DUAL.ball, 2);
+  m.Set32(DUAL_STICK_PLAYER + 0x390, 1);
+  frame();
+  EXPECT_EQ(PadHeld(script, "Buttons", "B"), 1.0);
+  EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), 0u);
+  EXPECT_EQ(PadHeld(script, "Main Stick", "X"), -2.0);
+  EXPECT_EQ(PadHeld(script, "C-Stick", "Y"), 0.0);
+  EXPECT_EQ(PadHeld(script, "D-Pad", "Up"), 0.0);
+  m.Set32(DUAL_STICK_PLAYER + 0x390, 0);
+  frame();
+  EXPECT_EQ(PadHeld(script, "Buttons", "B"), 0.0);
+  EXPECT_EQ(PadHeld(script, "C-Stick", "Y"), -2.0);
 }
 
 // PrimedGun's jump (on by default in Prime): the right thumbstick up holds B (jump) in first
