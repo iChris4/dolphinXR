@@ -1915,6 +1915,14 @@ public:
     }
     if (device == PadDevice::GCPad && kind == PadControlKind::Button && name.starts_with("D-Pad/"))
       return {{"D-Pad", std::string(name.substr(6))}};
+    if (device == PadDevice::GCPad && kind == PadControlKind::Button &&
+        (name == "A" || name == "B" || name == "Y"))
+    {
+      return {{"Buttons", std::string(name)}};
+    }
+    if (device == PadDevice::GCPad && kind == PadControlKind::Button &&
+        (name == "L" || name == "R"))
+      return {{"Triggers", std::string(name)}, {"Triggers", std::string(name) + "-Analog"}};
     *error = "unknown";
     return {};
   }
@@ -2038,7 +2046,9 @@ void ExpectDualStick(std::string_view game_id, const DualStickRevision& r)
   EXPECT_EQ(PadHeld(script, "C-Stick", "X"), 0.0);
   EXPECT_EQ(PadHeld(script, "D-Pad", "Left"), 0.0);
 
-  // Right B held: the right thumbstick is the profile's again, and does not turn.
+  // The beam button (right B; none by default in Echoes) held: the right thumbstick is the
+  // profile's again, and does not turn.
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("beam_button"), 0));
   game.input.hands[1].secondary = true;
   frame();
   EXPECT_EQ(PadHeld(script, "Main Stick", "X"), 0.0);
@@ -2101,12 +2111,23 @@ void ExpectDualStick(std::string_view game_id, const DualStickRevision& r)
   }
   EXPECT_EQ(m.Get32(DUAL_STICK_SCRATCH), 0u);
 }
+
+// The buttons' options off (Metroid Prime's are on by default) and no beam button.
+void ButtonsOff(PatchScript& script)
+{
+  for (const char* name : {"jump", "fire", "swap_ab", "missiles", "spider"})
+    ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting(name), 0)) << name;
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("beam_button"), 5));
+}
 }  // namespace
 
 TEST(GameCubeDualStickPatch, ManifestsAreValid)
 {
-  for (const auto& [game_id, revision, scratch] :
-       {std::tuple{"GM8E01", -1, 0x220u}, std::tuple{"G2ME01", 0, 0x40u}})
+  // Metroid Prime's buttons are PrimedGun's by default (jump on right A and the right thumbstick's
+  // up, fire on right B and the trigger, missiles, spider ball, beams on right B); Echoes keeps the
+  // stock profile's.
+  for (const auto& [game_id, revision, scratch, modern] :
+       {std::tuple{"GM8E01", -1, 0x220u, true}, std::tuple{"G2ME01", 0, 0x40u, false}})
   {
     SCOPED_TRACE(game_id);
     const std::string source = ReadPatch(game_id, "dual-stick");
@@ -2122,6 +2143,13 @@ TEST(GameCubeDualStickPatch, ManifestsAreValid)
     EXPECT_EQ(manifest.scratch_bytes, scratch);
     for (const char* name : {"turn_speed", "deadzone", "beam_button"})
       EXPECT_NE(manifest.FindSetting(name), nullptr) << name;
+    for (const char* name : {"jump", "fire", "swap_ab", "missiles", "spider"})
+    {
+      const SettingDef* setting = manifest.FindSetting(name);
+      ASSERT_NE(setting, nullptr) << name;
+      EXPECT_EQ(setting->default_value, modern ? 1.0 : 0.0) << name;
+    }
+    EXPECT_EQ(manifest.FindSetting("beam_button")->default_value, modern ? 0.0 : 5.0);
   }
 }
 
@@ -2138,6 +2166,60 @@ TEST(GameCubeDualStickPatch, Prime102)
 TEST(GameCubeDualStickPatch, Echoes)
 {
   ExpectDualStick("G2ME01", ECHOES_DUAL);
+}
+
+// PrimedGun's jump (on by default in Prime): the right thumbstick up holds B (jump) in first
+// person, from 0.6 until it is under 0.4; B then follows right B as in the stock profile otherwise.
+// Not while the beam button gives the right thumbstick to beams and visors, nor in the morph ball.
+TEST(GameCubeDualStickPatch, JumpsWithTheRightThumbstickUp)
+{
+  for (const auto& [game_id, r] :
+       {std::pair<const char*, const DualStickRevision*>{"GM8E01", &PRIME_102_DUAL},
+        std::pair<const char*, const DualStickRevision*>{"G2ME01", &ECHOES_DUAL}})
+  {
+    SCOPED_TRACE(game_id);
+    DualStickGame game(game_id, *r);
+    PatchScript script("dual-stick");
+    ASSERT_TRUE(script.Load(ReadPatch(game_id, "dual-stick"), game.env)) << script.Error();
+    ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+    const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+    ButtonsOff(script);
+    HandInput& hand = game.input.hands[1];
+
+    game.Sticks(0.0f, 0.0f, 0.0f, 1.0f);
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), -2.0);
+    ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("jump"), 1));
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), 1.0);
+    game.Sticks(0.0f, 0.0f, 0.0f, 0.5f);
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), 1.0);
+    game.Sticks(0.0f, 0.0f, 0.0f, 0.3f);
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), 0.0);
+    hand.secondary = true;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), 1.0);
+    hand.secondary = false;
+
+    // The beam button (right grip here) gives the right thumbstick back: no jump.
+    ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("beam_button"), 1));
+    game.Sticks(0.0f, 0.0f, 0.0f, 1.0f);
+    hand.squeeze_button = true;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), 0.0);
+    hand.squeeze_button = false;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), 1.0);
+    game.memory.Set32(DUAL_STICK_PLAYER + r->ball, 1);
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), 0.0);
+    // The map: the user's bindings.
+    game.memory.Set32(r->menu, 1);
+    frame();
+    EXPECT_TRUE(script.GetPadHolds().empty());
+  }
 }
 
 TEST(GameCubeDualStickPatch, RefusesOtherCode)
@@ -2371,6 +2453,135 @@ TEST(GameCubeVisorGesturePatch, RightHand)
   EXPECT_EQ(PadHeld(script, "Main Stick", "X"), -2.0);
 }
 
+// PrimedGun's fire (on by default in Prime): A follows the right trigger (and right A, as in the
+// stock profile), also in the morph ball (bombs); R (the free aim, the spider ball) is no longer on
+// the trigger. On the map, the user's bindings.
+TEST(GameCubeDualStickPatch, FiresWithTheRightTrigger)
+{
+  for (const auto& [game_id, r] :
+       {std::pair<const char*, const DualStickRevision*>{"GM8E01", &PRIME_100_DUAL},
+        std::pair<const char*, const DualStickRevision*>{"G2ME01", &ECHOES_DUAL}})
+  {
+    SCOPED_TRACE(game_id);
+    DualStickGame game(game_id, *r);
+    PatchScript script("dual-stick");
+    ASSERT_TRUE(script.Load(ReadPatch(game_id, "dual-stick"), game.env)) << script.Error();
+    ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+    const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+    ButtonsOff(script);
+    HandInput& hand = game.input.hands[1];
+
+    hand.trigger = 1.0f;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "A"), -2.0);
+    ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("fire"), 1));
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "A"), 1.0);
+    EXPECT_EQ(PadHeld(script, "Triggers", "R"), 0.0);
+    EXPECT_EQ(PadHeld(script, "Triggers", "R-Analog"), 0.0);
+    hand.trigger = 0.0f;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "A"), 0.0);
+    hand.primary = true;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "A"), 1.0);
+    hand.primary = false;
+    game.memory.Set32(DUAL_STICK_PLAYER + r->ball, 1);
+    hand.trigger = 1.0f;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "A"), 1.0);
+    EXPECT_EQ(PadHeld(script, "Triggers", "R"), 0.0);
+    game.memory.Set32(r->menu, 1);
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "A"), -2.0);
+    EXPECT_EQ(PadHeld(script, "Triggers", "R"), -2.0);
+  }
+}
+
+// Jump on A and fire on B; missiles on the right grip; the spider ball on the left trigger in the
+// morph ball (L released there).
+TEST(GameCubeDualStickPatch, SwapsButtonsMissilesAndSpiderBall)
+{
+  for (const auto& [game_id, r] :
+       {std::pair<const char*, const DualStickRevision*>{"GM8E01", &PRIME_102_DUAL},
+        std::pair<const char*, const DualStickRevision*>{"G2ME01", &ECHOES_DUAL}})
+  {
+    SCOPED_TRACE(game_id);
+    DualStickGame game(game_id, *r);
+    PatchScript script("dual-stick");
+    ASSERT_TRUE(script.Load(ReadPatch(game_id, "dual-stick"), game.env)) << script.Error();
+    ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+    const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+    ButtonsOff(script);
+    const auto set = [&](const char* name, double value) {
+      ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting(name), value));
+    };
+    HandInput& hand = game.input.hands[1];
+
+    set("swap_ab", 1);
+    hand.primary = true;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), 1.0);
+    EXPECT_EQ(PadHeld(script, "Buttons", "A"), 0.0);
+    hand.primary = false;
+    hand.secondary = true;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "A"), 1.0);
+    EXPECT_EQ(PadHeld(script, "Buttons", "B"), 0.0);
+    hand.secondary = false;
+
+    set("missiles", 1);
+    hand.squeeze_button = true;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "Y"), 1.0);
+    hand.squeeze_button = false;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Buttons", "Y"), 0.0);
+
+    set("spider", 1);
+    game.input.hands[0].trigger = 1.0f;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Triggers", "R"), -2.0);  // first person: the user's L and R
+    EXPECT_EQ(PadHeld(script, "Triggers", "L"), -2.0);
+    game.memory.Set32(DUAL_STICK_PLAYER + r->ball, 1);
+    frame();
+    EXPECT_EQ(PadHeld(script, "Triggers", "R"), 1.0);
+    EXPECT_EQ(PadHeld(script, "Triggers", "L"), 0.0);
+    game.input.hands[0].trigger = 0.0f;
+    frame();
+    EXPECT_EQ(PadHeld(script, "Triggers", "R"), 0.0);
+    ASSERT_TRUE(script.Call(Hook::OnUnload, game.env)) << script.Error();
+    EXPECT_TRUE(script.GetPadHolds().empty());
+  }
+}
+
+// While the beam quick swap uses right B, its game action (B, or A with the swap) comes only from a
+// tap (the flag beam_swap_tap), not from pressing it.
+TEST(GameCubeDualStickPatch, LeavesTheBeamSwapButtonToItsTaps)
+{
+  DualStickGame game("GM8E01", PRIME_102_DUAL);
+  PatchScript script("dual-stick");
+  ASSERT_TRUE(script.Load(ReadPatch("GM8E01", "dual-stick"), game.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, game.env)) << script.Error();
+  const auto frame = [&] { ASSERT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error(); };
+  HandInput& hand = game.input.hands[1];
+  ButtonsOff(script);
+
+  VR::PatchFlags::Set({"beam_swap_right_secondary"});
+  hand.secondary = true;
+  frame();
+  EXPECT_EQ(PadHeld(script, "Buttons", "B"), 0.0);
+  VR::PatchFlags::Set({"beam_swap_right_secondary", "beam_swap_tap"});
+  frame();
+  EXPECT_EQ(PadHeld(script, "Buttons", "B"), 1.0);
+  ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting("swap_ab"), 1));
+  frame();
+  EXPECT_EQ(PadHeld(script, "Buttons", "A"), 1.0);
+  EXPECT_EQ(PadHeld(script, "Buttons", "B"), 0.0);
+  VR::PatchFlags::Set({});
+  hand.secondary = false;
+}
+
 // ---- Prime 1 and 2 on the GameCube: the beam quick swap ----
 
 namespace
@@ -2449,9 +2660,16 @@ void ExpectBeamSwap(const BeamSwapCase& c)
   Memory& m = game.memory;
   HandInput& hand = game.input.hands[1];
 
-  // Not held: the user's input.
+  // Not held: the user's input; the flag naming its button.
   game.Frame();
   EXPECT_TRUE(game.script.GetPadHolds().empty());
+  EXPECT_TRUE(Raised(game.script, "beam_swap_right_secondary"));
+  // A tap (no direction): the flag beam_swap_tap for 6 fields.
+  game.Gesture(0.0f, 0.0f);
+  EXPECT_TRUE(Raised(game.script, "beam_swap_tap"));
+  for (int i = 0; i < 6; ++i)
+    game.Frame();
+  EXPECT_FALSE(Raised(game.script, "beam_swap_tap"));
 
   // Moved 10 cm right: the right beam's push for 8 fields, with the flag for dual-stick.
   game.Gesture(0.1f, 0.0f);
@@ -2500,6 +2718,7 @@ void ExpectBeamSwap(const BeamSwapCase& c)
   game.Frame();
   m.Set32(c.r.menu, 1);
   game.Frame();
+  EXPECT_FALSE(Raised(game.script, "beam_swap_right_secondary"));
   hand.secondary = false;
   m.Set32(c.r.menu, 0);
   game.Frame();

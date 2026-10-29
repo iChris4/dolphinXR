@@ -20,6 +20,11 @@
 -- in morph ball, on the map or pause screens, or with the VR menu open. It needs no scratch
 -- memory.
 --
+-- While it can change beams it also raises the flag beam_swap_<hand>_<button> (e.g.
+-- beam_swap_right_secondary), and for a few fields after the button is let go without a direction
+-- the flag beam_swap_tap: Modern controls (dual-stick.lua) then gives that button's game action (B,
+-- the jump, in the stock profile) only on such a tap, never when a gesture starts.
+--
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
 local BUTTONS = {"B or Y", "Grip", "Thumbstick click"}
@@ -27,7 +32,7 @@ local BUTTONS = {"B or Y", "Grip", "Thumbstick click"}
 patch = {
   title = "Beam quick swap",
   author = "DolphinXR, after PrimedGun (Nobbie)",
-  version = "1.0",
+  version = "1.1",
   description = "Hold B on the cannon hand, move or point the controller up, down, left or right, "
     .. "and let go to change beams, as on the C-stick: up Power, right Dark, left Light, down "
     .. "Annihilator. For Metroid Prime 2: Echoes NTSC-U (GameCube).",
@@ -81,6 +86,7 @@ local PANEL_AHEAD, PANEL_ABOVE, PANEL_STEP, PANEL_EDGE = 0.26, 0.055, 0.21, 1.8
 local MOVE_STEP = 0.075
 local PICK = 0.25          -- the steps that pick a direction
 local PUSH_FIELDS = 8      -- how long the C-stick is pushed after letting go
+local TAP_FIELDS = 6       -- how long a tap's flag stays up
 
 local raw_pose, sqrt, abs = vr.raw_pose, math.sqrt, math.abs
 
@@ -96,6 +102,9 @@ local first_x, first_y = nil, nil
 local hovered = nil
 local pushing = false      -- the C-stick pushed after letting go
 local push_left = 0        -- for that many more fields
+local moved = false        -- a direction was picked during this hold
+local tap_left = 0         -- fields left of a tap's flag
+local owned = nil          -- the flag naming the button while the patch uses it
 local warned = false
 
 local function hand_name()
@@ -164,6 +173,15 @@ local function push(dir)
   log(BEAMS[dir] .. " Beam")
 end
 
+-- The flag naming the button (beam_swap_<hand>_<button>) while the patch uses it.
+local function own(on)
+  local name = on and ("beam_swap_" .. hand_name() .. "_" .. BUTTON_NAMES[settings.button]) or nil
+  if name == owned then return end
+  if owned then vr.set_flag(owned, false) end
+  if name then vr.set_flag(name, true) end
+  owned = name
+end
+
 local function cancel()
   open = false
   hovered = nil
@@ -181,14 +199,23 @@ function on_frame()
     warn("no code of Metroid Prime 2: Echoes NTSC-U at the strafe site: beams unchanged")
     warned = true
   end
+  if tap_left > 0 then
+    tap_left = tap_left - 1
+    if tap_left == 0 then vr.set_flag("beam_swap_tap", false) end
+  end
   local hand = hand_name()
   local ok, px, py, pz, qx, qy, qz, qw = raw_pose(hand)
   if not r or not playing() or vr.menu_open() or not ok then
     cancel()
+    own(false)
     return
   end
+  own(true)
   if vr.button(hand, BUTTON_NAMES[settings.button]) then
-    if not open then begin(px, py, pz, qx, qy, qz, qw) end
+    if not open then
+      begin(px, py, pz, qx, qy, qz, qw)
+      moved = false
+    end
     local x, y = reading(px, py, pz, qx, qy, qz, qw)
     if not first_x then first_x, first_y = x, y end
     x = math.max(-1, math.min(1, x - first_x))
@@ -196,11 +223,20 @@ function on_frame()
     local dir = direction(x, y)
     if dir ~= hovered then
       hovered = dir
-      if dir and settings.haptics then vr.haptic(hand, 0.2, 0.02) end
+      if dir then
+        moved = true
+        if settings.haptics then vr.haptic(hand, 0.2, 0.02) end
+      end
     end
   elseif open then
     open = false
-    if hovered then push(hovered) end
+    if hovered then
+      push(hovered)
+    elseif not moved then
+      -- A tap: the button's own action (Modern controls).
+      vr.set_flag("beam_swap_tap", true)
+      tap_left = TAP_FIELDS
+    end
     hovered = nil
   end
 end

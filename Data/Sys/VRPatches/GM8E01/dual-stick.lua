@@ -24,17 +24,30 @@
 -- control stick to it. While the beam quick swap (beam-swap.lua) pushes the C-stick to change
 -- beams (the flag c_stick_gesture), the patch leaves the C-stick to it.
 --
+-- PrimedGun's buttons (settings, on by default), in first person and in the morph ball while
+-- playing: the patch then holds the GameCube buttons they use, placed as in the stock Quest Touch
+-- profile (A on right A, B on right B, Y on left Y, L and R on the triggers) with their changes:
+-- jump (B) also while the right thumbstick is up (first person), fire (A) on the right trigger
+-- (the morph ball's bombs too, and R, the free aim and the spider ball, no longer on it), A and B
+-- swapped (jump on right A, fire on right B), missiles (Y, the morph ball's power bombs) on the
+-- right grip, the spider ball (R) on the left trigger in the morph ball (L then released). While
+-- the beam quick swap (beam-swap.lua) uses a button (its flag beam_swap_<hand>_<button>), that
+-- button's action comes only from a tap of it (the flag beam_swap_tap): never when a gesture
+-- starts. The maps and pause screens keep the user's bindings.
+--
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
-local BUTTONS = {"Right B", "Right grip", "Right thumbstick click", "Left X", "Left Y"}
+local BUTTONS = {"Right B", "Right grip", "Right thumbstick click", "Left X", "Left Y", "None"}
 
 patch = {
-  title = "Strafe with the left thumbstick, turn with the right",
+  title = "Modern controls",
   author = "DolphinXR, with PrimeHack's strafe movement",
-  version = "1.3",
+  version = "1.5",
   description = "The left thumbstick moves forward, back and sideways and the right thumbstick "
     .. "turns, as in a first-person shooter. Hold a button to choose beams and visors with the "
-    .. "right thumbstick. For Metroid Prime NTSC-U 1.00 and 1.02 (GameCube).",
+    .. "right thumbstick. Options, as in PrimedGun: jump with the right thumbstick up, fire with "
+    .. "the right trigger, jump on A and fire on B, missiles on the right grip, the spider ball "
+    .. "on the left trigger. For Metroid Prime NTSC-U 1.00 and 1.02 (GameCube).",
   games = {"GM8E01"},
   scratch = 0x220,
   settings = {
@@ -45,7 +58,22 @@ patch = {
     {name = "beam_button", label = "Beams and visors on the right thumbstick", type = "choice",
      options = BUTTONS, default = 0,
      description = "While held, the right thumbstick selects beams (C-stick) and visors (D-pad) "
-       .. "as your profile binds them, and does not turn."},
+       .. "as your profile binds them, and does not turn (the beam quick swap and the visor "
+       .. "gesture do it without)."},
+    {name = "jump", label = "Jump with the right thumbstick up", type = "bool", default = true,
+     description = "In first person, pushing the right thumbstick up jumps (B), as in PrimedGun. "
+       .. "The morph ball, the maps and the menus keep your binding of B."},
+    {name = "fire", label = "Fire with the right trigger", type = "bool", default = true,
+     description = "The right trigger fires (A) and drops bombs, as in PrimedGun, and no longer "
+       .. "presses R (the free aim, the spider ball). The maps and the menus keep your bindings."},
+    {name = "swap_ab", label = "Jump on A, fire on B", type = "bool", default = true,
+     description = "The right controller's A jumps (B) and its B fires (A). With the beam quick "
+       .. "swap on B, a tap of B fires."},
+    {name = "missiles", label = "Missiles on the right grip", type = "bool", default = true,
+     description = "The right grip fires missiles (Y; power bombs in the morph ball) instead of "
+       .. "left Y."},
+    {name = "spider", label = "Spider ball on the left trigger", type = "bool", default = true,
+     description = "In the morph ball the left trigger holds the spider ball (R) instead of L."},
   },
 }
 
@@ -329,7 +357,7 @@ end
 -- The VR button of a setting's choice.
 local CHOICE_BUTTONS = {
   [0] = {"right", "secondary"}, [1] = {"right", "squeeze"}, [2] = {"right", "thumbstick"},
-  [3] = {"left", "primary"}, [4] = {"left", "secondary"},
+  [3] = {"left", "primary"}, [4] = {"left", "secondary"},  -- [5]: none
 }
 local DPAD = {"D-Pad/Up", "D-Pad/Down", "D-Pad/Left", "D-Pad/Right"}
 
@@ -364,13 +392,82 @@ local function release()
   release_right()
 end
 
--- The player in first person and playing (not morphed, no map or pause screen), or nil.
-local function playing_player(r)
+-- ---- The buttons (PrimedGun's options) ----
+
+-- The VR button; while the beam quick swap uses it (its flag beam_swap_<hand>_<button>), a tap of
+-- it (the flag beam_swap_tap: let go without a direction).
+local function vr_button(hand, name)
+  if vr.flag("beam_swap_" .. hand .. "_" .. name) then return vr.flag("beam_swap_tap") end
+  return vr.button(hand, name)
+end
+
+-- The jump: from 0.6 up until the thumbstick is back under 0.4. The triggers press at 0.5.
+local JUMP_PRESS, JUMP_RELEASE, TRIGGER_PRESS = 0.6, 0.4, 0.5
+local jumping = false
+local held_buttons = {}   -- the GameCube buttons the patch holds
+
+-- A GameCube button held pressed (true) or released (false; a trigger's analog travel too), or
+-- the user's again (nil).
+local function hold(name, pressed)
+  if pressed ~= nil then
+    pad.set_value(1, name, pressed and 1 or 0)
+    held_buttons[name] = true
+  elseif held_buttons[name] then
+    pad.release(1, name)
+    held_buttons[name] = nil
+  end
+end
+
+local function release_buttons()
+  for _, name in ipairs({"A", "B", "Y", "L", "R"}) do hold(name, nil) end
+  jumping = false
+end
+
+-- The options' buttons in first person and in the morph ball (state "first_person" or "morph";
+-- nil: the user's bindings). beams: the beam button gives the right thumbstick back.
+local function drive_buttons(state, beams)
+  if not state then
+    release_buttons()
+    return
+  end
+  local morph = state == "morph"
+  local y = axis("right", "thumbstick_y")
+  jumping = settings.jump and not morph and not beams and
+            not vr.flag("thumbstick_right_gesture") and
+            (y >= JUMP_PRESS or (jumping and y >= JUMP_RELEASE))
+  local owned = vr.flag("beam_swap_right_primary") or vr.flag("beam_swap_right_secondary")
+  if settings.jump or settings.fire or settings.swap_ab or owned then
+    local fire_button, jump_button = vr_button("right", "primary"), vr_button("right", "secondary")
+    if settings.swap_ab then fire_button, jump_button = jump_button, fire_button end
+    hold("A", fire_button or (settings.fire and axis("right", "trigger") >= TRIGGER_PRESS))
+    hold("B", jump_button or jumping)
+  else
+    hold("A", nil)
+    hold("B", nil)
+  end
+  if settings.missiles then
+    hold("Y", vr_button("right", "squeeze"))
+  else
+    hold("Y", nil)
+  end
+  if morph and settings.spider then
+    hold("R", axis("left", "trigger") >= TRIGGER_PRESS)
+    hold("L", false)
+  else
+    if settings.fire then hold("R", false) else hold("R", nil) end
+    hold("L", nil)
+  end
+end
+
+-- The player while playing (no map or pause screen) and its state: "first_person", "morph" (the
+-- morph ball) or nil (another camera); nil without a player.
+local function player_state(r)
   local sm = r.state_manager
   local player = mem.ptr(sm + 0x84C)
   if not player or mem.u32(sm + 0xF90) ~= 0 then return nil end
-  if mem.u32(player + r.camera) ~= 0 or mem.u32(player + r.ball) ~= 0 then return nil end
-  return player
+  if mem.u32(player + r.ball) ~= 0 then return player, "morph" end
+  if mem.u32(player + r.camera) ~= 0 then return player, nil end
+  return player, "first_person"
 end
 
 local function stop()
@@ -393,13 +490,16 @@ end
 
 function on_frame()
   if game.field() % 60 == 0 or not current then install() end
-  local player = current and playing_player(current)
-  if not player or vr.menu_open() or not vr.axis("left", "thumbstick_x") then
+  local player, state
+  if current then player, state = player_state(current) end
+  if vr.menu_open() or not vr.axis("left", "thumbstick_x") then state = nil end
+  local button = CHOICE_BUTTONS[settings.beam_button]
+  local beams = button and vr.button(button[1], button[2])
+  drive_buttons(state, beams)
+  if state ~= "first_person" then
     stop()
     return
   end
-  local button = CHOICE_BUTTONS[settings.beam_button]
-  local beams = button and vr.button(button[1], button[2])
   local left = not vr.flag("thumbstick_left_gesture")
   local turn = beams and 0 or dead(axis("right", "thumbstick_x")) * settings.turn_speed
   pad.set_stick(1, "Main Stick", turn, left and axis("left", "thumbstick_y") or 0)
@@ -424,4 +524,5 @@ end
 function on_unload()
   uninstall()
   release()
+  release_buttons()
 end
