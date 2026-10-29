@@ -51,9 +51,15 @@ function Save-Original([string]$remote, [string]$name) {
     if (-not (Test-Path $local)) { New-Item -ItemType File "$local.none" | Out-Null }
 }
 
+# A pushed file belongs to the shell, 644: the app could read it but not save it again.
+function Push-AppFile([string]$local, [string]$remote) {
+    & $Adb push $local $remote 2>&1 | Out-Null
+    & $Adb shell "chmod 666 '$remote'" | Out-Null
+}
+
 function Restore-Original([string]$remote, [string]$name) {
     $local = Join-Path $original $name
-    if (Test-Path $local) { & $Adb push $local $remote 2>&1 | Out-Null }
+    if (Test-Path $local) { Push-AppFile $local $remote }
     elseif (Test-Path "$local.none") { & $Adb shell "rm -f '$remote'" | Out-Null }
 }
 
@@ -81,7 +87,7 @@ function Push-Ini([string]$remote, [string]$name, [string[]]$keys) {
     }
     $edited = Join-Path $WorkDir $name
     [IO.File]::WriteAllText($edited, ($lines -join "`n") + "`n")
-    & $Adb push $edited $remote 2>&1 | Out-Null
+    Push-AppFile $edited $remote
 }
 
 function Install-Apk([string]$path) {
