@@ -659,6 +659,18 @@ VertexManagerBase::CpuCullPlan VertexManagerBase::GetCpuCullPlan()
   if (!cone)
     return CpuCullPlan::None;
   m_vr_cull_projection = *cone;
+  // The VR projection flips the view position's X and Y with the game projection's signs
+  // (GeometryShaderManager: mirror mode, Red Steel 2's Y-down view space): so does the cone.
+  if (xfmem.projection.type == ProjectionType::Perspective)
+  {
+    const float x_sign = xfmem.projection.rawProjection[0] < 0.0f ? -1.0f : 1.0f;
+    const float y_sign = xfmem.projection.rawProjection[2] < 0.0f ? -1.0f : 1.0f;
+    for (auto& row : m_vr_cull_projection)
+    {
+      row[0] *= x_sign;
+      row[1] *= y_sign;
+    }
+  }
 
   // Without overrides or a game profile, the only routes for a perspective draw of the main view
   // render it from the head. Anything else may be placed on the virtual screen or head-locked,

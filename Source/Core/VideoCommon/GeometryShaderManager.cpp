@@ -323,6 +323,11 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
             const float proj_x_sign =
                 (xfmem.projection.rawProjection[0] < 0.0f) ? -1.0f : 1.0f;
             constants.stereoparams[0] = proj_x_sign;
+            // The same for Y: Red Steel 2's view space points Y down, with a reflection in its
+            // view matrix, and its projection flips Y back. Without the flip the VR projection
+            // drew the world upside down with every triangle reversed (front faces culled).
+            const float proj_y_sign = (xfmem.projection.rawProjection[2] < 0.0f) ? -1.0f : 1.0f;
+            constants.stereoparams[1] = proj_y_sign;
 
             float depth_scale = 1.0f;
             float depth_offset = 0.0f;
