@@ -118,6 +118,50 @@ DrawDistanceRange ComputeDrawDistanceRange(const u8* vertices, u32 count, u32 st
   return range;
 }
 
+DrawViewBounds ComputeDrawViewBounds(const u8* vertices, u32 count, u32 stride,
+                                     const PortableVertexDeclaration& decl,
+                                     const float* pos_matrices, u32 shared_matrix_index,
+                                     u32 max_samples)
+{
+  DrawViewBounds bounds;
+  std::array<float, 3> min{std::numeric_limits<float>::infinity(),
+                           std::numeric_limits<float>::infinity(),
+                           std::numeric_limits<float>::infinity()};
+  std::array<float, 3> max{-std::numeric_limits<float>::infinity(),
+                           -std::numeric_limits<float>::infinity(),
+                           -std::numeric_limits<float>::infinity()};
+  std::array<double, 3> sum{};
+  bounds.points.reserve(std::min(count, max_samples) + 1);
+  // Row 2 is the same expression as ComputeDrawDepthRange's, so the depth range derived from the
+  // bounds is bit for bit the one it computes.
+  const auto visit = [&](const float* p, const float* m) {
+    std::array<float, 3> v;
+    for (int row = 0; row < 3; ++row)
+    {
+      const float* r = &m[row * 4];
+      v[row] = r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3];
+      min[row] = std::min(min[row], v[row]);
+      max[row] = std::max(max[row], v[row]);
+      sum[row] += v[row];
+    }
+    bounds.points.push_back(v);
+  };
+  if (!VisitSampledVertices(vertices, count, stride, decl, pos_matrices, shared_matrix_index,
+                            max_samples, &bounds.sampled, visit) ||
+      bounds.points.empty())
+  {
+    bounds.points.clear();
+    return bounds;
+  }
+  bounds.min = min;
+  bounds.max = max;
+  const double n = static_cast<double>(bounds.points.size());
+  bounds.centroid = {static_cast<float>(sum[0] / n), static_cast<float>(sum[1] / n),
+                     static_cast<float>(sum[2] / n)};
+  bounds.valid = true;
+  return bounds;
+}
+
 DrawDepthSource::DrawDepthSource(const u8* vertices, u32 count, u32 stride,
                                  const PortableVertexDeclaration* decl, const float* pos_matrices,
                                  u32 shared_matrix_index)
@@ -168,6 +212,32 @@ const DrawDistanceRange& DrawDepthSource::GetDistance() const
     m_distance_computed = true;
   }
   return m_distance;
+}
+
+const DrawViewBounds& DrawDepthSource::GetViewBounds() const
+{
+  if (!m_bounds_computed)
+  {
+    if (m_decl != nullptr)
+    {
+      m_bounds = ComputeDrawViewBounds(m_vertices, m_count, m_stride, *m_decl, m_pos_matrices,
+                                       m_shared_matrix_index);
+    }
+    m_bounds_computed = true;
+    if (!m_computed)
+    {
+      // The depth is -z of the same points: no second read of the vertices.
+      if (m_bounds.valid)
+      {
+        m_range.min = -m_bounds.max[2];
+        m_range.max = -m_bounds.min[2];
+        m_range.valid = true;
+        m_range.sampled = m_bounds.sampled;
+      }
+      m_computed = true;
+    }
+  }
+  return m_bounds;
 }
 
 bool DrawDepthSource::HasPerVertexMatrix() const

@@ -13,6 +13,7 @@
 
 #include "Common/CommonTypes.h"
 #include "VideoCommon/ShaderHunter.h"
+#include "VideoCommon/VR/VRFrameRegion.h"
 
 // Video-thread side of the agent server (Core/AgentServer): eye screenshots, the per-frame draw
 // capture (what "Debug Log Draws" logs, structured and for one frame), and the draw preview
@@ -182,6 +183,31 @@ struct DrawRecord
   std::array<float, 3> vertex_translation{};
   // Distance of the closest vertex from the camera (game units), NaN when unknown.
   float min_distance = std::numeric_limits<float>::quiet_NaN();
+  // View-space extent and centre of the sampled vertices (game units: the camera at the origin
+  // looking down -z, x right, y up), NaN when unknown.
+  std::array<float, 3> view_min{std::numeric_limits<float>::quiet_NaN(),
+                                std::numeric_limits<float>::quiet_NaN(),
+                                std::numeric_limits<float>::quiet_NaN()};
+  std::array<float, 3> view_max{std::numeric_limits<float>::quiet_NaN(),
+                                std::numeric_limits<float>::quiet_NaN(),
+                                std::numeric_limits<float>::quiet_NaN()};
+  std::array<float, 3> view_centroid{std::numeric_limits<float>::quiet_NaN(),
+                                     std::numeric_limits<float>::quiet_NaN(),
+                                     std::numeric_limits<float>::quiet_NaN()};
+  // Game units per meter the draw is shown with (its override, else the game's), -1 when unknown.
+  float scale_units_per_meter = -1.0f;
+  // Where the sampled vertices land on the game's own screen, as fractions of the displayed frame
+  // (0,0 top-left, 1,1 bottom-right; beyond that range is off screen), NaN when unknown. The VR
+  // projection moves 3D draws: for them it is where a flat screenshot shows the draw.
+  float screen_left = std::numeric_limits<float>::quiet_NaN();
+  float screen_top = std::numeric_limits<float>::quiet_NaN();
+  float screen_right = std::numeric_limits<float>::quiet_NaN();
+  float screen_bottom = std::numeric_limits<float>::quiet_NaN();
+  // Some sampled vertices were behind the camera and are not in the box.
+  bool screen_partial = false;
+  // Pixels of the frame's draw-ID map that show this draw (the draw on top at each pixel), -1
+  // without a map.
+  s32 visible_pixels = -1;
 };
 
 // One EFB copy of a captured frame: a render to texture, or the frame's copy to the XFB.
@@ -330,7 +356,33 @@ struct DrawFilter
   u32 index_min = 0;
   u32 index_max = std::numeric_limits<u32>::max();
   u32 min_index_count = 0;
+  // A point of the displayed frame (fractions, 0,0 top-left): only draws whose screen box holds it.
+  std::optional<float> screen_x;
+  std::optional<float> screen_y;
+  // Only draws with (true) or without (false) pixels in the frame's draw-ID map.
+  std::optional<bool> visible;
 };
+
+// A draw's box on the game's screen, as fractions of the displayed frame (0,0 top-left).
+struct ScreenBox
+{
+  float left = std::numeric_limits<float>::quiet_NaN();
+  float top = std::numeric_limits<float>::quiet_NaN();
+  float right = std::numeric_limits<float>::quiet_NaN();
+  float bottom = std::numeric_limits<float>::quiet_NaN();
+  bool valid = false;
+  // Perspective points behind the camera were left out.
+  bool partial = false;
+};
+
+// Projects view-space points through the game's projection (xfmem.projection.rawProjection) and
+// viewport (xfmem.viewport, with the doubled scissor offset x_off / y_off) onto the displayed frame
+// (VR::GetVRFrameRegion(); the whole EFB when it is not valid). Invalid when no point projects.
+ScreenBox ProjectViewPointsToFrame(const std::vector<std::array<float, 3>>& points,
+                                   const std::array<float, 6>& raw_projection, bool perspective,
+                                   float viewport_x, float viewport_y, float viewport_wd,
+                                   float viewport_ht, int x_off, int y_off,
+                                   const VRFrameRegion& frame);
 
 bool MatchesFilter(const DrawRecord& draw, const DrawFilter& filter);
 const char* GetHandlingName(u8 handling);

@@ -28,6 +28,12 @@ void SetZRow(Matrices& matrices, u32 index, float x, float y, float z, float w)
   row[3] = w;
 }
 
+// Sets the whole 3x4 row-major matrix `index`.
+void SetMatrix(Matrices& matrices, u32 index, const std::array<float, 12>& rows)
+{
+  std::copy(rows.begin(), rows.end(), &matrices[index * 4]);
+}
+
 PortableVertexDeclaration MakeDecl(int stride, int position_offset, int components,
                                    int posmtx_offset = -1)
 {
@@ -297,4 +303,84 @@ TEST(DrawDepth, ConstraintRule)
   EXPECT_FALSE(DrawPassesDepthConstraints(&source, 1.1f, 0.0f));
   EXPECT_TRUE(DrawPassesDepthConstraints(&source, 0.5f, 6.0f));
   EXPECT_FALSE(DrawPassesDepthConstraints(&source, 2.0f, 6.0f));
+}
+
+TEST(DrawDepth, ViewBounds)
+{
+  const PortableVertexDeclaration decl = MakeDecl(12, 0, 3);
+  Matrices matrices{};
+  // Matrix 0: the identity rotation with a translation of (1, 2, -10).
+  SetMatrix(matrices, 0, {1, 0, 0, 1, 0, 1, 0, 2, 0, 0, 1, -10});
+  const std::vector<u8> buffer = MakeBuffer(decl, {{0, 0, 0}, {4, -6, 2}, {-2, 2, -4}});
+  const DrawViewBounds bounds =
+      ComputeDrawViewBounds(buffer.data(), 3, decl.stride, decl, matrices.data(), 0);
+  ASSERT_TRUE(bounds.valid);
+  EXPECT_FALSE(bounds.sampled);
+  // (1, 2, -10), (5, -4, -8), (-1, 4, -14).
+  ASSERT_EQ(bounds.points.size(), 3u);
+  EXPECT_FLOAT_EQ(bounds.points[1][0], 5.0f);
+  EXPECT_FLOAT_EQ(bounds.points[1][1], -4.0f);
+  EXPECT_FLOAT_EQ(bounds.points[1][2], -8.0f);
+  EXPECT_FLOAT_EQ(bounds.min[0], -1.0f);
+  EXPECT_FLOAT_EQ(bounds.max[0], 5.0f);
+  EXPECT_FLOAT_EQ(bounds.min[1], -4.0f);
+  EXPECT_FLOAT_EQ(bounds.max[1], 4.0f);
+  EXPECT_FLOAT_EQ(bounds.min[2], -14.0f);
+  EXPECT_FLOAT_EQ(bounds.max[2], -8.0f);
+  EXPECT_FLOAT_EQ(bounds.centroid[0], 5.0f / 3.0f);
+  EXPECT_FLOAT_EQ(bounds.centroid[1], 2.0f / 3.0f);
+  EXPECT_FLOAT_EQ(bounds.centroid[2], -32.0f / 3.0f);
+
+  const DrawViewBounds none =
+      ComputeDrawViewBounds(buffer.data(), 0, decl.stride, decl, matrices.data(), 0);
+  EXPECT_FALSE(none.valid);
+  EXPECT_TRUE(none.points.empty());
+  EXPECT_TRUE(std::isnan(none.centroid[2]));
+}
+
+TEST(DrawDepth, ViewBoundsPerVertexMatricesAndSampling)
+{
+  const PortableVertexDeclaration decl = MakeDecl(16, 4, 3, 0);
+  Matrices matrices{};
+  SetMatrix(matrices, 0, {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0});
+  // Matrix 5 (0x45 & 0x3f) moves its vertices 100 units to the right.
+  SetMatrix(matrices, 5, {1, 0, 0, 100, 0, 1, 0, 0, 0, 0, 1, 0});
+  std::vector<Vertex> vertices(1000, Vertex{0, 0, -1, 0});
+  vertices[999] = {0, 0, -1, 0x45};  // The last vertex is always read.
+  const std::vector<u8> buffer = MakeBuffer(decl, vertices);
+  const DrawViewBounds bounds =
+      ComputeDrawViewBounds(buffer.data(), 1000, decl.stride, decl, matrices.data(), 9, 8);
+  ASSERT_TRUE(bounds.valid);
+  EXPECT_TRUE(bounds.sampled);
+  EXPECT_LE(bounds.points.size(), 9u);
+  EXPECT_FLOAT_EQ(bounds.min[0], 0.0f);
+  EXPECT_FLOAT_EQ(bounds.max[0], 100.0f);
+}
+
+TEST(DrawDepth, SourceDerivesDepthFromViewBounds)
+{
+  const PortableVertexDeclaration decl = MakeDecl(12, 0, 3);
+  Matrices matrices{};
+  SetMatrix(matrices, 0, {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -10});
+  std::vector<u8> buffer = MakeBuffer(decl, {{0, 0, 2}, {0, 0, -4}});
+  const DrawDepthSource source(buffer.data(), 2, 12, &decl, matrices.data(), 0);
+  EXPECT_FLOAT_EQ(source.GetViewBounds().min[2], -14.0f);
+  EXPECT_FLOAT_EQ(source.GetViewBounds().max[2], -8.0f);
+  // Get() comes from the bounds: the buffer is not read again.
+  const float z = -90.0f;
+  std::memcpy(buffer.data() + 8, &z, sizeof(z));
+  ASSERT_TRUE(source.Get().valid);
+  EXPECT_FLOAT_EQ(source.Get().min, 8.0f);
+  EXPECT_FLOAT_EQ(source.Get().max, 14.0f);
+  EXPECT_FALSE(source.Get().sampled);
+  EXPECT_FLOAT_EQ(source.GetFew().min, 8.0f);
+
+  // The other way round, the bounds read the vertices (Get() keeps its own result).
+  const DrawDepthSource depth_first(buffer.data(), 2, 12, &decl, matrices.data(), 0);
+  EXPECT_FLOAT_EQ(depth_first.Get().max, 100.0f);
+  EXPECT_FLOAT_EQ(depth_first.GetViewBounds().min[2], -100.0f);
+  EXPECT_FLOAT_EQ(depth_first.Get().max, 100.0f);
+
+  EXPECT_FALSE(DrawDepthSource().GetViewBounds().valid);
+  EXPECT_FALSE(DrawDepthSource().Get().valid);
 }

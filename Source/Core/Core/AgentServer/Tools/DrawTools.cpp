@@ -337,6 +337,17 @@ ToolResult ListDraws(const ToolArgs& args)
       static_cast<u32>(std::clamp<s64>(args.GetInt("index_max", std::numeric_limits<u32>::max()), 0,
                                        std::numeric_limits<u32>::max()));
   filter.min_index_count = static_cast<u32>(std::max<s64>(0, args.GetInt("min_index_count", 0)));
+  if (const auto x = args.GetOptionalNumber("screen_x"))
+    filter.screen_x = static_cast<float>(*x);
+  if (const auto y = args.GetOptionalNumber("screen_y"))
+    filter.screen_y = static_cast<float>(*y);
+  if (filter.screen_x.has_value() != filter.screen_y.has_value())
+  {
+    throw ToolError("screen_x and screen_y go together: a point of the displayed frame as "
+                    "fractions (0,0 top-left, 1,1 bottom-right).");
+  }
+  if (args.Has("visible"))
+    filter.visible = args.GetBool("visible", true);
 
   std::vector<const DrawRecord*> matches;
   for (const DrawRecord& draw : capture->draws)
@@ -356,8 +367,12 @@ ToolResult ListDraws(const ToolArgs& args)
   std::string text = fmt::format(
       "{} {}: {} of {} draws match; page {}/{} (draws {}-{}). Columns: {}#index projection | "
       "viewport x,y wxh (GX units: the EFB origin is usually 342,342) class | vs ps | index count "
-      "| z: camera depth of the vertices in game units (~ = sampled) | textures | z test/write, "
-      "blend | handling (source) | VR route.\n",
+      "| z: camera depth of the vertices in game units (~ = sampled) | at: where the draw is: for "
+      "3D draws the direction of its vertices' centre from the camera (yaw + right, pitch + up, "
+      "degrees) and its distance (game units, and meters at the game's scale); scr x0-x1,y0-y1 "
+      "its box on the game's screen as fractions of the displayed frame (0,0 top-left; ~ = "
+      "vertices behind the camera left out); vis = pixels showing it in the draw-ID map when "
+      "the capture has one | textures | z test/write, blend | handling (source) | VR route.\n",
       multi_frame ? "Capture" : "Frame", capture->id, matches.size(), capture->draws.size(), page,
       pages, first + 1, last, multi_frame ? "frame " : "");
   for (size_t i = first; i < last; ++i)
@@ -714,6 +729,14 @@ void RegisterDrawTools(ToolRegistry& registry, Server& server)
                .Integer("index_min", "First draw index.")
                .Integer("index_max", "Last draw index.")
                .Integer("min_index_count", "Only draws with at least this many indices.")
+               .Number("screen_x", "With screen_y: only draws whose box on the game's screen holds "
+                                   "this point, as fractions of the displayed frame (0,0 top-left, "
+                                   "1,1 bottom-right). 2D draws are exact; 3D draws are where a "
+                                   "flat screenshot shows them.")
+               .Number("screen_y", "See screen_x.")
+               .Boolean("visible", "Only draws with pixels in the frame's draw-ID map (true) or "
+                                   "none (false): hidden behind other draws or off screen. Needs "
+                                   "capture_frame ids=true or draw_at_pixel.")
                .Integer("page", "1-based page.", 1)
                .Integer("page_size", "Rows per page (default 80, at most 300).", 1, 300)
                .Build(),

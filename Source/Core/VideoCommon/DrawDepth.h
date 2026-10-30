@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <array>
 #include <limits>
+#include <vector>
 
 #include "Common/CommonTypes.h"
 
@@ -33,6 +35,22 @@ struct DrawDistanceRange
   bool sampled = false;
 };
 
+// View-space extent of a draw's vertices (each transformed by its GX position matrix), in game
+// units: the camera is at the origin and looks down -z, x is right and y is up. The agent lists
+// where a draw is relative to the camera from it, and projects the sampled points onto the game's
+// screen.
+struct DrawViewBounds
+{
+  static constexpr float UNKNOWN = std::numeric_limits<float>::quiet_NaN();
+  std::array<float, 3> min{UNKNOWN, UNKNOWN, UNKNOWN};
+  std::array<float, 3> max{UNKNOWN, UNKNOWN, UNKNOWN};
+  std::array<float, 3> centroid{UNKNOWN, UNKNOWN, UNKNOWN};
+  // The sampled view-space positions themselves (at most max_samples of them).
+  std::vector<std::array<float, 3>> points;
+  bool valid = false;
+  bool sampled = false;
+};
+
 constexpr u32 DRAW_DEPTH_MAX_SAMPLES = 256;
 // Detect Skybox reads the distance of every draw that sits at the camera, every frame, from
 // write-combined GPU memory (about 0.2 us per vertex on PC with D3D12, far less on the Quest): it
@@ -56,6 +74,12 @@ DrawDistanceRange ComputeDrawDistanceRange(const u8* vertices, u32 count, u32 st
                                            const float* pos_matrices, u32 shared_matrix_index,
                                            u32 max_samples = DRAW_DEPTH_MAX_SAMPLES);
 
+// The same vertices and sampling, for their view-space extent and the sampled points.
+DrawViewBounds ComputeDrawViewBounds(const u8* vertices, u32 count, u32 stride,
+                                     const PortableVertexDeclaration& decl,
+                                     const float* pos_matrices, u32 shared_matrix_index,
+                                     u32 max_samples = DRAW_DEPTH_MAX_SAMPLES);
+
 // The depth of the draw VertexManagerBase::Flush is resolving, computed on first use. Flush
 // fills it for every draw (pointers only) and the override managers only ask for the range once
 // an entry with a depth condition matched everything else: on most backends the vertices are in
@@ -73,6 +97,9 @@ public:
   const DrawDepthRange& GetFew() const;
   // The distance range from at most DRAW_DISTANCE_MAX_SAMPLES vertices, computed on first use too.
   const DrawDistanceRange& GetDistance() const;
+  // The view-space bounds and sampled points (Get()'s sampling), computed on first use. Get()
+  // then derives its depth range from them without reading the vertices again.
+  const DrawViewBounds& GetViewBounds() const;
 
   // Whether the vertices carry their own position matrix index (decl.posmtx).
   bool HasPerVertexMatrix() const;
@@ -93,6 +120,8 @@ private:
   mutable DrawDepthRange m_few_range;
   mutable bool m_distance_computed = false;
   mutable DrawDistanceRange m_distance;
+  mutable bool m_bounds_computed = false;
+  mutable DrawViewBounds m_bounds;
 };
 
 // The min_depth / max_depth rule of the VR overrides (a value <= 0 is unset). True when neither

@@ -19,6 +19,7 @@
 #include "VideoCommon/TextureConfig.h"
 #include "VideoCommon/TextureDecoder.h"
 #include "VideoCommon/VR/VRFrameRegion.h"
+#include "VideoCommon/VideoCommon.h"
 
 namespace VR::AgentCapture
 {
@@ -357,7 +358,84 @@ bool MatchesFilter(const DrawRecord& draw, const DrawFilter& filter)
   {
     return false;
   }
+  if (filter.screen_x && filter.screen_y)
+  {
+    // Written so that an unknown box (NaN) fails.
+    if (!(*filter.screen_x >= draw.screen_left && *filter.screen_x <= draw.screen_right &&
+          *filter.screen_y >= draw.screen_top && *filter.screen_y <= draw.screen_bottom))
+    {
+      return false;
+    }
+  }
+  if (filter.visible && (draw.visible_pixels < 0 || (draw.visible_pixels > 0) != *filter.visible))
+    return false;
   return true;
+}
+
+ScreenBox ProjectViewPointsToFrame(const std::vector<std::array<float, 3>>& points,
+                                   const std::array<float, 6>& raw_projection, bool perspective,
+                                   float viewport_x, float viewport_y, float viewport_wd,
+                                   float viewport_ht, int x_off, int y_off,
+                                   const VRFrameRegion& frame)
+{
+  ScreenBox box;
+  float frame_left = 0.0f;
+  float frame_top = 0.0f;
+  float frame_width = static_cast<float>(EFB_WIDTH);
+  float frame_height = static_cast<float>(EFB_HEIGHT);
+  if (frame.valid && frame.width > 0 && frame.height > 0)
+  {
+    frame_left = static_cast<float>(frame.left);
+    frame_top = static_cast<float>(frame.top);
+    frame_width = static_cast<float>(frame.width);
+    frame_height = static_cast<float>(frame.height);
+  }
+  float left = std::numeric_limits<float>::infinity();
+  float top = std::numeric_limits<float>::infinity();
+  float right = -std::numeric_limits<float>::infinity();
+  float bottom = -std::numeric_limits<float>::infinity();
+  for (const std::array<float, 3>& v : points)
+  {
+    float ndc_x;
+    float ndc_y;
+    if (perspective)
+    {
+      // VertexShaderManager::LoadProjectionMatrix: clip w is -z.
+      const float w = -v[2];
+      if (!(w > 1e-6f))
+      {
+        box.partial = true;
+        continue;
+      }
+      ndc_x = (raw_projection[0] * v[0] + raw_projection[1] * v[2]) / w;
+      ndc_y = (raw_projection[2] * v[1] + raw_projection[3] * v[2]) / w;
+    }
+    else
+    {
+      ndc_x = raw_projection[0] * v[0] + raw_projection[1];
+      ndc_y = raw_projection[2] * v[1] + raw_projection[3];
+    }
+    // The viewport transform of BPFunctions::SetScissorAndViewport: the half height is negative,
+    // so NDC y up becomes EFB y down.
+    const float x = viewport_x + ndc_x * viewport_wd - static_cast<float>(x_off);
+    const float y = viewport_y + ndc_y * viewport_ht - static_cast<float>(y_off);
+    const float fx = (x - frame_left) / frame_width;
+    const float fy = (y - frame_top) / frame_height;
+    if (!std::isfinite(fx) || !std::isfinite(fy))
+      continue;
+    left = std::min(left, fx);
+    right = std::max(right, fx);
+    top = std::min(top, fy);
+    bottom = std::max(bottom, fy);
+  }
+  if (left > right)
+    return box;
+  box.left = left;
+  box.top = top;
+  box.right = right;
+  box.bottom = bottom;
+  box.valid = true;
+  return box;
 }
 
 const char* GetHandlingName(u8 handling)
@@ -508,6 +586,44 @@ static std::string FormatDepthRange(const DrawRecord& draw)
                      WithoutNegativeZero(draw.depth_max), draw.depth_sampled ? "~" : "");
 }
 
+// The direction of a view-space point from the camera: yaw (+ right) and pitch (+ up), degrees.
+static std::array<float, 2> DirectionDegrees(const std::array<float, 3>& v)
+{
+  constexpr float RAD_TO_DEG = 180.0f / 3.14159265f;
+  return {std::atan2(v[0], -v[2]) * RAD_TO_DEG,
+          std::atan2(v[1], std::sqrt(v[0] * v[0] + v[2] * v[2])) * RAD_TO_DEG};
+}
+
+static float Length(const std::array<float, 3>& v)
+{
+  return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+}
+
+// "yaw -12 pitch +3 dist 540 (5.4m) scr 0.31-0.44,0.52-0.60 vis 1234px": where the draw is
+// relative to the camera (perspective draws), on the game's screen, and how much of it shows.
+static std::string FormatPosition(const DrawRecord& draw)
+{
+  std::string text;
+  if (draw.perspective && !std::isnan(draw.view_centroid[2]))
+  {
+    const std::array<float, 2> direction = DirectionDegrees(draw.view_centroid);
+    const float distance = Length(draw.view_centroid);
+    text = fmt::format("yaw {:+.0f} pitch {:+.0f} dist {:.3g}", WithoutNegativeZero(direction[0]),
+                       WithoutNegativeZero(direction[1]), distance);
+    if (draw.scale_units_per_meter > 0.0f)
+      text += fmt::format(" ({:.2g}m)", distance / draw.scale_units_per_meter);
+  }
+  if (!std::isnan(draw.screen_left))
+  {
+    text += fmt::format("{}scr {:.2f}-{:.2f},{:.2f}-{:.2f}{}", text.empty() ? "" : " ",
+                        draw.screen_left, draw.screen_right, draw.screen_top, draw.screen_bottom,
+                        draw.screen_partial ? "~" : "");
+  }
+  if (draw.visible_pixels >= 0)
+    text += fmt::format("{}vis {}px", text.empty() ? "" : " ", draw.visible_pixels);
+  return text.empty() ? "-" : text;
+}
+
 std::string FormatDrawRow(const DrawRecord& draw)
 {
   const std::array<float, 6> p = WithoutNegativeZero(draw.projection);
@@ -547,14 +663,14 @@ std::string FormatDrawRow(const DrawRecord& draw)
     depth_blend = "-";
 
   return fmt::format(
-      "#{} {} | vp {:.0f},{:.0f} {:.0f}x{:.0f} {} | vs {:08x} ps {:08x} | idx {} | z {} | tex {} | "
-      "{} | handling {} | {}{}",
+      "#{} {} | vp {:.0f},{:.0f} {:.0f}x{:.0f} {} | vs {:08x} ps {:08x} | idx {} | z {} | at {} | "
+      "tex {} | {} | handling {} | {}{}",
       draw.index, projection, draw.viewport_x - std::abs(draw.viewport_wd),
       draw.viewport_y - std::abs(draw.viewport_ht), std::abs(draw.viewport_wd) * 2,
       std::abs(draw.viewport_ht) * 2,
       GetVRViewportClassName(static_cast<VRViewportClass>(draw.viewport_class)), draw.vs, draw.ps,
-      draw.index_count, FormatDepthRange(draw), textures.empty() ? "-" : textures, depth_blend,
-      handling, DescribeRoute(draw),
+      draw.index_count, FormatDepthRange(draw), FormatPosition(draw),
+      textures.empty() ? "-" : textures, depth_blend, handling, DescribeRoute(draw),
       draw.skip != SkipReason::None ? fmt::format(" (skip: {})", GetSkipReasonName(draw.skip)) :
                                       std::string(draw.pink ? " (pink)" : ""));
 }
@@ -610,6 +726,44 @@ std::string FormatDrawDetails(const DrawRecord& draw)
     text += fmt::format("Camera depth: {:.4g} to {:.4g} game units{}\n",
                         WithoutNegativeZero(draw.depth_min), WithoutNegativeZero(draw.depth_max),
                         draw.depth_sampled ? " (some vertices of this big draw)" : "");
+  }
+  if (!std::isnan(draw.view_centroid[2]))
+  {
+    text += fmt::format(
+        "Position (view space, game units; x right, y up, the camera looks down "
+        "-z): centre ({:.4g}, {:.4g}, {:.4g}), x {:.4g}..{:.4g} y {:.4g}..{:.4g} z "
+        "{:.4g}..{:.4g}\n",
+        WithoutNegativeZero(draw.view_centroid[0]), WithoutNegativeZero(draw.view_centroid[1]),
+        WithoutNegativeZero(draw.view_centroid[2]), WithoutNegativeZero(draw.view_min[0]),
+        WithoutNegativeZero(draw.view_max[0]), WithoutNegativeZero(draw.view_min[1]),
+        WithoutNegativeZero(draw.view_max[1]), WithoutNegativeZero(draw.view_min[2]),
+        WithoutNegativeZero(draw.view_max[2]));
+    if (draw.perspective)
+    {
+      const std::array<float, 2> direction = DirectionDegrees(draw.view_centroid);
+      const float distance = Length(draw.view_centroid);
+      text += fmt::format(
+          "Relative to the camera: yaw {:+.1f} deg (+ right), pitch {:+.1f} deg "
+          "(+ up), distance {:.4g} game units{}\n",
+          WithoutNegativeZero(direction[0]), WithoutNegativeZero(direction[1]), distance,
+          draw.scale_units_per_meter > 0.0f ?
+              fmt::format(" ({:.3g} m at {:.4g} units per meter)",
+                          distance / draw.scale_units_per_meter, draw.scale_units_per_meter) :
+              std::string());
+    }
+  }
+  if (!std::isnan(draw.screen_left))
+  {
+    text += fmt::format("On the game's screen: x {:.3f}..{:.3f}, y {:.3f}..{:.3f} of the displayed "
+                        "frame (0,0 top-left, 1,1 bottom-right){}\n",
+                        draw.screen_left, draw.screen_right, draw.screen_top, draw.screen_bottom,
+                        draw.screen_partial ? "; vertices behind the camera are left out" : "");
+  }
+  if (draw.visible_pixels >= 0)
+  {
+    text +=
+        fmt::format("Visible: {} pixels of the draw-ID map show it{}\n", draw.visible_pixels,
+                    draw.visible_pixels == 0 ? " (hidden behind other draws, or off screen)" : "");
   }
   if (draw.perspective)
   {

@@ -155,6 +155,99 @@ TEST(AgentCapture, FiltersDraws)
   EXPECT_TRUE(MatchesFilter(ortho, filter));
   filter.frame = 0;
   EXPECT_FALSE(MatchesFilter(ortho, filter));
+
+  // A point of the screen: only draws with a known box holding it.
+  filter = {};
+  filter.screen_x = 0.5f;
+  filter.screen_y = 0.5f;
+  EXPECT_FALSE(MatchesFilter(ortho, filter));
+  ortho.screen_left = 0.4f;
+  ortho.screen_top = 0.45f;
+  ortho.screen_right = 0.6f;
+  ortho.screen_bottom = 0.55f;
+  EXPECT_TRUE(MatchesFilter(ortho, filter));
+  filter.screen_x = 0.7f;
+  EXPECT_FALSE(MatchesFilter(ortho, filter));
+
+  // Visibility needs a draw-ID map.
+  filter = {};
+  filter.visible = true;
+  EXPECT_FALSE(MatchesFilter(ortho, filter));
+  ortho.visible_pixels = 0;
+  EXPECT_FALSE(MatchesFilter(ortho, filter));
+  filter.visible = false;
+  EXPECT_TRUE(MatchesFilter(ortho, filter));
+  ortho.visible_pixels = 12;
+  EXPECT_FALSE(MatchesFilter(ortho, filter));
+  filter.visible = true;
+  EXPECT_TRUE(MatchesFilter(ortho, filter));
+}
+
+TEST(AgentCapture, ProjectsOrthographicPointsToTheFrame)
+{
+  // A 640x480 GX screen with (0,0) at the top left: ndc x = x / 320 - 1, ndc y = 1 - y / 240.
+  const std::array<float, 6> projection = {2.0f / 640.0f, -1.0f, -2.0f / 480.0f, 1.0f, 0.0f, 1.0f};
+  VR::VRFrameRegion frame;
+  frame.left = 0;
+  frame.top = 0;
+  frame.width = 640;
+  frame.height = 480;
+  frame.valid = true;
+  const std::vector<std::array<float, 3>> points = {{160, 120, 0}, {480, 360, 0}};
+  // The full-screen viewport: centre 342+320,342+240, half extents 320 x -240.
+  const ScreenBox box = ProjectViewPointsToFrame(points, projection, false, 662.0f, 582.0f, 320.0f,
+                                                 -240.0f, 342, 342, frame);
+  ASSERT_TRUE(box.valid);
+  EXPECT_FALSE(box.partial);
+  EXPECT_FLOAT_EQ(box.left, 0.25f);
+  EXPECT_FLOAT_EQ(box.top, 0.25f);
+  EXPECT_FLOAT_EQ(box.right, 0.75f);
+  EXPECT_FLOAT_EQ(box.bottom, 0.75f);
+
+  // A frame of 448 lines starting at line 16 (Metroid Prime Trilogy): y moves with it.
+  frame.top = 16;
+  frame.height = 448;
+  const ScreenBox boxed = ProjectViewPointsToFrame(points, projection, false, 662.0f, 582.0f,
+                                                   320.0f, -240.0f, 342, 342, frame);
+  ASSERT_TRUE(boxed.valid);
+  EXPECT_FLOAT_EQ(boxed.top, (120.0f - 16.0f) / 448.0f);
+  EXPECT_FLOAT_EQ(boxed.left, 0.25f);
+
+  // Without a frame region, the whole EFB (640x528) is the frame.
+  frame.valid = false;
+  const ScreenBox efb = ProjectViewPointsToFrame(points, projection, false, 662.0f, 582.0f, 320.0f,
+                                                 -240.0f, 342, 342, frame);
+  ASSERT_TRUE(efb.valid);
+  EXPECT_FLOAT_EQ(efb.top, 120.0f / 528.0f);
+
+  EXPECT_FALSE(ProjectViewPointsToFrame({}, projection, false, 662.0f, 582.0f, 320.0f, -240.0f, 342,
+                                        342, frame)
+                   .valid);
+}
+
+TEST(AgentCapture, ProjectsPerspectivePointsToTheFrame)
+{
+  // A 90 degree field of view: ndc x = x / -z, ndc y = y / -z.
+  const std::array<float, 6> projection = {1.0f, 0.0f, 1.0f, 0.0f, -1.0f, -2.0f};
+  VR::VRFrameRegion frame;
+  frame.width = 640;
+  frame.height = 480;
+  frame.valid = true;
+  const std::vector<std::array<float, 3>> points = {{5, -5, -10}, {0, 0, -10}, {0, 0, 5}};
+  const ScreenBox box = ProjectViewPointsToFrame(points, projection, true, 662.0f, 582.0f, 320.0f,
+                                                 -240.0f, 342, 342, frame);
+  ASSERT_TRUE(box.valid);
+  // The point behind the camera is left out.
+  EXPECT_TRUE(box.partial);
+  EXPECT_FLOAT_EQ(box.left, 0.5f);
+  EXPECT_FLOAT_EQ(box.top, 0.5f);
+  EXPECT_FLOAT_EQ(box.right, 0.75f);
+  EXPECT_FLOAT_EQ(box.bottom, 0.75f);
+
+  const ScreenBox behind = ProjectViewPointsToFrame(
+      {{0, 0, 5}, {0, 0, 0}}, projection, true, 662.0f, 582.0f, 320.0f, -240.0f, 342, 342, frame);
+  EXPECT_FALSE(behind.valid);
+  EXPECT_TRUE(behind.partial);
 }
 
 TEST(AgentCapture, CapturesConsecutiveFrames)
@@ -298,6 +391,45 @@ TEST(AgentCapture, FormatsRows)
   near.depth_sampled = true;
   EXPECT_NE(FormatDrawRow(near).find("| z 2.5..3~ |"), std::string::npos) << FormatDrawRow(near);
   EXPECT_NE(FormatDrawDetails(near).find("(some vertices of this big draw)"), std::string::npos);
+
+  // Where the draw is: unknown until the capture reads the vertices.
+  EXPECT_NE(row.find("| at - |"), std::string::npos) << row;
+  DrawRecord placed = draw;
+  placed.screen_left = 0.25f;
+  placed.screen_top = 0.5f;
+  placed.screen_right = 0.75f;
+  placed.screen_bottom = 1.0f;
+  EXPECT_NE(FormatDrawRow(placed).find("| at scr 0.25-0.75,0.50-1.00 |"), std::string::npos)
+      << FormatDrawRow(placed);
+  placed.screen_partial = true;
+  placed.visible_pixels = 1234;
+  EXPECT_NE(FormatDrawRow(placed).find("| at scr 0.25-0.75,0.50-1.00~ vis 1234px |"),
+            std::string::npos)
+      << FormatDrawRow(placed);
+  EXPECT_NE(FormatDrawDetails(placed).find("On the game's screen: x 0.250..0.750, y 0.500..1.000"),
+            std::string::npos)
+      << FormatDrawDetails(placed);
+  EXPECT_NE(FormatDrawDetails(placed).find("Visible: 1234 pixels"), std::string::npos);
+  DrawRecord world = MakeDraw(43, true);
+  world.view_centroid = {100.0f, 0.0f, -100.0f};
+  world.view_min = {90.0f, -5.0f, -110.0f};
+  world.view_max = {110.0f, 5.0f, -90.0f};
+  world.scale_units_per_meter = 50.0f;
+  const std::string world_row = FormatDrawRow(world);
+  EXPECT_NE(world_row.find("| at yaw +45 pitch +0 dist 141 (2.8m) |"), std::string::npos)
+      << world_row;
+  const std::string world_details = FormatDrawDetails(world);
+  EXPECT_NE(world_details.find("Relative to the camera: yaw +45.0 deg (+ right), pitch +0.0 deg "
+                               "(+ up), distance 141.4 game units (2.83 m at 50 units per meter)"),
+            std::string::npos)
+      << world_details;
+  EXPECT_NE(world_details.find("centre (100, 0, -100), x 90..110 y -5..5 z -110..-90"),
+            std::string::npos)
+      << world_details;
+  // An orthographic draw has no direction, only a screen box.
+  DrawRecord flat = placed;
+  flat.view_centroid = {0.0f, 0.0f, -1.0f};
+  EXPECT_EQ(FormatDrawRow(flat).find("yaw"), std::string::npos);
 
   // Ranges without "-0", and the depth/blend column without stray spaces.
   draw.projection = {-0.0f, 608, 72, -0.0f, 0, 1};

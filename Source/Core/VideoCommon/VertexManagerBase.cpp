@@ -1098,7 +1098,30 @@ static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool age
   record->stereo_override = geometry_shader_manager.vr_stereo_override;
   record->element_depth = geometry_shader_manager.vr_element_depth_override;
   record->units_per_meter = geometry_shader_manager.vr_units_per_meter_override;
+  record->scale_units_per_meter = record->units_per_meter > 0.0f ? record->units_per_meter :
+                                  VR::g_openxr ? VR::g_openxr->GetEffectiveUnitsPerMeter() :
+                                                 -1.0f;
   // A capture is an explicit agent request: reading every captured draw's vertices back is fine.
+  // The view-space bounds come first: Get() then derives the depth range from them.
+  const DrawViewBounds& bounds = draw_depth.GetViewBounds();
+  if (bounds.valid)
+  {
+    record->view_min = bounds.min;
+    record->view_max = bounds.max;
+    record->view_centroid = bounds.centroid;
+    const VR::AgentCapture::ScreenBox box = VR::AgentCapture::ProjectViewPointsToFrame(
+        bounds.points, xfmem.projection.rawProjection, record->perspective, xfmem.viewport.xOrig,
+        xfmem.viewport.yOrig, xfmem.viewport.wd, xfmem.viewport.ht, bpmem.scissorOffset.x << 1,
+        bpmem.scissorOffset.y << 1, VR::GetVRFrameRegion());
+    if (box.valid)
+    {
+      record->screen_left = box.left;
+      record->screen_top = box.top;
+      record->screen_right = box.right;
+      record->screen_bottom = box.bottom;
+      record->screen_partial = box.partial;
+    }
+  }
   const DrawDepthRange& depth = draw_depth.Get();
   if (depth.valid)
   {
