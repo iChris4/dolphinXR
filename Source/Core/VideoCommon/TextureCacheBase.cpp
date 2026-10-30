@@ -362,6 +362,7 @@ void TextureCacheBase::Invalidate()
     bind.reset();
   m_textures_by_hash.clear();
   m_textures_by_address.clear();
+  m_vr_recent_xfb_copies = {};
 
   m_texture_pool.clear();
 }
@@ -823,8 +824,10 @@ void TextureCacheBase::DoState(PointerWrap& p)
 {
   // Flush all pending XFB copies before either loading or saving.
   FlushEFBCopies();
-  // A loaded state replaces guest RAM: delivered copies no longer describe it.
+  // A loaded state replaces guest RAM: delivered copies no longer describe it, nor recent XFB
+  // copies the frames it presents.
   m_delivered_efb_copies.clear();
+  m_vr_recent_xfb_copies = {};
 
   p.Do(m_last_entry_id);
 
@@ -2539,6 +2542,9 @@ RcTcacheEntry TextureCacheBase::GetXFBTexture(u32 address, u32 width, u32 height
     return {};
   }
 
+  m_vr_presents_since_xfb_copy =
+      std::min(m_vr_presents_since_xfb_copy + 1, MAX_VR_RECENT_XFB_PRESENTS + 1);
+
   // Do we currently have a mutable version of this XFB copy in VRAM?
   RcTcacheEntry entry = GetXFBFromCache(address, width, height, stride);
   if (entry && !entry->IsLocked())
@@ -2552,6 +2558,15 @@ RcTcacheEntry TextureCacheBase::GetXFBTexture(u32 address, u32 width, u32 height
     GetDisplayRectForXFBEntry(entry.get(), width, height, display_rect);
     return entry;
   }
+
+#ifdef ENABLE_VR
+  // The game's copy of this frame, which later copies made the cache drop.
+  if (RcTcacheEntry recent = GetVRRecentXFBCopy(address, width, height, stride))
+  {
+    GetDisplayRectForXFBEntry(recent.get(), width, height, display_rect);
+    return recent;
+  }
+#endif
 
   // Create a new VRAM texture, and fill it with the data from guest RAM.
   entry = AllocateCacheEntry(TextureConfig(width, height, 1, 1, 1, AbstractTextureFormat::RGBA8,
@@ -2641,6 +2656,25 @@ RcTcacheEntry TextureCacheBase::GetXFBFromCache(u32 address, u32 width, u32 heig
     ++iter;
   }
 
+  return {};
+}
+
+RcTcacheEntry TextureCacheBase::GetVRRecentXFBCopy(u32 address, u32 width, u32 height,
+                                                   u32 stride) const
+{
+  if (!g_ActiveConfig.VRSessionActive() ||
+      m_vr_presents_since_xfb_copy > MAX_VR_RECENT_XFB_PRESENTS)
+  {
+    return {};
+  }
+  for (const RcTcacheEntry& entry : m_vr_recent_xfb_copies)
+  {
+    if (entry && entry->addr == address && entry->memory_stride == stride &&
+        entry->native_width >= width && entry->native_height >= height)
+    {
+      return entry;
+    }
+  }
   return {};
 }
 
@@ -3015,6 +3049,13 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
   FinalizeFramebufferCopy(entry, resolved_data);
 
 #ifdef ENABLE_VR
+  if (resolved_data.is_xfb && entry && g_ActiveConfig.VRSessionActive())
+  {
+    std::shift_right(m_vr_recent_xfb_copies.begin(), m_vr_recent_xfb_copies.end(), 1);
+    m_vr_recent_xfb_copies[0] = entry;
+    m_vr_presents_since_xfb_copy = 0;
+  }
+
   // The agent server's capture lists the copies between the draws, with the texture they made.
   if (VR::AgentCapture::IsCapturing()) [[unlikely]]
   {

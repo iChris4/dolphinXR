@@ -518,6 +518,8 @@ private:
                                    bool custom_arbitrary_mipmaps, bool skip_texture_dump);
 
   RcTcacheEntry GetXFBFromCache(u32 address, u32 width, u32 height, u32 stride);
+  // VR: the XFB copy at this address among the game's last ones (m_vr_recent_xfb_copies).
+  RcTcacheEntry GetVRRecentXFBCopy(u32 address, u32 width, u32 height, u32 stride) const;
 
   std::pair<RcTcacheEntry, u32> CreatePaletteEntryWithOffset(const RcTcacheEntry& entry,
                                                              const u8* palette);
@@ -681,6 +683,18 @@ private:
   EFBCopyStats m_efb_copy_stats;
   u32 m_efb_copy_frame = 0;
   u32 m_efb_copy_events_logged = 0;
+
+  // VR sessions: the game's last XFB copies, for a present that runs after the next frame's
+  // first copies (dual core, with the video thread behind the CPU). Some games make those over
+  // part of the XFB buffer the present shows (Metroid Prime Trilogy: 640x480 copies into buffers
+  // 448 lines apart, and a texture copy over the tail of one), so the cache drops the XFB copy
+  // and GetXFBTexture would rebuild the frame from RAM: one layer, which a stereo session shows
+  // on the flat panel, and an older picture while the copy's own RAM write is pending. Kept until
+  // the game presents MAX_VR_RECENT_XFB_PRESENTS frames without a new XFB copy, as for a menu
+  // it composes in RAM (Rogue Leader), which then gets its RAM frames.
+  std::array<RcTcacheEntry, 2> m_vr_recent_xfb_copies;
+  u32 m_vr_presents_since_xfb_copy = 0;
+  static constexpr u32 MAX_VR_RECENT_XFB_PRESENTS = 8;
 
   // Staging texture used for readbacks.
   // We store this in the class so that the same staging texture can be used for multiple
