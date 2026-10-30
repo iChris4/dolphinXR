@@ -71,6 +71,15 @@ VKGfx::VKGfx(std::unique_ptr<SwapChain> swap_chain, float backbuffer_scale)
   });
 }
 
+void VKGfx::SkipFrameForVRFoveation()
+{
+  if (!g_framebuffer_manager || !g_framebuffer_manager->IsEFBFoveated())
+    return;
+  RecordCommand command{};
+  command.type = RecordCommandType::EFBFoveationSkipFrame;
+  Record(command);
+}
+
 VKGfx::~VKGfx()
 {
   // Drain and join before any backend state the queued commands reference goes away.
@@ -1145,6 +1154,9 @@ void VKGfx::ExecuteRecordCommand(const RecordCommand& command)
     break;
   case RecordCommandType::EFBFrameEnd:
     tracker->OnEFBFrameEnd(command.efb_frame_end.efb_scale, command.efb_frame_end.foveation_level);
+    break;
+  case RecordCommandType::EFBFoveationSkipFrame:
+    tracker->OnEFBFoveationSkipFrame();
     break;
   }
 }

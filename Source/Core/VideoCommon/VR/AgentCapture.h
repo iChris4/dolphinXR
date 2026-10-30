@@ -205,8 +205,8 @@ struct DrawRecord
   float screen_bottom = std::numeric_limits<float>::quiet_NaN();
   // Some sampled vertices were behind the camera and are not in the box.
   bool screen_partial = false;
-  // Pixels of the frame's draw-ID map that show this draw (the draw on top at each pixel), -1
-  // without a map.
+  // Pixels of the frame's draw-ID map that show this draw (the draw on top at each pixel; both
+  // eyes in stereo), -1 without a map.
   s32 visible_pixels = -1;
 };
 
@@ -243,6 +243,30 @@ constexpr size_t MAX_CAPTURED_DRAWS = 65536;
 constexpr size_t MAX_CAPTURED_COPIES = 8192;
 constexpr u32 MAX_CAPTURE_FRAMES = 300;
 
+// The draw-ID map of a captured frame: for each native EFB pixel of each eye layer, the index of
+// the draw on top there (its last fragment that passed the depth test and showed something), or
+// NO_DRAW. Made by the draw-ID pass (FramebufferManager::BeginDrawIdFrame): the frame's draws
+// write their index in place of their colour, into a texture that shares the EFB depth.
+struct DrawIdMap
+{
+  static constexpr u32 NO_DRAW = 0xFFFFFFFFu;
+  // EFB_WIDTH x EFB_HEIGHT (native pixels); 0 layers: no map.
+  u32 width = 0;
+  u32 height = 0;
+  u32 layers = 0;
+  // Layer-major, then row-major.
+  std::vector<u32> ids;
+  // The EFB rectangle the frame's XFB copy showed (native pixels): what the eye images cover.
+  s32 xfb_left = 0;
+  s32 xfb_top = 0;
+  s32 xfb_right = 0;
+  s32 xfb_bottom = 0;
+
+  bool HasMap() const { return layers > 0; }
+  // NO_DRAW outside the map.
+  u32 Get(u32 layer, u32 x, u32 y) const;
+};
+
 struct CapturedFrame
 {
   u64 id = 0;
@@ -250,6 +274,10 @@ struct CapturedFrame
   u32 frames = 0;
   std::vector<DrawRecord> draws;
   std::vector<CopyRecord> copies;
+  // The draw-ID pass was asked for (its map covers the first frame); why there is no map.
+  bool draw_ids = false;
+  DrawIdMap id_map;
+  std::string id_map_error;
   // Draws beyond MAX_CAPTURED_DRAWS, copies beyond MAX_CAPTURED_COPIES.
   u32 dropped = 0;
   u32 dropped_copies = 0;
@@ -280,12 +308,18 @@ inline bool HasPreview()
 }
 
 // Video thread (agent job): records every draw and EFB copy of the `frames` frames that follow
-// the next EFB->XFB copy.
-void RequestCapture(u64 id, u32 frames = 1);
+// the next EFB->XFB copy. With draw_ids, the first of them is a draw-ID frame (DrawIdMap): the
+// capture is published once its map is read back, a frame or two later.
+void RequestCapture(u64 id, u32 frames = 1, bool draw_ids = false);
 // Draw path: a new record for the current draw, or nullptr when the capture is full.
 DrawRecord* BeginRecord();
 // TextureCacheBase, after an EFB or XFB copy (frame and after_index are filled in here).
 void RecordCopy(CopyRecord copy);
+// TextureCacheBase, at every XFB copy (capturing or not): its source rectangle in EFB pixels.
+void NoteXFBCopyRegion(int left, int top, int right, int bottom);
+// The displayed frame the screen boxes are measured in: VR::GetVRFrameRegion() when a VR session
+// latched it, else the last XFB copy's rectangle (invalid before the first one).
+VRFrameRegion GetDisplayedFrameRegion();
 void CountHiddenBatch();
 // VertexManagerBase::OnEndFrame, before the frame counters reset.
 void OnEndFrame(u32 head_culled_draws, bool flat_mode);
@@ -336,6 +370,7 @@ enum class PreviewAction : u8
 
 // Video thread (agent job).
 void SetPreview(PreviewSet preview);
+PreviewSet GetPreview();
 // Draw path.
 PreviewAction MatchPreview(u32 index, u64 vs, u64 ps, u64 gs, u64 vs_family, u64 ps_family,
                            u64 gs_family, const std::array<u64, 8>& textures);
@@ -362,6 +397,25 @@ struct DrawFilter
   // Only draws with (true) or without (false) pixels in the frame's draw-ID map.
   std::optional<bool> visible;
 };
+
+// ---- Draw-ID map (pure) ----
+
+// A texel of the ID texture (RGBA8): red and green hold the index, blue marks a draw.
+u32 DecodeDrawId(const u8* rgba);
+// Fills one layer of the map from the ID texture's texels (rows of src_width RGBA8 texels,
+// `stride` bytes apart), by nearest sampling when the texture is larger than the map.
+void FillDrawIdMapLayer(DrawIdMap* map, u32 layer, const u8* rgba, size_t stride, u32 src_width,
+                        u32 src_height);
+// The map pixel under a point of the eye image (fractions of the XFB rectangle, 0,0 top-left),
+// or nullopt outside it.
+std::optional<std::array<u32, 2>> MapImagePointToDrawIdPixel(const DrawIdMap& map, float u,
+                                                             float v);
+// The draws within `radius` pixels of a map pixel (NO_DRAW included), with their pixel counts,
+// most pixels first.
+std::vector<std::pair<u32, u32>> CountDrawIdsAround(const DrawIdMap& map, u32 layer, u32 x, u32 y,
+                                                    u32 radius);
+// Sets visible_pixels of the first frame's draws from the map.
+void CountVisiblePixels(CapturedFrame* frame);
 
 // A draw's box on the game's screen, as fractions of the displayed frame (0,0 top-left).
 struct ScreenBox

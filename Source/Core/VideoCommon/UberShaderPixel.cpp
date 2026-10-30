@@ -18,7 +18,7 @@ namespace UberShader
 {
 // Bumped to 3: dedicated VR passthrough coverage output modes.
 // Bumped to 4: coverage output carries the fragment blend alpha for blended draws.
-static constexpr u32 UBER_PIXEL_SHADER_CODE_VERSION = 5;
+static constexpr u32 UBER_PIXEL_SHADER_CODE_VERSION = 6;
 
 PixelShaderUid GetPixelShaderUid()
 {
@@ -1269,6 +1269,19 @@ ShaderCode GenPixelShader(APIType api_type, const ShaderHostConfig& host_config,
 
   }
 
+  if (uid_data->vr_draw_id)
+  {
+    // Draw-ID pass (VR::AgentCapture): the fragment passed the alpha test, so its draw's index
+    // goes out in place of the colour (16 bits in red and green; blue marks a draw). A fragment
+    // whose source-alpha blend would contribute nothing shows nothing: dropped.
+    out.Write("  if (blend_enable && blend_src_factor == {}u && TevResult.a == 0)\n"
+              "    discard_fragment;\n",
+              static_cast<u32>(SrcBlendFactor::SrcAlpha));
+    out.Write("  {} = float4(float(" I_VR_DRAW_ID " & 255u) / 255.0, float((" I_VR_DRAW_ID
+              " >> 8u) & 255u) / 255.0, 1.0, 1.0);\n",
+              use_framebuffer_fetch ? "real_ocol0" : "ocol0");
+  }
+
   if (bounding_box)
   {
     out.Write("  if (bpmem_bounding_box) {{\n"
@@ -1276,7 +1289,8 @@ ShaderCode GenPixelShader(APIType api_type, const ShaderHostConfig& host_config,
               "  }}\n");
   }
 
-  if (use_framebuffer_fetch)
+  // The draw-ID output is final: no blending in the shader over it.
+  if (use_framebuffer_fetch && !uid_data->vr_draw_id)
   {
     using Common::EnumMap;
 

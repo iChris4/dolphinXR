@@ -69,6 +69,8 @@ struct alignas(16) PixelShaderConstants
   // PS reproduces the fixed-function viewport transform: depth = near + vr_depth * range.
   float vr_screen_depth_near;
   float vr_screen_depth_range;
+  // Draw-ID pass (VR::AgentCapture): the index the frame's draw-ID uber pixel shader writes.
+  u32 vr_draw_id;
 };
 
 struct alignas(16) VertexShaderConstants

@@ -287,6 +287,7 @@ void WriteSwitch(ShaderCode& out, APIType ApiType, std::string_view variable,
 #define I_VR_PASSTHROUGH_ALPHA "cvr_passthrough_alpha"
 #define I_VR_SCREEN_DEPTH_NEAR "cvr_screen_depth_near"
 #define I_VR_SCREEN_DEPTH_RANGE "cvr_screen_depth_range"
+#define I_VR_DRAW_ID "cvr_draw_id"
 
 #define I_POSNORMALMATRIX "cpnmtx"
 #define I_PROJECTION "cproj"

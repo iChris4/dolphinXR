@@ -47,6 +47,9 @@ void LoadStateAndWait(const std::string& path, std::chrono::milliseconds timeout
 // Captures the current frame (both eyes in stereo) and appends the PNGs to `result`. Returns a
 // one-line description. Throws ToolError.
 std::string AppendScreenshots(ToolResult& result, u32 max_width, bool left, bool right);
+// The size of the last screenshot of an eye layer (0 left or mono, 1 right): what draw_at_pixel's
+// x and y refer to.
+std::optional<std::array<u32, 2>> GetLastScreenshotSize(u32 layer);
 
 // ---- CodeTools.cpp ----
 

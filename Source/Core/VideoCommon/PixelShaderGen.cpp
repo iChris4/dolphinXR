@@ -408,6 +408,7 @@ void WritePixelShaderCommonHeader(ShaderCode& out, APIType api_type,
             "\tfloat " I_VR_PASSTHROUGH_ALPHA ";\n"
             "\tfloat " I_VR_SCREEN_DEPTH_NEAR ";\n"
             "\tfloat " I_VR_SCREEN_DEPTH_RANGE ";\n"
+            "\tuint " I_VR_DRAW_ID ";\n"
             "}};\n\n");
   out.Write("#define bpmem_combiners(i) (bpmem_pack1[(i)].xy)\n"
             "#define bpmem_tevind(i) (bpmem_pack1[(i)].z)\n"

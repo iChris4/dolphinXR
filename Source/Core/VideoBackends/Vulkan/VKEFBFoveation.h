@@ -51,6 +51,9 @@ public:
   // The emulated frame ended (XFB copy): pass positions restart from 0. The EFB scale and the
   // foveation level select the cached verdicts; when they change, the passes are measured anew.
   void OnFrameEnd(u32 efb_scale, s32 foveation_level);
+  // The frame about to run (until the next OnFrameEnd) is not representative (the agent's
+  // draw-ID pass): its passes keep their density map choice but are neither timed nor counted.
+  void SkipNextFrame() { m_skip_frame = true; }
   // A command buffer kick was skipped to keep a foveated pass whole (VKGfx::Flush).
   void NoteSkippedKick() { ++m_skipped_kicks; }
 
@@ -162,6 +165,7 @@ private:
   float m_pending_ms = 0.0f;
   u32 m_frame = 0;
   u32 m_passes_last_frame = 0;
+  bool m_skip_frame = false;
   u32 m_skipped_kicks = 0;
   u32 m_trials = 0;
   u32 m_rechecks = 0;

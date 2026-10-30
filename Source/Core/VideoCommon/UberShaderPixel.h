@@ -24,6 +24,10 @@ struct pixel_ubershader_uid_data
   // vr_depth varying (see PixelShaderGen). Set per draw by VertexManagerBase, never by
   // GetPixelShaderUid.
   u32 vr_screen_exact_depth : 1;
+  // Draw-ID pass (VR::AgentCapture): write the draw's index (cvr_draw_id) in place of the colour
+  // and drop the fragments whose source-alpha blending would show nothing. Set per draw through
+  // ShaderCache::GetDrawIdUberPipelineForUid, never by GetPixelShaderUid or the enumeration.
+  u32 vr_draw_id : 1;
   // Bump when PS code generation logic changes to invalidate stale shader cache entries.
   u32 code_version : 4;
 

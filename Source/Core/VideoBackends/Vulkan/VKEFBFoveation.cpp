@@ -141,9 +141,10 @@ bool EFBFoveationScheduler::BeginPass(VkCommandBuffer cmd)
   // every frame is timed: it is judged by the frame's time from that pass on.
   const bool foveated =
       continued ? m_last_foveated : position < MAX_PASSES && m_passes[position].foveated;
-  const bool timed = continued ? m_last_timed :
-                                 position < MAX_PASSES && (m_frame % TIMING_INTERVAL == 0 ||
-                                                           m_trial_position != NO_TRIAL);
+  const bool timed = continued ?
+                         m_last_timed :
+                         !m_skip_frame && position < MAX_PASSES &&
+                             (m_frame % TIMING_INTERVAL == 0 || m_trial_position != NO_TRIAL);
   m_last_foveated = foveated;
   m_last_timed = timed;
 
@@ -526,7 +527,11 @@ void EFBFoveationScheduler::CompleteFrame(const FrameTimes& times)
 
 void EFBFoveationScheduler::OnFrameEnd(u32 efb_scale, s32 foveation_level)
 {
-  m_frame_pass_counts[m_frame % FRAME_RING] = {m_frame, m_position};
+  // A skipped frame's pass count is not stored: CompleteFrame leaves the frame out.
+  if (m_skip_frame)
+    m_skip_frame = false;
+  else
+    m_frame_pass_counts[m_frame % FRAME_RING] = {m_frame, m_position};
   m_passes_last_frame = m_position;
   m_position = 0;
   m_continue = false;

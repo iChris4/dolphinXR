@@ -7,6 +7,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <utility>
 
 #include <fmt/format.h>
 
@@ -14,6 +15,7 @@
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/AbstractStagingTexture.h"
 #include "VideoCommon/AbstractTexture.h"
+#include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/GeometryShaderManager.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/TextureConfig.h"
@@ -34,8 +36,20 @@ namespace
 // Video thread.
 u64 s_pending_capture_id = 0;
 u32 s_pending_capture_frames = 1;
+bool s_pending_capture_draw_ids = false;
 std::unique_ptr<CapturedFrame> s_current;
 u32 s_current_target_frames = 1;
+// The frame being rendered is s_current's draw-ID frame.
+bool s_draw_id_frame = false;
+// The draw-ID readback of s_current (then s_finishing) is on its way from the GPU.
+bool s_draw_id_readback_pending = false;
+// Recorded, waiting for its draw-ID map before it is published.
+std::unique_ptr<CapturedFrame> s_finishing;
+u32 s_finishing_frames = 0;
+// Frame ends the readback is given without blocking the video thread, before waiting for it.
+constexpr u32 DRAW_ID_READBACK_WAIT_FRAMES = 3;
+// The last XFB copy's source rectangle (GetDisplayedFrameRegion).
+VRFrameRegion s_last_xfb_region;
 PreviewSet s_preview;
 
 std::mutex s_published_mutex;
@@ -188,10 +202,67 @@ EyeCapture CaptureEyeImages(u32 max_width, bool left, bool right)
   return capture;
 }
 
-void RequestCapture(u64 id, u32 frames)
+void RequestCapture(u64 id, u32 frames, bool draw_ids)
 {
   s_pending_capture_id = id;
   s_pending_capture_frames = std::clamp(frames, 1u, MAX_CAPTURE_FRAMES);
+  s_pending_capture_draw_ids = draw_ids;
+}
+
+// Builds the capture's map from the readback (FramebufferManager::MapDrawIdReadback).
+static void ReadDrawIdMap(CapturedFrame* frame)
+{
+  DrawIdMap& map = frame->id_map;
+  const u32 layers = g_framebuffer_manager->GetDrawIdReadbackLayers();
+  map.width = EFB_WIDTH;
+  map.height = EFB_HEIGHT;
+  map.layers = layers;
+  map.ids.assign(static_cast<size_t>(EFB_WIDTH) * EFB_HEIGHT * layers, DrawIdMap::NO_DRAW);
+  const u32 src_width = g_framebuffer_manager->GetEFBWidth();
+  const u32 src_height = g_framebuffer_manager->GetEFBHeight();
+  for (u32 layer = 0; layer < layers; ++layer)
+  {
+    const u8* data = nullptr;
+    size_t stride = 0;
+    if (!g_framebuffer_manager->MapDrawIdReadback(layer, &data, &stride))
+    {
+      map = {};
+      frame->id_map_error = "The draw-ID readback could not be mapped.";
+      return;
+    }
+    FillDrawIdMapLayer(&map, layer, data, stride, src_width, src_height);
+    g_framebuffer_manager->UnmapDrawIdReadback(layer);
+  }
+  // The frame's XFB copy: the EFB rectangle the eye images show.
+  for (const CopyRecord& copy : frame->copies)
+  {
+    if (copy.frame != 0 || !copy.xfb)
+      continue;
+    map.xfb_left = copy.src_left;
+    map.xfb_top = copy.src_top;
+    map.xfb_right = copy.src_right;
+    map.xfb_bottom = copy.src_bottom;
+  }
+  CountVisiblePixels(frame);
+}
+
+// Publishes the recorded capture once its draw-ID map is in (with `wait`, waits for it). True
+// when nothing is left to publish.
+static bool PublishFinishing(bool wait)
+{
+  if (!s_finishing)
+    return true;
+  if (s_draw_id_readback_pending && g_framebuffer_manager)
+  {
+    if (!g_framebuffer_manager->IsDrawIdReadbackReady(wait))
+      return false;
+    ReadDrawIdMap(s_finishing.get());
+  }
+  s_draw_id_readback_pending = false;
+  std::shared_ptr<const CapturedFrame> done(s_finishing.release());
+  std::lock_guard lock(s_published_mutex);
+  s_published = std::move(done);
+  return true;
 }
 
 DrawRecord* BeginRecord()
@@ -231,8 +302,43 @@ void CountHiddenBatch()
     ++s_current->hidden_batches;
 }
 
+void NoteXFBCopyRegion(int left, int top, int right, int bottom)
+{
+  if (right <= left || bottom <= top)
+    return;
+  s_last_xfb_region = VRFrameRegion{left, top, right - left, bottom - top, true};
+}
+
+VRFrameRegion GetDisplayedFrameRegion()
+{
+  const VRFrameRegion vr_region = GetVRFrameRegion();
+  return vr_region.valid ? vr_region : s_last_xfb_region;
+}
+
 void OnEndFrame(u32 head_culled_draws, bool flat_mode)
 {
+  // The draw-ID frame (the first frame of a capture with IDs) just ended: queue its readback.
+  if (s_draw_id_frame)
+  {
+    s_draw_id_frame = false;
+    if (g_framebuffer_manager)
+    {
+      // The readback textures hold one frame: a capture still waiting for its map reads it first.
+      PublishFinishing(true);
+      if (s_current && g_framebuffer_manager->IsDrawIdFrame() &&
+          g_framebuffer_manager->QueueDrawIdReadback())
+      {
+        s_draw_id_readback_pending = true;
+      }
+      else if (s_current)
+      {
+        s_current->id_map_error = "The draw-ID pass did not run to the end of the frame (the "
+                                  "EFB was recreated, or a state was loaded).";
+      }
+      g_framebuffer_manager->EndDrawIdFrame();
+    }
+  }
+
   if (s_current)
   {
     s_current->head_culled += head_culled_draws;
@@ -242,12 +348,16 @@ void OnEndFrame(u32 head_culled_draws, bool flat_mode)
       s_current->patch_flags.push_back(ShaderHunter::GetInstance().GetActivePatchFlags());
       return;
     }
-
-    std::shared_ptr<const CapturedFrame> done(s_current.release());
+    // Recorded. Its draw-ID map may still be on its way from the GPU; a capture still waiting
+    // for its own map is published first.
+    PublishFinishing(true);
+    s_finishing = std::move(s_current);
+    s_finishing_frames = 0;
     detail::s_capturing = false;
-    std::lock_guard lock(s_published_mutex);
-    s_published = std::move(done);
   }
+
+  if (s_finishing)
+    PublishFinishing(++s_finishing_frames >= DRAW_ID_READBACK_WAIT_FRAMES);
 
   if (s_pending_capture_id != 0)
   {
@@ -259,6 +369,22 @@ void OnEndFrame(u32 head_culled_draws, bool flat_mode)
     s_current->patch_flags.push_back(ShaderHunter::GetInstance().GetActivePatchFlags());
     s_pending_capture_id = 0;
     detail::s_capturing = true;
+    if (s_pending_capture_draw_ids)
+    {
+      s_pending_capture_draw_ids = false;
+      s_current->draw_ids = true;
+      if (g_framebuffer_manager && g_gfx && !flat_mode)
+      {
+        g_framebuffer_manager->BeginDrawIdFrame();
+        g_gfx->SkipFrameForVRFoveation();
+        s_draw_id_frame = true;
+      }
+      else
+      {
+        s_current->id_map_error = "No draw-ID pass: the video backend is not running, or the "
+                                  "game is shown as a flat screen.";
+      }
+    }
   }
 }
 
@@ -271,7 +397,11 @@ std::shared_ptr<const CapturedFrame> GetLastCapture()
 void ResetForShutdown()
 {
   s_pending_capture_id = 0;
+  s_pending_capture_draw_ids = false;
   s_current.reset();
+  s_finishing.reset();
+  s_draw_id_frame = false;
+  s_draw_id_readback_pending = false;
   detail::s_capturing = false;
   s_preview = {};
   detail::s_preview_active = false;
@@ -309,6 +439,115 @@ void SetPreview(PreviewSet preview)
 {
   s_preview = std::move(preview);
   detail::s_preview_active = !s_preview.Empty();
+}
+
+PreviewSet GetPreview()
+{
+  return s_preview;
+}
+
+u32 DrawIdMap::Get(u32 layer, u32 x, u32 y) const
+{
+  if (layer >= layers || x >= width || y >= height)
+    return NO_DRAW;
+  return ids[(static_cast<size_t>(layer) * height + y) * width + x];
+}
+
+u32 DecodeDrawId(const u8* rgba)
+{
+  if (rgba[2] == 0)
+    return DrawIdMap::NO_DRAW;
+  return rgba[0] | (static_cast<u32>(rgba[1]) << 8);
+}
+
+void FillDrawIdMapLayer(DrawIdMap* map, u32 layer, const u8* rgba, size_t stride, u32 src_width,
+                        u32 src_height)
+{
+  if (layer >= map->layers || map->width == 0 || map->height == 0 || src_width == 0 ||
+      src_height == 0)
+  {
+    return;
+  }
+  u32* out = &map->ids[static_cast<size_t>(layer) * map->height * map->width];
+  for (u32 y = 0; y < map->height; ++y)
+  {
+    const u32 sy = static_cast<u32>(static_cast<u64>(y) * src_height / map->height);
+    const u8* row = rgba + static_cast<size_t>(sy) * stride;
+    for (u32 x = 0; x < map->width; ++x)
+    {
+      const u32 sx = static_cast<u32>(static_cast<u64>(x) * src_width / map->width);
+      *out++ = DecodeDrawId(row + static_cast<size_t>(sx) * 4);
+    }
+  }
+}
+
+std::optional<std::array<u32, 2>> MapImagePointToDrawIdPixel(const DrawIdMap& map, float u, float v)
+{
+  if (!map.HasMap() || !(u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f))
+    return std::nullopt;
+  s32 left = map.xfb_left;
+  s32 top = map.xfb_top;
+  s32 right = map.xfb_right;
+  s32 bottom = map.xfb_bottom;
+  if (right <= left || bottom <= top)
+  {
+    left = 0;
+    top = 0;
+    right = static_cast<s32>(map.width);
+    bottom = static_cast<s32>(map.height);
+  }
+  const s32 x =
+      std::clamp(static_cast<s32>(std::floor(left + u * (right - left))), left, right - 1);
+  const s32 y = std::clamp(static_cast<s32>(std::floor(top + v * (bottom - top))), top, bottom - 1);
+  return std::array<u32, 2>{
+      static_cast<u32>(std::clamp<s32>(x, 0, static_cast<s32>(map.width) - 1)),
+      static_cast<u32>(std::clamp<s32>(y, 0, static_cast<s32>(map.height) - 1))};
+}
+
+std::vector<std::pair<u32, u32>> CountDrawIdsAround(const DrawIdMap& map, u32 layer, u32 x, u32 y,
+                                                    u32 radius)
+{
+  std::vector<std::pair<u32, u32>> counts;
+  if (layer >= map.layers)
+    return counts;
+  const u32 x0 = x > radius ? x - radius : 0;
+  const u32 y0 = y > radius ? y - radius : 0;
+  const u32 x1 = std::min(map.width - 1, x + radius);
+  const u32 y1 = std::min(map.height - 1, y + radius);
+  for (u32 py = y0; py <= y1; ++py)
+  {
+    for (u32 px = x0; px <= x1; ++px)
+    {
+      const u32 id = map.Get(layer, px, py);
+      const auto it = std::find_if(counts.begin(), counts.end(),
+                                   [id](const auto& entry) { return entry.first == id; });
+      if (it == counts.end())
+        counts.emplace_back(id, 1);
+      else
+        ++it->second;
+    }
+  }
+  std::stable_sort(counts.begin(), counts.end(),
+                   [](const auto& a, const auto& b) { return a.second > b.second; });
+  return counts;
+}
+
+void CountVisiblePixels(CapturedFrame* frame)
+{
+  const DrawIdMap& map = frame->id_map;
+  if (!map.HasMap())
+    return;
+  std::vector<u32> counts(MAX_CAPTURED_DRAWS, 0);
+  for (const u32 id : map.ids)
+  {
+    if (id < counts.size())
+      ++counts[id];
+  }
+  for (DrawRecord& draw : frame->draws)
+  {
+    if (draw.frame == 0 && draw.index < counts.size())
+      draw.visible_pixels = static_cast<s32>(counts[draw.index]);
+  }
 }
 
 PreviewAction MatchPreview(u32 index, u64 vs, u64 ps, u64 gs, u64 vs_family, u64 ps_family,

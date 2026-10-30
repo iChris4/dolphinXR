@@ -57,6 +57,8 @@ enum class RecordCommandType : u8
   ResetQueryPool,
   // The emulated frame ended (XFB copy): EFB render pass positions restart.
   EFBFrameEnd,
+  // The next emulated frame is not representative (AbstractGfx::SkipFrameForVRFoveation).
+  EFBFoveationSkipFrame,
 };
 
 enum class FramebufferBindMode : u8

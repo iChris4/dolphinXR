@@ -539,6 +539,15 @@ void PixelShaderManager::SetVRPassthroughAlpha(float alpha)
   dirty = true;
 }
 
+void PixelShaderManager::SetVRDrawId(u32 id)
+{
+  if (constants.vr_draw_id == id)
+    return;
+
+  constants.vr_draw_id = id;
+  dirty = true;
+}
+
 void PixelShaderManager::SetVRScreenDepthRange(float near_depth, float far_depth)
 {
   const float range = far_depth - near_depth;

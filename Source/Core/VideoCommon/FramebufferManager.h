@@ -117,6 +117,26 @@ public:
   // intact until every copy of the finished frame has been read out.
   void RequestVRClearEFB() { m_vr_efb_clear_pending = true; }
 
+  // Draw-ID pass (VR::AgentCapture): for one frame, the GX draws write their index into a
+  // separate texture that shares the EFB depth, and the EFB colour stays as it was. The frame's
+  // colour clears clear the IDs instead ("no draw"); its depth clears apply as usual.
+  void BeginDrawIdFrame();
+  void EndDrawIdFrame();
+  bool IsDrawIdFrame() const { return m_draw_id_frame; }
+  // Binds the framebuffer the frame's GX draws render into (created on first use; false when
+  // it cannot be, or outside a draw-ID frame).
+  bool BindEFBDrawIdFramebuffer();
+  // After the frame's last draw: copies the ID texture (its first sample under MSAA) into one
+  // readback texture per layer.
+  bool QueueDrawIdReadback();
+  // Whether the readback can be mapped without waiting for the GPU; submits the copy when it
+  // still sits in the command buffer being recorded. With `wait`, waits for it.
+  bool IsDrawIdReadbackReady(bool wait);
+  u32 GetDrawIdReadbackLayers() const;
+  // Maps one layer of the readback: EFB-sized RGBA8 texels, `stride` bytes per row.
+  bool MapDrawIdReadback(u32 layer, const u8** data, size_t* stride);
+  void UnmapDrawIdReadback(u32 layer);
+
   // Resolve color/depth textures to a non-msaa texture, and return it.
   AbstractTexture* ResolveEFBColorTexture(const MathUtil::Rectangle<int>& region);
   AbstractTexture* ResolveEFBCoverageTexture(const MathUtil::Rectangle<int>& region);
@@ -325,6 +345,21 @@ protected:
   void FlushPendingVRClearEFB();
   bool WillRunVRClearEFB() const;
   bool m_vr_efb_clear_pending = false;
+
+  // Draw-ID pass. The textures live from the first pass of the session to the EFB's recreation.
+  bool EnsureDrawIdResources();
+  void DestroyDrawIdResources();
+  bool m_draw_id_frame = false;
+  // The ID texture was cleared for this frame (by the VR clear, or before the first draw).
+  bool m_draw_id_cleared = false;
+  bool m_draw_id_readback_queued = false;
+  std::unique_ptr<AbstractTexture> m_efb_draw_id_texture;
+  std::unique_ptr<AbstractTexture> m_efb_draw_id_resolve_texture;
+  std::unique_ptr<AbstractFramebuffer> m_efb_draw_id_framebuffer;
+  std::unique_ptr<AbstractFramebuffer> m_efb_draw_id_framebuffer_with_coverage;
+  std::unique_ptr<AbstractFramebuffer> m_efb_draw_id_resolve_framebuffer;
+  std::unique_ptr<AbstractPipeline> m_efb_draw_id_resolve_pipeline;
+  std::array<std::unique_ptr<AbstractStagingTexture>, 2> m_efb_draw_id_readback;
 
   struct DeferredEFBClear
   {

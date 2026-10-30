@@ -3056,6 +3056,15 @@ void TextureCacheBase::CopyRenderTargetToTexture(FramebufferCopyResolvedData& re
     m_vr_presents_since_xfb_copy = 0;
   }
 
+  // The displayed region for the agent's captures outside a VR session (VRFrameRegion is only
+  // latched in one).
+  if (resolved_data.is_xfb)
+  {
+    const MathUtil::Rectangle<int>& xfb_rect = resolved_data.source_data.src_rect;
+    VR::AgentCapture::NoteXFBCopyRegion(xfb_rect.left, xfb_rect.top, xfb_rect.right,
+                                        xfb_rect.bottom);
+  }
+
   // The agent server's capture lists the copies between the draws, with the texture they made.
   if (VR::AgentCapture::IsCapturing()) [[unlikely]]
   {

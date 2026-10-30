@@ -56,6 +56,8 @@ public:
   // Exact virtual-screen depth export: mirrors the host viewport depth range programmed by
   // BPFunctions::SetScissorAndViewport so the PS can reproduce the fixed-function transform.
   void SetVRScreenDepthRange(float near_depth, float far_depth);
+  // Draw-ID pass (VR::AgentCapture): the index of the draw being rendered.
+  void SetVRDrawId(u32 id);
 
   PixelShaderConstants constants{};
   bool dirty = false;

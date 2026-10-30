@@ -16,6 +16,19 @@
 
 namespace AgentServer
 {
+namespace
+{
+// The size of the last screenshot of each eye: what draw_at_pixel's x and y refer to.
+std::mutex s_last_size_mutex;
+std::array<std::optional<std::array<u32, 2>>, 2> s_last_size;
+}  // namespace
+
+std::optional<std::array<u32, 2>> GetLastScreenshotSize(u32 layer)
+{
+  std::lock_guard lock(s_last_size_mutex);
+  return layer < s_last_size.size() ? s_last_size[layer] : std::nullopt;
+}
+
 std::string AppendScreenshots(ToolResult& result, u32 max_width, bool left, bool right)
 {
   VR::AgentCapture::EyeCapture capture;
@@ -36,6 +49,11 @@ std::string AppendScreenshots(ToolResult& result, u32 max_width, bool left, bool
     text += fmt::format("{}{}: {}x{} (frame {}x{})", text.empty() ? "" : "; ", eye_name,
                         image.width, image.height, image.source_width, image.source_height);
     result.AddImagePng(*png);
+    {
+      std::lock_guard lock(s_last_size_mutex);
+      if (image.layer < s_last_size.size())
+        s_last_size[image.layer] = std::array<u32, 2>{image.width, image.height};
+    }
   }
   if (capture.layers < 2)
   {

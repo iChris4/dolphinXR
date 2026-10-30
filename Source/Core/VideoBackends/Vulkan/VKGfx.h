@@ -66,6 +66,7 @@ public:
                    bool z_enable, u32 color, u32 z) override;
   bool ClearAdditionalColorAttachments(const MathUtil::Rectangle<int>& target_rc,
                                        u32 color) override;
+  void SkipFrameForVRFoveation() override;
 
   void SetPipeline(const AbstractPipeline* pipeline) override;
   void SetForcePixelShader(const AbstractShader* shader) override;

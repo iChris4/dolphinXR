@@ -101,6 +101,11 @@ public:
     return false;
   }
 
+  // The emulated frame about to run is not representative (the agent's draw-ID pass draws with
+  // other pipelines into another framebuffer): the selective EFB foveation must neither time its
+  // passes nor count them.
+  virtual void SkipFrameForVRFoveation() {}
+
   // Drawing with currently-bound pipeline state.
   virtual void Draw(u32 base_vertex, u32 num_vertices) {}
   virtual void DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex) {}

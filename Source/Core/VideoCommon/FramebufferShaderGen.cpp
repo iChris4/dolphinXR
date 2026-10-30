@@ -376,6 +376,19 @@ std::string GenerateResolveDepthPixelShader(u32 samples)
   return code.GetBuffer();
 }
 
+std::string GenerateFirstSamplePixelShader()
+{
+  ShaderCode code;
+  EmitSamplerDeclarations(code, 0, 1, true);
+  EmitPixelMainDeclaration(code, 1, 0);
+  code.Write("{{\n"
+             "  int layer = int(v_tex0.z);\n"
+             "  int3 coords = int3(int2(gl_FragCoord.xy), layer);\n"
+             "  ocol0 = texelFetch(samp0, coords, 0);\n"
+             "}}\n");
+  return code.GetBuffer();
+}
+
 std::string GenerateClearVertexShader()
 {
   ShaderCode code;

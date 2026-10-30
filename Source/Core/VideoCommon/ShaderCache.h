@@ -72,6 +72,9 @@ public:
   const AbstractPipeline* GetUberPipelineForUid(const GXUberPipelineUid& uid);
   const AbstractPipeline* GetCoveragePipelineForUid(const GXPipelineUid& uid);
   const AbstractPipeline* GetCoverageUberPipelineForUid(const GXUberPipelineUid& uid);
+  // The draw-ID pass of VR::AgentCapture: the uber pipeline that writes the draw's index in
+  // place of its colour, without blending (the colour write masks stay) and with its depth state.
+  const AbstractPipeline* GetDrawIdUberPipelineForUid(const GXUberPipelineUid& uid);
 
   // Accesses ShaderGen shader caches asynchronously.
   // The optional will be empty if this pipeline is now background compiling.

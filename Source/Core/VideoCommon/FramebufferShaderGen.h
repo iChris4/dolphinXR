@@ -17,6 +17,8 @@ std::string GenerateTextureCopyVertexShader();
 std::string GenerateTextureCopyPixelShader();
 std::string GenerateResolveColorPixelShader(u32 samples);
 std::string GenerateResolveDepthPixelShader(u32 samples);
+// Copies the first sample of a multisampled texture: for values that must not be averaged.
+std::string GenerateFirstSamplePixelShader();
 std::string GenerateClearVertexShader();
 std::string GenerateEFBPokeVertexShader();
 std::string GenerateColorPixelShader();

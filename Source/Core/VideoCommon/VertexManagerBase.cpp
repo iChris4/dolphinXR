@@ -1112,7 +1112,7 @@ static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool age
     const VR::AgentCapture::ScreenBox box = VR::AgentCapture::ProjectViewPointsToFrame(
         bounds.points, xfmem.projection.rawProjection, record->perspective, xfmem.viewport.xOrig,
         xfmem.viewport.yOrig, xfmem.viewport.wd, xfmem.viewport.ht, bpmem.scissorOffset.x << 1,
-        bpmem.scissorOffset.y << 1, VR::GetVRFrameRegion());
+        bpmem.scissorOffset.y << 1, VR::AgentCapture::GetDisplayedFrameRegion());
     if (box.valid)
     {
       record->screen_left = box.left;
@@ -2880,6 +2880,16 @@ void VertexManagerBase::RenderDrawCall(PixelShaderManager& pixel_shader_manager,
                                        PrimitiveType primitive_type,
                                        const AbstractPipeline* current_pipeline)
 {
+#ifdef ENABLE_VR
+  // Draw-ID pass (VR::AgentCapture): this frame's draws write their index into the ID texture
+  // through the uber pipeline variant, with their own depth state, and leave the EFB colour.
+  const bool draw_id_frame = g_framebuffer_manager->IsDrawIdFrame();
+  if (draw_id_frame) [[unlikely]]
+    pixel_shader_manager.SetVRDrawId(m_draw_counter);
+#else
+  constexpr bool draw_id_frame = false;
+#endif
+
   // Now we can upload uniforms, as nothing else will override them.
   geometry_shader_manager.SetConstants(primitive_type);
   pixel_shader_manager.SetConstants();
@@ -2904,7 +2914,7 @@ void VertexManagerBase::RenderDrawCall(PixelShaderManager& pixel_shader_manager,
           m_current_uber_pipeline_config.ps_uid.GetUidData()->vr_coverage_mode :
           m_current_pipeline_config.ps_uid.GetUidData()->vr_coverage_mode;
 
-  if (coverage_mode == VRPassthroughCoverageShaderMode::Prepass)
+  if (coverage_mode == VRPassthroughCoverageShaderMode::Prepass && !draw_id_frame)
   {
     const AbstractPipeline* const coverage_pipeline =
         m_current_pipeline_is_uber ?
@@ -2918,19 +2928,32 @@ void VertexManagerBase::RenderDrawCall(PixelShaderManager& pixel_shader_manager,
     }
   }
 
-  // All EFB draws share the with-coverage framebuffer whenever the coverage attachment
-  // exists — non-MRT pipelines are built against the same attachment layout with a
-  // write-masked attachment 1 (see GetGXPipelineConfig), so the render pass never has
-  // to restart between draws (a per-switch GMEM store/load on tiler GPUs).
-  if (g_framebuffer_manager->HasEFBCoverage())
-    g_framebuffer_manager->BindEFBFramebufferWithCoverage();
+#ifdef ENABLE_VR
+  if (draw_id_frame && g_framebuffer_manager->BindEFBDrawIdFramebuffer()) [[unlikely]]
+  {
+    // Without the ID pipeline the draw's own one still writes the frame's depth: a wrong index
+    // beats a hole in the depth buffer.
+    const AbstractPipeline* const id_pipeline =
+        g_shader_cache->GetDrawIdUberPipelineForUid(m_current_uber_pipeline_config);
+    g_gfx->SetPipeline(id_pipeline ? id_pipeline : current_pipeline);
+  }
   else
-    g_framebuffer_manager->BindEFBFramebuffer();
-  g_gfx->SetPipeline(current_pipeline);
+#endif
+  {
+    // All EFB draws share the with-coverage framebuffer whenever the coverage attachment
+    // exists — non-MRT pipelines are built against the same attachment layout with a
+    // write-masked attachment 1 (see GetGXPipelineConfig), so the render pass never has
+    // to restart between draws (a per-switch GMEM store/load on tiler GPUs).
+    if (g_framebuffer_manager->HasEFBCoverage())
+      g_framebuffer_manager->BindEFBFramebufferWithCoverage();
+    else
+      g_framebuffer_manager->BindEFBFramebuffer();
+    g_gfx->SetPipeline(current_pipeline);
 
-  // Shader Hunter pink highlight: override PS after pipeline is set (like 3DMigoto).
-  if (m_force_pink_ps && m_pink_pixel_shader)
-    g_gfx->SetForcePixelShader(m_pink_pixel_shader.get());
+    // Shader Hunter pink highlight: override PS after pipeline is set (like 3DMigoto).
+    if (m_force_pink_ps && m_pink_pixel_shader)
+      g_gfx->SetForcePixelShader(m_pink_pixel_shader.get());
+  }
 
   if (PerfQueryBase::ShouldEmulate())
     g_perf_query->EnableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);

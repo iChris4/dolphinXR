@@ -441,3 +441,159 @@ TEST(AgentCapture, FormatsRows)
   EXPECT_NE(ortho.find("| blend |"), std::string::npos) << ortho;
   EXPECT_EQ(FormatDrawDetails(draw).find("-0"), std::string::npos);
 }
+
+TEST(AgentCapture, DecodesDrawIds)
+{
+  const u8 draw[4] = {0x34, 0x12, 255, 255};
+  EXPECT_EQ(DecodeDrawId(draw), 0x1234u);
+  const u8 none[4] = {0x34, 0x12, 0, 0};
+  EXPECT_EQ(DecodeDrawId(none), DrawIdMap::NO_DRAW);
+}
+
+TEST(AgentCapture, FillsTheDrawIdMapByNearestSampling)
+{
+  DrawIdMap map;
+  map.width = 2;
+  map.height = 2;
+  map.layers = 2;
+  map.ids.assign(8, DrawIdMap::NO_DRAW);
+  // A 4x4 texture (the EFB at 2x), its rows 20 bytes apart: texel (x, y) holds index x + 4y,
+  // except the last one, which shows no draw.
+  std::vector<u8> texels(4 * 20, 0);
+  for (u32 y = 0; y < 4; ++y)
+  {
+    for (u32 x = 0; x < 4; ++x)
+    {
+      u8* texel = &texels[y * 20 + x * 4];
+      texel[0] = static_cast<u8>(x + 4 * y);
+      texel[2] = (x == 3 && y == 3) ? 0 : 255;
+    }
+  }
+  FillDrawIdMapLayer(&map, 1, texels.data(), 20, 4, 4);
+  EXPECT_EQ(map.Get(1, 0, 0), 0u);
+  EXPECT_EQ(map.Get(1, 1, 0), 2u);
+  EXPECT_EQ(map.Get(1, 0, 1), 8u);
+  EXPECT_EQ(map.Get(1, 1, 1), 10u);
+  // The other layer is untouched, and the map's edges hold.
+  EXPECT_EQ(map.Get(0, 0, 0), DrawIdMap::NO_DRAW);
+  EXPECT_EQ(map.Get(1, 2, 0), DrawIdMap::NO_DRAW);
+  EXPECT_EQ(map.Get(2, 0, 0), DrawIdMap::NO_DRAW);
+
+  // At the texture's own size, every texel is read.
+  DrawIdMap same;
+  same.width = 4;
+  same.height = 4;
+  same.layers = 1;
+  same.ids.assign(16, DrawIdMap::NO_DRAW);
+  FillDrawIdMapLayer(&same, 0, texels.data(), 20, 4, 4);
+  EXPECT_EQ(same.Get(0, 3, 2), 11u);
+  EXPECT_EQ(same.Get(0, 3, 3), DrawIdMap::NO_DRAW);
+}
+
+TEST(AgentCapture, MapsImagePointsAndCountsDraws)
+{
+  // An 8x4 map: draw 7 on the left half, draw 9 on the right, nothing at the bottom right.
+  DrawIdMap map;
+  map.width = 8;
+  map.height = 4;
+  map.layers = 1;
+  map.ids.assign(32, 7);
+  for (u32 y = 0; y < 4; ++y)
+  {
+    for (u32 x = 4; x < 8; ++x)
+      map.ids[y * 8 + x] = 9;
+  }
+  map.ids[3 * 8 + 7] = DrawIdMap::NO_DRAW;
+  // The image shows EFB x 2..6.
+  map.xfb_left = 2;
+  map.xfb_top = 0;
+  map.xfb_right = 6;
+  map.xfb_bottom = 4;
+
+  auto pixel = MapImagePointToDrawIdPixel(map, 0.0f, 0.0f);
+  ASSERT_TRUE(pixel);
+  EXPECT_EQ((*pixel)[0], 2u);
+  EXPECT_EQ((*pixel)[1], 0u);
+  pixel = MapImagePointToDrawIdPixel(map, 0.5f, 0.5f);
+  ASSERT_TRUE(pixel);
+  EXPECT_EQ((*pixel)[0], 4u);
+  EXPECT_EQ((*pixel)[1], 2u);
+  // The far edge stays inside the image.
+  pixel = MapImagePointToDrawIdPixel(map, 1.0f, 1.0f);
+  ASSERT_TRUE(pixel);
+  EXPECT_EQ((*pixel)[0], 5u);
+  EXPECT_EQ((*pixel)[1], 3u);
+  EXPECT_FALSE(MapImagePointToDrawIdPixel(map, 1.5f, 0.0f));
+  EXPECT_FALSE(MapImagePointToDrawIdPixel(DrawIdMap{}, 0.5f, 0.5f));
+  // Without an XFB rectangle, the whole map is the image.
+  map.xfb_right = 0;
+  pixel = MapImagePointToDrawIdPixel(map, 0.5f, 0.5f);
+  ASSERT_TRUE(pixel);
+  EXPECT_EQ((*pixel)[0], 4u);
+
+  // Around (4, 2) within 1 pixel: x 3..5, y 1..3: three of draw 7, six of draw 9.
+  const auto around = CountDrawIdsAround(map, 0, 4, 2, 1);
+  ASSERT_EQ(around.size(), 2u);
+  EXPECT_EQ(around[0].first, 9u);
+  EXPECT_EQ(around[0].second, 6u);
+  EXPECT_EQ(around[1].first, 7u);
+  EXPECT_EQ(around[1].second, 3u);
+  // At the corner the window is clipped, and no-draw pixels are counted too.
+  const auto corner = CountDrawIdsAround(map, 0, 7, 3, 1);
+  ASSERT_EQ(corner.size(), 2u);
+  EXPECT_EQ(corner[0].first, 9u);
+  EXPECT_EQ(corner[0].second, 3u);
+  EXPECT_EQ(corner[1].first, DrawIdMap::NO_DRAW);
+  EXPECT_EQ(corner[1].second, 1u);
+  EXPECT_TRUE(CountDrawIdsAround(map, 1, 0, 0, 1).empty());
+
+  CapturedFrame frame;
+  frame.id_map = map;
+  frame.draws.push_back(MakeDraw(7, true));
+  frame.draws.push_back(MakeDraw(9, false));
+  frame.draws.push_back(MakeDraw(5, false));
+  frame.draws.push_back(MakeDraw(7, true));
+  frame.draws.back().frame = 1;
+  CountVisiblePixels(&frame);
+  EXPECT_EQ(frame.draws[0].visible_pixels, 16);
+  EXPECT_EQ(frame.draws[1].visible_pixels, 15);
+  EXPECT_EQ(frame.draws[2].visible_pixels, 0);
+  EXPECT_EQ(frame.draws[3].visible_pixels, -1);
+}
+
+TEST(AgentCapture, CaptureWithIdsWithoutABackendReportsIt)
+{
+  ResetForShutdown();
+  RequestCapture(8, 1, true);
+  OnEndFrame(0, false);
+  ASSERT_TRUE(IsCapturing());
+  OnEndFrame(0, false);
+  EXPECT_FALSE(IsCapturing());
+  const auto capture = GetLastCapture();
+  ASSERT_NE(capture, nullptr);
+  EXPECT_EQ(capture->id, 8u);
+  EXPECT_TRUE(capture->draw_ids);
+  EXPECT_FALSE(capture->id_map.HasMap());
+  EXPECT_FALSE(capture->id_map_error.empty());
+  ResetForShutdown();
+}
+
+TEST(AgentCapture, DisplayedFrameRegionFollowsTheXFBCopyOutsideVR)
+{
+  VR::ResetVRFrameRegion();
+  NoteXFBCopyRegion(0, 16, 640, 464);
+  VR::VRFrameRegion region = GetDisplayedFrameRegion();
+  ASSERT_TRUE(region.valid);
+  EXPECT_EQ(region.top, 16);
+  EXPECT_EQ(region.height, 448);
+  // An empty copy is ignored.
+  NoteXFBCopyRegion(0, 0, 0, 0);
+  EXPECT_EQ(GetDisplayedFrameRegion().height, 448);
+  // In a VR session, the latched VR region wins (committed by the next frame's first copy).
+  VR::NotifyVRXFBCopyRegion(0, 0, 640, 480);
+  VR::NotifyVRXFBCopyRegion(0, 0, 640, 480);
+  region = GetDisplayedFrameRegion();
+  ASSERT_TRUE(region.valid);
+  EXPECT_EQ(region.height, 480);
+  VR::ResetVRFrameRegion();
+}

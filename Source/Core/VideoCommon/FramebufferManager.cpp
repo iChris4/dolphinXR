@@ -462,6 +462,7 @@ bool FramebufferManager::CreateEFBFramebuffer(int efb_scale)
 
 void FramebufferManager::DestroyEFBFramebuffer()
 {
+  DestroyDrawIdResources();
   m_efb_framebuffer.reset();
   m_efb_convert_framebuffer.reset();
   m_efb_framebuffer_with_coverage.reset();
@@ -502,6 +503,13 @@ void FramebufferManager::ClearEFBForOpenXR()
   // buffer with *near*, so every depth-tested draw of the frame failed the test and only
   // depth-test-disabled 2D/HUD content survived.
   const float far_depth = g_backend_info.bSupportsReversedDepthRange ? 1.0f : 0.0f;
+  if (m_draw_id_frame && EnsureDrawIdResources())
+  {
+    // Draw-ID frame: the colour is frozen; the IDs start empty and the depth far.
+    g_gfx->SetAndClearFramebuffer(m_efb_draw_id_framebuffer.get(), {0.f, 0.f, 0.f, 0.f}, far_depth);
+    m_draw_id_cleared = true;
+    return;
+  }
   if (!HasEFBCoverage())
   {
     g_gfx->SetAndClearFramebuffer(m_efb_framebuffer.get(), {0.f, 0.f, 0.f, 0.f}, far_depth);
@@ -521,6 +529,209 @@ void FramebufferManager::ClearEFBForOpenXR()
     g_gfx->ClearRegion(m_efb_coverage_framebuffer->GetRect(), true, true, false, 0x00FF0000u, 0);
     BindEFBFramebufferWithCoverage();
   }
+}
+
+void FramebufferManager::BeginDrawIdFrame()
+{
+  m_draw_id_frame = true;
+  m_draw_id_cleared = false;
+}
+
+void FramebufferManager::EndDrawIdFrame()
+{
+  m_draw_id_frame = false;
+}
+
+bool FramebufferManager::EnsureDrawIdResources()
+{
+  if (m_efb_draw_id_texture)
+    return true;
+
+  const u32 width = GetEFBWidth();
+  const u32 height = GetEFBHeight();
+  const u32 layers = std::min<u32>(GetEFBLayers(), static_cast<u32>(m_efb_draw_id_readback.size()));
+  m_efb_draw_id_texture =
+      g_gfx->CreateTexture(GetEFBColorTextureConfig(width, height), "EFB draw ID texture");
+  if (!m_efb_draw_id_texture)
+  {
+    DestroyDrawIdResources();
+    return false;
+  }
+  m_efb_draw_id_framebuffer =
+      g_gfx->CreateFramebuffer(m_efb_draw_id_texture.get(), m_efb_depth_texture.get());
+  bool ok = m_efb_draw_id_framebuffer != nullptr;
+  if (HasEFBCoverage())
+  {
+    // The GX pipelines target the EFB's with-coverage attachment layout (GetGXPipelineConfig);
+    // the draw-ID pipelines write-mask that attachment, so the coverage stays as it was.
+    m_efb_draw_id_framebuffer_with_coverage = g_gfx->CreateFramebuffer(
+        m_efb_draw_id_texture.get(), m_efb_depth_texture.get(), {m_efb_coverage_texture.get()});
+    ok = ok && m_efb_draw_id_framebuffer_with_coverage != nullptr;
+  }
+  for (u32 layer = 0; layer < layers; ++layer)
+  {
+    m_efb_draw_id_readback[layer] = g_gfx->CreateStagingTexture(
+        StagingTextureType::Readback, TextureConfig(width, height, 1, 1, 1, GetEFBColorFormat(), 0,
+                                                    AbstractTextureType::Texture_2DArray));
+    ok = ok && m_efb_draw_id_readback[layer] != nullptr;
+  }
+  if (IsEFBMultisampled())
+  {
+    // A readback cannot read a multisampled texture: the first sample of each texel is copied
+    // into a single-sample one (a resolve would average the IDs along the edges).
+    m_efb_draw_id_resolve_texture = g_gfx->CreateTexture(
+        TextureConfig(width, height, 1, GetEFBLayers(), 1, GetEFBColorFormat(),
+                      AbstractTextureFlag_RenderTarget, AbstractTextureType::Texture_2DArray),
+        "EFB draw ID resolve texture");
+    if (m_efb_draw_id_resolve_texture)
+    {
+      m_efb_draw_id_resolve_framebuffer =
+          g_gfx->CreateFramebuffer(m_efb_draw_id_resolve_texture.get(), nullptr);
+    }
+    const auto shader = g_gfx->CreateShaderFromSource(
+        ShaderStage::Pixel, FramebufferShaderGen::GenerateFirstSamplePixelShader(), nullptr,
+        "Draw ID first sample pixel shader");
+    if (shader)
+    {
+      AbstractPipelineConfig config = {};
+      config.vertex_shader = g_shader_cache->GetTextureCopyVertexShader();
+      config.geometry_shader =
+          IsEFBStereo() ? g_shader_cache->GetTexcoordGeometryShader() : nullptr;
+      config.pixel_shader = shader.get();
+      config.rasterization_state =
+          RenderState::GetNoCullRasterizationState(PrimitiveType::Triangles);
+      config.depth_state = RenderState::GetNoDepthTestingDepthState();
+      config.blending_state = RenderState::GetNoBlendingBlendState();
+      config.framebuffer_state = RenderState::GetColorFramebufferState(GetEFBColorFormat());
+      config.usage = AbstractPipelineUsage::Utility;
+      m_efb_draw_id_resolve_pipeline = g_gfx->CreatePipeline(config);
+    }
+    ok = ok && m_efb_draw_id_resolve_texture && m_efb_draw_id_resolve_framebuffer &&
+         m_efb_draw_id_resolve_pipeline;
+  }
+  if (!ok)
+  {
+    ERROR_LOG_FMT(VIDEO, "Failed to create the draw-ID pass resources");
+    DestroyDrawIdResources();
+    return false;
+  }
+  return true;
+}
+
+void FramebufferManager::DestroyDrawIdResources()
+{
+  m_efb_draw_id_resolve_pipeline.reset();
+  m_efb_draw_id_resolve_framebuffer.reset();
+  m_efb_draw_id_resolve_texture.reset();
+  m_efb_draw_id_framebuffer_with_coverage.reset();
+  m_efb_draw_id_framebuffer.reset();
+  m_efb_draw_id_texture.reset();
+  for (auto& readback : m_efb_draw_id_readback)
+    readback.reset();
+  m_draw_id_frame = false;
+  m_draw_id_cleared = false;
+  m_draw_id_readback_queued = false;
+}
+
+bool FramebufferManager::BindEFBDrawIdFramebuffer()
+{
+  if (!m_draw_id_frame || !EnsureDrawIdResources())
+    return false;
+  if (!m_draw_id_cleared)
+  {
+    // The frame starts from no draw (a colour clear of the game's, if it made one, also did
+    // this).
+    g_gfx->SetFramebuffer(m_efb_draw_id_framebuffer.get());
+    g_gfx->ClearRegion(m_efb_draw_id_framebuffer->GetRect(), true, true, false, 0, 0);
+    m_draw_id_cleared = true;
+  }
+  g_gfx->SetFramebuffer(HasEFBCoverage() ? m_efb_draw_id_framebuffer_with_coverage.get() :
+                                           m_efb_draw_id_framebuffer.get());
+  return true;
+}
+
+bool FramebufferManager::QueueDrawIdReadback()
+{
+  if (!m_efb_draw_id_texture)
+    return false;
+  if (!m_draw_id_cleared)
+  {
+    // No draw and no clear touched it this frame: it holds the last pass's IDs.
+    g_gfx->SetFramebuffer(m_efb_draw_id_framebuffer.get());
+    g_gfx->ClearRegion(m_efb_draw_id_framebuffer->GetRect(), true, true, false, 0, 0);
+    m_draw_id_cleared = true;
+  }
+  AbstractTexture* source = m_efb_draw_id_texture.get();
+  const MathUtil::Rectangle<int> rect = source->GetRect();
+  if (IsEFBMultisampled())
+  {
+    g_gfx->BeginUtilityDrawing();
+    m_efb_draw_id_texture->FinishedRendering();
+    g_gfx->SetAndDiscardFramebuffer(m_efb_draw_id_resolve_framebuffer.get());
+    g_gfx->SetPipeline(m_efb_draw_id_resolve_pipeline.get());
+    g_gfx->SetTexture(0, m_efb_draw_id_texture.get());
+    g_gfx->SetSamplerState(0, RenderState::GetPointSamplerState());
+    g_gfx->SetViewportAndScissor(rect);
+    g_gfx->Draw(0, 3);
+    m_efb_draw_id_resolve_texture->FinishedRendering();
+    g_gfx->EndUtilityDrawing();
+    source = m_efb_draw_id_resolve_texture.get();
+  }
+  else
+  {
+    m_efb_draw_id_texture->FinishedRendering();
+  }
+  for (u32 layer = 0; layer < GetDrawIdReadbackLayers(); ++layer)
+    m_efb_draw_id_readback[layer]->CopyFromTexture(source, rect, layer, 0, rect);
+  m_draw_id_readback_queued = true;
+  return true;
+}
+
+u32 FramebufferManager::GetDrawIdReadbackLayers() const
+{
+  if (!m_efb_draw_id_texture)
+    return 0;
+  return std::min<u32>(GetEFBLayers(), static_cast<u32>(m_efb_draw_id_readback.size()));
+}
+
+bool FramebufferManager::IsDrawIdReadbackReady(bool wait)
+{
+  if (!m_draw_id_readback_queued)
+    return false;
+  bool ready = true;
+  for (u32 layer = 0; layer < GetDrawIdReadbackLayers(); ++layer)
+  {
+    AbstractStagingTexture* readback = m_efb_draw_id_readback[layer].get();
+    if (wait)
+    {
+      readback->Flush();
+      continue;
+    }
+    if (readback->TryFlush())
+      continue;
+    if (!readback->IsCopySubmitted())
+      g_gfx->Flush();
+    ready = false;
+  }
+  return ready;
+}
+
+bool FramebufferManager::MapDrawIdReadback(u32 layer, const u8** data, size_t* stride)
+{
+  if (!m_draw_id_readback_queued || layer >= GetDrawIdReadbackLayers())
+    return false;
+  AbstractStagingTexture* readback = m_efb_draw_id_readback[layer].get();
+  if (!readback->Map())
+    return false;
+  *data = reinterpret_cast<const u8*>(readback->GetMappedPointer());
+  *stride = readback->GetMappedStride();
+  return true;
+}
+
+void FramebufferManager::UnmapDrawIdReadback(u32 layer)
+{
+  if (layer < GetDrawIdReadbackLayers())
+    m_efb_draw_id_readback[layer]->Unmap();
 }
 
 AbstractTexture* FramebufferManager::ResolveEFBColorTexture(const MathUtil::Rectangle<int>& region)
@@ -1557,6 +1768,15 @@ void FramebufferManager::ClearEFBNow(const DeferredEFBClear& clear)
     color &= 0x00FFFFFF;
   }
 
+  if (m_draw_id_frame && EnsureDrawIdResources())
+  {
+    // Draw-ID frame: a colour clear hides the draws before it, so it clears their IDs (the EFB
+    // colour is frozen); the depth clear applies as usual through the shared attachment.
+    g_gfx->SetFramebuffer(m_efb_draw_id_framebuffer.get());
+    g_gfx->ClearRegion(target_rc, color_enable, color_enable, z_enable, 0, z);
+    return;
+  }
+
   // Coverage is independent of guest EFB alpha. Game color clears cover their region;
   // depth-only and alpha-only clears leave coverage unchanged. With Remove Black EFB
   // Clears enabled, (near-)black color clears mark their region as unrendered instead,
@@ -1884,6 +2104,8 @@ void FramebufferManager::DoState(PointerWrap& p)
   {
     ClearEFBCacheSnapshot(m_efb_color_cache);
     ClearEFBCacheSnapshot(m_efb_depth_cache);
+    // The draw-ID pass of this frame, if any, is meaningless across the load.
+    m_draw_id_frame = false;
   }
   p.Do(m_prev_efb_format);
 

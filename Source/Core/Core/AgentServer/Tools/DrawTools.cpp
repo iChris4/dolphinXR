@@ -6,8 +6,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <map>
+#include <memory>
+#include <optional>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -15,6 +18,7 @@
 #include "Common/StringUtil.h"
 #include "Core/AgentServer/AgentServer.h"
 #include "Core/AgentServer/ToolHelpers.h"
+#include "Core/AgentServer/Tools/Tools.h"
 #include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/HideObjectEngine.h"
 #include "VideoCommon/VR/AgentCapture.h"
@@ -57,8 +61,10 @@ std::shared_ptr<const CapturedFrame> GetCaptureOrThrow()
 
 // Records every draw and EFB copy of the next `frames` frames. Paused: steps frames until the
 // capture is complete. `setup` runs on the video thread just before the capture is requested.
+// With draw_ids the first frame is a draw-ID pass and the capture also has a DrawIdMap.
 std::shared_ptr<const CapturedFrame> CaptureFrame(std::chrono::milliseconds timeout,
-                                                  std::function<void()> setup = {}, u32 frames = 1)
+                                                  std::function<void()> setup = {}, u32 frames = 1,
+                                                  bool draw_ids = false)
 {
   RequireGame();
   if (g_ActiveConfig.vr_flat_screen)
@@ -69,10 +75,10 @@ std::shared_ptr<const CapturedFrame> CaptureFrame(std::chrono::milliseconds time
 
   const u64 id = s_next_capture_id++;
   // Not waited for: outside a VR session a paused game presents nothing until the frame step.
-  VR::AgentVideoJobs::Post([id, frames, setup = std::move(setup)] {
+  VR::AgentVideoJobs::Post([id, frames, draw_ids, setup = std::move(setup)] {
     if (setup)
       setup();
-    VR::AgentCapture::RequestCapture(id, frames);
+    VR::AgentCapture::RequestCapture(id, frames, draw_ids);
   });
 
   const auto done = [id] {
@@ -84,14 +90,19 @@ std::shared_ptr<const CapturedFrame> CaptureFrame(std::chrono::milliseconds time
     MarkCallRunsEmulation();
   if (IsPaused())
   {
-    // The capture starts at the next EFB->XFB copy and ends `frames` copies later.
-    for (u32 i = 0; i < frames + 6 && !done() && !IsCallCancelled(); ++i)
-      AdvanceFrames(1);
+    // The capture starts at the next EFB->XFB copy and ends `frames` copies later (a draw-ID
+    // map takes a few more). The first draw-ID frame of a session compiles its uber shaders
+    // and links its pipelines: seconds on D3D12.
+    const std::chrono::milliseconds step_timeout =
+        draw_ids ? std::max(timeout, std::chrono::milliseconds(30000)) : FRAME_STEP_TIMEOUT;
+    for (u32 i = 0; i < frames + 8 && !done() && !IsCallCancelled(); ++i)
+      AdvanceFrames(1, step_timeout);
     WaitUntil(done, 1s);
   }
   else
   {
-    WaitUntil([&] { return done() || IsCallCancelled(); }, timeout + frames * 50ms);
+    WaitUntil([&] { return done() || IsCallCancelled(); },
+              timeout + frames * 50ms + (draw_ids ? 500ms : 0ms));
   }
   if (!done() && IsCallCancelled())
     throw ToolError("Cancelled before the capture was complete.");
@@ -200,6 +211,30 @@ std::string SummarizeCapture(const CapturedFrame& frame)
   text += "Viewport classes: " + join(by_class) + "\n";
   text += "VR routes: " + join(by_route) + "\n";
   text += "Override handlings: " + join(by_handling) + "\n";
+  if (frame.draw_ids)
+  {
+    if (frame.id_map.HasMap())
+    {
+      size_t visible = 0;
+      size_t first_frame = 0;
+      for (const DrawRecord& draw : frame.draws)
+      {
+        if (draw.frame != 0)
+          continue;
+        ++first_frame;
+        visible += draw.visible_pixels > 0;
+      }
+      text += fmt::format("Draw-ID map{}: {} of the {} draws show (the others are hidden behind "
+                          "other draws, or off screen; list_draws visible=true, and vis in its "
+                          "rows). draw_at_pixel names the draw under a point of a screenshot.\n",
+                          frame.frames > 1 ? " of f0" : "", visible, first_frame);
+    }
+    else
+    {
+      text += fmt::format("Draw-ID map: none ({})\n",
+                          frame.id_map_error.empty() ? "the pass did not run" : frame.id_map_error);
+    }
+  }
   // What condition= entries saw: the flags VR game patches raised, per frame when they changed.
   for (size_t f = 0; f < frame.patch_flags.size(); ++f)
   {
@@ -234,7 +269,7 @@ ToolResult CaptureFrameTool(const ToolArgs& args)
       std::chrono::milliseconds(std::clamp<s64>(args.GetInt("timeout_ms", 5000), 500, 30000));
   const u32 frames = static_cast<u32>(
       std::clamp<s64>(args.GetInt("frames", 1), 1, VR::AgentCapture::MAX_CAPTURE_FRAMES));
-  const auto capture = CaptureFrame(timeout, {}, frames);
+  const auto capture = CaptureFrame(timeout, {}, frames, args.GetBool("ids", false));
   return ToolResult::Text(SummarizeCapture(*capture));
 }
 
@@ -372,7 +407,8 @@ ToolResult ListDraws(const ToolArgs& args)
       "degrees) and its distance (game units, and meters at the game's scale); scr x0-x1,y0-y1 "
       "its box on the game's screen as fractions of the displayed frame (0,0 top-left; ~ = "
       "vertices behind the camera left out); vis = pixels showing it in the draw-ID map when "
-      "the capture has one | textures | z test/write, blend | handling (source) | VR route.\n",
+      "the capture has one (both eyes in stereo) | textures | z test/write, blend | handling "
+      "(source) | VR route.\n",
       multi_frame ? "Capture" : "Frame", capture->id, matches.size(), capture->draws.size(), page,
       pages, first + 1, last, multi_frame ? "frame " : "");
   for (size_t i = first; i < last; ++i)
@@ -424,6 +460,8 @@ std::string ElementsStub(const DrawRecord& draw)
   return text;
 }
 
+std::string DescribeDraw(const CapturedFrame* capture, const DrawRecord& draw);
+
 ToolResult GetDraw(const ToolArgs& args)
 {
   const auto capture = GetCaptureOrThrow();
@@ -445,10 +483,18 @@ ToolResult GetDraw(const ToolArgs& args)
   std::string text;
   if (capture->frames > 1)
     text += fmt::format("Frame f{} of capture {}\n", frame, capture->id);
-  text += VR::AgentCapture::FormatDrawDetails(draw);
+  text += DescribeDraw(capture.get(), draw);
+  return ToolResult::Text(std::move(text));
+}
+
+// Everything about one draw: its details, the copies that made its textures, hints, and the
+// override entries to start from.
+std::string DescribeDraw(const CapturedFrame* capture, const DrawRecord& draw)
+{
+  std::string text = VR::AgentCapture::FormatDrawDetails(draw);
   size_t ps_draws = 0;
   for (const DrawRecord& other : capture->draws)
-    ps_draws += other.frame == frame && other.ps == draw.ps;
+    ps_draws += other.frame == draw.frame && other.ps == draw.ps;
   text += fmt::format("{} draw(s) of this frame use this pixel shader.\n", ps_draws);
 
   for (const u64 texture : draw.textures)
@@ -530,7 +576,7 @@ ToolResult GetDraw(const ToolArgs& args)
                         texture, texture);
     break;
   }
-  return ToolResult::Text(std::move(text));
+  return text;
 }
 
 ToolResult SetPreview(const ToolArgs& args)
@@ -583,6 +629,164 @@ ToolResult ClearPreview(const ToolArgs&)
   if (IsPaused())
     AdvanceFrames(1);
   return ToolResult::Text("Preview cleared.");
+}
+
+ToolResult DrawAtPixel(const ToolArgs& args)
+{
+  using VR::AgentCapture::DrawIdMap;
+  RequireGame();
+  const u32 eye = static_cast<u32>(std::clamp<s64>(args.GetInt("eye", 0), 0, 1));
+  const u32 radius = static_cast<u32>(std::clamp<s64>(args.GetInt("radius", 2), 0, 64));
+
+  // The point: fractions of the eye image, or pixels of an image (the last screenshot's size
+  // unless given).
+  float u = -1.0f;
+  float v = -1.0f;
+  if (args.Has("u") || args.Has("v"))
+  {
+    u = static_cast<float>(args.GetNumber("u", -1.0));
+    v = static_cast<float>(args.GetNumber("v", -1.0));
+  }
+  else if (args.Has("x") || args.Has("y"))
+  {
+    const std::optional<std::array<u32, 2>> last = GetLastScreenshotSize(eye);
+    const s64 width = args.GetInt("image_width", last ? (*last)[0] : 0);
+    const s64 height = args.GetInt("image_height", last ? (*last)[1] : 0);
+    if (width <= 0 || height <= 0)
+    {
+      throw ToolError("x and y are pixels of an image: give image_width and image_height, take "
+                      "a screenshot first (its size is remembered), or give u and v instead.");
+    }
+    u = static_cast<float>((args.GetNumber("x", 0.0) + 0.5) / static_cast<double>(width));
+    v = static_cast<float>((args.GetNumber("y", 0.0) + 0.5) / static_cast<double>(height));
+  }
+  else
+  {
+    throw ToolError("Give the point: u and v (0..1 across and down the eye image), or x and y "
+                    "(pixels of the last screenshot of that eye).");
+  }
+  if (!(u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f))
+    throw ToolError("The point is outside the image: u and v are 0..1.");
+
+  std::vector<u32> exclude;
+  if (const picojson::array* values = args.GetArray("exclude"))
+  {
+    for (const picojson::value& value : *values)
+    {
+      if (!value.is<double>())
+        throw ToolError("exclude holds draw indices.");
+      exclude.push_back(static_cast<u32>(value.get<double>()));
+    }
+  }
+
+  std::shared_ptr<const CapturedFrame> capture = VR::AgentCapture::GetLastCapture();
+  const bool recapture = args.GetBool("recapture", false) || !exclude.empty() || !capture ||
+                         !capture->id_map.HasMap() || !IsPaused();
+  std::string note;
+  if (recapture)
+  {
+    const auto timeout =
+        std::chrono::milliseconds(std::clamp<s64>(args.GetInt("timeout_ms", 5000), 500, 30000));
+    // The excluded draws are skipped by a preview for the pass; the previous preview comes back.
+    std::shared_ptr<std::optional<VR::AgentCapture::PreviewSet>> previous;
+    std::function<void()> setup;
+    if (!exclude.empty())
+    {
+      previous = std::make_shared<std::optional<VR::AgentCapture::PreviewSet>>();
+      setup = [previous, exclude] {
+        *previous = VR::AgentCapture::GetPreview();
+        VR::AgentCapture::PreviewSet skip;
+        skip.mode = VR::AgentCapture::PreviewSet::Mode::Skip;
+        skip.indices = exclude;
+        VR::AgentCapture::SetPreview(std::move(skip));
+      };
+    }
+    const auto restore = [&] {
+      if (!previous)
+        return;
+      VR::AgentVideoJobs::Post([previous] {
+        if (previous->has_value())
+          VR::AgentCapture::SetPreview(**previous);
+      });
+    };
+    try
+    {
+      capture = CaptureFrame(timeout, std::move(setup), 1, true);
+    }
+    catch (...)
+    {
+      restore();
+      throw;
+    }
+    restore();
+    note =
+        fmt::format("Captured frame {}{}. ", capture->id,
+                    exclude.empty() ? std::string() :
+                                      fmt::format(" without draw(s) {}", fmt::join(exclude, ", ")));
+  }
+
+  const DrawIdMap& map = capture->id_map;
+  if (!map.HasMap())
+  {
+    throw ToolError(note + "The capture has no draw-ID map: " +
+                    (capture->id_map_error.empty() ? std::string("the pass did not run.") :
+                                                     capture->id_map_error));
+  }
+  const u32 layer = std::min(eye, map.layers - 1);
+  const std::optional<std::array<u32, 2>> pixel =
+      VR::AgentCapture::MapImagePointToDrawIdPixel(map, u, v);
+  if (!pixel)
+    throw ToolError("The point is outside the frame.");
+  const u32 x = (*pixel)[0];
+  const u32 y = (*pixel)[1];
+  const u32 id = map.Get(layer, x, y);
+
+  std::string text = note;
+  text += fmt::format("{} eye, image point ({:.3f}, {:.3f}) = EFB pixel {},{} (the image shows "
+                      "EFB {},{} to {},{}).\n",
+                      map.layers < 2 ? "Mono" :
+                      layer == 0     ? "Left" :
+                                       "Right",
+                      u, v, x, y, map.xfb_left, map.xfb_top, map.xfb_right, map.xfb_bottom);
+  if (eye != layer)
+    text += "(The frame has no right eye: the mono image.)\n";
+  const DrawRecord* hit = nullptr;
+  if (id != DrawIdMap::NO_DRAW)
+  {
+    const auto it =
+        std::find_if(capture->draws.begin(), capture->draws.end(),
+                     [id](const DrawRecord& draw) { return draw.frame == 0 && draw.index == id; });
+    if (it != capture->draws.end())
+      hit = &*it;
+  }
+  if (id == DrawIdMap::NO_DRAW)
+  {
+    text += "Nothing drawn shows at this pixel: the EFB clear colour (or a draw beyond the "
+            "capture limit).\n";
+  }
+  else if (!hit)
+  {
+    text += fmt::format("Draw #{} is on top here, but the capture has no record of it.\n", id);
+  }
+  else
+  {
+    text += fmt::format("Draw #{} is on top here ({} pixels of the map show it). What is behind "
+                        "it: draw_at_pixel again with exclude=[{}].\n\n",
+                        id, hit->visible_pixels, id);
+    text += DescribeDraw(capture.get(), *hit);
+  }
+  const auto around = VR::AgentCapture::CountDrawIdsAround(map, layer, x, y, radius);
+  if (around.size() > 1)
+  {
+    text += fmt::format("\nWithin {} pixels:", radius);
+    for (const auto& [draw, count] : around)
+    {
+      text += draw == DrawIdMap::NO_DRAW ? fmt::format(" none ({} px)", count) :
+                                           fmt::format(" #{} ({} px)", draw, count);
+    }
+    text += "\n";
+  }
+  return ToolResult::Text(std::move(text));
 }
 
 ToolResult CaptureHideObjectPrefixes(const ToolArgs& args)
@@ -698,6 +902,9 @@ void RegisterDrawTools(ToolRegistry& registry, Server& server)
                         "copies are numbered f0, f1...",
                         1, VR::AgentCapture::MAX_CAPTURE_FRAMES)
                .Integer("timeout_ms", "When running (default 5000, plus 50 per frame).", 500, 30000)
+               .Boolean("ids", "Also run the draw-ID pass on the first frame: a map of which draw "
+                               "shows at each pixel (draw_at_pixel, list_draws visible=true, the "
+                               "vis column). The headset shows the previous image once more.")
                .Build(),
        .handler = CaptureFrameTool});
 
@@ -803,6 +1010,40 @@ void RegisterDrawTools(ToolRegistry& registry, Server& server)
                 .input_schema = Schema().Build(),
                 .idempotent = true,
                 .handler = ClearPreview});
+
+  registry.Add(
+      {.name = "draw_at_pixel",
+       .title = "The draw at a pixel",
+       .description =
+           "Names the draw visible at a point of the eye image (what a screenshot shows) and "
+           "gives its details, as get_draw does, plus the draws around the point. It runs a "
+           "draw-ID pass: one frame whose draws write their index in place of their colour, read "
+           "back as a map of the frame (the headset shows the previous image once more; the "
+           "first pass of a session links pipelines, up to a second on Quest). The map stays "
+           "with the capture: later calls reuse it while the game is paused (recapture=true for "
+           "a new one), and list_draws visible=true lists the draws that show. exclude=[indices] "
+           "draws the frame without those draws: what is behind them.",
+       .input_schema =
+           Schema()
+               .Number("u", "Across the eye image, 0 (left) to 1 (right).")
+               .Number("v", "Down the eye image, 0 (top) to 1 (bottom).")
+               .Number("x", "Instead of u: a pixel column of the last screenshot of that eye (or "
+                            "of an image_width wide image).")
+               .Number("y", "Instead of v: a pixel row of it.")
+               .Integer("image_width",
+                        "The width of the image x and y refer to (default: the "
+                        "last screenshot's).",
+                        1)
+               .Integer("image_height", "Its height.", 1)
+               .Integer("eye", "0 = left (or mono), 1 = right.", 0, 1)
+               .Integer("radius", "Also list the draws within this many EFB pixels (default 2).", 0,
+                        64)
+               .ArrayOf("exclude", "Draw indices to leave out of the pass (a new capture).",
+                        picojson::object{{"type", JsonString("integer")}})
+               .Boolean("recapture", "Capture a new frame even when the last one has a map.")
+               .Integer("timeout_ms", "When running (default 5000).", 500, 30000)
+               .Build(),
+       .handler = DrawAtPixel});
 
   registry.Add(
       {.name = "capture_hide_object_prefixes",

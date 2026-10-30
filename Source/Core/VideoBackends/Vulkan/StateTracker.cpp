@@ -510,6 +510,12 @@ void StateTracker::OnEFBFrameEnd(u32 efb_scale, s32 foveation_level)
     m_efb_foveation->OnFrameEnd(efb_scale, foveation_level);
 }
 
+void StateTracker::OnEFBFoveationSkipFrame()
+{
+  if (m_efb_foveation)
+    m_efb_foveation->SkipNextFrame();
+}
+
 void StateTracker::NoteSkippedKick()
 {
   if (m_efb_foveation)

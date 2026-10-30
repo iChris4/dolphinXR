@@ -212,6 +212,23 @@ const AbstractPipeline* ShaderCache::GetCoverageUberPipelineForUid(const GXUberP
   return GetUberPipelineForUid(coverage_uid);
 }
 
+const AbstractPipeline* ShaderCache::GetDrawIdUberPipelineForUid(const GXUberPipelineUid& uid)
+{
+  GXUberPipelineUid id_uid = uid;
+  UberShader::pixel_ubershader_uid_data* const ps = id_uid.ps_uid.GetUidData();
+  ps->vr_draw_id = 1;
+  ps->vr_coverage_mode = VRPassthroughCoverageShaderMode::None;
+  ps->no_dual_src = 1;
+  ps->uint_output = 0;
+  // The index replaces the colour: no blending, no logic op. A draw that writes no colour shows
+  // nothing and writes no index either.
+  BlendingState blending = RenderState::GetNoBlendingBlendState();
+  blending.color_update = uid.blending_state.color_update.Value();
+  blending.alpha_update = uid.blending_state.alpha_update.Value();
+  id_uid.blending_state = blending;
+  return GetUberPipelineForUid(id_uid);
+}
+
 void ShaderCache::WaitForAsyncCompiler()
 {
   bool running = true;
@@ -931,7 +948,9 @@ ShaderCache::InsertGXUberPipeline(const GXUberPipelineUid& config,
   {
     entry.first = std::move(pipeline);
 
-    if (g_ActiveConfig.bShaderCache)
+    // The disk cache's pipelines are all recreated at boot: the draw-ID ones (the agent's
+    // picks) are not worth that.
+    if (g_ActiveConfig.bShaderCache && !config.ps_uid.GetUidData()->vr_draw_id)
     {
       auto cache_data = entry.first->GetCacheData();
       if (!cache_data.empty())
