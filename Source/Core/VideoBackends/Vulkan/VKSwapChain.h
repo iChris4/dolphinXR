@@ -55,6 +55,10 @@ public:
   VkResult AcquireNextImage();
 
   bool RecreateSurface(void* native_handle);
+  // The window is gone (Android destroys it when another app or the system takes the
+  // foreground): no swap chain nor surface until RecreateSurface with a new one.
+  void ReleaseSurface();
+  bool HasSurface() const { return m_surface != VK_NULL_HANDLE; }
   bool ResizeSwapChain();
   bool RecreateSwapChain();
 

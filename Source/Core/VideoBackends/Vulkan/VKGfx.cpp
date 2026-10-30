@@ -418,6 +418,8 @@ bool VKGfx::BindBackbuffer(const ClearColor& clear_color)
 
   // Handle host window resizes.
   CheckForSurfaceChange();
+  if (!m_swap_chain->HasSurface())
+    return false;
   CheckForSurfaceResize();
 
   // Check for exclusive fullscreen request.
@@ -564,8 +566,17 @@ void VKGfx::CheckForSurfaceChange()
   // Clear the present failed flag, since we don't want to resize after recreating.
   g_command_buffer_mgr->CheckLastPresentFail();
 
+  // No window: Android destroyed it (another app or the system took the foreground) and paused
+  // emulation, but a VR session keeps presenting. A surface for no window crashes the driver.
+  void* const native_handle = g_presenter->GetNewSurfaceHandle();
+  if (!native_handle)
+  {
+    m_swap_chain->ReleaseSurface();
+    return;
+  }
+
   // Recreate the surface. If this fails we're in trouble.
-  if (!m_swap_chain->RecreateSurface(g_presenter->GetNewSurfaceHandle()))
+  if (!m_swap_chain->RecreateSurface(native_handle))
     PanicAlertFmt("Failed to recreate Vulkan surface. Cannot continue.");
 
   // Handle case where the dimensions are now different.

@@ -502,6 +502,9 @@ VkResult SwapChain::AcquireNextImage()
 
 bool SwapChain::ResizeSwapChain()
 {
+  if (!HasSurface())
+    return false;
+
   DestroySwapChainImages();
   if (!CreateSwapChain() || !SetupSwapChainImages())
   {
@@ -514,6 +517,9 @@ bool SwapChain::ResizeSwapChain()
 
 bool SwapChain::RecreateSwapChain()
 {
+  if (!HasSurface())
+    return false;
+
   DestroySwapChainImages();
   DestroySwapChain();
   if (!CreateSwapChain() || !SetupSwapChainImages())
@@ -608,6 +614,15 @@ bool SwapChain::RecreateSurface(void* native_handle)
     return false;
 
   return true;
+}
+
+void SwapChain::ReleaseSurface()
+{
+  DestroySwapChainImages();
+  DestroySwapChain();
+  DestroySurface();
+  m_wsi.render_surface = nullptr;
+  m_current_swap_chain_image_is_valid = false;
 }
 
 void SwapChain::DestroySurface()
