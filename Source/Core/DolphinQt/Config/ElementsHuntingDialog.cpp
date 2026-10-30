@@ -32,6 +32,9 @@
 #include "VideoCommon/HideObjectEngine.h"
 #include "VideoCommon/ShaderHunter.h"
 #include "VideoCommon/TextureElementManager.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/DrawPick.h"
+#endif
 
 namespace
 {
@@ -380,8 +383,22 @@ void ElementsHuntingDialog::CreateWidgets()
   auto* texture_layout = new QHBoxLayout;
   m_view_textures_button = new QPushButton(tr("View Textures"));
   texture_layout->addWidget(m_view_textures_button);
+#ifdef ENABLE_VR
+  m_pick_button = new QPushButton(tr("Pick on Screen"));
+  m_pick_button->setToolTip(
+      tr("Then click an object in the game window: the seed whose group draws it is selected. "
+         "The game must be running. The first pick of a session may pause the game for a "
+         "moment."));
+  texture_layout->addWidget(m_pick_button);
+#endif
   texture_layout->addStretch();
   layout->addLayout(texture_layout);
+#ifdef ENABLE_VR
+  m_pick_label = new QLabel;
+  m_pick_label->setWordWrap(true);
+  layout->addWidget(m_pick_label);
+  m_pick_serial = VR::DrawPick::GetLastResult().serial;
+#endif
 
   m_pending_texture_label = new QLabel;
   m_pending_texture_label->setWordWrap(true);
@@ -435,6 +452,13 @@ void ElementsHuntingDialog::ConnectWidgets()
   });
   connect(m_seed_list, &QListWidget::itemSelectionChanged, this,
           &ElementsHuntingDialog::OnSeedSelectionChanged);
+#ifdef ENABLE_VR
+  connect(m_pick_button, &QPushButton::clicked, this, [this] {
+    m_enable_check->setChecked(true);
+    VR::DrawPick::ArmClick(VR::DrawPick::Target::Elements);
+    m_pick_label->setText(tr("Click the object in the game window."));
+  });
+#endif
   connect(m_view_textures_button, &QPushButton::clicked, this,
           &ElementsHuntingDialog::ShowTextureBrowser);
 
@@ -471,6 +495,17 @@ void ElementsHuntingDialog::ConnectWidgets()
 
 void ElementsHuntingDialog::UpdateDisplay()
 {
+#ifdef ENABLE_VR
+  if (const VR::DrawPick::Result pick = VR::DrawPick::GetLastResult(); pick.serial != m_pick_serial)
+  {
+    m_pick_serial = pick.serial;
+    if (pick.target == VR::DrawPick::Target::Elements)
+    {
+      m_pick_label->setText(QString::fromStdString(pick.message));
+      RequestRefresh();
+    }
+  }
+#endif
   auto& manager = ElementsGroupManager::GetInstance();
   const auto status = manager.GetStatus();
   bool refresh_lists = m_refresh_pending || (m_auto_refresh_check && m_auto_refresh_check->isChecked());

@@ -46,6 +46,7 @@
 #include "VideoCommon/VideoConfig.h"
 #ifdef ENABLE_VR
 #include "Core/AgentServer/AgentServer.h"
+#include "VideoCommon/VR/DrawPick.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #endif
 
@@ -865,6 +866,15 @@ void HotkeyScheduler::Run()
           OSD::AddMessage("Save Shader Override: no shader selected");
         }
       }
+
+#ifdef ENABLE_VR
+      // The next left click in the game window picks the draw under it for the hunter that is on.
+      if (IsHotkey(HK_VR_HUNT_PICK))
+      {
+        VR::DrawPick::ArmClick(VR::DrawPick::Target::Auto);
+        OSD::AddMessage("Pick: click the object in the game window");
+      }
+#endif
 
       // VR Texture Hunting
       auto& texture_hunter = TextureElementManager::GetInstance();

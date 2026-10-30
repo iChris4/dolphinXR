@@ -208,6 +208,9 @@ struct DrawRecord
   // Pixels of the frame's draw-ID map that show this draw (the draw on top at each pixel; both
   // eyes in stereo), -1 without a map.
   s32 visible_pixels = -1;
+  // The runtime signature Elements overrides match (only while the Shader Hunter or Elements
+  // hunting runs; invalid otherwise).
+  ShaderHunter::RuntimeElementSignature signature;
 };
 
 // One EFB copy of a captured frame: a render to texture, or the frame's copy to the XFB.

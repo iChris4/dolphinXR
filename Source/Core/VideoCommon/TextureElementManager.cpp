@@ -938,6 +938,15 @@ void TextureElementManager::SetPreviewTextures(const std::vector<u64>& hashes)
   m_has_preview.store(!m_preview_textures.empty(), std::memory_order_relaxed);
 }
 
+bool TextureElementManager::SelectTexture(u64 hash)
+{
+  std::lock_guard lock(m_mutex);
+  m_selected_texture_hash = hash;
+  m_preview_textures = {hash};
+  m_has_preview.store(hash != 0, std::memory_order_relaxed);
+  return m_textures_display.contains(hash);
+}
+
 void TextureElementManager::SetPreviewPink(bool pink)
 {
   m_preview_pink.store(pink, std::memory_order_relaxed);

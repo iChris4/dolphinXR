@@ -30,6 +30,11 @@
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 
 #include "VideoCommon/Present.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/OnScreenDisplay.h"
+#include "VideoCommon/VR/DrawPick.h"
+#include "VideoCommon/VideoConfig.h"
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -358,6 +363,16 @@ void RenderWidget::SetWaitingForMessageBox(bool waiting_for_message_box)
 
 bool RenderWidget::event(QEvent* event)
 {
+#ifdef ENABLE_VR
+  // The click a hunter armed is the pick's, not the game's or the on-screen UI's.
+  if (event->type() == QEvent::MouseButtonPress &&
+      static_cast<const QMouseEvent*>(event)->button() == Qt::LeftButton &&
+      VR::DrawPick::IsClickArmed())
+  {
+    PickAt(static_cast<const QMouseEvent*>(event)->position());
+    return true;
+  }
+#endif
   PassEventToPresenter(event);
 
   switch (event->type())
@@ -517,6 +532,60 @@ bool RenderWidget::event(QEvent* event)
     break;
   }
   return QWidget::event(event);
+}
+
+void RenderWidget::PickAt(const QPointF& position)
+{
+#ifdef ENABLE_VR
+  const std::optional<VR::DrawPick::Target> target = VR::DrawPick::TakeArmedClick();
+  if (!target || !g_presenter)
+    return;
+
+  using Layout = VR::DrawPick::WindowLayout;
+  Layout layout = Layout::Mono;
+  switch (g_ActiveConfig.stereo_mode)
+  {
+  case StereoMode::SideBySide:
+    layout = Layout::SideBySide;
+    break;
+  case StereoMode::TopAndBottom:
+    layout = Layout::TopAndBottom;
+    break;
+  case StereoMode::OpenXR:
+    switch (g_ActiveConfig.vr_mirror_view)
+    {
+    case OpenXRMirrorView::LeftEye:
+      layout = Layout::LeftEye;
+      break;
+    case OpenXRMirrorView::RightEye:
+      layout = Layout::RightEye;
+      break;
+    case OpenXRMirrorView::None:
+      OSD::AddMessage("Pick: the window shows no eye (VR Mirror View is None)",
+                      OSD::Duration::NORMAL);
+      return;
+    default:
+      layout = Layout::SideBySide;
+      break;
+    }
+    break;
+  default:
+    break;
+  }
+
+  // Backbuffer pixels, as SetMousePos gives the presenter.
+  const float scale = devicePixelRatio();
+  const std::optional<VR::DrawPick::ImagePoint> point = VR::DrawPick::MapWindowPoint(
+      g_presenter->GetTargetRectangle(), g_presenter->GetBackbufferWidth(),
+      g_presenter->GetBackbufferHeight(), layout, static_cast<float>(position.x()) * scale,
+      static_cast<float>(position.y()) * scale);
+  if (!point)
+  {
+    OSD::AddMessage("Pick: click on the game's picture", OSD::Duration::NORMAL);
+    return;
+  }
+  VR::DrawPick::Request(*target, point->layer, point->u, point->v);
+#endif
 }
 
 void RenderWidget::PassEventToPresenter(const QEvent* event)

@@ -35,6 +35,9 @@
 #include <fmt/format.h>
 
 #include "Common/FileUtil.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/DrawPick.h"
+#endif
 #include "Common/CommonTypes.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/ConfigManager.h"
@@ -193,6 +196,19 @@ void ShaderHunterWidget::CreateWidgets()
   nav_layout->addWidget(m_next_button);
   layout->addLayout(nav_layout);
 
+#ifdef ENABLE_VR
+  m_pick_button = new QPushButton(tr("Pick on Screen"));
+  m_pick_button->setToolTip(
+      tr("Then click an object in the game window: the shader that draws it (of the Shader "
+         "Type above) is selected. The game must be running. The first pick of a session may "
+         "pause the game for a moment."));
+  layout->addWidget(m_pick_button);
+  m_pick_label = new QLabel;
+  m_pick_label->setWordWrap(true);
+  layout->addWidget(m_pick_label);
+  m_pick_serial = VR::DrawPick::GetLastResult().serial;
+#endif
+
   // Save shader override section
   m_shader_name_edit = new QLineEdit;
   m_shader_name_edit->setPlaceholderText(tr("Enter shader name..."));
@@ -262,6 +278,13 @@ void ShaderHunterWidget::CreateWidgets()
 
 void ShaderHunterWidget::ConnectSignals()
 {
+#ifdef ENABLE_VR
+  connect(m_pick_button, &QPushButton::clicked, this, [this] {
+    m_enable_checkbox->setChecked(true);
+    VR::DrawPick::ArmClick(VR::DrawPick::Target::Shader);
+    m_pick_label->setText(tr("Click the object in the game window."));
+  });
+#endif
   connect(m_enable_checkbox, &QCheckBox::toggled, this, [this](bool checked) {
     ShaderHunter::GetInstance().SetEnabled(checked);
     m_hunting_option_combo->setEnabled(checked);
@@ -330,6 +353,18 @@ void ShaderHunterWidget::ConnectSignals()
 
 void ShaderHunterWidget::UpdateDisplay()
 {
+#ifdef ENABLE_VR
+  if (const VR::DrawPick::Result pick = VR::DrawPick::GetLastResult(); pick.serial != m_pick_serial)
+  {
+    m_pick_serial = pick.serial;
+    if (pick.target == VR::DrawPick::Target::Shader)
+    {
+      m_pick_label->setText(QString::fromStdString(pick.message));
+      m_saved_texture_filters.clear();
+      SetSelectedTextureHashes({});
+    }
+  }
+#endif
   auto& hunter = ShaderHunter::GetInstance();
   const int pos = hunter.GetSelectedPosition();
   const int total = hunter.GetTotalCount();

@@ -240,6 +240,9 @@ public:
   HuntingOption GetHuntingOption() const;
 
   void SelectSeedCandidate(int index);
+  // The seed candidate (of the last frame) whose group a draw with this signature belongs to,
+  // -1 when none: what a pick on screen selects.
+  int FindSeedCandidate(const RuntimeElementSignature& signature) const;
   void SetSeedGroupMask(bool projection, bool layer, bool viewport, bool scissor,
                         bool render_state);
   void SelectMatch(int index);

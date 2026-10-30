@@ -61,6 +61,10 @@ private:
   QPushButton* m_prev_match_button = nullptr;
   QPushButton* m_next_match_button = nullptr;
   QPushButton* m_view_textures_button = nullptr;
+  QPushButton* m_pick_button = nullptr;
+  QLabel* m_pick_label = nullptr;
+  // The last pick result shown (VR::DrawPick).
+  u64 m_pick_serial = 0;
   QListWidget* m_current_match_list = nullptr;
   QPushButton* m_save_button = nullptr;
   QPushButton* m_save_hide_objects_button = nullptr;

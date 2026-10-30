@@ -57,6 +57,10 @@ private:
   QPushButton* m_textures_button;
   QComboBox* m_texture_filter_mode_combo;
   QLabel* m_selected_texture_label;
+  QPushButton* m_pick_button = nullptr;
+  QLabel* m_pick_label = nullptr;
+  // The last pick result shown (VR::DrawPick).
+  uint64_t m_pick_serial = 0;
   QTimer* m_update_timer;
   std::vector<uint64_t> m_saved_texture_filters;
 };

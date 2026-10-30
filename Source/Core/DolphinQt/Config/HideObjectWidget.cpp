@@ -7,11 +7,20 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
+#include <QTimer>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
+#include <fmt/format.h>
+
+#include "Core/ConfigManager.h"
 #include "DolphinQt/Config/HideObjectAddEditDialog.h"
 #include "DolphinQt/QtUtils/NonDefaultQPushButton.h"
 #include "VideoCommon/HideObjectEngine.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/DrawPick.h"
+#endif
 
 HideObjectWidget::HideObjectWidget(std::string game_id, std::optional<u16> revision)
     : m_game_id(std::move(game_id)), m_revision(revision)
@@ -46,6 +55,13 @@ void HideObjectWidget::CreateWidgets()
   button_layout->addWidget(m_code_add);
   button_layout->addWidget(m_code_edit);
   button_layout->addWidget(m_code_remove);
+#ifdef ENABLE_VR
+  m_code_pick = new NonDefaultQPushButton(tr("&Pick on Screen..."));
+  m_code_pick->setToolTip(
+      tr("Then click an object in the game window: a new code made from the start of its vertex "
+         "data opens in the editor. The game must be running."));
+  button_layout->addWidget(m_code_pick);
+#endif
   button_layout->addStretch();
   button_layout->addWidget(m_code_refresh);
   button_layout->addWidget(m_code_reload);
@@ -54,6 +70,13 @@ void HideObjectWidget::CreateWidgets()
   layout->addWidget(info_label);
   layout->addWidget(m_code_list);
   layout->addLayout(button_layout);
+#ifdef ENABLE_VR
+  m_pick_label = new QLabel;
+  m_pick_label->setWordWrap(true);
+  layout->addWidget(m_pick_label);
+  m_pick_timer = new QTimer(this);
+  m_pick_timer->setInterval(100);
+#endif
 }
 
 void HideObjectWidget::ConnectWidgets()
@@ -66,6 +89,63 @@ void HideObjectWidget::ConnectWidgets()
   connect(m_code_remove, &QPushButton::clicked, this, &HideObjectWidget::OnRemoveClicked);
   connect(m_code_refresh, &QPushButton::clicked, this, &HideObjectWidget::OnRefreshClicked);
   connect(m_code_reload, &QPushButton::clicked, this, &HideObjectWidget::OnReloadClicked);
+#ifdef ENABLE_VR
+  connect(m_code_pick, &QPushButton::clicked, this, &HideObjectWidget::OnPickClicked);
+  connect(m_pick_timer, &QTimer::timeout, this, &HideObjectWidget::CheckPickResult);
+#endif
+}
+
+void HideObjectWidget::OnPickClicked()
+{
+#ifdef ENABLE_VR
+  if (SConfig::GetInstance().GetGameID() != m_game_id)
+  {
+    m_pick_label->setText(tr("Start this game first: the pick reads the running game."));
+    return;
+  }
+  m_pick_serial = VR::DrawPick::GetLastResult().serial;
+  VR::DrawPick::ArmClick(VR::DrawPick::Target::HideCode);
+  m_pick_label->setText(tr("Click the object in the game window."));
+  m_pick_timer->start();
+#endif
+}
+
+void HideObjectWidget::CheckPickResult()
+{
+#ifdef ENABLE_VR
+  const VR::DrawPick::Result pick = VR::DrawPick::GetLastResult();
+  if (pick.serial == m_pick_serial)
+    return;
+  m_pick_serial = pick.serial;
+  if (pick.target != VR::DrawPick::Target::HideCode)
+    return;
+  m_pick_timer->stop();
+  m_pick_label->setText(QString::fromStdString(pick.message));
+  if (!pick.ok || !pick.draw)
+    return;
+
+  // A new code, opened in the editor to shorten or extend before it is added.
+  HideObjectEngine::HideObject code;
+  for (u32 n = pick.draw->index;; ++n)
+  {
+    code.name = fmt::format("Picked Draw {}", n);
+    if (std::ranges::none_of(m_codes, [&code](const HideObjectEngine::HideObject& other) {
+          return other.name == code.name;
+        }))
+    {
+      break;
+    }
+  }
+  code.entries = pick.hide_entries;
+  HideObjectAddEditDialog dialog(this, &code, m_codes);
+  if (dialog.exec() == QDialog::Accepted)
+  {
+    m_codes.push_back(dialog.GetResult());
+    SaveCodes();
+    UpdateList();
+  }
+  HideObjectEngine::Engine::GetInstance().ApplyCodes(m_codes);
+#endif
 }
 
 void HideObjectWidget::LoadCodes()

@@ -1475,6 +1475,20 @@ void ElementsGroupManager::SelectSeedCandidate(int index)
   SelectSeedCandidateLocked(index);
 }
 
+int ElementsGroupManager::FindSeedCandidate(const RuntimeElementSignature& signature) const
+{
+  std::lock_guard lock(m_mutex);
+  if (!signature.valid)
+    return -1;
+  const RuntimeElementSignature group_signature = GetSeedGroupSignatureLocked(signature);
+  for (size_t i = 0; i < m_display_seed_candidates.size(); ++i)
+  {
+    if (SignaturesEqual(m_display_seed_candidates[i].group_signature, group_signature))
+      return static_cast<int>(i);
+  }
+  return -1;
+}
+
 void ElementsGroupManager::SetSeedGroupMask(bool projection, bool layer, bool viewport,
                                             bool scissor, bool render_state)
 {

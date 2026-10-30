@@ -166,6 +166,9 @@ public:
   // mirroring the Shader Override tool's texture preview. The set is cleared when the hunter is
   // deactivated.
   void SetPreviewTextures(const std::vector<u64>& hashes);
+  // Selects one texture, as Prev/NextTexture do, by its hash (a pick on screen). Returns whether
+  // the last frame's list has it (the selection stands either way).
+  bool SelectTexture(u64 hash);
   // Preview mode: false = Skip (hide the draw), true = Pink (magenta highlight).
   void SetPreviewPink(bool pink);
   bool IsPreviewPink() const;

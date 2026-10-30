@@ -41,6 +41,8 @@ private:
   void OnKeepOnTopChanged(bool top);
   void UpdateCursor();
   void PassEventToPresenter(const QEvent* event);
+  // VR::DrawPick: a click armed by a hunter's "Pick on Screen" picks the draw under it.
+  void PickAt(const QPointF& position);
   void SetPresenterKeyMap();
   void dragEnterEvent(QDragEnterEvent* event) override;
   void dropEvent(QDropEvent* event) override;

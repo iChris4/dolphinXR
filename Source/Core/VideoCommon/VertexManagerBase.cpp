@@ -63,6 +63,7 @@
 
 #ifdef ENABLE_VR
 #include "VideoCommon/VR/AgentCapture.h"
+#include "VideoCommon/VR/DrawPick.h"
 #endif
 
 std::unique_ptr<VertexManagerBase> g_vertex_manager;
@@ -1597,6 +1598,7 @@ void VertexManagerBase::Flush()
                 m_current_primitive_type);
             if (agent_record)
             {
+              agent_record->signature = draw_signature;
               agent_record->projection_load = static_cast<s32>(projection_load);
               for (u32 i = 0; i < 8; i++)
               {
@@ -2809,6 +2811,8 @@ void VertexManagerBase::OnEndFrame()
 #ifdef ENABLE_VR
   // Publishes the agent server's draw capture of the frame that just ended (or starts one).
   VR::AgentCapture::OnEndFrame(m_vr_culled_flushes, g_ActiveConfig.vr_flat_screen);
+  // A pick for the hunters resolves once its capture is published.
+  VR::DrawPick::OnEndFrame();
 #endif
   ElementsGroupManager::GetInstance().OnFrameEnd();
   Core::System::GetInstance().GetGeometryShaderManager().OnEndFrame();

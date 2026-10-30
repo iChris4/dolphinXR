@@ -11,9 +11,11 @@
 
 #include "VideoCommon/HideObjectEngine.h"
 
+class QLabel;
 class QListWidget;
 class QListWidgetItem;
 class QPushButton;
+class QTimer;
 
 class HideObjectWidget : public QWidget
 {
@@ -36,6 +38,8 @@ private:
   void OnRemoveClicked();
   void OnRefreshClicked();
   void OnReloadClicked();
+  void OnPickClicked();
+  void CheckPickResult();
 
   std::string m_game_id;
   std::optional<u16> m_revision;
@@ -46,6 +50,10 @@ private:
   QPushButton* m_code_remove;
   QPushButton* m_code_refresh;
   QPushButton* m_code_reload;
+  QPushButton* m_code_pick = nullptr;
+  QLabel* m_pick_label = nullptr;
+  QTimer* m_pick_timer = nullptr;
+  u64 m_pick_serial = 0;
 
   std::vector<HideObjectEngine::HideObject> m_codes;
 };
