@@ -309,7 +309,25 @@ LogManager* LogManager::GetInstance()
 
 void LogManager::Init()
 {
-  s_log_manager = std::unique_ptr<LogManager>(new LogManager());
+  auto manager = std::unique_ptr<LogManager>(new LogManager());
+  // Android re-creates the manager to reload its settings, also during a game. The listeners other
+  // code registered and keeps a pointer to (the agent server's log, the lost-GPU report) move to
+  // the new manager instead of being destroyed under that code.
+  if (s_log_manager)
+  {
+    for (const LogListener::LISTENER id : {
+#ifdef ENABLE_VR
+             LogListener::AGENT_LISTENER,
+#endif
+             LogListener::GPU_LOST_LISTENER})
+    {
+      if (!s_log_manager->m_listeners[id])
+        continue;
+      manager->m_listeners[id] = std::move(s_log_manager->m_listeners[id]);
+      manager->m_listener_ids[id] = static_cast<bool>(s_log_manager->m_listener_ids[id]);
+    }
+  }
+  s_log_manager = std::move(manager);
 }
 
 void LogManager::Shutdown()
