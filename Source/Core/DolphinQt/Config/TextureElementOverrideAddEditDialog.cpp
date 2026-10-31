@@ -29,6 +29,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
@@ -123,8 +124,8 @@ private:
 
 }  // namespace
 
-// The hash list opens tall enough for its rows (up to MAX_VISIBLE_TEXTURE_HASH_ROWS), but the
-// dialog can be shrunk until it shows one row: the others scroll.
+// The hash list asks for room for its rows (up to MAX_VISIBLE_TEXTURE_HASH_ROWS) but needs only
+// one: the others scroll, so it never makes the dialog taller than the other fields.
 class TextureElementOverrideAddEditDialog::TextureHashScrollArea final : public QScrollArea
 {
 public:
@@ -134,14 +135,17 @@ public:
     updateGeometry();
   }
 
+  // The rows plus the scroll bar: whole hashes stay readable when the list scrolls.
   QSize sizeHint() const override
   {
-    return {QScrollArea::sizeHint().width(), m_visible_rows * TEXTURE_HASH_ROW_HEIGHT};
+    return {widget()->sizeHint().width() + verticalScrollBar()->sizeHint().width(),
+            m_visible_rows * TEXTURE_HASH_ROW_HEIGHT};
   }
 
   QSize minimumSizeHint() const override
   {
-    return {QScrollArea::minimumSizeHint().width(), TEXTURE_HASH_ROW_HEIGHT};
+    return {widget()->minimumSizeHint().width() + verticalScrollBar()->sizeHint().width(),
+            TEXTURE_HASH_ROW_HEIGHT};
   }
 
 private:
@@ -159,7 +163,6 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
 {
   setWindowTitle(edit_override ? tr("Edit Texture Element Override") :
                                  tr("Add Texture Element Override"));
-  setMinimumWidth(350);
 
   m_name_edit = new QLineEdit;
   m_name_edit->setPlaceholderText(tr("Override name..."));
@@ -475,8 +478,23 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   form->addRow(m_anchor_ctrl_roll_label, m_anchor_ctrl_roll_spin);
   form->addRow(QString(), m_view_textures_button);
   form->addRow(QString(), m_import_textures_button);
-  form->addRow(tr("Texture Hashes:"), m_texture_hash_scroll);
   form->addRow(tr("Comments:"), m_comments_edit);
+
+  // The hashes get a column of their own beside the other fields, so the dialog is no taller than
+  // the fields and fits small screens.
+  auto* hash_form = new QFormLayout;
+  hash_form->addRow(tr("Texture Hashes:"), m_texture_hash_scroll);
+
+  auto* separator = new QFrame;
+  separator->setFrameShape(QFrame::VLine);
+  // A sunken line vanishes in the dark palette.
+  separator->setFrameShadow(QFrame::Plain);
+  separator->setForegroundRole(QPalette::Mid);
+
+  auto* columns = new QHBoxLayout;
+  columns->addLayout(form);
+  columns->addWidget(separator);
+  columns->addLayout(hash_form, 1);
 
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
   connect(buttons, &QDialogButtonBox::accepted, this,
@@ -495,7 +513,7 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
           &TextureElementOverrideAddEditDialog::OnImportTextures);
 
   auto* layout = new QVBoxLayout;
-  layout->addLayout(form);
+  layout->addLayout(columns);
   layout->addWidget(buttons);
   setLayout(layout);
 
@@ -856,6 +874,8 @@ void TextureElementOverrideAddEditDialog::AddTextureHashField(const QString& tex
          "You can paste multiple hashes separated by comma, semicolon, or spaces,\n"
          "or drop one or more dumped PNG/DDS texture files here."));
   edit->setText(text);
+  // Wide enough for a whole 16-digit hash, with room for the frame.
+  edit->setMinimumWidth(edit->fontMetrics().horizontalAdvance(QString(18, QLatin1Char('0'))));
 
   // Thumbnail of the matching dumped texture, shown beside the hash.
   auto* preview = new QLabel;
