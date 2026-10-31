@@ -123,6 +123,31 @@ private:
 
 }  // namespace
 
+// The hash list opens tall enough for its rows (up to MAX_VISIBLE_TEXTURE_HASH_ROWS), but the
+// dialog can be shrunk until it shows one row: the others scroll.
+class TextureElementOverrideAddEditDialog::TextureHashScrollArea final : public QScrollArea
+{
+public:
+  void SetVisibleRows(int rows)
+  {
+    m_visible_rows = rows;
+    updateGeometry();
+  }
+
+  QSize sizeHint() const override
+  {
+    return {QScrollArea::sizeHint().width(), m_visible_rows * TEXTURE_HASH_ROW_HEIGHT};
+  }
+
+  QSize minimumSizeHint() const override
+  {
+    return {QScrollArea::minimumSizeHint().width(), TEXTURE_HASH_ROW_HEIGHT};
+  }
+
+private:
+  int m_visible_rows = 1;
+};
+
 using HandlingType = TextureElementManager::HandlingType;
 using AnchorRotationMode = TextureElementManager::AnchorRotationMode;
 using TextureElementOverride = TextureElementManager::TextureElementOverride;
@@ -346,7 +371,7 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   m_texture_hash_layout->setContentsMargins(0, 0, 0, 0);
   m_texture_hash_layout->setSpacing(4);
   m_texture_hash_layout->setAlignment(Qt::AlignTop);
-  m_texture_hash_scroll = new QScrollArea;
+  m_texture_hash_scroll = new TextureHashScrollArea;
   m_texture_hash_scroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   m_texture_hash_scroll->setWidgetResizable(true);
   m_texture_hash_scroll->setFrameShape(QFrame::NoFrame);
@@ -888,9 +913,15 @@ void TextureElementOverrideAddEditDialog::EnsureTextureHashFieldRows()
     delete row;  // Deletes its child edit and preview label too.
   }
 
-  const int visible_rows = std::min(desired_rows, MAX_VISIBLE_TEXTURE_HASH_ROWS);
-  const int viewport_height = visible_rows * TEXTURE_HASH_ROW_HEIGHT;
-  m_texture_hash_scroll->setMinimumHeight(viewport_height);
+  // The dialog grows with the list while the whole list fits in it. Once the user has shrunk it
+  // and the list scrolls, it keeps their size.
+  const bool list_fits =
+      m_texture_hash_scroll->height() >= m_texture_hash_scroll->sizeHint().height();
+  m_texture_hash_scroll->SetVisibleRows(std::min(desired_rows, MAX_VISIBLE_TEXTURE_HASH_ROWS));
+  const int missing_height =
+      m_texture_hash_scroll->sizeHint().height() - m_texture_hash_scroll->height();
+  if (isVisible() && list_fits && missing_height > 0)
+    resize(width(), height() + missing_height);
 
   m_updating_texture_hash_fields = false;
 }

@@ -20,7 +20,6 @@ class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
-class QScrollArea;
 class QString;
 class QSpinBox;
 class QVBoxLayout;
@@ -42,6 +41,8 @@ public:
   TextureElementManager::TextureElementOverride GetResult() const;
 
 private:
+  class TextureHashScrollArea;
+
   std::vector<std::string> CollectTextureHashTokens() const;
   std::vector<u64> CollectTextureHashValues() const;
   void SetTextureHashFields(const std::vector<u64>& hashes);
@@ -98,7 +99,7 @@ private:
   QPushButton* m_view_textures_button;
   QPushButton* m_import_textures_button;
   QWidget* m_texture_hash_container;
-  QScrollArea* m_texture_hash_scroll;
+  TextureHashScrollArea* m_texture_hash_scroll;
   QVBoxLayout* m_texture_hash_layout;
   std::vector<QLineEdit*> m_texture_hash_edits;
   std::vector<QLabel*> m_texture_hash_previews;
