@@ -688,14 +688,14 @@ LoadElementGroupOverridesFromINIFile(const std::string& path)
     {
       if (!line.empty() && line.back() == '\r')
         line.pop_back();
-      if (line == "[ElementsGroupOverride_Enable]")
+      // Read every copy of the section: a code pasted with its header in the VR Config editor can
+      // add one after the other sections.
+      if (!line.empty() && line[0] == '[')
       {
-        in_section = true;
-        parsed.has_enable_section = true;
+        in_section = line == "[ElementsGroupOverride_Enable]";
+        parsed.has_enable_section |= in_section;
         continue;
       }
-      if (in_section && !line.empty() && line[0] == '[')
-        break;
       if (!in_section || line.empty())
         continue;
       if (line[0] == '$')
@@ -792,13 +792,13 @@ LoadElementGroupOverridesFromINIFile(const std::string& path)
     if (!line.empty() && line.back() == '\r')
       line.pop_back();
 
-    if (line == "[ElementsGroupOverride]")
+    if (!line.empty() && line[0] == '[')
     {
-      in_section = true;
+      commit_entry();
+      has_entry = false;
+      in_section = line == "[ElementsGroupOverride]";
       continue;
     }
-    if (in_section && !line.empty() && line[0] == '[')
-      break;
     if (!in_section || line.empty())
       continue;
 

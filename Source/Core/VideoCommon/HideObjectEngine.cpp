@@ -155,14 +155,14 @@ static ParsedHideObjectFile LoadFromINIFile(const std::string& path)
       if (!line.empty() && line.back() == '\r')
         line.pop_back();
 
-      if (line == "[HideObjectCodes_Enabled]")
+      // Read every copy of the section: a code pasted with its header in the VR Config editor can
+      // add one after the other sections.
+      if (!line.empty() && line[0] == '[')
       {
-        in_section = true;
-        parsed.has_enable_section = true;
+        in_section = line == "[HideObjectCodes_Enabled]";
+        parsed.has_enable_section |= in_section;
         continue;
       }
-      if (in_section && !line.empty() && line[0] == '[')
-        break;
       if (!in_section || line.empty())
         continue;
       if (line[0] == '$')
@@ -202,13 +202,13 @@ static ParsedHideObjectFile LoadFromINIFile(const std::string& path)
     if (!line.empty() && line.back() == '\r')
       line.pop_back();
 
-    if (line == "[HideObjectCodes]")
+    if (!line.empty() && line[0] == '[')
     {
-      in_section = true;
+      commit_code();
+      has_code = false;
+      in_section = line == "[HideObjectCodes]";
       continue;
     }
-    if (in_section && !line.empty() && line[0] == '[')
-      break;
     if (!in_section || line.empty())
       continue;
 

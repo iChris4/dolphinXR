@@ -107,3 +107,69 @@ TEST(OverrideProfileMerge, ShaderTextureAndHideObjectFollowTheSameRule)
   ASSERT_EQ(codes.size(), 1u);
   EXPECT_TRUE(codes[0].active);
 }
+
+// The writers move each section to the end of the file when they save it, so a code pasted at the
+// end of the VR Config editor, with its section header, lands after other sections. Every copy of
+// a section is read, and the keys of other sections stay out of the code before them.
+TEST(OverrideProfileMerge, PastedTextureCodesAfterOtherSectionsLoad)
+{
+  const std::string user = WriteTemp("[TextureElementOverride_Enable]\n$A\n"
+                                     "[TextureElementOverride]\n"
+                                     "$A\nhandling=screen\ntexture=0ea0e7ac012220d3\n\n"
+                                     "[Graphics.VR]\ntexture = 00000000000000aa\n"
+                                     "[TextureElementOverride_Enable]\n$B\n"
+                                     "[TextureElementOverride]\n"
+                                     "$B\nhandling=skip\ntexture=00000000deadbeef\n");
+  const auto textures = TextureElementManager::LoadOverridesFromINIFiles({}, {user});
+  ASSERT_EQ(textures.size(), 2u);
+  ASSERT_TRUE(Find(textures, "A"));
+  EXPECT_TRUE(Find(textures, "A")->enabled);
+  EXPECT_EQ(Find(textures, "A")->texture_hashes, std::vector<u64>{0x0ea0e7ac012220d3});
+  ASSERT_TRUE(Find(textures, "B"));
+  EXPECT_TRUE(Find(textures, "B")->enabled);
+  EXPECT_EQ(Find(textures, "B")->texture_hashes, std::vector<u64>{0xdeadbeef});
+}
+
+TEST(OverrideProfileMerge, PastedShaderElementsAndHideCodesAfterOtherSectionsLoad)
+{
+  const std::string shader_user =
+      WriteTemp("[ShaderOverride_Enable]\n$A\n[ShaderOverride]\n"
+                "$A\nHash=000000001d369b69\nType=PS\nhandling=screen\n"
+                "[Graphics.VR]\nhandling = skip\n"
+                "[ShaderOverride_Enable]\n$B\n[ShaderOverride]\n"
+                "$B\nHash=00000000deadbeef\nType=PS\nhandling=fullscreen\n");
+  const auto shaders = ShaderHunter::LoadOverridesFromINIFiles({}, {shader_user});
+  ASSERT_EQ(shaders.size(), 2u);
+  ASSERT_TRUE(Find(shaders, "A"));
+  EXPECT_TRUE(Find(shaders, "A")->enabled);
+  EXPECT_EQ(Find(shaders, "A")->handling, ShaderHunter::HandlingType::Screen);
+  ASSERT_TRUE(Find(shaders, "B"));
+  EXPECT_TRUE(Find(shaders, "B")->enabled);
+
+  const std::string elements_user = WriteTemp(
+      "[ElementsGroupOverride_Enable]\n$A\n[ElementsGroupOverride]\n" + ElementEntry("A") +
+      "[Graphics.VR]\nhandling = skip\n" +
+      "[ElementsGroupOverride_Enable]\n$B\n[ElementsGroupOverride]\n" + ElementEntry("B"));
+  const auto elements = ElementsGroupManager::LoadOverridesFromINIFiles({}, {elements_user});
+  ASSERT_EQ(elements.size(), 2u);
+  ASSERT_TRUE(Find(elements, "A"));
+  EXPECT_TRUE(Find(elements, "A")->enabled);
+  EXPECT_EQ(Find(elements, "A")->handling, ShaderHunter::HandlingType::Screen);
+  ASSERT_TRUE(Find(elements, "B"));
+  EXPECT_TRUE(Find(elements, "B")->enabled);
+
+  const std::string hide_user = WriteTemp("[HideObjectCodes_Enabled]\n$A\n[HideObjectCodes]\n"
+                                          "$A\nType=128bits\nUpper=0x3C00800500FFF800\n"
+                                          "Lower=0x000000000000003C\n"
+                                          "[Graphics.VR]\nType = 64bits\n"
+                                          "[HideObjectCodes_Enabled]\n$B\n[HideObjectCodes]\n"
+                                          "$B\nType=128bits\nUpper=0x1100800500FFF800\n"
+                                          "Lower=0x0000000000000011\n");
+  const auto codes = HideObjectEngine::LoadFromINIFiles({}, {hide_user});
+  ASSERT_EQ(codes.size(), 2u);
+  ASSERT_TRUE(Find(codes, "A"));
+  EXPECT_TRUE(Find(codes, "A")->active);
+  EXPECT_EQ(Find(codes, "A")->entries.size(), 1u);
+  ASSERT_TRUE(Find(codes, "B"));
+  EXPECT_TRUE(Find(codes, "B")->active);
+}
