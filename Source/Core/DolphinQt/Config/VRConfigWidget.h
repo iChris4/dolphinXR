@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <QWidget>
 
@@ -27,6 +28,10 @@ public:
                           QWidget* parent = nullptr);
   ~VRConfigWidget() override;
 
+protected:
+  void showEvent(QShowEvent* event) override;
+  void hideEvent(QHideEvent* event) override;
+
 private:
   void CreateWidgets();
   void SaveSettings();
@@ -35,6 +40,7 @@ private:
 
   std::string GetLocalINIPath() const;
   std::string GetLayerState() const;
+  std::vector<std::string> ReadEditorFiles() const;
 
   const std::string m_game_id;
   const std::optional<u16> m_revision;
@@ -44,5 +50,8 @@ private:
 
   QTabWidget* m_default_tab = nullptr;
   QTabWidget* m_local_tab = nullptr;
+  int m_editor_tab_index = -1;
   int m_prev_tab_index = 0;
+  // The user files as the editor left them when another pane was shown.
+  std::vector<std::string> m_editor_files;
 };

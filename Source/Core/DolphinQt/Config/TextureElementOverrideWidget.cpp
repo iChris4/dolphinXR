@@ -388,8 +388,10 @@ void TextureElementOverrideWidget::OnReloadClicked()
 void TextureElementOverrideWidget::showEvent(QShowEvent* event)
 {
   QWidget::showEvent(event);
-  // Re-scan the dump folder each time the pane is shown (dumps may have been created meanwhile).
-  UpdateDumpWarning();
+  // The VR Config editor writes the same file: show what it holds now, or the next change here
+  // would save the old list over the codes pasted there. This also re-scans the dump folder
+  // (dumps may have been created meanwhile).
+  LoadOverrides();
 }
 
 bool TextureElementOverrideWidget::HasTextureDumps() const

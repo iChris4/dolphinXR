@@ -25,6 +25,9 @@ public:
                                        std::optional<u16> revision = std::nullopt);
   ~ElementsGroupOverrideWidget() override;
 
+protected:
+  void showEvent(QShowEvent* event) override;
+
 private:
   void CreateWidgets();
   void ConnectWidgets();

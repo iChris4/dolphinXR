@@ -24,6 +24,9 @@ public:
   explicit ShaderOverrideWidget(std::string game_id, std::optional<u16> revision = std::nullopt);
   ~ShaderOverrideWidget() override;
 
+protected:
+  void showEvent(QShowEvent* event) override;
+
 private:
   void CreateWidgets();
   void ConnectWidgets();

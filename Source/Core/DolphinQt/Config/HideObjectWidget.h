@@ -24,6 +24,9 @@ public:
   explicit HideObjectWidget(std::string game_id, std::optional<u16> revision = std::nullopt);
   ~HideObjectWidget() override;
 
+protected:
+  void showEvent(QShowEvent* event) override;
+
 private:
   void CreateWidgets();
   void ConnectWidgets();

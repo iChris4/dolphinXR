@@ -457,6 +457,14 @@ void ShaderOverrideWidget::OnRefreshClicked()
   LoadOverrides();
 }
 
+void ShaderOverrideWidget::showEvent(QShowEvent* event)
+{
+  QWidget::showEvent(event);
+  // The VR Config editor writes the same file: show what it holds now, or the next change here
+  // would save the old list over the codes pasted there.
+  LoadOverrides();
+}
+
 void ShaderOverrideWidget::OnReloadClicked()
 {
   // Force the runtime ShaderHunter to reload overrides from the INI,

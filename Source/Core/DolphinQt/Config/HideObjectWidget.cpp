@@ -302,6 +302,14 @@ void HideObjectWidget::OnRefreshClicked()
   LoadCodes();
 }
 
+void HideObjectWidget::showEvent(QShowEvent* event)
+{
+  QWidget::showEvent(event);
+  // The VR Config editor writes the same file: show what it holds now, or the next change here
+  // would save the old list over the codes pasted there.
+  LoadCodes();
+}
+
 void HideObjectWidget::OnReloadClicked()
 {
   HideObjectEngine::Engine::GetInstance().LoadCodes(m_game_id);

@@ -65,14 +65,20 @@ void PopulateVRConfigTab(QTabWidget* tab, const std::string& path, const std::st
   }
 }
 
-bool HasTab(const QTabWidget* tab, const QString& name)
+int FindTab(const QTabWidget* tab, const QString& name)
 {
   for (int i = 0; i < tab->count(); ++i)
   {
     if (tab->tabText(i) == name)
-      return true;
+      return i;
   }
-  return false;
+  return -1;
+}
+
+void SelectTab(QTabWidget* tab, const QString& name)
+{
+  if (const int index = FindTab(tab, name); index >= 0)
+    tab->setCurrentIndex(index);
 }
 }  // namespace
 
@@ -400,16 +406,16 @@ void VRConfigWidget::CreateWidgets()
   auto* tabs = new QTabWidget;
   tabs->addTab(GetWrappedWidget(general_page), tr("General"));
   tabs->addTab(GetWrappedWidget(hacks_page), tr("Hacks"));
-  const int editor_index = tabs->addTab(editor_page, tr("Editor"));
+  m_editor_tab_index = tabs->addTab(editor_page, tr("Editor"));
 
-  connect(tabs, &QTabWidget::currentChanged, this, [this, editor_index](int index) {
-    if (index == editor_index)
+  connect(tabs, &QTabWidget::currentChanged, this, [this](int index) {
+    if (index == m_editor_tab_index)
     {
       m_layer->Save();
       RefreshEditorTabs();
     }
 
-    if (m_prev_tab_index == editor_index)
+    if (m_prev_tab_index == m_editor_tab_index)
       ReloadSettings();
 
     m_prev_tab_index = index;
@@ -428,6 +434,26 @@ void VRConfigWidget::CreateWidgets()
   setLayout(root_layout);
 
   RefreshEditorTabs();
+}
+
+void VRConfigWidget::showEvent(QShowEvent* event)
+{
+  QWidget::showEvent(event);
+  // The override panes write the file the editor shows. Show their changes, or the next keystroke
+  // here would save the old text over them. Reloading the text loses its scroll position, so only
+  // do it when the file changed.
+  if (m_prev_tab_index == m_editor_tab_index && ReadEditorFiles() != m_editor_files)
+    RefreshEditorTabs();
+}
+
+void VRConfigWidget::hideEvent(QHideEvent* event)
+{
+  QWidget::hideEvent(event);
+  // Leaving the editor for another pane, like leaving it for another tab.
+  if (m_prev_tab_index != m_editor_tab_index)
+    return;
+  ReloadSettings();
+  m_editor_files = ReadEditorFiles();
 }
 
 void VRConfigWidget::SaveSettings()
@@ -457,6 +483,8 @@ void VRConfigWidget::RefreshEditorTabs()
   if (!m_default_tab || !m_local_tab || m_game_id.empty())
     return;
 
+  const QString default_tab_name = m_default_tab->tabText(m_default_tab->currentIndex());
+  const QString local_tab_name = m_local_tab->tabText(m_local_tab->currentIndex());
   ResetTabPages(m_default_tab);
   ResetTabPages(m_local_tab);
 
@@ -465,18 +493,30 @@ void VRConfigWidget::RefreshEditorTabs()
   PopulateVRConfigTab(m_local_tab, File::GetUserPath(D_GAMESETTINGSVR_IDX), m_game_id, m_revision,
                       false);
 
-  const QString local_tab_name = QString::fromStdString(m_game_id + ".ini");
-  if (!HasTab(m_local_tab, local_tab_name))
+  const QString game_tab_name = QString::fromStdString(m_game_id + ".ini");
+  if (FindTab(m_local_tab, game_tab_name) < 0)
   {
     m_local_tab->addTab(
         new GameConfigEdit(nullptr, QString::fromStdString(GetLocalINIPath()), false),
-        local_tab_name);
+        game_tab_name);
   }
+
+  SelectTab(m_default_tab, default_tab_name);
+  SelectTab(m_local_tab, local_tab_name);
 }
 
 std::string VRConfigWidget::GetLocalINIPath() const
 {
   return File::GetUserPath(D_GAMESETTINGSVR_IDX) + m_game_id + ".ini";
+}
+
+std::vector<std::string> VRConfigWidget::ReadEditorFiles() const
+{
+  std::vector<std::string> files;
+  for (const std::string& filename : ConfigLoaders::GetGameIniFilenames(m_game_id, m_revision))
+    File::ReadFileToString(File::GetUserPath(D_GAMESETTINGSVR_IDX) + filename,
+                           files.emplace_back());
+  return files;
 }
 
 std::string VRConfigWidget::GetLayerState() const

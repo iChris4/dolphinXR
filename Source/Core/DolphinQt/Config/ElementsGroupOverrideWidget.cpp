@@ -357,6 +357,14 @@ void ElementsGroupOverrideWidget::OnRefreshClicked()
   LoadOverrides();
 }
 
+void ElementsGroupOverrideWidget::showEvent(QShowEvent* event)
+{
+  QWidget::showEvent(event);
+  // The VR Config editor writes the same file: show what it holds now, or the next change here
+  // would save the old list over the codes pasted there.
+  LoadOverrides();
+}
+
 void ElementsGroupOverrideWidget::OnReloadClicked()
 {
   INFO_LOG_FMT(VIDEO, "ElementsGroup: reload requested for {}", m_game_id);
