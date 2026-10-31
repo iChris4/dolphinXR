@@ -177,6 +177,16 @@ public:
 
   bool IsInterruptWaiting() const;
 
+  // Diagnostics (agent tools): registers and flags that are otherwise private, read unlocked.
+  struct DebugState
+  {
+    u16 control = 0;
+    u16 status = 0;
+    bool interrupt_set = false;
+    bool interrupt_waiting = false;
+  };
+  DebugState GetDebugState() const;
+
   void SetCpClearRegister();
   void SetCpControlRegister();
   void SetCpStatusRegister();

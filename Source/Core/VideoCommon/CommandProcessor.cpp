@@ -439,6 +439,14 @@ bool CommandProcessorManager::IsInterruptWaiting() const
   return m_interrupt_waiting.IsSet();
 }
 
+CommandProcessorManager::DebugState CommandProcessorManager::GetDebugState() const
+{
+  return {.control = m_cp_ctrl_reg.Hex,
+          .status = m_cp_status_reg.Hex,
+          .interrupt_set = m_interrupt_set.IsSet(),
+          .interrupt_waiting = m_interrupt_waiting.IsSet()};
+}
+
 void CommandProcessorManager::SetCPStatusFromGPU()
 {
   // breakpoint
