@@ -14,7 +14,7 @@
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
 
-static constexpr u32 VERTEX_SHADER_CODE_VERSION = 25;
+static constexpr u32 VERTEX_SHADER_CODE_VERSION = 26;
 
 VertexShaderUid GetVertexShaderUid()
 {
@@ -1086,7 +1086,14 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
   // flag suppresses the trailing depth-range/pixel-center fixups below to avoid
   // double-remapping.
   if (UseVRMultiviewVSProjection(api_type, host_config))
+  {
     GenerateVRMultiviewVSProjection(out, api_type, host_config, "vertex_output.position");
+    // The line/point expansion above offset the game's clip position, which the VR block
+    // replaced: offset the per-eye position by the same NDC amount, or the expanded quad folds
+    // back onto its line (Metroid Prime's map outlines and electric effects vanished).
+    if (uid_data->vs_expand != VSExpand::None)
+      out.Write("\tif (vr_pos_replaced)\n\t\to.pos.xy += offset * o.pos.w;\n");
+  }
 
   // clipPos/w needs to be done in pixel shader, not here
   if (!host_config.fast_depth_calc)

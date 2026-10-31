@@ -14,7 +14,7 @@
 
 namespace UberShader
 {
-static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 9;
+static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 10;
 
 VertexShaderUid GetVertexShaderUid()
 {
@@ -371,6 +371,8 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
 
   if (vs_expand)
   {
+    // Kept for the multiview VR path below, which replaces the position the expansion offset.
+    out.Write("float2 vs_expand_offset = float2(0.0, 0.0);\n");
     out.Write("if (vs_expand == {}u) {{ // Line\n", std::to_underlying(VSExpand::Line));
     out.Write("  bool is_bottom = (gl_VertexID & 2) != 0;\n"
               "  bool is_right = (gl_VertexID & 1) != 0;\n"
@@ -396,10 +398,12 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
               "  float4 other_pos = float4(dot(other_p0, other_rawpos), "
               "dot(other_p1, other_rawpos), dot(other_p2, other_rawpos), 1.0);\n");
     GenerateVSLineExpansion(out, "  ", num_texgen);
+    out.Write("  vs_expand_offset = offset;\n");
     out.Write("}} else if (vs_expand == {}u) {{ // Point\n", std::to_underlying(VSExpand::Point));
     out.Write("  bool is_bottom = (gl_VertexID & 2) != 0;\n"
               "  bool is_right = (gl_VertexID & 1) != 0;\n");
     GenerateVSPointExpansion(out, "  ", num_texgen);
+    out.Write("  vs_expand_offset = offset;\n");
     out.Write("}}\n");
   }
 
@@ -431,7 +435,13 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
   // vr_pos_replaced flag suppresses the trailing depth-range/pixel-center fixups
   // below to avoid double-remapping — same structure as the specialized VS.
   if (vr_multiview_vs)
+  {
     GenerateVRMultiviewVSProjection(out, api_type, host_config, "pos");
+    // The expansion offset the game's clip position, which the VR block replaced: offset the
+    // per-eye position by the same NDC amount (see the specialized VS).
+    if (vs_expand)
+      out.Write("if (vr_pos_replaced)\n  o.pos.xy += vs_expand_offset * o.pos.w;\n");
+  }
 
   if (!host_config.fast_depth_calc)
   {
