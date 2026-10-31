@@ -193,6 +193,10 @@ struct TCacheEntry
   bool is_xfb_container = false;
   // DolphinXR: every layer of this EFB copy holds the left eye's picture (ApplyVRMonoEFBCopy).
   bool vr_mono_layers = false;
+  // DolphinXR: this XFB copy resampled the scene's lines over all of its own
+  // (VR::ConsumeVRPresentationSourceRegion: Metroid Prime Trilogy renders 448 lines of a 480-line
+  // copy), so the eyes' picture is the whole copy, not the lines the VI shows of it.
+  bool vr_scene_fills_copy = false;
   // DolphinXR: the same block taken where each eye sees it, and per eye how far (native EFB
   // pixels, x and y) from the game's rectangle (PerEyeScreenCopies). A fullscreen draw that
   // distorts the block (the warp around Metroid Prime's charged shots) samples this one and is

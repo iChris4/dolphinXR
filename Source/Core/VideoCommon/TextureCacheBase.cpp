@@ -2520,6 +2520,12 @@ RcTcacheEntry TextureCacheBase::CreateTextureEntry(
 static void GetDisplayRectForXFBEntry(TCacheEntry* entry, u32 width, u32 height,
                                       MathUtil::Rectangle<int>* display_rect)
 {
+  // VR: the eye projections fill the scene's lines, which this copy spread over all of its own.
+  // The VI may show fewer (the Trilogy's 448 of 480, with ImmediateXFB off): showing only those
+  // would crop and stretch the eyes' picture, and the world would swim as the head turns.
+  if (entry->vr_scene_fills_copy)
+    height = entry->native_height;
+
   // Scale the sub-rectangle to the full resolution of the texture.
   display_rect->left = 0;
   display_rect->top = 0;
@@ -4205,6 +4211,7 @@ RcTcacheEntry TextureCacheBase::SetupCopyEntry(FramebufferManager* frame_buffer_
     {
       entry->should_force_safe_hashing = resolved_data.is_xfb;
       entry->SetXfbCopy(resolved_data.source_data.dest_stride);
+      entry->vr_scene_fills_copy = resolved_data.source_data.vr_vram_src_rect.has_value();
     }
     else
     {
