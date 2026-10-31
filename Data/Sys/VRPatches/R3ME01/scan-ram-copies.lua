@@ -1,13 +1,15 @@
 -- Metroid Prime Trilogy (NTSC-U, Wii): EFB copies to RAM only while scanning.
 --
--- The scan visors of Echoes and Corruption read EFB copies from the game's memory, so the Sys
--- GameSettings (R3M.ini) turn "Store EFB Copies to Texture Only" off for the disc. The copies to
--- RAM slow every frame down, the Quest's most, and nothing else in the games needs them. This
+-- The scan visors of Echoes and Corruption read EFB copies from the game's memory, so upstream's
+-- Sys GameSettings (R3M.ini) turn "Store EFB Copies to Texture Only" off for the disc; R3ME01.ini
+-- turns it back on, relying on this patch. The copies to RAM slow every frame down, the Quest's
+-- most, and nothing else in the games needs them. This
 -- patch turns the setting on while another visor is in play or a pause screen shows, in each of
 -- the three games, and off while the scan visor is on (Prime's too), for this session: the game's
 -- own value is back when the patch stops. It follows the flags of the "Game state for the VR
 -- profile" patch (metroid-state.lua); without them (that patch off, the Trilogy's menus) the
--- game's own value applies.
+-- game's own value applies: texture only, so with either patch off the scan visors of Echoes and
+-- Corruption cannot target.
 --
 -- The cost: Echoes also measures how much of the sun shows from a copy in its memory, so the
 -- sun's glare is gone outside the scan visor (seen in the GameCube version).
