@@ -80,6 +80,8 @@ add_library(videocommon
   GPUDeviceLost.cpp
   GPUDeviceLost.h
   GeometryShaderManager.h
+  GPUFifoDiagnostics.cpp
+  GPUFifoDiagnostics.h
   GPUWaitStats.cpp
   GPUWaitStats.h
   GraphicsModSystem/Config/GraphicsMod.cpp

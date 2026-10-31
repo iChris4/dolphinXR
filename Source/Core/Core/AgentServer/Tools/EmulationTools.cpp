@@ -34,8 +34,7 @@
 #include "Core/State.h"
 #include "Core/System.h"
 #include "VideoCommon/AbstractGfx.h"
-#include "VideoCommon/CommandProcessor.h"
-#include "VideoCommon/Fifo.h"
+#include "VideoCommon/GPUFifoDiagnostics.h"
 #include "VideoCommon/PerformanceMetrics.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VideoConfig.h"
@@ -228,70 +227,27 @@ ToolResult GetGPUFifoState(const ToolArgs&)
   if (!Core::IsRunning(system))
     return ToolResult::Error("No game is running.");
 
-  auto& cp = system.GetCommandProcessor();
-  const auto& fifo = cp.GetFifo();
-  const CommandProcessor::CommandProcessorManager::DebugState debug = cp.GetDebugState();
-  const auto& pi = system.GetProcessorInterface();
-  const u32 base = fifo.CPBase.load();
-  const u32 end = fifo.CPEnd.load();
-  const u32 read = fifo.CPReadPointer.load();
-  const u32 write = fifo.CPWritePointer.load();
-  const u32 breakpoint = fifo.CPBreakpoint.load();
-  const u32 distance = fifo.CPReadWriteDistance.load();
-  const bool bp_enabled = fifo.bFF_BPEnable.load() != 0;
-  const bool bp_int = fifo.bFF_BPInt.load() != 0;
-  const bool bp_hit = fifo.bFF_Breakpoint.load() != 0;
-  const bool read_enabled = fifo.bFF_GPReadEnable.load() != 0;
-  const bool linked = fifo.bFF_GPLinkEnable.load() != 0;
-  const bool cp_cause = (pi.GetCause() & ProcessorInterface::INT_CAUSE_CP) != 0;
-  const bool cp_unmasked = (pi.GetMask() & ProcessorInterface::INT_CAUSE_CP) != 0;
-  const bool cpu_ee = system.GetPPCState().msr.EE != 0;
-  const size_t undecoded = system.GetFifo().GetVideoBufferPendingBytes();
-
-  std::string text = fmt::format(
-      "CP FIFO {:08X}-{:08X}: read {:08X}, write {:08X}, distance {:#x} ({} bytes not read "
-      "yet), safe read {:08X}.\n",
-      base, end, read, write, distance, distance, fifo.SafeCPReadPointer.load());
-  text += fmt::format("Breakpoint {:08X}: {}, interrupt {}, hit flag {}{}.\n", breakpoint,
-                      bp_enabled ? "enabled" : "disabled", bp_int ? "on" : "off",
-                      bp_hit ? "set" : "clear",
-                      bp_enabled && read == breakpoint ? " (the GPU is stopped at it)" : "");
-  text += fmt::format(
-      "Watermarks: high {:#x} (over: {}, interrupt {}), low {:#x} (under: {}, interrupt {}).\n",
-      fifo.CPHiWatermark, fifo.bFF_HiWatermark.load() != 0, fifo.bFF_HiWatermarkInt.load() != 0,
-      fifo.CPLoWatermark, fifo.bFF_LoWatermark.load() != 0, fifo.bFF_LoWatermarkInt.load() != 0);
-  text +=
-      fmt::format("CP control {:#06x} (GP read {}, link {}), status {:#06x}. CP interrupt "
-                  "line {}, a raise or clear waiting for the CPU thread: {}.\n",
-                  debug.control, read_enabled ? "on" : "off", linked ? "on" : "off", debug.status,
-                  debug.interrupt_set ? "set" : "clear", debug.interrupt_waiting ? "yes" : "no");
-  text += fmt::format("PI: cause {:#x}, mask {:#x} (CP interrupt pending {}, unmasked {}); CPU "
-                      "external interrupts {}. CPU FIFO {:08X}-{:08X}, write {:08X}.\n",
-                      pi.GetCause(), pi.GetMask(), cp_cause ? "yes" : "no",
-                      cp_unmasked ? "yes" : "no", cpu_ee ? "enabled" : "disabled",
-                      pi.m_fifo_cpu_base, pi.m_fifo_cpu_end, pi.m_fifo_cpu_write_pointer);
-  text += fmt::format("GPU thread: {} bytes copied from the FIFO but not decoded (an incomplete "
-                      "command).",
-                      undecoded);
-
+  const VideoCommon::GPUFifoState s = VideoCommon::GetGPUFifoState(system);
   picojson::object structured;
-  structured["read"] = JsonNumber(read);
-  structured["write"] = JsonNumber(write);
-  structured["distance"] = JsonNumber(distance);
-  structured["breakpoint"] = JsonNumber(breakpoint);
-  structured["breakpoint_enabled"] = JsonBool(bp_enabled);
-  structured["breakpoint_interrupt"] = JsonBool(bp_int);
-  structured["breakpoint_hit"] = JsonBool(bp_hit);
-  structured["gp_read_enabled"] = JsonBool(read_enabled);
-  structured["cp_control"] = JsonNumber(debug.control);
-  structured["cp_status"] = JsonNumber(debug.status);
-  structured["cp_interrupt_set"] = JsonBool(debug.interrupt_set);
-  structured["cp_interrupt_waiting"] = JsonBool(debug.interrupt_waiting);
-  structured["pi_cause"] = JsonNumber(pi.GetCause());
-  structured["pi_mask"] = JsonNumber(pi.GetMask());
-  structured["cpu_external_interrupts"] = JsonBool(cpu_ee);
-  structured["undecoded_bytes"] = JsonNumber(static_cast<double>(undecoded));
-  return ToolResult::Text(std::move(text)).SetStructured(std::move(structured));
+  structured["read"] = JsonNumber(s.read);
+  structured["write"] = JsonNumber(s.write);
+  structured["distance"] = JsonNumber(s.distance);
+  structured["pointer_distance"] = JsonNumber(s.pointer_distance);
+  structured["breakpoint"] = JsonNumber(s.breakpoint);
+  structured["breakpoint_enabled"] = JsonBool(s.breakpoint_enabled);
+  structured["breakpoint_interrupt"] = JsonBool(s.breakpoint_interrupt);
+  structured["breakpoint_hit"] = JsonBool(s.breakpoint_hit);
+  structured["gp_read_enabled"] = JsonBool(s.gp_read_enabled);
+  structured["cp_control"] = JsonNumber(s.cp_control);
+  structured["cp_status"] = JsonNumber(s.cp_status);
+  structured["cp_interrupt_set"] = JsonBool(s.cp_interrupt_set);
+  structured["cp_interrupt_waiting"] = JsonBool(s.cp_interrupt_waiting);
+  structured["pi_cause"] = JsonNumber(s.pi_cause);
+  structured["pi_mask"] = JsonNumber(s.pi_mask);
+  structured["cpu_external_interrupts"] = JsonBool(s.cpu_external_interrupts);
+  structured["undecoded_bytes"] = JsonNumber(static_cast<double>(s.undecoded_bytes));
+  return ToolResult::Text(VideoCommon::DescribeGPUFifoState(s))
+      .SetStructured(std::move(structured));
 }
 
 ToolResult GetStatus(const ToolArgs&)

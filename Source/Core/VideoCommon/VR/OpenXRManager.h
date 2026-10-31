@@ -724,6 +724,8 @@ private:
   // the video thread). Returns nullopt until the video thread has anchored the panel.
   std::optional<XrPosef> GetAnchoredFlatScreenPose() const;
   void CaptureStartupDisplayRefreshRateFromExtension();
+  // XR pacing thread: logs the GPU FIFO state when the game stops sending frames.
+  void LogGameStall(bool no_fresh_frame);
   void SetStartupDisplayRefreshRate(float refresh_rate_hz, std::string_view source);
 
   XrInstance m_instance = XR_NULL_HANDLE;
@@ -885,6 +887,8 @@ private:
 
   std::thread m_frame_thread;
   std::atomic<bool> m_frame_thread_running{false};
+  // 5 s pacing windows in a row without a new frame from the running game (pacing thread only).
+  u32 m_stall_windows = 0;
   std::atomic<bool> m_frame_thread_should_exit{false};
   std::mutex m_publish_mutex;
   std::condition_variable m_publish_cv;

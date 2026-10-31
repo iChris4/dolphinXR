@@ -52,8 +52,10 @@
 #include "Common/Timer.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "Core/Config/GraphicsSettings.h"
+#include "Core/Core.h"
 #include "Core/HW/Memmap.h"
 #include "Core/System.h"
+#include "VideoCommon/GPUFifoDiagnostics.h"
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/VR/CameraPitch.h"
 #include "VideoCommon/VideoConfig.h"
@@ -1698,6 +1700,7 @@ void OpenXRManager::FrameThreadLoop()
                    stat_repeat, stat_empty, stat_wait_ms / stat_cycles,
                    stat_content_wait_ms / stat_cycles, stat_end_ms / stat_cycles,
                    stat_handoff_waited);
+      LogGameStall(stat_fresh == 0);
       stats_start_us = now_us;
       stat_cycles = stat_fresh = stat_repeat = stat_empty = 0;
       stat_handoff_waited = 0;
@@ -1707,6 +1710,24 @@ void OpenXRManager::FrameThreadLoop()
 
   m_frame_thread_running.store(false, std::memory_order_release);
   INFO_LOG_FMT(OPENXR, "OpenXR: XR pacing thread exiting.");
+}
+
+void OpenXRManager::LogGameStall(bool no_fresh_frame)
+{
+  // A game that waits for the GPU forever (a frame-end breakpoint or a draw-done that never
+  // comes) leaves the headset repeating its last frame. Log the GPU FIFO state then: the first
+  // 5 s window without a new frame, and every 30 s while the stall lasts.
+  auto& system = Core::System::GetInstance();
+  if (!no_fresh_frame || Core::GetState(system) != Core::State::Running)
+  {
+    m_stall_windows = 0;
+    return;
+  }
+  if (m_stall_windows++ % 6 != 0)
+    return;
+  WARN_LOG_FMT(OPENXR, "XRPacing: no new frame from the game for {} s. GPU FIFO state:\n{}",
+               m_stall_windows * 5,
+               VideoCommon::DescribeGPUFifoState(VideoCommon::GetGPUFifoState(system)));
 }
 
 void OpenXRManager::CaptureStartupDisplayRefreshRateFromExtension()
