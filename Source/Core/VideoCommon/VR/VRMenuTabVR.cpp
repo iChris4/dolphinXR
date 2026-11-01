@@ -56,6 +56,14 @@ constexpr std::array<std::pair<VRMenuToggleButton, const char*>, 4> MENU_BUTTONS
     {VRMenuToggleButton::Disabled, "Disabled"},
 }};
 
+constexpr std::array<std::pair<int, const char*>, 5> FORCED_VBI_FREQUENCIES{{
+    {Config::GFX_VR_FORCED_VBI_FREQUENCY_AUTO, "Auto"},
+    {Config::GFX_VR_FORCED_VBI_FREQUENCY_OFF, "Off"},
+    {Config::GFX_VR_FORCED_VBI_FREQUENCY_72, "72 Hz"},
+    {Config::GFX_VR_FORCED_VBI_FREQUENCY_90, "90 Hz"},
+    {Config::GFX_VR_FORCED_VBI_FREQUENCY_120, "120 Hz"},
+}};
+
 constexpr std::array<std::pair<int, const char*>, 3> GAZE_RAM_COPIES{{
     {Config::GFX_VR_GAZE_RAM_COPIES_OFF, "Off"},
     {Config::GFX_VR_GAZE_RAM_COPIES_HEAD, "Reticle on a head-locked HUD"},
@@ -276,6 +284,32 @@ private:
         "back over it, distorted (the warp around Metroid Prime's charged shots). This takes and "
         "draws each eye's block where that eye sees the point. Turn it on per game.",
         Config::GFX_VR_PER_EYE_SCREEN_COPIES, touched);
+
+    // The desktop's "Framerate" group.
+    MenuWidgets::SectionHeader("Framerate");
+    if (MenuWidgets::Combo<int>(
+            "Forced VBI Frequency",
+            "Runs the console's video timing (and its CPU with it) at this rate instead of 60 Hz "
+            "while in VR, overriding the Advanced settings' VBI Frequency Override. Games that "
+            "time themselves by the clock render more frames; games that count frames run faster. "
+            "Auto picks the rate closest to the headset's refresh rate when the VR session "
+            "starts. Set it per game.",
+            Config::GFX_VR_FORCED_VBI_FREQUENCY, FORCED_VBI_FREQUENCIES, touched) &&
+        Config::Get(Config::GFX_VR_AUTO_VBI_FROM_HMD))
+    {
+      // The legacy switch would turn Off back into 90 Hz; the desktop panes clear it too.
+      Config::SetBaseOrCurrent(Config::GFX_VR_AUTO_VBI_FROM_HMD, false);
+      if (touched)
+        touched->Add(Config::GFX_VR_AUTO_VBI_FROM_HMD.GetLocation());
+    }
+    MenuWidgets::Checkbox(
+        "Eager Frame Heartbeat",
+        "How the VR pacing thread fills the headset's refresh rate when the game renders slower "
+        "than the display. On resubmits the last frame at every headset refresh: best on "
+        "standalone headsets (Quest), and on PC it keeps the runtime's motion smoothing (SteamVR "
+        "reprojection, ASW, SSW) and its artifacts from starting. Off paces submissions to the "
+        "game's frame rate so the PC runtime's motion smoothing can remove head-tracking judder.",
+        Config::GFX_VR_EAGER_HEARTBEAT, touched);
   }
 
   static void DrawRendering(MenuWidgets::TouchedKeys* touched)
