@@ -156,6 +156,8 @@ public:
       });
     }
 
+    DrawFastForwardButton(context);
+
     if (BigButton("Take Screenshot"))
     {
       context.actions.Run("Taking a screenshot...", [](Core::System&) {
@@ -211,6 +213,49 @@ private:
     bool done = false;
     std::vector<Disc> discs;
   };
+
+  // A toggle, since a laser cannot hold a button like the desktop's hotkey: it sets the speed limit
+  // to Unlimited for this run (the CurrentRun layer, which the hotkey threads leave alone, unlike
+  // Core's temporary throttle switch they rewrite on every poll), and turning it off restores the
+  // speed set before.
+  void DrawFastForwardButton(VRMenuContext& context)
+  {
+    const bool fast = Config::Get(Config::MAIN_EMULATION_SPEED) <= 0.0f;
+    if (fast)
+    {
+      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.48f, 0.68f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.24f, 0.58f, 0.80f, 1.0f));
+    }
+    const bool pressed =
+        BigButton(fast ? "Stop Fast Forward###fast_forward" : "Fast Forward###fast_forward");
+    if (fast)
+      ImGui::PopStyleColor(2);
+    if (!pressed)
+      return;
+
+    if (!fast)
+    {
+      m_speed_before_fast_forward = Config::GetLayer(Config::LayerType::CurrentRun)
+                                        ->Get<float>(Config::MAIN_EMULATION_SPEED.GetLocation());
+      context.actions.Run({}, [](Core::System&) {
+        Config::SetCurrent(Config::MAIN_EMULATION_SPEED, 0.0f);
+        return std::string("Fast forward: no speed limit");
+      });
+      return;
+    }
+    const std::optional<float> before = std::exchange(m_speed_before_fast_forward, std::nullopt);
+    context.actions.Run({}, [before](Core::System&) {
+      if (before && *before > 0.0f)
+        Config::SetCurrent(Config::MAIN_EMULATION_SPEED, *before);
+      else
+        Config::DeleteKey(Config::LayerType::CurrentRun, Config::MAIN_EMULATION_SPEED);
+      // The speed limit was off in the settings: back to full speed for this run.
+      if (Config::Get(Config::MAIN_EMULATION_SPEED) <= 0.0f)
+        Config::SetCurrent(Config::MAIN_EMULATION_SPEED, 1.0f);
+      return fmt::format("Fast forward off: {:.0f}% speed",
+                         Config::Get(Config::MAIN_EMULATION_SPEED) * 100.0f);
+    });
+  }
 
   // Records the left eye with the hardware encoder into Movies/DolphinXR (Android, Vulkan).
   static void DrawRecordButton(VRMenuContext& context)
@@ -373,6 +418,8 @@ private:
   }
 
   std::string m_title;
+  // The speed this run had before Fast Forward (the CurrentRun layer's, if it had one).
+  std::optional<float> m_speed_before_fast_forward;
   u64 m_confirm_exit_until_us = 0;
   bool m_show_discs = false;
   std::shared_ptr<DiscSearch> m_disc_search;
