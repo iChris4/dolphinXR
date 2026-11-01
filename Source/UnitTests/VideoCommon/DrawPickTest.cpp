@@ -103,20 +103,6 @@ TEST(DrawPick, MapsWindowPointsToEyeImages)
   EXPECT_FALSE(MapWindowPoint(boxed, 1280, 720, WindowLayout::LeftEye, 100.0f, 10.0f));
 }
 
-TEST(DrawPick, GazeLandsWhereTheEyeLooks)
-{
-  const auto centre = GazeImagePoint(-1.0f, 1.0f, 1.0f, -1.0f);
-  EXPECT_FLOAT_EQ(centre[0], 0.5f);
-  EXPECT_FLOAT_EQ(centre[1], 0.5f);
-  // A left eye that sees farther out (left) than in, and farther down than up: straight ahead
-  // is right of and above the image centre.
-  const auto left_eye = GazeImagePoint(-1.2f, 0.8f, 0.9f, -1.1f);
-  EXPECT_FLOAT_EQ(left_eye[0], 0.6f);
-  EXPECT_FLOAT_EQ(left_eye[1], 0.45f);
-  const auto broken = GazeImagePoint(0.0f, 0.0f, 0.0f, 0.0f);
-  EXPECT_FLOAT_EQ(broken[0], 0.5f);
-}
-
 TEST(DrawPick, PicksForTheHunterThatIsOn)
 {
   EXPECT_EQ(ResolveAutoTarget(true, true, true), Target::Shader);

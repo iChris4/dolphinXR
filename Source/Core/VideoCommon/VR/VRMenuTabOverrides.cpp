@@ -804,10 +804,10 @@ private:
   bool DrawPickRow(DrawPick::Target target)
   {
     MenuWidgets::BeginRow("Pick on Screen",
-                          "Press Pick, look straight at an object, then pull the trigger with "
-                          "the laser off this menu: the draw at the centre of your view is "
-                          "selected. The game must be drawing; the first pick may pause it for "
-                          "a moment.",
+                          "Press Pick, then point the pink laser at an object away from this "
+                          "menu: resting it there paints what it points at in pink. Pull the "
+                          "trigger to select it. The game must be drawing; the first pick may "
+                          "pause it for a moment.",
                           Config::LayerType::Base);
     const bool armed = DrawPick::IsVRPickArmed() && m_pick_target == target;
     bool armed_now = false;
@@ -821,6 +821,7 @@ private:
       {
         DrawPick::ArmVRPick(target);
         m_pick_target = target;
+        m_pick_armed_serial = DrawPick::GetLastResult().serial;
         armed_now = true;
       }
     }
@@ -828,12 +829,16 @@ private:
     // next row is drawn over it.
     std::string status;
     bool status_disabled = false;
+    const DrawPick::Result result = DrawPick::GetLastResult();
     if (armed || armed_now)
     {
-      status = "Look at it, trigger off the menu";
+      // What the laser points at, once it rested on something since Pick was pressed.
+      if (result.preview && result.target == target && result.serial > m_pick_armed_serial)
+        status = result.message + ", trigger to pick";
+      else
+        status = "Point the laser at it, then trigger";
     }
-    else if (const DrawPick::Result result = DrawPick::GetLastResult();
-             result.serial != 0 && result.target == target)
+    else if (result.serial != 0 && result.target == target)
     {
       status = result.message;
       status_disabled = true;
@@ -858,7 +863,7 @@ private:
     if (result.serial == m_pick_serial)
       return;
     m_pick_serial = result.serial;
-    if (result.target != DrawPick::Target::HideCode || !result.ok)
+    if (result.target != DrawPick::Target::HideCode || !result.ok || result.preview)
       return;
     m_hide_hunt = {};
     m_hide_hunt.lines.clear();
@@ -1726,6 +1731,8 @@ private:
   bool m_open_hide_hunting = false;
   // The hunter the armed pick is for, and the last pick result taken (DrawPick).
   DrawPick::Target m_pick_target = DrawPick::Target::Shader;
+  // The last result when Pick was pressed: newer previews are the armed pick's.
+  u64 m_pick_armed_serial = 0;
   u64 m_pick_serial = DrawPick::GetLastResult().serial;
   // Override being renamed (empty = none) and its list, the name typed so far, and its request.
   EditableList m_rename_list = EditableList::Shaders;

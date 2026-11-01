@@ -26,6 +26,7 @@
 #include "VideoCommon/VR/DrawPick.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/VRAlerts.h"
+#include "VideoCommon/VR/VRLaser.h"
 #include "VideoCommon/VR/VRMenuTabs.h"
 #include "VideoCommon/VR/VRPanelMath.h"
 #include "VideoCommon/VideoConfig.h"
@@ -114,7 +115,9 @@ bool VRMenu::InitializeContext()
   io.IniFilename = nullptr;
   io.LogFilename = nullptr;
   io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
-  io.DisplaySize = {static_cast<float>(CANVAS_WIDTH), static_cast<float>(CANVAS_HEIGHT)};
+  // The canvas, then the laser beams' texture strips (VR::Laser) beside it.
+  io.DisplaySize = {static_cast<float>(CANVAS_WIDTH + Laser::STRIPS_WIDTH),
+                    static_cast<float>(CANVAS_HEIGHT)};
   // A laser pointer wobbles: be generous before a press turns into a drag.
   io.MouseDragThreshold = 12.0f;
 
@@ -186,6 +189,9 @@ void VRMenu::Open(uint32_t open_serial)
 void VRMenu::Close()
 {
   m_open = false;
+  // A pick still armed ends with the menu, and the hunter's own option comes back.
+  DrawPick::DisarmVRPick();
+  m_pick_hand.reset();
   VRMenuContext context{m_actions, m_touched, m_game_id, g_ActiveConfig.vr_flat_screen};
   for (auto& tab : m_tabs)
     tab->OnClose(context);
@@ -225,29 +231,11 @@ void VRMenu::FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot)
       continue;
     m_hit[hand] = true;
     m_hit_position[hand] = {u * CANVAS_WIDTH, v * CANVAS_HEIGHT};
+    m_hit_length[hand] =
+        Laser::GetHitLength(PanelMath::ToXrPose(controller.pointer_pose), m_pose, *hit);
   }
 
-  // A pick armed in the Overrides tab: a press with the laser off the panel picks the draw at
-  // the centre of the left eye's view (where the user looks), and is not a click.
-  if (DrawPick::IsVRPickArmed() && !menu.binding_capture)
-  {
-    for (size_t hand = 0; hand < m_hit.size(); ++hand)
-    {
-      if (menu.select_presses[hand] == m_seen_presses[hand] || m_hit[hand])
-        continue;
-      if (const std::optional<DrawPick::Target> target = DrawPick::TakeArmedVRPick())
-      {
-        const XrFovf& fov = g_openxr->GetRenderedEyeViews()[0].fov;
-        const std::array<float, 2> point =
-            DrawPick::GazeImagePoint(std::tan(fov.angleLeft), std::tan(fov.angleRight),
-                                     std::tan(fov.angleUp), std::tan(fov.angleDown));
-        DrawPick::RequestNow(*target, 0, point[0], point[1]);
-      }
-      m_seen_presses[hand] = menu.select_presses[hand];
-      m_seen_releases[hand] = menu.select_releases[hand];
-      break;
-    }
-  }
+  FeedPick(snapshot);
 
   // While a binding is captured the controller buttons are not menu input.
   if (menu.binding_capture)
@@ -338,9 +326,95 @@ void VRMenu::FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot)
     io.AddMouseWheelEvent(0.0f, wheel);
 }
 
+// How far into the game the picking laser reaches: the virtual screen, where 2D elements are.
+static float GetPickLength()
+{
+  return std::max(g_ActiveConfig.vr_screen_distance, 0.5f);
+}
+
+void VRMenu::FeedPick(const Common::VR::OpenXRInputSnapshot& snapshot)
+{
+  m_pick_hand.reset();
+  const Common::VR::OpenXRMenuInput& menu = snapshot.menu;
+  if (!DrawPick::IsVRPickArmed() || menu.binding_capture)
+    return;
+
+  // The picking laser: the active controller's while it points off the panel, else the other's.
+  const auto points_off_panel = [&](size_t hand) {
+    const Common::VR::OpenXRControllerState& controller = snapshot.controllers[hand];
+    return controller.connected && controller.pointer_pose.valid && !m_hit[hand];
+  };
+  const size_t other_hand = 1 - m_active_hand;
+  if (points_off_panel(m_active_hand))
+    m_pick_hand = m_active_hand;
+  else if (points_off_panel(other_hand))
+    m_pick_hand = other_hand;
+  if (!m_pick_hand)
+    return;
+  const size_t hand = *m_pick_hand;
+
+  // Where the laser's end shows in the left eye's image (the image the draw-ID map is read from).
+  const XrPosef aim = PanelMath::ToXrPose(snapshot.controllers[hand].pointer_pose);
+  const XrVector3f direction = Laser::GetAimDirection(aim.orientation);
+  const float length = GetPickLength();
+  const XrVector3f end{aim.position.x + direction.x * length, aim.position.y + direction.y * length,
+                       aim.position.z + direction.z * length};
+  const XREyeView& eye = g_openxr->GetPresentEyeViews()[0];
+  const std::optional<std::array<float, 2>> point = Laser::ProjectToImage(eye.pose, eye.fov, end);
+
+  if (menu.select_presses[hand] != m_seen_presses[hand])
+  {
+    // The trigger picks, and is not a click.
+    if (point)
+      DrawPick::ConfirmVRPick((*point)[0], (*point)[1]);
+    m_seen_presses[hand] = menu.select_presses[hand];
+    m_seen_releases[hand] = menu.select_releases[hand];
+    m_pick_hand.reset();
+    return;
+  }
+  if (point)
+    DrawPick::UpdateVRHover((*point)[0], (*point)[1]);
+}
+
+uint32_t VRMenu::BuildBeams(const Common::VR::OpenXRInputSnapshot& snapshot, XrSwapchain swapchain,
+                            std::array<XrCompositionLayerQuad, 2>* beams) const
+{
+  OpenXRManager* manager = g_openxr.get();
+  const auto& views = manager->GetEyeViews();
+  const XrVector3f eye{0.5f * (views[0].pose.position.x + views[1].pose.position.x),
+                       0.5f * (views[0].pose.position.y + views[1].pose.position.y),
+                       0.5f * (views[0].pose.position.z + views[1].pose.position.z)};
+  uint32_t count = 0;
+  for (size_t hand = 0; hand < snapshot.controllers.size(); ++hand)
+  {
+    const Common::VR::OpenXRControllerState& controller = snapshot.controllers[hand];
+    if (!controller.connected || !controller.pointer_pose.valid)
+      continue;
+    // To the panel it points at; into the game while it picks; else a short beam.
+    Laser::Style style = Laser::Style::Pointer;
+    float length = Laser::FREE_LENGTH_METERS;
+    if (m_hit[hand])
+    {
+      length = m_hit_length[hand];
+    }
+    else if (m_pick_hand == hand)
+    {
+      style = Laser::Style::Pick;
+      length = GetPickLength();
+    }
+    (*beams)[count++] =
+        Laser::MakeBeamLayer(manager->GetReferenceSpace(), swapchain,
+                             Laser::GetStripRect(style, CANVAS_WIDTH, CANVAS_HEIGHT),
+                             PanelMath::ToXrPose(controller.pointer_pose), length, eye);
+  }
+  return count;
+}
+
 void VRMenu::DrawPointers() const
 {
   ImDrawList* draw_list = ImGui::GetForegroundDrawList();
+  // The laser beams' texture, beside the canvas.
+  Laser::DrawStrips(draw_list, static_cast<float>(CANVAS_WIDTH), static_cast<float>(CANVAS_HEIGHT));
   for (size_t hand = 0; hand < m_hit.size(); ++hand)
   {
     if (!m_hit[hand])
@@ -480,7 +554,7 @@ void VRMenu::OnPresent(VideoCommon::OnScreenUI* osd)
 
   IOpenXRSwapchain* swapchain = manager->GetSwapchain();
   if (swapchain->GetMenuSwapchain() == XR_NULL_HANDLE &&
-      !swapchain->CreateMenuSwapchain(CANVAS_WIDTH, CANVAS_HEIGHT))
+      !swapchain->CreateMenuSwapchain(CANVAS_WIDTH + Laser::STRIPS_WIDTH, CANVAS_HEIGHT))
   {
     ERROR_LOG_FMT(OPENXR, "VRMenu: could not create the menu swapchain; the menu is unavailable");
     m_swapchain_failed = true;
@@ -501,7 +575,10 @@ void VRMenu::OnPresent(VideoCommon::OnScreenUI* osd)
 
   const u64 now_us = Common::Timer::NowUs();
   ImGuiIO& io = ImGui::GetIO();
-  io.DisplaySize = {static_cast<float>(CANVAS_WIDTH), static_cast<float>(CANVAS_HEIGHT)};
+  io.DisplaySize = {static_cast<float>(CANVAS_WIDTH + Laser::STRIPS_WIDTH),
+                    static_cast<float>(CANVAS_HEIGHT)};
+  // Popups and tooltips stay on the canvas, off the strips.
+  ImGui::GetStyle().DisplaySafeAreaPadding.x = static_cast<float>(Laser::STRIPS_WIDTH) + 4.0f;
   io.DeltaTime =
       m_last_frame_us == 0 ?
           1.0f / 60.0f :
@@ -533,10 +610,13 @@ void VRMenu::OnPresent(VideoCommon::OnScreenUI* osd)
 
   if (released)
   {
-    manager->SetMenuLayer({m_pose, m_size, swapchain->GetMenuSwapchain(),
-                           {static_cast<int32_t>(framebuffer->GetWidth()),
-                            static_cast<int32_t>(framebuffer->GetHeight())}},
-                          m_open_serial);
+    OpenXRManager::MenuLayerDesc layer{
+        m_pose,
+        m_size,
+        swapchain->GetMenuSwapchain(),
+        {static_cast<int32_t>(CANVAS_WIDTH), static_cast<int32_t>(CANVAS_HEIGHT)}};
+    layer.beam_count = BuildBeams(snapshot, swapchain->GetMenuSwapchain(), &layer.beams);
+    manager->SetMenuLayer(layer, m_open_serial);
   }
 }
 }  // namespace VR

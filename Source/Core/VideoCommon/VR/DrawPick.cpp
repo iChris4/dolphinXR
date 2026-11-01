@@ -5,11 +5,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <mutex>
 #include <utility>
 
 #include <fmt/format.h>
 
+#include "Common/Timer.h"
 #include "VideoCommon/ElementsGroupManager.h"
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/TextureElementManager.h"
@@ -33,10 +35,32 @@ struct Pending
   float u = 0.0f;
   float v = 0.0f;
   u32 frames = 0;
+  // A hover preview (UpdateVRHover).
+  bool preview = false;
   // What the pick turned on for its capture, turned off again afterwards.
   bool close_elements_popup = false;
   bool stop_hide_capture = false;
 };
+
+// Hover previews while a pick is armed in the headset.
+struct Hover
+{
+  // The previews force the target hunter's Pink option; its own option comes back when the pick
+  // ends (RestoreHover). Hide codes preview with the agent preview (pink by draw index) instead.
+  std::optional<Target> forced;
+  ShaderHunter::HuntingOption shader_option = ShaderHunter::HuntingOption::Skip;
+  bool texture_pink = false;
+  ShaderHunter::HuntingOption elements_option = ShaderHunter::HuntingOption::Skip;
+  AgentCapture::PreviewSet agent_preview;
+  // Where the laser rests and since when, and where the last preview was taken.
+  std::array<float, 2> resting{-1.0f, -1.0f};
+  u64 resting_since_us = 0;
+  std::optional<std::array<float, 2>> previewed;
+};
+// The laser rests when it moves less than this (a fraction of the image) ...
+constexpr float HOVER_STILL = 0.01f;
+// ... for this long.
+constexpr u64 HOVER_DWELL_US = 250'000;
 
 // Any thread.
 std::atomic<int> s_armed_click{-1};
@@ -47,6 +71,7 @@ Result s_result;
 std::optional<Pending> s_pending;
 u64 s_next_capture = 0;
 std::optional<Target> s_armed_vr_pick;
+Hover s_hover;
 
 const char* ShaderTypeName(ShaderHunter::ShaderType type)
 {
@@ -63,8 +88,11 @@ const char* ShaderTypeName(ShaderHunter::ShaderType type)
 
 void Finish(Result result)
 {
-  OSD::AddMessage(result.message, OSD::Duration::NORMAL,
-                  result.ok ? OSD::Color::GREEN : OSD::Color::YELLOW);
+  if (!result.preview)
+  {
+    OSD::AddMessage(result.message, OSD::Duration::NORMAL,
+                    result.ok ? OSD::Color::GREEN : OSD::Color::YELLOW);
+  }
   std::lock_guard lock(s_result_mutex);
   result.serial = s_result.serial + 1;
   s_result = std::move(result);
@@ -76,6 +104,69 @@ void Fail(Target target, std::string message)
   result.target = target;
   result.message = std::move(message);
   Finish(std::move(result));
+}
+
+// Before the first preview of a pick: the target hunter shows its selection in pink.
+void ForcePinkPreview(Target target)
+{
+  if (s_hover.forced)
+    return;
+  s_hover.forced = target;
+  switch (target)
+  {
+  case Target::Shader:
+  {
+    ShaderHunter& hunter = ShaderHunter::GetInstance();
+    s_hover.shader_option = hunter.GetHuntingOption();
+    hunter.SetHuntingOption(ShaderHunter::HuntingOption::Pink);
+    break;
+  }
+  case Target::Texture:
+  {
+    TextureElementManager& textures = TextureElementManager::GetInstance();
+    s_hover.texture_pink = textures.IsPreviewPink();
+    textures.SetPreviewPink(true);
+    break;
+  }
+  case Target::Elements:
+  {
+    ElementsGroupManager& elements = ElementsGroupManager::GetInstance();
+    s_hover.elements_option = elements.GetHuntingOption();
+    elements.SetHuntingOption(ShaderHunter::HuntingOption::Pink);
+    break;
+  }
+  case Target::HideCode:
+    s_hover.agent_preview = AgentCapture::GetPreview();
+    break;
+  case Target::Auto:
+    break;
+  }
+}
+
+// The pick ended: the hunter's own option comes back.
+void RestoreHover()
+{
+  if (s_hover.forced)
+  {
+    switch (*s_hover.forced)
+    {
+    case Target::Shader:
+      ShaderHunter::GetInstance().SetHuntingOption(s_hover.shader_option);
+      break;
+    case Target::Texture:
+      TextureElementManager::GetInstance().SetPreviewPink(s_hover.texture_pink);
+      break;
+    case Target::Elements:
+      ElementsGroupManager::GetInstance().SetHuntingOption(s_hover.elements_option);
+      break;
+    case Target::HideCode:
+      AgentCapture::SetPreview(s_hover.agent_preview);
+      break;
+    case Target::Auto:
+      break;
+    }
+  }
+  s_hover = {};
 }
 
 void Restore(const Pending& pending)
@@ -90,6 +181,7 @@ Result Resolve(const Pending& pending, const AgentCapture::CapturedFrame& captur
 {
   Result result;
   result.target = pending.target;
+  result.preview = pending.preview;
   if (!capture.id_map.HasMap())
   {
     result.message =
@@ -104,6 +196,9 @@ Result Resolve(const Pending& pending, const AgentCapture::CapturedFrame& captur
     return result;
   }
   result.draw = *draw;
+  // "Picked draw #12" or, for a hover preview, "Pointing at draw #12".
+  const std::string what =
+      fmt::format("{} draw #{}", pending.preview ? "Pointing at" : "Picked", draw->index);
 
   switch (pending.target)
   {
@@ -113,12 +208,12 @@ Result Resolve(const Pending& pending, const AgentCapture::CapturedFrame& captur
     const ShaderHunter::ShaderType type = hunter.GetActiveType();
     const u64 hash = GetShaderHash(*draw, type);
     result.ok = hunter.SelectShader(type, hash);
-    result.message = result.ok ?
-                         fmt::format("Picked draw #{}: {} {:08x}", draw->index,
-                                     ShaderTypeName(type), static_cast<u32>(hash)) :
-                         fmt::format("Picked draw #{}, but its {} {:08x} is not in the Shader "
-                                     "Hunter's list yet: pick again",
-                                     draw->index, ShaderTypeName(type), static_cast<u32>(hash));
+    result.message =
+        result.ok ?
+            fmt::format("{}: {} {:08x}", what, ShaderTypeName(type), static_cast<u32>(hash)) :
+            fmt::format("{}, but its {} {:08x} is not in the Shader Hunter's list "
+                        "yet: pick again",
+                        what, ShaderTypeName(type), static_cast<u32>(hash));
     break;
   }
   case Target::Elements:
@@ -128,10 +223,10 @@ Result Resolve(const Pending& pending, const AgentCapture::CapturedFrame& captur
     if (seed >= 0)
       elements.SelectSeedCandidate(seed);
     result.ok = seed >= 0;
-    result.message = result.ok ? fmt::format("Picked draw #{}: seed {}", draw->index, seed + 1) :
-                                 fmt::format("Picked draw #{}, but no seed of Elements hunting "
-                                             "has its signature yet: pick again",
-                                             draw->index);
+    result.message = result.ok ? fmt::format("{}: seed {}", what, seed + 1) :
+                                 fmt::format("{}, but no seed of Elements hunting has its "
+                                             "signature yet: pick again",
+                                             what);
     break;
   }
   case Target::Texture:
@@ -139,12 +234,12 @@ Result Resolve(const Pending& pending, const AgentCapture::CapturedFrame& captur
     const u64 texture = GetFirstTexture(*draw);
     if (texture == 0)
     {
-      result.message = fmt::format("Picked draw #{}: it binds no texture", draw->index);
+      result.message = fmt::format("{}: it binds no texture", what);
       break;
     }
     TextureElementManager::GetInstance().SelectTexture(texture);
     result.ok = true;
-    result.message = fmt::format("Picked draw #{}: texture {:016x}", draw->index, texture);
+    result.message = fmt::format("{}: texture {:016x}", what, texture);
     break;
   }
   case Target::HideCode:
@@ -155,10 +250,16 @@ Result Resolve(const Pending& pending, const AgentCapture::CapturedFrame& captur
     result.hide_entries = captured.entries;
     result.ok = !captured.entries.empty();
     result.message =
-        result.ok ? fmt::format("Picked draw #{}: a hide code of {} line(s)", draw->index,
-                                captured.entries.size()) :
-                    fmt::format("Picked draw #{}, but its vertex data was not captured: pick again",
-                                draw->index);
+        result.ok ? fmt::format("{}: a hide code of {} line(s)", what, captured.entries.size()) :
+                    fmt::format("{}, but its vertex data was not captured: pick again", what);
+    if (pending.preview)
+    {
+      // Hide code hunting hides; the preview paints the draw itself instead.
+      AgentCapture::PreviewSet pink;
+      pink.mode = AgentCapture::PreviewSet::Mode::Pink;
+      pink.indices = {draw->index};
+      AgentCapture::SetPreview(std::move(pink));
+    }
     break;
   }
   case Target::Auto:
@@ -264,12 +365,43 @@ std::optional<ImagePoint> MapWindowPoint(const MathUtil::Rectangle<int>& target,
 
 void ArmVRPick(Target target)
 {
+  RestoreHover();
   s_armed_vr_pick = target;
 }
 
 void DisarmVRPick()
 {
+  RestoreHover();
   s_armed_vr_pick.reset();
+}
+
+void UpdateVRHover(float u, float v)
+{
+  if (!s_armed_vr_pick)
+    return;
+  const u64 now = Common::Timer::NowUs();
+  if (std::abs(u - s_hover.resting[0]) > HOVER_STILL ||
+      std::abs(v - s_hover.resting[1]) > HOVER_STILL)
+  {
+    s_hover.resting = {u, v};
+    s_hover.resting_since_us = now;
+    return;
+  }
+  if (now - s_hover.resting_since_us < HOVER_DWELL_US || s_pending)
+    return;
+  if (s_hover.previewed && std::abs(u - (*s_hover.previewed)[0]) <= HOVER_STILL &&
+      std::abs(v - (*s_hover.previewed)[1]) <= HOVER_STILL)
+  {
+    return;
+  }
+  s_hover.previewed = std::array<float, 2>{u, v};
+  RequestNow(*s_armed_vr_pick, 0, u, v, true);
+}
+
+void ConfirmVRPick(float u, float v)
+{
+  if (const std::optional<Target> target = TakeArmedVRPick())
+    RequestNow(*target, 0, u, v);
 }
 
 bool IsVRPickArmed()
@@ -282,21 +414,12 @@ std::optional<Target> TakeArmedVRPick()
   return std::exchange(s_armed_vr_pick, std::nullopt);
 }
 
-std::array<float, 2> GazeImagePoint(float tan_left, float tan_right, float tan_up, float tan_down)
-{
-  const float width = tan_right - tan_left;
-  const float height = tan_up - tan_down;
-  if (!(width > 0.0f) || !(height > 0.0f))
-    return {0.5f, 0.5f};
-  return {-tan_left / width, tan_up / height};
-}
-
 void Request(Target target, u32 layer, float u, float v)
 {
   AgentVideoJobs::Post([target, layer, u, v] { RequestNow(target, layer, u, v); });
 }
 
-void RequestNow(Target target, u32 layer, float u, float v)
+void RequestNow(Target target, u32 layer, float u, float v, bool preview)
 {
   if (s_pending)
   {
@@ -325,6 +448,9 @@ void RequestNow(Target target, u32 layer, float u, float v)
   pending.layer = layer;
   pending.u = u;
   pending.v = v;
+  pending.preview = preview;
+  if (preview)
+    ForcePinkPreview(target);
   // The hunter starts collecting now, so the picked draw is in its lists when the pick resolves.
   switch (target)
   {
@@ -390,6 +516,9 @@ void OnEndFrame()
   s_pending.reset();
   Result result = Resolve(pending, *capture);
   Restore(pending);
+  // A pick (not a preview) ends the previews: the hunter's own option comes back.
+  if (!pending.preview)
+    RestoreHover();
   Finish(std::move(result));
 }
 

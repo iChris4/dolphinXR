@@ -2482,6 +2482,9 @@ void OpenXRManager::SetMenuLayer(const MenuLayerDesc& layer, uint32_t open_seria
   m_menu_layer.subImage.imageRect.offset = {0, 0};
   m_menu_layer.subImage.imageRect.extent = layer.image_size;
   m_menu_layer_visible = layer.swapchain != XR_NULL_HANDLE;
+  m_menu_beams = layer.beams;
+  m_menu_beam_count =
+      std::min<uint32_t>(layer.beam_count, static_cast<uint32_t>(m_menu_beams.size()));
 }
 
 void OpenXRManager::HideMenuLayer()
@@ -3308,16 +3311,22 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
   // The in-game VR menu panel composites last, over the game. Copied under its lock: this runs
   // on the pacing thread, the video thread or the Android submit worker.
   XrCompositionLayerQuad menu_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  std::array<XrCompositionLayerQuad, 2> menu_beams{};
+  uint32_t menu_beam_count = 0;
   bool show_menu_layer = false;
   {
     std::lock_guard lock(m_menu_layer_mutex);
     show_menu_layer = m_menu_layer_visible;
     if (show_menu_layer)
+    {
       menu_layer = m_menu_layer;
+      menu_beams = m_menu_beams;
+      menu_beam_count = m_menu_beam_count;
+    }
   }
 
   std::vector<XrCompositionLayerBaseHeader*> submit_layers;
-  submit_layers.reserve(layers.size() + 2);
+  submit_layers.reserve(layers.size() + 2 + menu_beams.size());
   if (m_fb_passthrough_running && m_fb_passthrough_layer != XR_NULL_HANDLE)
   {
     m_fb_passthrough_composition_layer = {XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
@@ -3329,7 +3338,12 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
   }
   submit_layers.insert(submit_layers.end(), layers.begin(), layers.end());
   if (show_menu_layer)
+  {
     submit_layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&menu_layer));
+    // The controllers' laser beams, over the panel they point at.
+    for (uint32_t i = 0; i < menu_beam_count; ++i)
+      submit_layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&menu_beams[i]));
+  }
 
   XrFrameEndInfo end_info{XR_TYPE_FRAME_END_INFO};
   end_info.displayTime = display_time;

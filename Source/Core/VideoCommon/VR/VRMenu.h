@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,11 @@ private:
   void PlacePanel();
   bool InitializeContext();
   void FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot);
+  // The armed pick's laser (DrawPick): previews while it rests, picks on a press.
+  void FeedPick(const Common::VR::OpenXRInputSnapshot& snapshot);
+  // The controllers' laser beams (VR::Laser) for the menu layer.
+  uint32_t BuildBeams(const Common::VR::OpenXRInputSnapshot& snapshot, XrSwapchain swapchain,
+                      std::array<XrCompositionLayerQuad, 2>* beams) const;
   void DrawMenu(VRMenuContext& context);
   void DrawAlerts();
   void DrawPointers() const;
@@ -91,6 +97,10 @@ private:
   // Pointer state. Counters mirror OpenXRMenuInput; the deltas become ImGui mouse events.
   std::array<bool, 2> m_hit{};
   std::array<ImVec2, 2> m_hit_position{};
+  // Length of each controller's ray to its panel hit, in meters.
+  std::array<float, 2> m_hit_length{};
+  // The controller whose laser picks into the game while a pick is armed.
+  std::optional<size_t> m_pick_hand;
   size_t m_active_hand = 1;
   bool m_mouse_down = false;
   // Set on open: a press held when the menu last closed was never released in ImGui.

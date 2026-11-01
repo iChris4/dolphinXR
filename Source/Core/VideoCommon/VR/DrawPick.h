@@ -70,23 +70,28 @@ std::optional<ImagePoint> MapWindowPoint(const MathUtil::Rectangle<int>& target,
                                          int backbuffer_width, int backbuffer_height,
                                          WindowLayout layout, float x, float y);
 
-// ---- Headset: a trigger press away from the VR menu picks what the left eye looks at ----
+// ---- Headset: the laser of a VR controller picks what it points at ----
 
-// Video thread (the VR menu).
+// Video thread (the VR menu). While armed, the menu shows the picking controller's laser into the
+// game; resting it on an element previews it (UpdateVRHover), and the trigger picks it
+// (ConfirmVRPick). Disarming ends the previews.
 void ArmVRPick(Target target);
 void DisarmVRPick();
 bool IsVRPickArmed();
 std::optional<Target> TakeArmedVRPick();
-// Where an eye's straight-ahead direction lands in its image (fractions, 0,0 top-left), from
-// the tangents of its field of view (left and down negative).
-std::array<float, 2> GazeImagePoint(float tan_left, float tan_right, float tan_up, float tan_down);
+// The laser points at (u, v) of the left eye's image. Once it rests there for a moment, a preview
+// pick selects the draw in the hunter with its Pink option (the hunter's own option comes back
+// when the pick ends), so the element under the laser turns pink.
+void UpdateVRHover(float u, float v);
+// The trigger: picks the draw at (u, v) of the left eye's image, and disarms.
+void ConfirmVRPick(float u, float v);
 
 // ---- The pick ----
 
 // Any thread: picks the draw at (u, v) of eye `layer`'s image (fractions, 0,0 top-left).
 void Request(Target target, u32 layer, float u, float v);
 // Video thread.
-void RequestNow(Target target, u32 layer, float u, float v);
+void RequestNow(Target target, u32 layer, float u, float v, bool preview = false);
 // Video thread: VertexManagerBase::OnEndFrame, after AgentCapture::OnEndFrame.
 void OnEndFrame();
 
@@ -101,6 +106,8 @@ struct Result
   std::optional<AgentCapture::DrawRecord> draw;
   // HideCode: the start of the draw's vertex data, as hide code lines.
   std::vector<HideObjectEngine::HideObjectEntry> hide_entries;
+  // A hover preview (UpdateVRHover), not a pick.
+  bool preview = false;
 };
 
 // Any thread.

@@ -58,9 +58,9 @@
 #include "Common/MsgHandler.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "Core/Core.h"
-#include "Core/HotkeyManager.h"
 #include "Core/HW/GCPad.h"
 #include "Core/HW/Wiimote.h"
+#include "Core/HotkeyManager.h"
 #include "Core/System.h"
 #include "InputCommon/ControlReference/ControlReference.h"
 #include "InputCommon/ControllerEmu/ControlGroup/Attachments.h"
@@ -71,6 +71,7 @@
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/VR/OpenXRBindingWizardModel.h"
 #include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/VRLaser.h"
 #include "VideoCommon/VR/VRPanelMath.h"
 #include "VideoCommon/VideoConfig.h"
 
@@ -633,6 +634,9 @@ struct OpenXRUtilitySession::Impl
   std::array<ImVec2, 2> pointer_positions{};
   std::array<bool, 2> pointer_visible{};
   std::array<bool, 2> pointer_pressed{};
+  // Each controller's laser beam (VR::Laser): its length to the panel, and its layer.
+  std::array<float, 2> pointer_lengths{};
+  std::array<XrCompositionLayerQuad, 2> beams{};
   size_t active_pointer_hand = 0;
   bool previous_pointer_down = false;
 
@@ -790,7 +794,8 @@ struct OpenXRUtilitySession::Impl
     info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
     info.format = static_cast<int64_t>(format);
     info.sampleCount = 1;
-    info.width = UI_WIDTH;
+    // The canvas, then the laser beams' texture strips (VR::Laser) beside it.
+    info.width = UI_WIDTH + Laser::STRIPS_WIDTH;
     info.height = UI_HEIGHT;
     info.faceCount = 1;
     info.arraySize = 1;
@@ -852,7 +857,7 @@ struct OpenXRUtilitySession::Impl
       framebuffer_info.renderPass = render_pass;
       framebuffer_info.attachmentCount = 1;
       framebuffer_info.pAttachments = &image.view;
-      framebuffer_info.width = UI_WIDTH;
+      framebuffer_info.width = UI_WIDTH + Laser::STRIPS_WIDTH;
       framebuffer_info.height = UI_HEIGHT;
       framebuffer_info.layers = 1;
       const VkResult framebuffer_result =
@@ -923,7 +928,10 @@ struct OpenXRUtilitySession::Impl
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
-    io.DisplaySize = {static_cast<float>(UI_WIDTH), static_cast<float>(UI_HEIGHT)};
+    io.DisplaySize = {static_cast<float>(UI_WIDTH + Laser::STRIPS_WIDTH),
+                      static_cast<float>(UI_HEIGHT)};
+    // Popups and tooltips stay on the canvas, off the strips.
+    ImGui::GetStyle().DisplaySafeAreaPadding.x = static_cast<float>(Laser::STRIPS_WIDTH) + 4.0f;
     std::string font_path = File::GetUserPath(D_LOAD_IDX) + "OSD_Font.ttf";
     if (!File::Exists(font_path))
       font_path = File::GetSysDirectory() + DIR_SEP + RESOURCES_DIR + DIR_SEP + "OSD_Font.ttf";
@@ -1005,6 +1013,8 @@ struct OpenXRUtilitySession::Impl
         continue;
       pointer_visible[hand] = true;
       pointer_positions[hand] = {u * UI_WIDTH, v * UI_HEIGHT};
+      pointer_lengths[hand] =
+          Laser::GetHitLength(PanelMath::ToXrPose(controller.aim_pose), quad.pose, *hit);
       pointer_pressed[hand] = controller.trigger_value > 0.55f || controller.trigger_button;
     }
 
@@ -1051,6 +1061,8 @@ struct OpenXRUtilitySession::Impl
   void DrawPointers() const
   {
     ImDrawList* draw_list = ImGui::GetForegroundDrawList();
+    // The laser beams' texture, beside the canvas.
+    Laser::DrawStrips(draw_list, static_cast<float>(UI_WIDTH), static_cast<float>(UI_HEIGHT));
     constexpr std::array<ImU32, 2> colors{IM_COL32(35, 210, 255, 255), IM_COL32(255, 170, 35, 255)};
     for (size_t hand = 0; hand < pointer_visible.size(); ++hand)
     {
@@ -1100,7 +1112,8 @@ struct OpenXRUtilitySession::Impl
 
     ImGui::SetCurrentContext(imgui_context);
     ImGuiIO& io = ImGui::GetIO();
-    io.DisplaySize = {static_cast<float>(UI_WIDTH), static_cast<float>(UI_HEIGHT)};
+    io.DisplaySize = {static_cast<float>(UI_WIDTH + Laser::STRIPS_WIDTH),
+                      static_cast<float>(UI_HEIGHT)};
     io.DeltaTime = 1.0f / 72.0f;
     UpdatePointer();
     ImGui_ImplVulkan_NewFrame();
@@ -1114,10 +1127,21 @@ struct OpenXRUtilitySession::Impl
     VkRenderPassBeginInfo render_info{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     render_info.renderPass = render_pass;
     render_info.framebuffer = image.framebuffer;
-    render_info.renderArea.extent = {UI_WIDTH, UI_HEIGHT};
+    render_info.renderArea.extent = {UI_WIDTH + Laser::STRIPS_WIDTH, UI_HEIGHT};
     render_info.clearValueCount = 1;
     render_info.pClearValues = &clear;
     vkCmdBeginRenderPass(image.command_buffer, &render_info, VK_SUBPASS_CONTENTS_INLINE);
+    // The panel's background stops at the canvas: around the beams the strips are clear.
+    VkClearAttachment strip_clear{};
+    strip_clear.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    strip_clear.colorAttachment = 0;
+    strip_clear.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    VkClearRect strip_rect{};
+    strip_rect.rect.offset = {static_cast<int32_t>(UI_WIDTH), 0};
+    strip_rect.rect.extent = {Laser::STRIPS_WIDTH, UI_HEIGHT};
+    strip_rect.baseArrayLayer = 0;
+    strip_rect.layerCount = 1;
+    vkCmdClearAttachments(image.command_buffer, 1, &strip_clear, 1, &strip_rect);
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), image.command_buffer);
     vkCmdEndRenderPass(image.command_buffer);
     if (vkEndCommandBuffer(image.command_buffer) != VK_SUCCESS)
@@ -1163,6 +1187,26 @@ struct OpenXRUtilitySession::Impl
       if (XR_FAILED(xrReleaseSwapchainImage(swapchain, &release)) || !rendered)
         return false;
       layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&quad));
+
+      // Each controller's laser beam, over the panel: to the point it aims at, or a short one.
+      const auto snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+      const auto& views = manager->GetEyeViews();
+      const XrVector3f eye{0.5f * (views[0].pose.position.x + views[1].pose.position.x),
+                           0.5f * (views[0].pose.position.y + views[1].pose.position.y),
+                           0.5f * (views[0].pose.position.z + views[1].pose.position.z)};
+      for (size_t hand = 0; hand < snapshot.controllers.size(); ++hand)
+      {
+        const auto& controller = snapshot.controllers[hand];
+        if (!controller.connected || !controller.aim_pose.valid)
+          continue;
+        const float length =
+            pointer_visible[hand] ? pointer_lengths[hand] : Laser::FREE_LENGTH_METERS;
+        beams[hand] =
+            Laser::MakeBeamLayer(manager->GetReferenceSpace(), swapchain,
+                                 Laser::GetStripRect(Laser::Style::Pointer, UI_WIDTH, UI_HEIGHT),
+                                 PanelMath::ToXrPose(controller.aim_pose), length, eye);
+        layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&beams[hand]));
+      }
     }
     return manager->EndFrame(layers);
   }

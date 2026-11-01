@@ -330,6 +330,8 @@ if(ENABLE_VR)
     VR/AgentVideoJobs.h
     VR/DrawPick.cpp
     VR/DrawPick.h
+    VR/VRLaser.cpp
+    VR/VRLaser.h
     VR/OpenXRManager.cpp
     VR/OpenXRManager.h
     VR/VRAlerts.cpp

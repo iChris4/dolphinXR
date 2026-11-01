@@ -419,6 +419,9 @@ public:
     XrExtent2Df size{};
     XrSwapchain swapchain = XR_NULL_HANDLE;
     XrExtent2Di image_size{};
+    // The controllers' laser beams (VR::Laser), composited over the panel.
+    std::array<XrCompositionLayerQuad, 2> beams{};
+    uint32_t beam_count = 0;
   };
   // Video thread, once a panel image was released: show it at this placement. Ignored when the
   // menu closed or reopened since `open_serial` was read from the input snapshot.
@@ -958,6 +961,8 @@ private:
   bool m_menu_layer_visible = false;
   uint32_t m_menu_layer_serial = 0;
   XrCompositionLayerQuad m_menu_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  std::array<XrCompositionLayerQuad, 2> m_menu_beams{};
+  uint32_t m_menu_beam_count = 0;
   u64 m_recenter_generation = 0;  // Video thread only.
   std::array<XrPath, 2> m_logged_interaction_profiles{XR_NULL_PATH, XR_NULL_PATH};
 
