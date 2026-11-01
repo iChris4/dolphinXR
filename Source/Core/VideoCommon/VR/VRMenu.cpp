@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <optional>
 
 #include <fmt/format.h>
@@ -22,6 +23,7 @@
 #include "VideoCommon/AbstractFramebuffer.h"
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/OnScreenUI.h"
+#include "VideoCommon/VR/DrawPick.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/VRAlerts.h"
 #include "VideoCommon/VR/VRMenuTabs.h"
@@ -223,6 +225,28 @@ void VRMenu::FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot)
       continue;
     m_hit[hand] = true;
     m_hit_position[hand] = {u * CANVAS_WIDTH, v * CANVAS_HEIGHT};
+  }
+
+  // A pick armed in the Overrides tab: a press with the laser off the panel picks the draw at
+  // the centre of the left eye's view (where the user looks), and is not a click.
+  if (DrawPick::IsVRPickArmed() && !menu.binding_capture)
+  {
+    for (size_t hand = 0; hand < m_hit.size(); ++hand)
+    {
+      if (menu.select_presses[hand] == m_seen_presses[hand] || m_hit[hand])
+        continue;
+      if (const std::optional<DrawPick::Target> target = DrawPick::TakeArmedVRPick())
+      {
+        const XrFovf& fov = g_openxr->GetRenderedEyeViews()[0].fov;
+        const std::array<float, 2> point =
+            DrawPick::GazeImagePoint(std::tan(fov.angleLeft), std::tan(fov.angleRight),
+                                     std::tan(fov.angleUp), std::tan(fov.angleDown));
+        DrawPick::RequestNow(*target, 0, point[0], point[1]);
+      }
+      m_seen_presses[hand] = menu.select_presses[hand];
+      m_seen_releases[hand] = menu.select_releases[hand];
+      break;
+    }
   }
 
   // While a binding is captured the controller buttons are not menu input.

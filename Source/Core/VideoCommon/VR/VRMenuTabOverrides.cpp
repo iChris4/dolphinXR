@@ -26,6 +26,7 @@
 #include "VideoCommon/HideObjectEngine.h"
 #include "VideoCommon/ShaderHunter.h"
 #include "VideoCommon/TextureElementManager.h"
+#include "VideoCommon/VR/DrawPick.h"
 #include "VideoCommon/VR/VRMenuActions.h"
 #include "VideoCommon/VR/VRMenuPatches.h"
 #include "VideoCommon/VR/VRMenuTabs.h"
@@ -321,6 +322,7 @@ public:
       TextureElementManager::GetInstance().SetHunterActive(false);
     if (m_elements_hunt_held)
       SetElementsHunting(false);
+    DrawPick::DisarmVRPick();
     m_patches.Flush();
   }
 
@@ -346,6 +348,7 @@ public:
     }
     if (!m_loaded || m_game_id != game_id)
       Load(game_id);
+    TakePickedHideCode();
 
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     ImGui::TextWrapped("Changes apply at once and are saved to this game's VR settings. The "
@@ -675,6 +678,8 @@ private:
       hunter.SetEnabled(enabled);
       m_shader_hunting_started_here = enabled;
     }
+    if (DrawPickRow(DrawPick::Target::Shader) && !enabled)
+      m_shader_hunting_started_here = true;
 
     ImGui::BeginDisabled(!enabled);
     ShaderHunter::HuntingOption option = hunter.GetHuntingOption();
@@ -749,6 +754,8 @@ private:
       hunter.SetHunterActive(enabled);
       m_texture_hunting_started_here = enabled;
     }
+    if (DrawPickRow(DrawPick::Target::Texture) && !enabled)
+      m_texture_hunting_started_here = true;
 
     ImGui::BeginDisabled(!enabled);
     ShaderHunter::HuntingOption option = hunter.IsPreviewPink() ?
@@ -789,6 +796,80 @@ private:
 
     DrawHuntingHints(context, enabled, selection.total, TEXTURE_KIND);
     ImGui::PopID();
+  }
+
+  // "Pick on Screen": arms (or cancels) a pick for `target`; the next trigger press with the
+  // laser off this menu picks the draw at the centre of the left eye's view. Shows the armed
+  // state, or the target's last result. Returns true when it was armed.
+  bool DrawPickRow(DrawPick::Target target)
+  {
+    MenuWidgets::BeginRow("Pick on Screen",
+                          "Press Pick, look straight at an object, then pull the trigger with "
+                          "the laser off this menu: the draw at the centre of your view is "
+                          "selected. The game must be drawing; the first pick may pause it for "
+                          "a moment.",
+                          Config::LayerType::Base);
+    const bool armed = DrawPick::IsVRPickArmed() && m_pick_target == target;
+    bool armed_now = false;
+    if (ImGui::Button(armed ? "Cancel" : "Pick"))
+    {
+      if (armed)
+      {
+        DrawPick::DisarmVRPick();
+      }
+      else
+      {
+        DrawPick::ArmVRPick(target);
+        m_pick_target = target;
+        armed_now = true;
+      }
+    }
+    // The status goes on the button's line; without one the line must end at the button, or the
+    // next row is drawn over it.
+    std::string status;
+    bool status_disabled = false;
+    if (armed || armed_now)
+    {
+      status = "Look at it, trigger off the menu";
+    }
+    else if (const DrawPick::Result result = DrawPick::GetLastResult();
+             result.serial != 0 && result.target == target)
+    {
+      status = result.message;
+      status_disabled = true;
+    }
+    if (!status.empty())
+    {
+      ImGui::SameLine();
+      ImGui::AlignTextToFramePadding();
+      if (status_disabled)
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+      ImGui::TextUnformatted(status.c_str());
+      if (status_disabled)
+        ImGui::PopStyleColor();
+    }
+    return armed_now;
+  }
+
+  // A pick for the hide code editor: its code replaces the one being made.
+  void TakePickedHideCode()
+  {
+    const DrawPick::Result result = DrawPick::GetLastResult();
+    if (result.serial == m_pick_serial)
+      return;
+    m_pick_serial = result.serial;
+    if (result.target != DrawPick::Target::HideCode || !result.ok)
+      return;
+    m_hide_hunt = {};
+    m_hide_hunt.lines.clear();
+    for (const HideObjectEngine::HideObjectEntry& entry : result.hide_entries)
+      m_hide_hunt.lines.push_back(LineFromEntry(entry));
+    if (m_hide_hunt.lines.empty())
+      m_hide_hunt.lines.emplace_back();
+    m_hide_hunt.changed = true;
+    m_hide_hunting = true;
+    m_open_hide_hunting = true;
+    ApplyHideCodes();
   }
 
   // "<< Previous", "Next >>" and "position / total" (position -1: nothing selected). Returns -1
@@ -1021,6 +1102,7 @@ private:
     }
 
     ImGui::BeginDisabled(!enabled);
+    DrawPickRow(DrawPick::Target::Elements);
     ShaderHunter::HuntingOption option = status.option;
     if (MenuWidgets::Combo<ShaderHunter::HuntingOption>(
             "Hunting Option", "What happens to the draws of the seed's group.", &option,
@@ -1246,6 +1328,7 @@ private:
       ApplyHideCodes();
     }
 
+    DrawPickRow(DrawPick::Target::HideCode);
     ImGui::BeginDisabled(!m_hide_hunting);
     HideCodeHunt& hunt = m_hide_hunt;
     if (!hunt.editing.empty())
@@ -1641,6 +1724,9 @@ private:
   bool m_hide_hunting = false;
   HideCodeHunt m_hide_hunt;
   bool m_open_hide_hunting = false;
+  // The hunter the armed pick is for, and the last pick result taken (DrawPick).
+  DrawPick::Target m_pick_target = DrawPick::Target::Shader;
+  u64 m_pick_serial = DrawPick::GetLastResult().serial;
   // Override being renamed (empty = none) and its list, the name typed so far, and its request.
   EditableList m_rename_list = EditableList::Shaders;
   std::string m_rename_name;
