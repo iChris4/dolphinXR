@@ -17,6 +17,7 @@ if(ENABLE_VR)
   endif()
   add_dolphin_test(VRPatchTest
     VRPatch/ArmCannonPatchTest.cpp
+    VRPatch/FirstPersonPatchTest.cpp
     VRPatch/FrameRatePatchTest.cpp
     VRPatch/MetroidStatePatchTest.cpp
     VRPatch/VRPatchTest.cpp
