@@ -27,7 +27,10 @@ public:
 
   struct NewVersionInformation
   {
-    // Name (5.0-1234) and revision hash of the new version.
+    // Release name of the running version.
+    std::string current_shortrev;
+
+    // Name (v0.5) and revision hash of the new version.
     std::string new_shortrev;
     std::string new_hash;
 

@@ -3,9 +3,12 @@
 
 #include "UICommon/AutoUpdate.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
+#include <span>
 #include <string>
+#include <vector>
 
 #include <fmt/format.h>
 #include <picojson.h>
@@ -100,44 +103,54 @@ void CleanupFromPreviousUpdate()
 }
 #endif
 
-// This ignores i18n because most of the text in there (change descriptions) is only going to be
-// written in english anyway.
-std::string GenerateChangelog(const picojson::array& versions)
+// DolphinXR publishes its own releases with Tools/dolphinxr-update.py (docs/DolphinXR-Updates.md):
+// upstream's server would replace a VR build that carries an upstream hash with upstream binaries.
+// The server is a static site:
+//   update/v1/<track>/<platform>/latest.json  the releases of a track, newest first
+//   update/v1/<platform>/manifests/<hash>     the signed manifest of each release
+//   update/v1/content/                        the content store, gzipped files by hash
+constexpr char DOLPHINXR_UPDATE_SERVER_URL[] = "https://ichris4.github.io/dolphinxr-updates";
+constexpr char DOLPHINXR_RELEASES_URL[] = "https://github.com/iChris4/dolphinXR/releases";
+
+struct Release
+{
+  std::string name;
+  std::string hash;
+  std::string notes_html;
+};
+
+std::vector<Release> ParseReleases(const picojson::value& json)
+{
+  std::vector<Release> releases;
+  if (!json.is<picojson::object>() || !json.get("releases").is<picojson::array>())
+    return releases;
+
+  for (const picojson::value& entry : json.get("releases").get<picojson::array>())
+  {
+    if (!entry.is<picojson::object>() || !entry.get("name").is<std::string>() ||
+        !entry.get("hash").is<std::string>())
+    {
+      continue;
+    }
+    Release& release = releases.emplace_back();
+    release.name = entry.get("name").get<std::string>();
+    release.hash = entry.get("hash").get<std::string>();
+    if (entry.get("notes_html").is<std::string>())
+      release.notes_html = entry.get("notes_html").get<std::string>();
+  }
+  return releases;
+}
+
+// This ignores i18n because the release notes are only written in English anyway.
+std::string GenerateChangelog(std::span<const Release> releases)
 {
   std::string changelog;
-  for (const auto& ver : versions)
+  for (const Release& release : releases)
   {
-    if (!ver.is<picojson::object>())
-      continue;
-    picojson::object ver_obj = ver.get<picojson::object>();
-
-    if (ver_obj["changelog_html"].is<picojson::null>())
-    {
-      if (!changelog.empty())
-        changelog += "<div style=\"margin-top: 0.4em;\"></div>";  // Vertical spacing.
-
-      // Try to link to the PR if we have this info. Otherwise just show shortrev.
-      if (ver_obj["pr_url"].is<std::string>())
-      {
-        changelog += "<a href=\"" + ver_obj["pr_url"].get<std::string>() + "\">" +
-                     ver_obj["shortrev"].get<std::string>() + "</a>";
-      }
-      else
-      {
-        changelog += ver_obj["shortrev"].get<std::string>();
-      }
-      const std::string escaped_description =
-          Common::GetEscapedHtml(ver_obj["short_descr"].get<std::string>());
-      changelog += " by <a href = \"" + ver_obj["author_url"].get<std::string>() + "\">" +
-                   ver_obj["author"].get<std::string>() + "</a> &mdash; " + escaped_description;
-    }
-    else
-    {
-      if (!changelog.empty())
-        changelog += "<hr>";
-      changelog += "<b>Dolphin " + ver_obj["shortrev"].get<std::string>() + "</b>";
-      changelog += "<p>" + ver_obj["changelog_html"].get<std::string>() + "</p>";
-    }
+    if (!changelog.empty())
+      changelog += "<hr>";
+    changelog += "<b>DolphinXR " + Common::GetEscapedHtml(release.name) + "</b>";
+    changelog += release.notes_html;
   }
   return changelog;
 }
@@ -145,9 +158,11 @@ std::string GenerateChangelog(const picojson::array& versions)
 
 bool AutoUpdateChecker::SystemSupportsAutoUpdates()
 {
-  // Dolphin-VR-ReduX is maintained as a separate branch and must not offer upstream auto-updates,
-  // which would replace the VR-specific build with incompatible binaries.
+#if defined(AUTOUPDATE) && defined(OS_SUPPORTS_UPDATER)
+  return true;
+#else
   return false;
+#endif
 }
 
 static std::string GetPlatformID()
@@ -174,7 +189,7 @@ static std::string GetUpdateServerUrl()
   auto server_url = std::getenv("DOLPHIN_UPDATE_SERVER_URL");
   if (server_url)
     return server_url;
-  return "https://dolphin-emu.org";
+  return DOLPHINXR_UPDATE_SERVER_URL;
 }
 
 static u32 GetOwnProcessId()
@@ -211,11 +226,22 @@ void AutoUpdateChecker::CheckForUpdate(std::string_view update_track,
   CleanupFromPreviousUpdate();
 #endif
 
-  std::string_view version_hash = hash_override.empty() ? Common::GetScmRevGitStr() : hash_override;
-  std::string url = fmt::format("{}/update/check/v1/{}/{}/{}", GetUpdateServerUrl(), update_track,
-                                version_hash, GetPlatformID());
-
   const bool is_manual_check = check_type == CheckType::Manual;
+
+  // A build with uncommitted changes carries the hash of a release but not its files.
+  if (hash_override.empty() && Common::GetScmDescStr().ends_with("-dirty"))
+  {
+    if (is_manual_check)
+      SuccessAlertFmtT("This build has uncommitted changes, so it cannot update itself.");
+    INFO_LOG_FMT(COMMON, "Auto-update: this build has uncommitted changes.");
+    return;
+  }
+
+  const std::string server_url = GetUpdateServerUrl();
+  const std::string platform = GetPlatformID();
+  std::string_view version_hash = hash_override.empty() ? Common::GetScmRevGitStr() : hash_override;
+  std::string url =
+      fmt::format("{}/update/v1/{}/{}/latest.json", server_url, update_track, platform);
 
   Common::HttpRequest req{std::chrono::seconds{10}};
   auto resp = req.Get(url);
@@ -235,9 +261,23 @@ void AutoUpdateChecker::CheckForUpdate(std::string_view update_track,
     CriticalAlertFmtT("Invalid JSON received from auto-update service : {0}", err);
     return;
   }
-  picojson::object obj = json.get<picojson::object>();
+  // Only a release of the track can update: the updater needs the manifest of the installed files,
+  // and an unlisted build could be newer than the track.
+  const std::vector<Release> releases = ParseReleases(json);
+  const auto current = std::ranges::find(releases, version_hash, &Release::hash);
+  if (current == releases.end())
+  {
+    if (is_manual_check)
+    {
+      SuccessAlertFmtT("This build is not a release of this update track, so it cannot update "
+                       "itself. DolphinXR releases can be downloaded from {0}",
+                       DOLPHINXR_RELEASES_URL);
+    }
+    INFO_LOG_FMT(COMMON, "Auto-update: this build is not a release of the track.");
+    return;
+  }
 
-  if (obj["status"].get<std::string>() != "outdated")
+  if (current == releases.begin())
   {
     if (is_manual_check)
       SuccessAlertFmtT("You are running the latest version available on this update track.");
@@ -245,20 +285,22 @@ void AutoUpdateChecker::CheckForUpdate(std::string_view update_track,
     return;
   }
 
+  const Release& latest = releases.front();
   NewVersionInformation nvi;
-  nvi.this_manifest_url = obj["old"].get<picojson::object>()["manifest"].get<std::string>();
-  nvi.next_manifest_url = obj["new"].get<picojson::object>()["manifest"].get<std::string>();
-  nvi.content_store_url = obj["content-store"].get<std::string>();
-  nvi.new_shortrev = obj["new"].get<picojson::object>()["name"].get<std::string>();
-  nvi.new_hash = obj["new"].get<picojson::object>()["hash"].get<std::string>();
-
-  // TODO: generate the HTML changelog from the JSON information.
-  nvi.changelog_html = GenerateChangelog(obj["changelog"].get<picojson::array>());
+  nvi.this_manifest_url =
+      fmt::format("{}/update/v1/{}/manifests/{}", server_url, platform, version_hash);
+  nvi.next_manifest_url =
+      fmt::format("{}/update/v1/{}/manifests/{}", server_url, platform, latest.hash);
+  nvi.content_store_url = fmt::format("{}/update/v1/content/", server_url);
+  nvi.current_shortrev = current->name;
+  nvi.new_shortrev = latest.name;
+  nvi.new_hash = latest.hash;
+  nvi.changelog_html = GenerateChangelog(std::span(releases.begin(), current));
 
   if (std::getenv("DOLPHIN_UPDATE_TEST_DONE"))
   {
     // We are at end of updater test flow, send a message to server, which will kill us.
-    req.Get(fmt::format("{}/update-test-done/{}", GetUpdateServerUrl(), GetOwnProcessId()));
+    req.Get(fmt::format("{}/update-test-done/{}", server_url, GetOwnProcessId()));
   }
   else
   {

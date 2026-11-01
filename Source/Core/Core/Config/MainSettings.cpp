@@ -505,8 +505,9 @@ const Info<bool> MAIN_FIFOPLAYER_EARLY_MEMORY_UPDATES{
 
 // Main.AutoUpdate
 
-const Info<std::string> MAIN_AUTOUPDATE_UPDATE_TRACK{{System::Main, "AutoUpdate", "UpdateTrack"},
-                                                     ""};
+// Not UpdateTrack: an official Dolphin that shares the user folder sets it to its own tracks.
+const Info<std::string> MAIN_AUTOUPDATE_UPDATE_TRACK{{System::Main, "AutoUpdate", "DolphinXRTrack"},
+                                                     "stable"};
 const Info<std::string> MAIN_AUTOUPDATE_HASH_OVERRIDE{{System::Main, "AutoUpdate", "HashOverride"},
                                                       ""};
 

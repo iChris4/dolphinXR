@@ -14,8 +14,6 @@
 #include <QTextBrowser>
 #include <QVBoxLayout>
 
-#include "Common/Version.h"
-
 #include "DolphinQt/QtUtils/RunOnObject.h"
 #include "DolphinQt/Settings.h"
 
@@ -60,11 +58,11 @@ void Updater::OnUpdateAvailable(const NewVersionInformation& info)
     dialog->setWindowTitle(tr("Update available"));
 
     auto* label = new QLabel(
-        tr("<h2>A new version of Dolphin is available!</h2>Dolphin %1 is available for "
+        tr("<h2>A new version of DolphinXR is available!</h2>DolphinXR %1 is available for "
            "download. "
            "You are running %2.<br> Would you like to update?<br><h4>Release Notes:</h4>")
-            .arg(QString::fromStdString(info.new_shortrev))
-            .arg(QString::fromStdString(Common::GetScmDescStr())));
+            .arg(QString::fromStdString(info.new_shortrev).toHtmlEscaped())
+            .arg(QString::fromStdString(info.current_shortrev).toHtmlEscaped()));
     label->setTextFormat(Qt::RichText);
 
     auto* changelog = new QTextBrowser;

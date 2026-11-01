@@ -35,14 +35,10 @@
 
 constexpr int AUTO_UPDATE_DISABLE_INDEX = 0;
 constexpr int AUTO_UPDATE_RELEASE_INDEX = 1;
-constexpr int AUTO_UPDATE_DEV_INDEX = 2;
 
 constexpr const char* AUTO_UPDATE_DISABLE_STRING = "";
-// Before the official switch to the rolling release cycle in 2407, de facto releases were called
-// beta builds. To maintain backward compatibility and let users update from those builds to current
-// releases the value of this string remains "beta".
-constexpr const char* AUTO_UPDATE_RELEASE_STRING = "beta";
-constexpr const char* AUTO_UPDATE_DEV_STRING = "dev";
+// DolphinXR's update server (Tools/dolphinxr-update.py) has one track, its releases.
+constexpr const char* AUTO_UPDATE_RELEASE_STRING = "stable";
 
 constexpr int FALLBACK_REGION_NTSCJ_INDEX = 0;
 constexpr int FALLBACK_REGION_NTSCU_INDEX = 1;
@@ -208,13 +204,9 @@ void GeneralPane::CreateAutoUpdate()
 
   auto_update_group_layout->addRow(tr("&Auto Update:"), m_combobox_update_track);
 
-  for (const QString& option :
-       {tr("Don't Update"),
-        // i18n: Releases is a noun.
-        tr("Releases (every few months)"), tr("Dev (multiple times a day)")})
-  {
+  // i18n: Releases is a noun.
+  for (const QString& option : {tr("Don't Update"), tr("DolphinXR Releases")})
     m_combobox_update_track->addItem(option);
-  }
 }
 
 void GeneralPane::CreateFallbackRegion()
@@ -259,12 +251,8 @@ void GeneralPane::LoadConfig()
   {
     const auto track = Settings::Instance().GetAutoUpdateTrack().toStdString();
 
-    // If the track doesn't match any known value, set to "beta" which is the
-    // default config value on Dolphin release builds.
     if (track == AUTO_UPDATE_DISABLE_STRING)
       SignalBlocking(m_combobox_update_track)->setCurrentIndex(AUTO_UPDATE_DISABLE_INDEX);
-    else if (track == AUTO_UPDATE_DEV_STRING)
-      SignalBlocking(m_combobox_update_track)->setCurrentIndex(AUTO_UPDATE_DEV_INDEX);
     else
       SignalBlocking(m_combobox_update_track)->setCurrentIndex(AUTO_UPDATE_RELEASE_INDEX);
   }
@@ -306,9 +294,6 @@ static QString UpdateTrackFromIndex(int index)
     break;
   case AUTO_UPDATE_RELEASE_INDEX:
     value = QString::fromStdString(AUTO_UPDATE_RELEASE_STRING);
-    break;
-  case AUTO_UPDATE_DEV_INDEX:
-    value = QString::fromStdString(AUTO_UPDATE_DEV_STRING);
     break;
   }
 
@@ -414,24 +399,15 @@ void GeneralPane::AddDescriptions()
                  "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
 #endif
   static constexpr char TR_UPDATE_TRACK_DESCRIPTION[] = QT_TR_NOOP(
-      "Selects which update track Dolphin uses when checking for updates at startup. If a new "
-      "update is available, Dolphin will show a list of changes made since your current version "
-      "and ask you if you want to update."
-      "<br><br>The Dev track has the latest version of Dolphin which often updates multiple times "
-      "per day. Select this track if you want the newest features and fixes."
-      "<br><br>The Releases track has an update every few months. Some reasons you might prefer to "
-      "use this track:"
-      "<br>- You prefer using versions that have had additional testing."
-      "<br>- NetPlay requires players to have the same Dolphin version, and the latest Release "
-      "version will have the most players to match with."
-      "<br>- You frequently use Dolphin's savestate system, which doesn't guarantee backward "
-      "compatibility of savestates between Dolphin versions. If this applies to you, make sure you "
-      "make an in-game save before updating (i.e. save your game in the same way you would on a "
-      "physical GameCube or Wii), then load the in-game save after updating Dolphin and before "
-      "making any new savestates."
-      "<br><br>Selecting \"Don't Update\" will prevent Dolphin from automatically checking for "
-      "updates."
-      "<br><br><dolphin_emphasis>If unsure, select Releases.</dolphin_emphasis>");
+      "Selects whether DolphinXR checks for a new DolphinXR release at startup. If one is "
+      "available, DolphinXR will show the release notes since your current version and ask you if "
+      "you want to update."
+      "<br><br>Savestates are not guaranteed to load in another version. Before updating, make an "
+      "in-game save (i.e. save your game in the same way you would on a physical GameCube or Wii), "
+      "then load it after updating and before making any new savestates."
+      "<br><br>Selecting \"Don't Update\" will prevent DolphinXR from automatically checking for "
+      "updates. Help > Check for Updates still works."
+      "<br><br><dolphin_emphasis>If unsure, select DolphinXR Releases.</dolphin_emphasis>");
   static constexpr char TR_FALLBACK_REGION_DESCRIPTION[] =
       QT_TR_NOOP("Sets the region used for titles whose region cannot be determined automatically."
                  "<br><br>This setting cannot be changed while emulation is active.");
