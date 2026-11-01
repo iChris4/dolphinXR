@@ -260,6 +260,7 @@ void VideoConfig::Refresh()
   vr_use_xr_pacing_thread = Config::Get(Config::GFX_VR_USE_XR_PACING_THREAD);
   vr_input_poll_hz = Config::Get(Config::GFX_VR_INPUT_POLL_HZ);
   vr_perf_counters = Config::Get(Config::GFX_VR_PERF_COUNTERS);
+  vr_d3d12_dred = Config::Get(Config::GFX_VR_D3D12_DRED);
   vr_eager_heartbeat = Config::Get(Config::GFX_VR_EAGER_HEARTBEAT);
   if (!Config::GetAsString(Config::GFX_VR_REFERENCE_SPACE_MODE.GetLocation()) &&
       vr_use_openxr_play_space_center)

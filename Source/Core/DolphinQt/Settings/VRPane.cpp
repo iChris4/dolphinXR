@@ -630,6 +630,9 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
           [](bool checked) { ShaderHunter::GetInstance().SetDebugLogging(checked); });
   debug_layout->addWidget(m_debug_log_draws, 2, 0, 1, 2);
 
+  m_d3d12_dred = new ConfigBool(tr("D3D12 GPU Fault Report (DRED)"), Config::GFX_VR_D3D12_DRED);
+  debug_layout->addWidget(m_d3d12_dred, 3, 0, 1, 2);
+
   general_layout->addStretch();
   hack_layout->addStretch();
   tools_tab_layout->addWidget(tools_group);
@@ -699,6 +702,16 @@ void VRPane::AddDescriptions()
       "<br><br>None disables both head rotation and position tracking."
       "<br><br>This only affects the emulated VR camera; OpenXR still receives frames normally."
       "<br><br><dolphin_emphasis>If unsure, use 6DoF.</dolphin_emphasis>");
+  static constexpr char TR_D3D12_DRED_DESCRIPTION[] = QT_TR_NOOP(
+      "Creates the D3D12 device with DRED (Device Removed Extended Data): the GPU makes a small "
+      "write after each operation (auto-breadcrumbs) and tracks page faults."
+      "<br><br>When the GPU device is lost (a driver reset), the report written to "
+      "User/Logs/gpu-lost-&lt;time&gt;.txt then lists the operations the GPU had not finished "
+      "and the allocations at the faulting address. Without it, the report has the removal "
+      "reason and the first logged errors only."
+      "<br><br>Costs some GPU time. Only affects the D3D12 backend, and takes effect the next "
+      "time emulation starts."
+      "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
   static constexpr char TR_LEAN_BACK_ANGLE_DESCRIPTION[] = QT_TR_NOOP(
       "Applies a constant pitch offset (in degrees) to the VR camera."
       "<br><br>Use this to compensate games where the default viewpoint feels tilted."
@@ -902,6 +915,7 @@ void VRPane::AddDescriptions()
   m_use_vulkan_multiview->SetDescription(tr(TR_USE_VULKAN_MULTIVIEW_DESCRIPTION));
   m_reference_space_mode->SetDescription(tr(TR_REFERENCE_SPACE_MODE_DESCRIPTION));
   m_tracking_mode->SetDescription(tr(TR_TRACKING_MODE_DESCRIPTION));
+  m_d3d12_dred->SetDescription(tr(TR_D3D12_DRED_DESCRIPTION));
   m_units_per_meter->SetDescription(tr(TR_UNITS_PER_METER_DESCRIPTION));
   m_lean_back_angle->SetDescription(tr(TR_LEAN_BACK_ANGLE_DESCRIPTION));
   m_camera_forward->SetDescription(tr(TR_CAMERA_FORWARD_DESCRIPTION));
@@ -1008,6 +1022,7 @@ void VRPane::OnEmulationStateChanged(Core::State state)
   m_flat_screen->setEnabled(!running);
   m_reference_space_mode->setEnabled(!running);
   m_use_vulkan_multiview->setEnabled(!running);
+  m_d3d12_dred->setEnabled(!running);
 }
 
 void VRPane::ResetGeneralSettings()
@@ -1022,6 +1037,7 @@ void VRPane::ResetGeneralSettings()
                            Config::GFX_VR_REFERENCE_SPACE_MODE.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_TRACKING_MODE,
                            Config::GFX_VR_TRACKING_MODE.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_D3D12_DRED, Config::GFX_VR_D3D12_DRED.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_UNITS_PER_METER,
                            Config::GFX_VR_UNITS_PER_METER.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_ENABLE_LEAN_BACK_ANGLE,

@@ -140,7 +140,7 @@ bool DXContext::SupportsTextureFormat(DXGI_FORMAT format)
          (support.Support1 & required) == required;
 }
 
-bool DXContext::Create(u32 adapter_index, bool enable_debug_layer)
+bool DXContext::Create(u32 adapter_index, bool enable_debug_layer, bool enable_dred)
 {
   ASSERT(!g_dx_context);
   if (!s_d3d12_library.Open("d3d12.dll") ||
@@ -161,7 +161,7 @@ bool DXContext::Create(u32 adapter_index, bool enable_debug_layer)
 
   g_dx_context.reset(new DXContext());
   if (!g_dx_context->CreateDXGIFactory(enable_debug_layer) ||
-      !g_dx_context->CreateDevice(adapter_index, enable_debug_layer) ||
+      !g_dx_context->CreateDevice(adapter_index, enable_debug_layer, enable_dred) ||
       !g_dx_context->CreateCommandQueue() || !g_dx_context->CreateFence())
   {
     Destroy();
@@ -210,7 +210,7 @@ bool DXContext::CreateDXGIFactory(bool enable_debug_layer)
   return m_dxgi_factory != nullptr;
 }
 
-bool DXContext::CreateDevice(u32 adapter_index, bool enable_debug_layer)
+bool DXContext::CreateDevice(u32 adapter_index, bool enable_debug_layer, bool enable_dred)
 {
   ComPtr<IDXGIAdapter> adapter;
   HRESULT hr = m_dxgi_factory->EnumAdapters(adapter_index, &adapter);
@@ -237,12 +237,16 @@ bool DXContext::CreateDevice(u32 adapter_index, bool enable_debug_layer)
 
   // Device Removed Extended Data: when the GPU faults, which operations of the command lists
   // in flight had run, and the allocations near a page fault (DescribeDeviceRemoval). The cost
-  // is a small write after each operation; it must be set before the device is created.
+  // is a small write after each operation; it must be set before the device is created. The
+  // settings are process-wide: off hands an earlier game's forced-on back to the system default.
   ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dred_settings;
   if (SUCCEEDED(s_d3d12_get_debug_interface(IID_PPV_ARGS(&dred_settings))))
   {
-    dred_settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-    dred_settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+    const D3D12_DRED_ENABLEMENT enablement =
+        enable_dred ? D3D12_DRED_ENABLEMENT_FORCED_ON : D3D12_DRED_ENABLEMENT_SYSTEM_CONTROLLED;
+    dred_settings->SetAutoBreadcrumbsEnablement(enablement);
+    dred_settings->SetPageFaultEnablement(enablement);
+    m_dred_enabled = enable_dred;
   }
 
   // Create the actual device.
@@ -617,6 +621,12 @@ bool DXContext::CheckDeviceLost(std::string_view operation)
 
 std::string DXContext::DescribeDeviceRemoval() const
 {
+  if (!m_dred_enabled)
+  {
+    return "No DRED data: turn on Settings > VR > Tools > Debug > D3D12 GPU Fault Report (DRED) "
+           "to record what the GPU was doing.\n";
+  }
+
   ComPtr<ID3D12DeviceRemovedExtendedData> dred;
   if (FAILED(m_device.As(&dred)))
     return "No DRED data.\n";

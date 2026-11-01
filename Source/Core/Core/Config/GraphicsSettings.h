@@ -268,6 +268,10 @@ extern const Info<float> GFX_VR_WIIMOTE_MOTION_PITCH;
 // Samples per-draw CPU timing into the Vulkan VKPERF counters. Off by default: the timer
 // reads alone cost about 3% of the video thread on Quest. Counts are always accumulated.
 extern const Info<bool> GFX_VR_PERF_COUNTERS;
+// D3D12 devices record DRED (Device Removed Extended Data): auto-breadcrumbs, a small GPU write
+// after each operation, and page fault tracking, which name what the GPU was doing in a lost
+// device's report. Off by default for that GPU cost; read when the device is created.
+extern const Info<bool> GFX_VR_D3D12_DRED;
 // Android big.LITTLE: pin the CPU (JIT) and Video threads to dedicated performance cores
 // so they never migrate onto a slow core or contend with each other. INI-only escape
 // hatch; default on for Android/Quest.

@@ -464,6 +464,9 @@ struct VideoConfig final
   // Enable API validation layers, currently only supported with Vulkan.
   bool bEnableValidationLayer = false;
 
+  // D3D12 devices record DRED breadcrumbs and page faults ([VR] D3D12DRED).
+  bool vr_d3d12_dred = false;
+
   // Multithreaded submission, currently only supported with Vulkan.
   bool bBackendMultithreading = true;
   bool bVulkanRecordingWorker = false;

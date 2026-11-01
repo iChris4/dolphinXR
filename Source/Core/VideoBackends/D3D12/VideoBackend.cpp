@@ -115,7 +115,8 @@ void VideoBackend::FillBackendInfo()
 
 bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
 {
-  if (!DXContext::Create(g_Config.iAdapter, g_Config.bEnableValidationLayer))
+  if (!DXContext::Create(g_Config.iAdapter, g_Config.bEnableValidationLayer,
+                         g_Config.vr_d3d12_dred))
   {
     PanicAlertFmtT("Failed to create D3D12 context");
     return false;

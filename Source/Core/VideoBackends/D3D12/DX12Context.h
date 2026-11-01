@@ -56,8 +56,8 @@ public:
   // Returns a list of AA modes.
   static std::vector<u32> GetAAModes(u32 adapter_index);
 
-  // Creates new device and context.
-  static bool Create(u32 adapter_index, bool enable_debug_layer);
+  // Creates new device and context. `enable_dred` records DRED for DescribeDeviceRemoval.
+  static bool Create(u32 adapter_index, bool enable_debug_layer, bool enable_dred);
 
   // Destroys active context.
   static void Destroy();
@@ -190,7 +190,7 @@ private:
   DXContext();
 
   bool CreateDXGIFactory(bool enable_debug_layer);
-  bool CreateDevice(u32 adapter_index, bool enable_debug_layer);
+  bool CreateDevice(u32 adapter_index, bool enable_debug_layer, bool enable_dred);
   bool CreateCommandQueue();
   bool CreateFence();
   bool CreateDescriptorHeaps();
@@ -210,6 +210,7 @@ private:
   ComPtr<ID3D12Debug> m_debug_interface;
   ComPtr<ID3D12Device> m_device;
   ComPtr<ID3D12CommandQueue> m_command_queue;
+  bool m_dred_enabled = false;
 
   ComPtr<ID3D12Fence> m_fence = nullptr;
   HANDLE m_fence_event = {};

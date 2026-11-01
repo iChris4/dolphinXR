@@ -109,6 +109,7 @@ private:
   QPushButton* m_reset_general_settings = nullptr;
   ConfigBool* m_load_custom_shaders = nullptr;
   QCheckBox* m_debug_log_draws = nullptr;
+  ConfigBool* m_d3d12_dred = nullptr;
   QLabel* m_agent_server_status = nullptr;
   QLineEdit* m_agent_server_command = nullptr;
   QPointer<ShaderHunterWidget> m_shader_hunter_widget;
