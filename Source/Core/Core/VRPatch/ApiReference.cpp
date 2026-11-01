@@ -110,6 +110,10 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
   vr.velocity(hand) -> linear, angular (vec3 or nil; m/s and rad/s)
   vr.screen_hit(hand) -> u, v, distance or nil (aim ray on the virtual screen, -1..1)
   vr.units_per_meter()   -- the profile's world scale (game units per meter)
+  vr.refresh_rate()      -- the headset's refresh rate in Hz as the session reported it when it
+                            started (e.g. 72, 90, 120), or nil without a VR session or before the
+                            runtime reports it (the first frames). To run a game at the headset's
+                            rate: patch its frame rate and set ForcedVBIFrequency to the same rate
   vr.haptic(hand, amplitude 0-1 [, seconds])
   vr.setting(key) -> string; vr.set_setting(key, value)   -- the [Graphics.VR] keys and
       EFBToTextureEnable, this session (on_unload can put them back)

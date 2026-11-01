@@ -68,7 +68,9 @@ const std::vector<VRSetting>& GetVRSettings()
       Entry(Config::GFX_VR_TRACKING_MODE, "0 6DoF, 1 3DoF, 2 none"),
       Entry(Config::GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER),
       Entry(Config::GFX_VR_EAGER_HEARTBEAT),
-      Entry(Config::GFX_VR_FORCED_VBI_FREQUENCY, "-1 auto, 0 off, 72/90/120; restart the game"),
+      Entry(Config::GFX_VR_FORCED_VBI_FREQUENCY,
+            "-1 auto (72/90/120, the closest to the headset), 0 off, or a rate from 30 to 240 Hz; "
+            "the emulated CPU runs faster by the same factor"),
       Entry(Config::GFX_VR_AUTO_VBI_FROM_HMD, "restart the game"),
       Entry(Config::GFX_VR_EXACT_SCREEN_DEPTH),
       Entry(Config::GFX_VR_AUTO_NATIVE_EFB_EFFECTS,

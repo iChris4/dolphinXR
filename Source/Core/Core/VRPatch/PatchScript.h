@@ -76,6 +76,9 @@ struct ScriptEnvironment
   u32 scratch_size = 0;
   // Game units per meter of the VR profile.
   double units_per_meter = 1.0;
+  // The headset's refresh rate (Hz) as the VR session reported it; 0 without a session or before
+  // the runtime reports it.
+  double display_refresh_rate = 0.0;
 };
 
 // Per call of a patch function.

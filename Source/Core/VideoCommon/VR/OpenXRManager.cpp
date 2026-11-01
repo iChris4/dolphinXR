@@ -1394,7 +1394,7 @@ void OpenXRManager::DestroySession()
   m_should_render_snapshot.store(false, std::memory_order_release);
   m_last_predicted_display_time = 0;
   m_estimated_display_period_ms.store(0.0, std::memory_order_release);
-  m_startup_display_refresh_rate_hz = 0.0f;
+  m_startup_display_refresh_rate_hz.store(0.0f, std::memory_order_release);
 
   {
     std::lock_guard<std::mutex> lock(m_publish_mutex);
@@ -1732,7 +1732,7 @@ void OpenXRManager::LogGameStall(bool no_fresh_frame)
 
 void OpenXRManager::CaptureStartupDisplayRefreshRateFromExtension()
 {
-  if (m_startup_display_refresh_rate_hz > 0.0f || m_session == XR_NULL_HANDLE ||
+  if (GetStartupDisplayRefreshRateHz() > 0.0f || m_session == XR_NULL_HANDLE ||
       m_xrGetDisplayRefreshRateFB == nullptr)
   {
     return;
@@ -1752,12 +1752,12 @@ void OpenXRManager::CaptureStartupDisplayRefreshRateFromExtension()
 
 void OpenXRManager::SetStartupDisplayRefreshRate(float refresh_rate_hz, std::string_view source)
 {
-  if (m_startup_display_refresh_rate_hz > 0.0f || refresh_rate_hz <= 0.0f)
+  if (GetStartupDisplayRefreshRateHz() > 0.0f || refresh_rate_hz <= 0.0f)
     return;
 
-  m_startup_display_refresh_rate_hz = refresh_rate_hz;
+  m_startup_display_refresh_rate_hz.store(refresh_rate_hz, std::memory_order_release);
   INFO_LOG_FMT(OPENXR, "OpenXR: Startup display refresh rate is {:.2f} Hz from {}.",
-               m_startup_display_refresh_rate_hz, source);
+               refresh_rate_hz, source);
   Config::OnConfigChanged();
 }
 
@@ -3090,7 +3090,7 @@ bool OpenXRManager::WaitFrame()
   m_should_render_snapshot.store(m_frame_state.shouldRender == XR_TRUE,
                                  std::memory_order_release);
 
-  if (m_startup_display_refresh_rate_hz <= 0.0f && m_frame_state.predictedDisplayPeriod > 0)
+  if (GetStartupDisplayRefreshRateHz() <= 0.0f && m_frame_state.predictedDisplayPeriod > 0)
   {
     constexpr double ns_per_second = 1000000000.0;
     SetStartupDisplayRefreshRate(

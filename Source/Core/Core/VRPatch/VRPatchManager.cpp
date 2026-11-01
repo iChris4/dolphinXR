@@ -42,6 +42,7 @@
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/VRSettingsTable.h"
 #include "VideoCommon/VR/CameraPitch.h"
+#include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/OverrideSuppression.h"
 #include "VideoCommon/VR/PatchFlags.h"
 
@@ -519,6 +520,8 @@ void FillEnvironment(Environment* environment, MemoryAccess* memory)
   environment->env.pad = &m.pad_resolver;
   environment->env.field = m.field.load(std::memory_order_relaxed);
   environment->env.units_per_meter = Config::Get(Config::GFX_VR_UNITS_PER_METER);
+  environment->env.display_refresh_rate =
+      VR::g_openxr ? VR::g_openxr->GetStartupDisplayRefreshRateHz() : 0.0;
 }
 
 // ---- Gecko region, overrides, controller holds ----

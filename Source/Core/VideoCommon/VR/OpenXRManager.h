@@ -498,7 +498,12 @@ public:
   {
     return m_estimated_display_period_ms.load(std::memory_order_acquire);
   }
-  float GetStartupDisplayRefreshRateHz() const { return m_startup_display_refresh_rate_hz; }
+  // The headset's refresh rate when the session started; 0 until the runtime reports it. Any
+  // thread (the VBI override and the VR patches read it on the CPU thread).
+  float GetStartupDisplayRefreshRateHz() const
+  {
+    return m_startup_display_refresh_rate_hz.load(std::memory_order_acquire);
+  }
   // HMD's native display period from XrFrameState (e.g. 11.11ms for 90Hz)
   double GetNativeDisplayPeriodMs() const
   {
@@ -1021,7 +1026,7 @@ private:
   bool m_present_eye_views_valid = false;
   XrTime m_last_predicted_display_time = 0;
   std::atomic<double> m_estimated_display_period_ms{0.0};
-  float m_startup_display_refresh_rate_hz = 0.0f;
+  std::atomic<float> m_startup_display_refresh_rate_hz{0.0f};
 
   // "Home" head-center position, recorded from the first stable tracked pose.
   // All positional tracking is relative to this to avoid floor-level offsets.

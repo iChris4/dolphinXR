@@ -356,6 +356,10 @@ static constexpr int GFX_VR_FORCED_VBI_FREQUENCY_OFF = 0;
 static constexpr int GFX_VR_FORCED_VBI_FREQUENCY_72 = 72;
 static constexpr int GFX_VR_FORCED_VBI_FREQUENCY_90 = 90;
 static constexpr int GFX_VR_FORCED_VBI_FREQUENCY_120 = 120;
+// The UIs offer 72/90/120; a profile or a VR patch can ask for any rate in this range (a patch
+// that sets a game's frame rate to the headset's: 80 or 144 Hz).
+static constexpr int GFX_VR_FORCED_VBI_FREQUENCY_MIN = 30;
+static constexpr int GFX_VR_FORCED_VBI_FREQUENCY_MAX = 240;
 static constexpr float GFX_VR_HUD_THICKNESS_MIN = 0.0f;
 static constexpr float GFX_VR_HUD_THICKNESS_MAX = 1.0f;
 static constexpr float GFX_VR_HUD_THICKNESS_STEP = 0.02f;
@@ -365,16 +369,13 @@ static constexpr float GFX_VR_GAMMA_STEP = 0.1f;
 
 inline int NormalizeVRForcedVBIFrequency(int frequency)
 {
-  switch (frequency)
+  if (frequency == GFX_VR_FORCED_VBI_FREQUENCY_AUTO ||
+      (frequency >= GFX_VR_FORCED_VBI_FREQUENCY_MIN &&
+       frequency <= GFX_VR_FORCED_VBI_FREQUENCY_MAX))
   {
-  case GFX_VR_FORCED_VBI_FREQUENCY_AUTO:
-  case GFX_VR_FORCED_VBI_FREQUENCY_72:
-  case GFX_VR_FORCED_VBI_FREQUENCY_90:
-  case GFX_VR_FORCED_VBI_FREQUENCY_120:
     return frequency;
-  default:
-    return GFX_VR_FORCED_VBI_FREQUENCY_OFF;
   }
+  return GFX_VR_FORCED_VBI_FREQUENCY_OFF;
 }
 
 inline int ChooseClosestVRForcedVBIFrequency(float refresh_rate_hz)

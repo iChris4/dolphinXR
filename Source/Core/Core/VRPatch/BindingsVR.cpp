@@ -199,6 +199,18 @@ int VRUnitsPerMeter(lua_State* L)
   return 1;
 }
 
+// vr.refresh_rate() -> the headset's refresh rate in Hz, or nil without a VR session or before
+// the runtime reports it.
+int VRRefreshRate(lua_State* L)
+{
+  const ScriptContext* context = GetContext(L);
+  if (context->env && context->env->display_refresh_rate > 0)
+    lua_pushnumber(L, context->env->display_refresh_rate);
+  else
+    lua_pushnil(L);
+  return 1;
+}
+
 // vr.haptic(hand, amplitude 0-1, seconds): a one-shot vibration.
 int VRHaptic(lua_State* L)
 {
@@ -377,6 +389,7 @@ void RegisterVRBindings(lua_State* L)
       {"focused", VRFocused},
       {"menu_open", VRMenuOpen},
       {"units_per_meter", VRUnitsPerMeter},
+      {"refresh_rate", VRRefreshRate},
       {"haptic", VRHaptic},
       {"setting", VRSettingGet},
       {"set_setting", VRSettingSet},
