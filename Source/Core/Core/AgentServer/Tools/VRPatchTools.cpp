@@ -32,6 +32,7 @@
 #include "Core/PowerPC/MMU.h"
 #include "Core/System.h"
 #include "Core/VRPatch/PatchScript.h"
+#include "Core/VRPatch/StickTurn.h"
 #include "Core/VRPatch/VRPatch.h"
 #include "VideoCommon/VR/CameraAnchorMath.h"
 #include "VideoCommon/VR/OpenXRManager.h"
@@ -738,6 +739,15 @@ std::string CameraAnchorPatchSource(const ToolArgs& args, const std::string& tit
   const std::string head = AddressExpression(args, "head", true);
   const std::string camera = AddressExpression(args, "camera", true);
   const std::string heading = AddressExpression(args, "heading", false);
+  static constexpr std::array<std::string_view, 3> STICKS = {"facing", "head", "camera"};
+  const auto stick_it = std::ranges::find(STICKS, args.GetString("stick", "facing"));
+  if (stick_it == STICKS.end())
+    throw ToolError("stick is facing, head or camera.");
+  const double stick_lead = std::clamp(args.GetNumber("stick_lead", 0), 0.0, 4.0);
+  const std::string free_byte = AddressExpression(args, "free_byte", false);
+  const s64 free_value = args.GetInt("free_value", 0);
+  if (free_value < 0 || free_value > 255)
+    throw ToolError("free_value is a byte, 0 to 255.");
 
   std::string hide;
   for (const u64 hash : args.GetHexArray("hide_textures"))
@@ -781,38 +791,54 @@ std::string CameraAnchorPatchSource(const ToolArgs& args, const std::string& tit
       "default = {}, min = 0, max = 200, step = 0.5}},\n"
       "    {{name = \"hide_below\", label = \"Down to under the head (game units, -1: any)\", "
       "default = {}, min = -1, max = 200, step = 0.5}},\n"
+      "    {{name = \"stick\", label = \"Stick forward\", type = \"choice\",\n"
+      "     options = {{\"The character's facing\", \"Where you look\", \"The game's camera\"}},\n"
+      "     default = {},\n"
+      "     description = \"What up on the stick means: where the character faces, the \"\n"
+      "       .. \"headset's direction, or the game camera's.\"}},\n"
       "  }},\n"
       "}}\n\n",
       rotation_it - ROTATIONS.begin(), LuaNumber(args.GetNumber("yaw_deg", 0)),
       LuaNumber(args.GetNumber("right_m", 0)), LuaNumber(args.GetNumber("up_m", 0)),
       LuaNumber(args.GetNumber("forward_m", 0)), LuaNumber(args.GetNumber("upm", 0)),
       LuaNumber(args.GetNumber("smoothing", -1)), LuaNumber(args.GetNumber("hide_radius", 0)),
-      LuaNumber(args.GetNumber("hide_below", -1)));
-  source +=
-      fmt::format("local ROTATIONS = {{\"level\", \"fixed\", \"full\", \"camera\", \"yaw\"}}\n\n"
-                  "local function apply_options()\n"
-                  "  vr.set_camera_anchor_options{{\n"
-                  "    rotation = ROTATIONS[settings.rotation + 1], yaw = settings.yaw,\n"
-                  "    right = settings.right, up = settings.up, forward = settings.forward,\n"
-                  "    upm = settings.upm > 0 and settings.upm or nil,\n"
-                  "    smoothing = settings.smoothing >= 0 and settings.smoothing or nil,\n"
-                  "    hide_radius = settings.hide_radius, hide_below = settings.hide_below,\n"
-                  "    up_axis = \"{}\", forward_axis = \"{}\", bone_up_axis = \"{}\",\n"
-                  "  }}\n"
-                  "end\n\n"
-                  "function on_load() apply_options() end\n"
-                  "function on_setting_changed() apply_options() end\n\n"
-                  "-- Followed again at every field: the objects move between rooms.\n"
-                  "local function head() return {} end\n"
-                  "local function camera() return {} end\n"
-                  "local function heading() return {} end\n\n"
-                  "local fields = 0\n"
-                  "function on_frame()\n"
-                  "  local h, c = head(), camera()\n"
-                  "  local ok = h ~= nil and c ~= nil and\n"
-                  "             vr.set_camera_anchor_matrices(h, c, \"{}\", heading())\n",
-                  args.GetString("up_axis", "y"), args.GetString("forward_axis", "z"),
-                  args.GetString("bone_up_axis", "y"), head, camera, heading, kind);
+      LuaNumber(args.GetNumber("hide_below", -1)), stick_it - STICKS.begin());
+  source += fmt::format(
+      "local ROTATIONS = {{\"level\", \"fixed\", \"full\", \"camera\", \"yaw\"}}\n"
+      "local STICKS = {{\"facing\", \"head\", \"camera\"}}\n\n"
+      "local function apply_options()\n"
+      "  vr.set_camera_anchor_options{{\n"
+      "    rotation = ROTATIONS[settings.rotation + 1], yaw = settings.yaw,\n"
+      "    right = settings.right, up = settings.up, forward = settings.forward,\n"
+      "    upm = settings.upm > 0 and settings.upm or nil,\n"
+      "    smoothing = settings.smoothing >= 0 and settings.smoothing or nil,\n"
+      "    hide_radius = settings.hide_radius, hide_below = settings.hide_below,\n"
+      "    stick = STICKS[settings.stick + 1], stick_lead = {},\n"
+      "    up_axis = \"{}\", forward_axis = \"{}\", bone_up_axis = \"{}\",\n"
+      "  }}\n"
+      "end\n\n"
+      "function on_load() apply_options() end\n"
+      "function on_setting_changed() apply_options() end\n\n"
+      "-- Followed again at every field: the objects move between rooms.\n"
+      "local function head() return {} end\n"
+      "local function camera() return {} end\n"
+      "local function heading() return {} end\n\n"
+      "local fields = 0\n"
+      "function on_frame()\n"
+      "  local h, c = head(), camera()\n"
+      "{}"
+      "  local ok = h ~= nil and c ~= nil and\n"
+      "             vr.set_camera_anchor_matrices(h, c, \"{}\", heading())\n",
+      LuaNumber(stick_lead), args.GetString("up_axis", "y"), args.GetString("forward_axis", "z"),
+      args.GetString("bone_up_axis", "y"), head, camera, heading,
+      free_byte == "nil" ?
+          "" :
+          fmt::format("  -- The stick walks only while the game is in free play.\n"
+                      "  local byte = {}\n"
+                      "  vr.set_camera_anchor_stick(byte ~= nil and mem.u8(byte) == "
+                      "{})\n",
+                      free_byte, free_value),
+      kind);
   if (!hide_flag.empty())
   {
     source +=
@@ -852,6 +878,12 @@ ToolResult TestCameraAnchor(const ToolArgs& args)
       gate_open ? "" :
                   " The patch still composes the anchor and logs it; without a stereo session "
                   "compare its log with get_draw's position matrix of the head.");
+  const std::optional<float> stick = VRPatch::StickTurn::Get();
+  text += stick ? fmt::format("Main stick: turned {:.0f} degrees (+ = left) from the game camera's "
+                              "heading to the view's.\n",
+                              *stick * 57.29578f) :
+                  "Main stick: not turned (stick=camera, free_byte not in free play, or the "
+                  "anchor does not hold the camera).\n";
   if (frames == 0)
     text += pending;
   text += "\nLoaded live for this session (not saved): tune with set_vr_patch_setting, save with "
@@ -859,7 +891,10 @@ ToolResult TestCameraAnchor(const ToolArgs& args)
           id + " once the user confirms it in the headset.\nSource:\n" + source;
   ToolResult result = ToolResult::Text(std::move(text));
   result.SetStructured(
-      {{"id", JsonString(id)}, {"gate_open", JsonBool(gate_open)}, {"source", JsonString(source)}});
+      {{"id", JsonString(id)},
+       {"gate_open", JsonBool(gate_open)},
+       {"stick_turn_deg", stick ? JsonNumber(*stick * 57.29578f) : picojson::value()},
+       {"source", JsonString(source)}});
   return result;
 }
 }  // namespace
@@ -1113,6 +1148,20 @@ void RegisterVRPatchTools(ToolRegistry& registry, Server& server)
                                           "anchor holds the camera.")
                .String("hide_flag", "Also raise this override flag while the anchor applies, for "
                                     "profile entries (condition=<flag>) that hide by shader.")
+               .String("stick",
+                       "What up on the main stick means while the anchor holds the camera: facing "
+                       "(default: where the character faces), head (where the headset looks) or "
+                       "camera (the game's own).",
+                       {"facing", "head", "camera"})
+               .Number("stick_lead",
+                       "Camera updates the game's control angle runs ahead of the camera matrix "
+                       "(0 to 4, default 0). 1 when the character's path bends with each swing of "
+                       "the game camera while up is held (Wind Waker, Twilight Princess).")
+               .String("free_byte",
+                       "A byte (an address or a path) holding free_value only while the character "
+                       "moves freely (not in a menu, a dialog or a cutscene): the stick is turned "
+                       "only then. Find it with cheat_search or a logging patch (Workflow 7).")
+               .Integer("free_value", "free_byte's value in free play (default 0).", 0, 255)
                .Integer("frames", "Frames to advance after loading (default 60).", 0, 600)
                .String("id", "Patch id (default camera-anchor-test).")
                .String("title", "Patch title (default \"First-person view\").")
