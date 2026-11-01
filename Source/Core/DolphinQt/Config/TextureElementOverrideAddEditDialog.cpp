@@ -82,6 +82,13 @@ public:
     setAcceptDrops(true);
   }
 
+  // Never narrower than a whole hash. When there is room, as wide as two: a field can hold several.
+  QSize sizeHint() const override { return {HashWidth(2), QLineEdit::sizeHint().height()}; }
+  QSize minimumSizeHint() const override
+  {
+    return {HashWidth(1), QLineEdit::minimumSizeHint().height()};
+  }
+
 protected:
   void dragEnterEvent(QDragEnterEvent* event) override
   {
@@ -119,6 +126,12 @@ protected:
   }
 
 private:
+  // 16 digits per hash, plus two digits of room for the frame.
+  int HashWidth(int hashes) const
+  {
+    return fontMetrics().horizontalAdvance(QString(16 * hashes + 2, QLatin1Char('0')));
+  }
+
   DropHandler m_drop_handler;
 };
 
@@ -482,8 +495,9 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
 
   // The hashes get a column of their own beside the other fields, so the dialog is no taller than
   // the fields and fits small screens.
-  auto* hash_form = new QFormLayout;
-  hash_form->addRow(tr("Texture Hashes:"), m_texture_hash_scroll);
+  auto* hash_column = new QVBoxLayout;
+  hash_column->addWidget(new QLabel(tr("Texture Hashes:")));
+  hash_column->addWidget(m_texture_hash_scroll, 1);
 
   auto* separator = new QFrame;
   separator->setFrameShape(QFrame::VLine);
@@ -492,9 +506,9 @@ TextureElementOverrideAddEditDialog::TextureElementOverrideAddEditDialog(
   separator->setForegroundRole(QPalette::Mid);
 
   auto* columns = new QHBoxLayout;
-  columns->addLayout(form);
+  columns->addLayout(form, 1);
   columns->addWidget(separator);
-  columns->addLayout(hash_form, 1);
+  columns->addLayout(hash_column, 1);
 
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
   connect(buttons, &QDialogButtonBox::accepted, this,
@@ -874,10 +888,8 @@ void TextureElementOverrideAddEditDialog::AddTextureHashField(const QString& tex
          "You can paste multiple hashes separated by comma, semicolon, or spaces,\n"
          "or drop one or more dumped PNG/DDS texture files here."));
   edit->setText(text);
-  // Wide enough for a whole 16-digit hash, with room for the frame.
-  edit->setMinimumWidth(edit->fontMetrics().horizontalAdvance(QString(18, QLatin1Char('0'))));
 
-  // Thumbnail of the matching dumped texture, shown beside the hash.
+  // Thumbnail of the matching dumped texture, shown before the hash.
   auto* preview = new QLabel;
   preview->setFixedSize(TEXTURE_HASH_PREVIEW_SIZE, TEXTURE_HASH_PREVIEW_SIZE);
   preview->setAlignment(Qt::AlignCenter);
@@ -887,10 +899,10 @@ void TextureElementOverrideAddEditDialog::AddTextureHashField(const QString& tex
   auto* row_layout = new QHBoxLayout(row);
   row_layout->setContentsMargins(0, 0, 0, 0);
   row_layout->setSpacing(6);
-  row_layout->addWidget(edit, 1);
   row_layout->addWidget(preview);
+  row_layout->addWidget(edit);
 
-  m_texture_hash_layout->addWidget(row);
+  m_texture_hash_layout->addWidget(row, 0, Qt::AlignHCenter);
   m_texture_hash_edits.push_back(edit);
   m_texture_hash_previews.push_back(preview);
   m_texture_hash_rows.push_back(row);
