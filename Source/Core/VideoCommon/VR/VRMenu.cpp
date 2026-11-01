@@ -75,6 +75,15 @@ size_t DefaultPointerHand()
       Config::Get(Config::Info<bool>{{Config::System::Main, "Android", "QuestLeftHanded"}, false});
   return left_handed ? 0 : 1;
 }
+
+// Between the eyes, in the reference space.
+XrVector3f GetHeadCenter()
+{
+  const auto& views = g_openxr->GetEyeViews();
+  return {0.5f * (views[0].pose.position.x + views[1].pose.position.x),
+          0.5f * (views[0].pose.position.y + views[1].pose.position.y),
+          0.5f * (views[0].pose.position.z + views[1].pose.position.z)};
+}
 }  // namespace
 
 VRMenu::VRMenu()
@@ -115,9 +124,9 @@ bool VRMenu::InitializeContext()
   io.IniFilename = nullptr;
   io.LogFilename = nullptr;
   io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
-  // The canvas, then the laser beams' texture strips (VR::Laser) beside it.
-  io.DisplaySize = {static_cast<float>(CANVAS_WIDTH + Laser::STRIPS_WIDTH),
-                    static_cast<float>(CANVAS_HEIGHT)};
+  // The canvas, then the laser beams' texture strips (VR::Laser) and the grab bar's texture
+  // (VR::PanelHandle) beside it.
+  io.DisplaySize = {static_cast<float>(IMAGE_WIDTH), static_cast<float>(CANVAS_HEIGHT)};
   // A laser pointer wobbles: be generous before a press turns into a drag.
   io.MouseDragThreshold = 12.0f;
 
@@ -152,22 +161,30 @@ void VRMenu::PlacePanel()
 {
   OpenXRManager* manager = g_openxr.get();
   const auto& views = manager->GetEyeViews();
-  const PanelMath::YawAnchor anchor =
+  m_anchor =
       PanelMath::HeadYawAnchor(views[0].pose, views[1].pose).value_or(PanelMath::YawAnchor{});
+  m_recenter_generation = manager->GetRecenterGeneration();
+  constexpr float aspect = static_cast<float>(CANVAS_HEIGHT) / CANVAS_WIDTH;
+
+  if (m_placement)
+  {
+    m_pose = PanelMath::FromAnchorFrame(m_anchor, m_placement->pose);
+    m_size = {m_placement->width, m_placement->width * aspect};
+    return;
+  }
 
   float distance = PANEL_DISTANCE_METERS;
   // In flat-screen mode stay in front of the game panel, or the two quads would fight in depth.
   if (g_ActiveConfig.vr_flat_screen)
     distance = std::clamp(g_ActiveConfig.vr_screen_distance - 0.15f, 0.5f, PANEL_DISTANCE_METERS);
 
-  m_pose = PanelMath::PoseInFront(anchor, distance, PANEL_VERTICAL_OFFSET_METERS);
-  m_size = {PANEL_WIDTH_METERS,
-            PANEL_WIDTH_METERS * static_cast<float>(CANVAS_HEIGHT) / CANVAS_WIDTH};
-  m_recenter_generation = manager->GetRecenterGeneration();
+  m_pose = PanelMath::PoseInFront(m_anchor, distance, PANEL_VERTICAL_OFFSET_METERS);
+  m_size = {PANEL_WIDTH_METERS, PANEL_WIDTH_METERS * aspect};
 }
 
 void VRMenu::Open(uint32_t open_serial)
 {
+  EndDrag();
   m_open = true;
   m_open_serial = open_serial;
   m_game_id = SConfig::GetInstance().GetGameID();
@@ -188,6 +205,7 @@ void VRMenu::Open(uint32_t open_serial)
 
 void VRMenu::Close()
 {
+  EndDrag();
   m_open = false;
   // A pick still armed ends with the menu, and the hunter's own option comes back.
   DrawPick::DisarmVRPick();
@@ -214,10 +232,13 @@ void VRMenu::FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot)
     m_reset_mouse = false;
   }
 
-  // Where each controller's pointer ray meets the panel, in canvas pixels.
+  UpdateDrag(snapshot);
+
+  // Where each controller's pointer ray meets the panel, in canvas pixels, or the grab bar.
   for (size_t hand = 0; hand < m_hit.size(); ++hand)
   {
     m_hit[hand] = false;
+    m_bar_hit[hand] = false;
     const Common::VR::OpenXRControllerState& controller = snapshot.controllers[hand];
     if (!controller.connected || !controller.pointer_pose.valid)
       continue;
@@ -225,16 +246,23 @@ void VRMenu::FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot)
         PanelMath::IntersectRayQuad(PanelMath::ToXrPose(controller.pointer_pose), m_pose);
     if (!hit || hit->plane_distance <= 0.0f)
       continue;
-    const float u = hit->x / m_size.width + 0.5f;
-    const float v = 0.5f - hit->y / m_size.height;
-    if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f)
-      continue;
-    m_hit[hand] = true;
-    m_hit_position[hand] = {u * CANVAS_WIDTH, v * CANVAS_HEIGHT};
     m_hit_length[hand] =
         Laser::GetHitLength(PanelMath::ToXrPose(controller.pointer_pose), m_pose, *hit);
+    const float u = hit->x / m_size.width + 0.5f;
+    const float v = 0.5f - hit->y / m_size.height;
+    if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f)
+    {
+      m_hit[hand] = true;
+      m_hit_position[hand] = {u * CANVAS_WIDTH, v * CANVAS_HEIGHT};
+    }
+    else if (PanelHandle::IsOnBar(*hit, m_size))
+    {
+      m_bar_hit[hand] = true;
+      m_bar_hit_point[hand] = *hit;
+    }
   }
 
+  BeginDrag(snapshot);
   FeedPick(snapshot);
 
   // While a binding is captured the controller buttons are not menu input.
@@ -326,6 +354,78 @@ void VRMenu::FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot)
     io.AddMouseWheelEvent(0.0f, wheel);
 }
 
+void VRMenu::UpdateDrag(const Common::VR::OpenXRInputSnapshot& snapshot)
+{
+  if (!m_drag)
+    return;
+  const size_t hand = m_drag_hand;
+  const Common::VR::OpenXRMenuInput& menu = snapshot.menu;
+  const Common::VR::OpenXRControllerState& controller = snapshot.controllers[hand];
+  m_seen_presses[hand] = menu.select_presses[hand];
+  m_seen_releases[hand] = menu.select_releases[hand];
+  const float push_steps = menu.wheel_steps[hand] - m_seen_wheel[hand];
+  m_seen_wheel[hand] = menu.wheel_steps[hand];
+
+  // Presses and releases alternate, so the button is held while they differ.
+  const bool held = menu.select_presses[hand] != menu.select_releases[hand];
+  if (!held || !controller.connected || !controller.pointer_pose.valid)
+  {
+    EndDrag();
+    return;
+  }
+  m_drag->Update(PanelMath::ToXrPose(controller.pointer_pose), GetHeadCenter(), push_steps,
+                 ImGui::GetIO().DeltaTime);
+  m_pose = m_drag->GetPose();
+  m_size = m_drag->GetSize();
+}
+
+void VRMenu::BeginDrag(const Common::VR::OpenXRInputSnapshot& snapshot)
+{
+  const Common::VR::OpenXRMenuInput& menu = snapshot.menu;
+  if (m_drag || menu.binding_capture)
+    return;
+  for (size_t hand = 0; hand < m_bar_hit.size(); ++hand)
+  {
+    if (!m_bar_hit[hand] || menu.select_presses[hand] == m_seen_presses[hand])
+      continue;
+    // The press grabs the bar and is not a click. A press still down in ImGui ends first.
+    if (hand == m_active_hand && m_mouse_down)
+    {
+      ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+      m_mouse_down = false;
+    }
+    m_seen_presses[hand] = menu.select_presses[hand];
+    m_seen_releases[hand] = menu.select_releases[hand];
+    m_seen_wheel[hand] = menu.wheel_steps[hand];
+    // Released again within the frame: nothing to move.
+    if (menu.select_presses[hand] == menu.select_releases[hand])
+      continue;
+    m_drag.emplace(PanelMath::ToXrPose(snapshot.controllers[hand].pointer_pose),
+                   m_bar_hit_point[hand], m_pose, m_size, GetHeadCenter());
+    m_drag_hand = hand;
+    Common::VR::OpenXRInputState::PulseHaptic(hand, 0.4f, 20'000'000);
+    return;
+  }
+}
+
+void VRMenu::EndDrag()
+{
+  if (!m_drag)
+    return;
+  m_placement = Placement{PanelMath::ToAnchorFrame(m_anchor, m_pose.position, m_drag->GetHeading()),
+                          m_size.width};
+  m_drag.reset();
+}
+
+PanelHandle::State VRMenu::GetHandleState() const
+{
+  if (m_drag)
+    return PanelHandle::State::Grabbed;
+  if (m_bar_hit[0] || m_bar_hit[1])
+    return PanelHandle::State::Hovered;
+  return PanelHandle::State::Idle;
+}
+
 // How far into the game the picking laser reaches: the virtual screen, where 2D elements are.
 static float GetPickLength()
 {
@@ -342,7 +442,8 @@ void VRMenu::FeedPick(const Common::VR::OpenXRInputSnapshot& snapshot)
   // The picking laser: the active controller's while it points off the panel, else the other's.
   const auto points_off_panel = [&](size_t hand) {
     const Common::VR::OpenXRControllerState& controller = snapshot.controllers[hand];
-    return controller.connected && controller.pointer_pose.valid && !m_hit[hand];
+    return controller.connected && controller.pointer_pose.valid && !m_hit[hand] &&
+           !m_bar_hit[hand] && !(m_drag && m_drag_hand == hand);
   };
   const size_t other_hand = 1 - m_active_hand;
   if (points_off_panel(m_active_hand))
@@ -380,20 +481,22 @@ uint32_t VRMenu::BuildBeams(const Common::VR::OpenXRInputSnapshot& snapshot, XrS
                             std::array<XrCompositionLayerQuad, 2>* beams) const
 {
   OpenXRManager* manager = g_openxr.get();
-  const auto& views = manager->GetEyeViews();
-  const XrVector3f eye{0.5f * (views[0].pose.position.x + views[1].pose.position.x),
-                       0.5f * (views[0].pose.position.y + views[1].pose.position.y),
-                       0.5f * (views[0].pose.position.z + views[1].pose.position.z)};
+  const XrVector3f eye = GetHeadCenter();
   uint32_t count = 0;
   for (size_t hand = 0; hand < snapshot.controllers.size(); ++hand)
   {
     const Common::VR::OpenXRControllerState& controller = snapshot.controllers[hand];
     if (!controller.connected || !controller.pointer_pose.valid)
       continue;
-    // To the panel it points at; into the game while it picks; else a short beam.
+    // To the panel or bar it points at (or holds); into the game while it picks; else a short
+    // beam.
     Laser::Style style = Laser::Style::Pointer;
     float length = Laser::FREE_LENGTH_METERS;
-    if (m_hit[hand])
+    if (m_drag && m_drag_hand == hand)
+    {
+      length = m_drag->GetRayLength();
+    }
+    else if (m_hit[hand] || m_bar_hit[hand])
     {
       length = m_hit_length[hand];
     }
@@ -493,7 +596,9 @@ void VRMenu::DrawMenu(VRMenuContext& context)
   ImGui::Separator();
   ImGui::AlignTextToFramePadding();
   const std::string status = m_actions.GetStatus();
-  if (!status.empty())
+  if (GetHandleState() != PanelHandle::State::Idle)
+    ImGui::TextDisabled("Hold the trigger to move the menu    Thumbstick: farther / nearer");
+  else if (!status.empty())
     ImGui::TextUnformatted(status.c_str());
   else
     ImGui::TextDisabled("Trigger: select    Thumbstick: scroll    Left Menu: close");
@@ -554,14 +659,19 @@ void VRMenu::OnPresent(VideoCommon::OnScreenUI* osd)
 
   IOpenXRSwapchain* swapchain = manager->GetSwapchain();
   if (swapchain->GetMenuSwapchain() == XR_NULL_HANDLE &&
-      !swapchain->CreateMenuSwapchain(CANVAS_WIDTH + Laser::STRIPS_WIDTH, CANVAS_HEIGHT))
+      !swapchain->CreateMenuSwapchain(IMAGE_WIDTH, CANVAS_HEIGHT))
   {
     ERROR_LOG_FMT(OPENXR, "VRMenu: could not create the menu swapchain; the menu is unavailable");
     m_swapchain_failed = true;
     return;
   }
   if (manager->GetRecenterGeneration() != m_recenter_generation)
+  {
+    // A recenter puts the panel back in front of the head.
+    m_drag.reset();
+    m_placement.reset();
     PlacePanel();
+  }
 
   std::unique_lock<std::mutex> imgui_lock =
       osd ? osd->GetImGuiLock() : std::unique_lock<std::mutex>(m_fallback_imgui_mutex);
@@ -575,10 +685,10 @@ void VRMenu::OnPresent(VideoCommon::OnScreenUI* osd)
 
   const u64 now_us = Common::Timer::NowUs();
   ImGuiIO& io = ImGui::GetIO();
-  io.DisplaySize = {static_cast<float>(CANVAS_WIDTH + Laser::STRIPS_WIDTH),
-                    static_cast<float>(CANVAS_HEIGHT)};
-  // Popups and tooltips stay on the canvas, off the strips.
-  ImGui::GetStyle().DisplaySafeAreaPadding.x = static_cast<float>(Laser::STRIPS_WIDTH) + 4.0f;
+  io.DisplaySize = {static_cast<float>(IMAGE_WIDTH), static_cast<float>(CANVAS_HEIGHT)};
+  // Popups and tooltips stay on the canvas, off the textures beside it.
+  ImGui::GetStyle().DisplaySafeAreaPadding.x =
+      static_cast<float>(IMAGE_WIDTH - CANVAS_WIDTH) + 4.0f;
   io.DeltaTime =
       m_last_frame_us == 0 ?
           1.0f / 60.0f :
@@ -590,6 +700,8 @@ void VRMenu::OnPresent(VideoCommon::OnScreenUI* osd)
   VRMenuContext context{m_actions, m_touched, m_game_id, g_ActiveConfig.vr_flat_screen};
   DrawMenu(context);
   DrawPointers();
+  PanelHandle::DrawTexture(ImGui::GetForegroundDrawList(), static_cast<float>(HANDLE_TEXTURE_LEFT),
+                           GetHandleState());
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsAnyItemHovered())
     Common::VR::OpenXRInputState::PulseHaptic(m_active_hand, 0.3f, 15'000'000);
   ImGui::Render();
@@ -615,6 +727,9 @@ void VRMenu::OnPresent(VideoCommon::OnScreenUI* osd)
         m_size,
         swapchain->GetMenuSwapchain(),
         {static_cast<int32_t>(CANVAS_WIDTH), static_cast<int32_t>(CANVAS_HEIGHT)}};
+    layer.handle = PanelHandle::MakeLayer(
+        manager->GetReferenceSpace(), swapchain->GetMenuSwapchain(),
+        PanelHandle::GetTextureRect(HANDLE_TEXTURE_LEFT), m_pose, m_size, GetHandleState());
     layer.beam_count = BuildBeams(snapshot, swapchain->GetMenuSwapchain(), &layer.beams);
     manager->SetMenuLayer(layer, m_open_serial);
   }

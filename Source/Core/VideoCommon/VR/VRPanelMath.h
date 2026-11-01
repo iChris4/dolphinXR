@@ -5,6 +5,7 @@
 
 #ifdef ENABLE_VR
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 
@@ -13,8 +14,8 @@
 #include "Common/VR/OpenXRInputState.h"
 
 // Math for flat panels placed in the OpenXR reference space (the flat-screen game panel, the
-// in-game VR menu, the controller-mapper quad): yaw-only placement in front of the head and
-// controller-ray hits.
+// in-game VR menu, the controller-mapper quad): yaw-only placement in front of the head,
+// headings without roll for panels moved by hand, and controller-ray hits.
 namespace VR::PanelMath
 {
 inline XrVector3f RotateVector(const XrQuaternionf& q, const XrVector3f& v)
@@ -29,6 +30,24 @@ inline XrVector3f RotateVector(const XrQuaternionf& q, const XrVector3f& v)
 inline XrQuaternionf Conjugate(const XrQuaternionf& q)
 {
   return {-q.x, -q.y, -q.z, q.w};
+}
+
+// The rotation `a` after `b`.
+inline XrQuaternionf Multiply(const XrQuaternionf& a, const XrQuaternionf& b)
+{
+  const float x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
+  const float y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x;
+  const float z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w;
+  const float w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
+  return {x, y, z, w};
+}
+
+// Rotates `v` by `yaw` radians about +Y.
+inline XrVector3f RotateYaw(const XrVector3f& v, float yaw)
+{
+  const float c = std::cos(yaw);
+  const float s = std::sin(yaw);
+  return {v.x * c + v.z * s, v.y, -v.x * s + v.z * c};
 }
 
 inline bool IsValidOrientation(const XrQuaternionf& q)
@@ -75,6 +94,65 @@ inline XrPosef PoseInFront(const YawAnchor& anchor, float distance, float y_offs
   pose.position = {anchor.center.x - std::sin(anchor.yaw) * distance, anchor.center.y + y_offset,
                    anchor.center.z - std::cos(anchor.yaw) * distance};
   return pose;
+}
+
+// Which way a panel faces, without roll: its +Z axis is turned `yaw` about +Y (0 = toward +Z,
+// as YawOf) and raised `pitch` above the horizon (positive = facing up, leaning back).
+struct Heading
+{
+  float yaw = 0.0f;
+  float pitch = 0.0f;
+};
+
+inline XrQuaternionf HeadingOrientation(const Heading& heading)
+{
+  // Yaw about +Y after a tilt of -pitch about +X.
+  const float sy = std::sin(heading.yaw * 0.5f);
+  const float cy = std::cos(heading.yaw * 0.5f);
+  const float sx = std::sin(-heading.pitch * 0.5f);
+  const float cx = std::cos(-heading.pitch * 0.5f);
+  return {cy * sx, sy * cx, -sy * sx, cy * cx};
+}
+
+// The heading of an orientation without roll (as HeadingOrientation makes).
+inline Heading HeadingOf(const XrQuaternionf& q)
+{
+  const XrVector3f normal = RotateVector(q, {0.0f, 0.0f, 1.0f});
+  return {std::atan2(normal.x, normal.z), std::asin(std::clamp(normal.y, -1.0f, 1.0f))};
+}
+
+// The heading from `from` toward `to`. Returns nullopt when `to` is nearly straight above or
+// below, where the yaw is undefined.
+inline std::optional<Heading> HeadingToward(const XrVector3f& from, const XrVector3f& to)
+{
+  const XrVector3f v{to.x - from.x, to.y - from.y, to.z - from.z};
+  const float horizontal = std::sqrt(v.x * v.x + v.z * v.z);
+  if (horizontal < 1e-3f || horizontal < 0.05f * std::abs(v.y))
+    return std::nullopt;
+  return Heading{std::atan2(v.x, v.z), std::atan2(v.y, horizontal)};
+}
+
+// A placement relative to a YawAnchor: the anchor's head center and heading are its origin and
+// -Z, so the same placement under another anchor stays where it was relative to the head.
+struct AnchoredPose
+{
+  XrVector3f position{};
+  Heading heading;
+};
+
+inline AnchoredPose ToAnchorFrame(const YawAnchor& anchor, const XrVector3f& position,
+                                  const Heading& heading)
+{
+  const XrVector3f offset{position.x - anchor.center.x, position.y - anchor.center.y,
+                          position.z - anchor.center.z};
+  return {RotateYaw(offset, -anchor.yaw), {heading.yaw - anchor.yaw, heading.pitch}};
+}
+
+inline XrPosef FromAnchorFrame(const YawAnchor& anchor, const AnchoredPose& placement)
+{
+  const XrVector3f offset = RotateYaw(placement.position, anchor.yaw);
+  return {HeadingOrientation({placement.heading.yaw + anchor.yaw, placement.heading.pitch}),
+          {anchor.center.x + offset.x, anchor.center.y + offset.y, anchor.center.z + offset.z}};
 }
 
 struct QuadHit

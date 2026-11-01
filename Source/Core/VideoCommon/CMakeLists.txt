@@ -353,6 +353,8 @@ if(ENABLE_VR)
     VR/VRMenuTabVR.cpp
     VR/VRMenuWidgets.cpp
     VR/VRMenuWidgets.h
+    VR/VRPanelHandle.cpp
+    VR/VRPanelHandle.h
     VR/VRPanelMath.h
     VR/VRTextInput.cpp
     VR/VRTextInput.h

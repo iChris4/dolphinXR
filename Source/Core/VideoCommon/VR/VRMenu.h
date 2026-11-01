@@ -18,8 +18,11 @@
 
 #include "Common/CommonTypes.h"
 #include "VideoCommon/ImGuiRenderer.h"
+#include "VideoCommon/VR/VRLaser.h"
 #include "VideoCommon/VR/VRMenuActions.h"
 #include "VideoCommon/VR/VRMenuWidgets.h"
+#include "VideoCommon/VR/VRPanelHandle.h"
+#include "VideoCommon/VR/VRPanelMath.h"
 
 struct ImPlotContext;
 namespace Common::VR
@@ -50,6 +53,9 @@ public:
   // Canvas size in pixels; a 4:3 panel, 1.2 m x 0.9 m in the headset.
   static constexpr u32 CANVAS_WIDTH = 1440;
   static constexpr u32 CANVAS_HEIGHT = 1080;
+  // The swapchain image: the canvas, then the laser strips, then the grab bar's column.
+  static constexpr u32 HANDLE_TEXTURE_LEFT = CANVAS_WIDTH + Laser::STRIPS_WIDTH;
+  static constexpr u32 IMAGE_WIDTH = HANDLE_TEXTURE_LEFT + PanelHandle::TEXTURE_WIDTH;
 
   VRMenu();
   ~VRMenu();
@@ -65,9 +71,16 @@ public:
 private:
   void Open(uint32_t open_serial);
   void Close();
+  // In front of the head, or where it was moved to relative to the head (m_placement).
   void PlacePanel();
   bool InitializeContext();
   void FeedInput(const Common::VR::OpenXRInputSnapshot& snapshot);
+  // The grab bar (VR::PanelHandle): a press on it grabs the panel, which follows that laser until
+  // released. The press, the release and that thumbstick's scrolling are not ImGui input.
+  void UpdateDrag(const Common::VR::OpenXRInputSnapshot& snapshot);
+  void BeginDrag(const Common::VR::OpenXRInputSnapshot& snapshot);
+  void EndDrag();
+  PanelHandle::State GetHandleState() const;
   // The armed pick's laser (DrawPick): previews while it rests, picks on a press.
   void FeedPick(const Common::VR::OpenXRInputSnapshot& snapshot);
   // The controllers' laser beams (VR::Laser) for the menu layer.
@@ -92,12 +105,27 @@ private:
   u64 m_last_frame_us = 0;
   XrPosef m_pose{{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
   XrExtent2Df m_size{};
+  // The head when the panel was placed, and where it was moved to relative to it. The menu opens
+  // there again, relative to the head's heading then; a recenter forgets it.
+  PanelMath::YawAnchor m_anchor;
+  struct Placement
+  {
+    PanelMath::AnchoredPose pose;
+    float width = 0.0f;
+  };
+  std::optional<Placement> m_placement;
+  // The panel held by its bar, and the hand holding it.
+  std::optional<PanelHandle::Drag> m_drag;
+  size_t m_drag_hand = 0;
   std::string m_game_id;
 
   // Pointer state. Counters mirror OpenXRMenuInput; the deltas become ImGui mouse events.
   std::array<bool, 2> m_hit{};
   std::array<ImVec2, 2> m_hit_position{};
-  // Length of each controller's ray to its panel hit, in meters.
+  // Each controller's ray on the grab bar, and where in the panel's frame.
+  std::array<bool, 2> m_bar_hit{};
+  std::array<PanelMath::QuadHit, 2> m_bar_hit_point{};
+  // Length of each controller's ray to its panel or bar hit, in meters.
   std::array<float, 2> m_hit_length{};
   // The controller whose laser picks into the game while a pick is armed.
   std::optional<size_t> m_pick_hand;
