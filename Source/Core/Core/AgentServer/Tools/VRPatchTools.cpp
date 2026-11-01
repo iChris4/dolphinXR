@@ -777,12 +777,17 @@ std::string CameraAnchorPatchSource(const ToolArgs& args, const std::string& tit
       "min = 0, max = 2000, step = 0.5}},\n"
       "    {{name = \"smoothing\", label = \"Smoothing (-1: the Camera Anchor setting)\", "
       "default = {}, min = -1, max = 0.95, step = 0.05}},\n"
+      "    {{name = \"hide_radius\", label = \"Hide the head's draws within (game units)\", "
+      "default = {}, min = 0, max = 200, step = 0.5}},\n"
+      "    {{name = \"hide_below\", label = \"Down to under the head (game units, -1: any)\", "
+      "default = {}, min = -1, max = 200, step = 0.5}},\n"
       "  }},\n"
       "}}\n\n",
       rotation_it - ROTATIONS.begin(), LuaNumber(args.GetNumber("yaw_deg", 0)),
       LuaNumber(args.GetNumber("right_m", 0)), LuaNumber(args.GetNumber("up_m", 0)),
       LuaNumber(args.GetNumber("forward_m", 0)), LuaNumber(args.GetNumber("upm", 0)),
-      LuaNumber(args.GetNumber("smoothing", -1)));
+      LuaNumber(args.GetNumber("smoothing", -1)), LuaNumber(args.GetNumber("hide_radius", 0)),
+      LuaNumber(args.GetNumber("hide_below", -1)));
   source +=
       fmt::format("local ROTATIONS = {{\"level\", \"fixed\", \"full\", \"camera\", \"yaw\"}}\n\n"
                   "local function apply_options()\n"
@@ -791,6 +796,7 @@ std::string CameraAnchorPatchSource(const ToolArgs& args, const std::string& tit
                   "    right = settings.right, up = settings.up, forward = settings.forward,\n"
                   "    upm = settings.upm > 0 and settings.upm or nil,\n"
                   "    smoothing = settings.smoothing >= 0 and settings.smoothing or nil,\n"
+                  "    hide_radius = settings.hide_radius, hide_below = settings.hide_below,\n"
                   "    up_axis = \"{}\", forward_axis = \"{}\", bone_up_axis = \"{}\",\n"
                   "  }}\n"
                   "end\n\n"
@@ -1096,6 +1102,13 @@ void RegisterVRPatchTools(ToolRegistry& registry, Server& server)
                               "profile's).")
                .Number("smoothing", "Fraction kept per field, 0 to 0.95 (default -1: the Camera "
                                     "Anchor Smoothing setting).")
+               .Number("hide_radius",
+                       "Game units: the draws centred within this distance of the head bone (and "
+                       "not lower than hide_below under it) are hidden while the anchor holds the "
+                       "camera, for heads sharing the body's textures. Default 0.")
+               .Number("hide_below", "Game units a hidden draw's centre can be under the head "
+                                     "bone along up_axis (the bone is at the neck: the head's "
+                                     "parts are above it, the shoulders under). Default -1: any.")
                .HexArray("hide_textures", "Texture hashes of the head's draws, hidden while the "
                                           "anchor holds the camera.")
                .String("hide_flag", "Also raise this override flag while the anchor applies, for "
