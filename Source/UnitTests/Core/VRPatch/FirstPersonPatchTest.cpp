@@ -256,6 +256,32 @@ TEST(FirstPersonPatch, OnlyLinksModel)
   EXPECT_TRUE(game.Frame());
 }
 
+// Up on the stick walks straight ahead in the view while Link moves freely, not during an event (a
+// dialog) or in a menu.
+TEST(FirstPersonPatch, StickWalksStraightAheadInFreePlay)
+{
+  TwilightPrincess game;
+  ASSERT_TRUE(game.Load());
+  auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  // The game camera's heading is 30 degrees, Link's 220.
+  const std::optional<float> turn = VR::CameraAnchorMath::StickTurn(*anchor, nullptr);
+  ASSERT_TRUE(turn);
+  EXPECT_NEAR(*turn / DEG, -170.0f, 0.05f);
+  for (const u32 busy : {0x8040B16Cu, 0x8040B16Du, 0x8040C075u})
+  {
+    SCOPED_TRACE(busy);
+    game.memory.Write8(busy, 1);
+    anchor = game.Frame();
+    ASSERT_TRUE(anchor);
+    EXPECT_FALSE(VR::CameraAnchorMath::StickTurn(*anchor, nullptr));
+    game.memory.Write8(busy, 0);
+  }
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_TRUE(VR::CameraAnchorMath::StickTurn(*anchor, nullptr));
+}
+
 // ---- The Wind Waker (Data/Sys/VRPatches/GZLE01/first-person.lua) ----
 
 namespace
@@ -328,6 +354,32 @@ TEST(WindWakerFirstPersonPatch, LevelInTheHeadWithTheHeadHidden)
   ExpectNear(anchor->hide_center, VR::CameraAnchorMath::TransformPoint(VIEW, HEAD_POSITION));
   EXPECT_EQ(anchor->hide_radius, 40.0f);
   EXPECT_EQ(anchor->hide_below, 5.0f);
+}
+
+// Up on the stick walks straight ahead in the view while Link moves freely; the menus and dialogs
+// read it as the game does.
+TEST(WindWakerFirstPersonPatch, StickWalksStraightAheadInFreePlay)
+{
+  constexpr u32 GAME_MODE = 0x803CA80A;
+  WindWaker game;
+  ASSERT_TRUE(game.Load());
+  auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  // The game camera's heading is 30 degrees, Link's 220.
+  const std::optional<float> turn = VR::CameraAnchorMath::StickTurn(*anchor, nullptr);
+  ASSERT_TRUE(turn);
+  EXPECT_NEAR(*turn / DEG, -170.0f, 0.05f);
+  for (const u8 mode : {1, 7})
+  {
+    game.memory.Write8(GAME_MODE, mode);
+    anchor = game.Frame();
+    ASSERT_TRUE(anchor);
+    EXPECT_FALSE(VR::CameraAnchorMath::StickTurn(*anchor, nullptr));
+  }
+  game.memory.Write8(GAME_MODE, 0);
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_TRUE(VR::CameraAnchorMath::StickTurn(*anchor, nullptr));
 }
 
 // No anchor unless the model is Link's: his actor's, pointing back at it, with 42 joints.

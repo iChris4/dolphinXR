@@ -5,7 +5,9 @@
 -- turns with Link (his model's own facing), so the game's third-person camera, which keeps
 -- swinging around him, no longer moves it, and his head (face, hair, eyes) is hidden while the
 -- view is inside it. It replaces the profile's "Links Head" texture anchor, which followed a head
--- draw in the game camera's view.
+-- draw in the game camera's view. The game moves Link relative to its camera: the main stick is
+-- turned so that up walks straight ahead in the view, except during events (dialogs) and in the
+-- menus, where the stick picks.
 --
 -- Memory (NTSC-U rev 0, found with the agent server's Workflow 7):
 -- - 8040BF6C (and 8040B098) in the game's global info point to Link's actor; actor + 0x524 is his
@@ -17,13 +19,15 @@
 --   is the head (its +X points where Link faces, its +Y down).
 -- - 803DCDCC: the camera's world -> view matrix, written once per game frame. J3D's global view
 --   (80434AC8) is rewritten by other views several times per field.
+-- - 8040B16C and 8040B16D (the game's event control): 1 during a dialog, 0 while Link moves
+--   freely; 8040C075: 1 while the pause or the item menu is open.
 --
 -- SPDX-License-Identifier: GPL-2.0-or-later
 
 patch = {
   title = "First-person view",
   author = "DolphinXR",
-  version = "1.1",
+  version = "1.2",
   description = "With Camera Anchor on, the VR camera is in Link's head: level, turning with Link "
     .. "whatever the game's camera does, his head hidden. As a wolf the game's camera returns; "
     .. "cutscenes stay in the head (the Camera Anchor hotkey leaves it). For Twilight Princess "
@@ -52,6 +56,11 @@ patch = {
      step = 1},
     {name = "smoothing", label = "Smoothing (-1: the Camera Anchor setting)", default = -1,
      min = -1, max = 0.95, step = 0.05},
+    {name = "stick", label = "Stick forward", type = "choice",
+     options = {"Link's facing", "Where you look", "The game's camera"}, default = 0,
+     description = "What up on the stick means. Link's facing: up keeps him going straight, a "
+       .. "sideways push turns him. Where you look: the headset's direction; with Level, looking "
+       .. "aside while walking keeps turning Link. The game's camera: as the game does."},
   },
 }
 
@@ -62,7 +71,11 @@ local MODEL_VTABLE = 0x803CED20
 local LINK_JOINTS = 35
 local HEAD = 4 * 0x30
 local CAMERA = 0x803DCDCC
+-- An event (a dialog), and the menus: the stick is not Link's to walk with.
+local EVENT = 0x8040B16C
+local MENU = 0x8040C075
 local ROTATIONS = {"level", "fixed", "full", "camera", "yaw"}
+local STICKS = {"facing", "head", "camera"}
 
 local function apply_options()
   local body = settings.heading == 0
@@ -71,6 +84,8 @@ local function apply_options()
     up = settings.up, forward = settings.forward,
     upm = settings.upm > 0 and settings.upm or nil,
     smoothing = settings.smoothing >= 0 and settings.smoothing or nil,
+    -- The game reads the pad, moves its camera, then Link with the new camera.
+    stick = STICKS[settings.stick + 1], stick_lead = 1,
     up_axis = "y", forward_axis = body and "z" or "x", bone_up_axis = body and "y" or "-y",
   }
 end
@@ -112,5 +127,6 @@ function on_frame()
     return
   end
   local heading = settings.heading == 0 and model + 0x24 or nil
+  vr.set_camera_anchor_stick(mem.u16(EVENT) == 0 and mem.u8(MENU) == 0)
   vr.set_camera_anchor_matrices(joints + HEAD, CAMERA, "view", heading)
 end

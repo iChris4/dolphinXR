@@ -8,6 +8,8 @@
 -- skinned with weighted matrices, so the draws centred around his head joint are hidden: within
 -- 40 units and above 5 units under it (his head's parts are 3 to 33 units away, all above the
 -- joint; his body's centres are 12 units under it or lower). The eyes also by their textures.
+-- The game moves Link relative to its camera: the main stick is turned so that up walks straight
+-- ahead in the view, except in menus and dialogs, where the stick picks.
 --
 -- Memory (NTSC-U rev 0, found with the agent server's Workflow 7):
 -- - 803CA74C (and 803C9DEC) in the game's global info point to Link's actor; actor + 0x32C is his
@@ -17,6 +19,8 @@
 -- - J3DModel + 0x8C: the joints' world matrices, 0x30 bytes each (this J3D has no matrix buffer):
 --   joint 15 is the head (its +Y points where Link faces, its +X up).
 -- - 803EDA58: the camera's world -> view matrix, written once per field.
+-- - 803CA80A (in the game's global info): 0 while Link moves freely, 1 with the pause menu open,
+--   7 during a dialog.
 -- - Around the head joint (the neck's top): the shoulders 13 units under it, the hair up to 37
 --   above.
 --
@@ -25,7 +29,7 @@
 patch = {
   title = "First-person view",
   author = "DolphinXR",
-  version = "1.0",
+  version = "1.1",
   description = "With Camera Anchor on, the VR camera is in Link's head: level, turning with Link "
     .. "whatever the game's camera does. For The Wind Waker NTSC-U.",
   games = {"GZLE01"},
@@ -58,6 +62,11 @@ patch = {
      max = 20, step = 1,
      description = "How far under the head joint a hidden draw's centre can be (the shoulders "
        .. "are 13 under it)."},
+    {name = "stick", label = "Stick forward", type = "choice",
+     options = {"Link's facing", "Where you look", "The game's camera"}, default = 0,
+     description = "What up on the stick means. Link's facing: up keeps him going straight, a "
+       .. "sideways push turns him. Where you look: the headset's direction; with Level, looking "
+       .. "aside while walking keeps turning Link. The game's camera: as the game does."},
   },
 }
 
@@ -68,7 +77,10 @@ local MODEL_VTABLE = 0x8039EA50
 local LINK_JOINTS = 42
 local HEAD = 15 * 0x30
 local CAMERA = 0x803EDA58
+-- 0 while Link moves freely: the stick is his to walk with.
+local GAME_MODE = 0x803CA80A
 local ROTATIONS = {"level", "fixed", "full", "camera", "yaw"}
+local STICKS = {"facing", "head", "camera"}
 
 local function apply_options()
   local body = settings.heading == 0
@@ -78,6 +90,8 @@ local function apply_options()
     upm = settings.upm > 0 and settings.upm or nil,
     smoothing = settings.smoothing >= 0 and settings.smoothing or nil,
     hide_radius = settings.hide_radius, hide_below = settings.hide_below,
+    -- The game reads the pad, moves its camera, then Link with the new camera.
+    stick = STICKS[settings.stick + 1], stick_lead = 1,
     up_axis = "y", forward_axis = body and "z" or "y", bone_up_axis = body and "y" or "x",
   }
 end
@@ -114,5 +128,6 @@ function on_frame()
     return
   end
   local heading = settings.heading == 0 and model + 0x24 or nil
+  vr.set_camera_anchor_stick(mem.u8(GAME_MODE) == 0)
   vr.set_camera_anchor_matrices(joints + HEAD, CAMERA, "view", heading)
 end
