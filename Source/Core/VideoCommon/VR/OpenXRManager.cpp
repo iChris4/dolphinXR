@@ -57,6 +57,7 @@
 #include "Core/System.h"
 #include "VideoCommon/GPUFifoDiagnostics.h"
 #include "VideoCommon/OnScreenDisplay.h"
+#include "VideoCommon/VR/CameraAnchorSource.h"
 #include "VideoCommon/VR/CameraPitch.h"
 #include "VideoCommon/VideoConfig.h"
 
@@ -3991,6 +3992,15 @@ void OpenXRManager::CommitCameraAnchorFrame()
   // glides back to the default position (rides out transient culling).
   constexpr int HOLD_FRAMES = 15;
 
+  // The frame was drawn from a VR patch's anchor, already latched as the current one: it wins
+  // over an anchor draw of the same frame, and there is nothing to blend.
+  if (m_camera_anchor_from_source)
+  {
+    m_camera_anchor_from_source = false;
+    m_camera_anchor_pending_valid = false;
+    return;
+  }
+
   // No anchor draw this frame and the camera back at rest (the end state of a return glide):
   // nothing to blend.
   if (!m_camera_anchor_pending_valid && !m_camera_anchor_has_target &&
@@ -4080,11 +4090,46 @@ void OpenXRManager::CommitCameraAnchorFrame()
   }
 
   // An engaged or gliding anchor moves the game-camera rig every frame.
-  if (m_camera_anchor_has_target || m_camera_anchor_rotation_active || m_camera_anchor_upm > 0.0f ||
-      m_camera_anchor_position != std::array<float, 3>{})
-  {
+  if (IsCameraAnchorEngaged())
     ++m_pose_generation;
+}
+
+void OpenXRManager::LatchCameraAnchorSource()
+{
+  const std::optional<CameraAnchorMath::Anchor> anchor = CameraAnchorSource::Get();
+  // The same gate as an anchor draw's capture: without it the camera glides home.
+  if (!anchor || !g_ActiveConfig.vr_enable_camera_anchor || g_ActiveConfig.vr_flat_screen)
+    return;
+
+  m_camera_anchor_target = anchor->position;
+  m_camera_anchor_target_rotation = anchor->rotation;
+  if (!OrthonormalizeAnchorRotation(m_camera_anchor_target_rotation))
+    m_camera_anchor_target_rotation = CAMERA_ANCHOR_IDENTITY;
+  m_camera_anchor_target_upm = anchor->units_per_meter > 0.0f ? anchor->units_per_meter : 0.0f;
+  m_camera_anchor_has_target = true;
+  m_camera_anchor_missing_frames = 0;
+  // Applied as is: the patch smoothed it in world space, and a blend here, in the game camera's
+  // view space, would lag behind the game camera's turns (the world would sway with them).
+  m_camera_anchor_position = m_camera_anchor_target;
+  m_camera_anchor_rotation = m_camera_anchor_target_rotation;
+  m_camera_anchor_upm = m_camera_anchor_target_upm;
+  m_camera_anchor_rotation_active = false;
+  for (size_t i = 0; i < 9; ++i)
+  {
+    if (std::abs(m_camera_anchor_rotation[i] - CAMERA_ANCHOR_IDENTITY[i]) > 1e-4f)
+    {
+      m_camera_anchor_rotation_active = true;
+      break;
+    }
   }
+  m_camera_anchor_from_source = true;
+  ++m_pose_generation;
+}
+
+bool OpenXRManager::IsCameraAnchorEngaged() const
+{
+  return m_camera_anchor_has_target || m_camera_anchor_rotation_active ||
+         m_camera_anchor_upm > 0.0f || m_camera_anchor_position != std::array<float, 3>{};
 }
 
 bool OpenXRManager::GetControllerAnchorViewPose(int hand, float units_per_meter,

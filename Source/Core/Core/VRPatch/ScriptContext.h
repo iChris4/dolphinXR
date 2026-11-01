@@ -24,6 +24,7 @@
 #include "Common/CommonTypes.h"
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/PatchTypes.h"
+#include "VideoCommon/VR/CameraAnchorMath.h"
 
 namespace VRPatch
 {
@@ -81,6 +82,19 @@ struct ScriptContext
   std::optional<u32> camera_pitch_source;
   // vr.keep_pointer_on_screen (Wiimote::SetOpenXRPointerKeptOnScreen).
   bool keep_pointer_on_screen = false;
+
+  // vr.set_camera_anchor_options and the anchors of vr.set_camera_anchor*. Smoothing nullopt: the
+  // Camera Anchor Smoothing setting; units per meter <= 0: the profile's.
+  VR::CameraAnchorMath::Options camera_anchor_options;
+  std::optional<float> camera_anchor_smoothing;
+  std::optional<float> camera_anchor_heading_smoothing;
+  float camera_anchor_units_per_meter = 0.0f;
+  VR::CameraAnchorMath::State camera_anchor_state;
+  // The field of the last anchor: after a gap the smoothing starts over.
+  u64 camera_anchor_field = 0;
+  // This field's anchor, taken by the engine after the hooks (VR::CameraAnchorSource).
+  std::optional<VR::CameraAnchorMath::Anchor> camera_anchor;
+  bool warned_camera_anchor = false;
 };
 
 ScriptContext* GetContext(lua_State* L);

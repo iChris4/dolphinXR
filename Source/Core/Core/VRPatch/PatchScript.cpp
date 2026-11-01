@@ -352,6 +352,43 @@ bool ReadConflicts(lua_State* L, int index, ScriptContext* context)
   return true;
 }
 
+// hide = {texture = {"<16 hex digits>", ...}}: the head the Camera Anchor puts the view in.
+bool ReadHide(lua_State* L, int index, ScriptContext* context)
+{
+  if (lua_getfield(L, index, "hide") == LUA_TNIL)
+  {
+    lua_pop(L, 1);
+    return true;
+  }
+  if (!lua_istable(L, -1))
+    return Fail(context, "hide must be a table like {texture = {\"d7f168afaf5c673a\"}}");
+  const int table = lua_gettop(L);
+  for (const char* other : {"shader", "elements"})
+  {
+    const bool present = lua_getfield(L, table, other) != LUA_TNIL;
+    lua_pop(L, 1);
+    if (present)
+    {
+      return Fail(context, std::string("hide takes texture hashes only, not ") + other +
+                               ": raise a flag (vr.set_flag) and condition a skip entry of the "
+                               "profile on it");
+    }
+  }
+  context->strings.clear();
+  if (!ReadStringList(L, table, "texture", &context->strings, context))
+    return false;
+  for (const std::string& hash : context->strings)
+  {
+    u64 value = 0;
+    if (hash.size() != 16 || !TryParse("0x" + hash, &value))
+      return Fail(context, "hide.texture: \"" + hash + "\" is not 16 hexadecimal digits");
+    context->manifest.hide_textures.push_back(value);
+  }
+  context->strings.clear();
+  lua_pop(L, 1);
+  return true;
+}
+
 bool IsGeckoLine(std::string_view line)
 {
   if (line.size() != 17 || line[8] != ' ')
@@ -409,7 +446,8 @@ bool ReadManifestTable(lua_State* L, ScriptContext* context)
       !ReadString(L, table, "version", &manifest.version, context) ||
       !ReadStringList(L, table, "games", &manifest.games, context) ||
       !ReadStringList(L, table, "gecko", &manifest.gecko_lines, context) ||
-      !ReadAddressRanges(L, table, context) || !ReadConflicts(L, table, context))
+      !ReadAddressRanges(L, table, context) || !ReadConflicts(L, table, context) ||
+      !ReadHide(L, table, context))
   {
     return false;
   }
@@ -880,6 +918,11 @@ std::optional<u32> PatchScript::GetCameraPitchSource() const
 bool PatchScript::KeepsPointerOnScreen() const
 {
   return m_context->keep_pointer_on_screen;
+}
+
+std::optional<VR::CameraAnchorMath::Anchor> PatchScript::TakeCameraAnchor()
+{
+  return std::exchange(m_context->camera_anchor, std::nullopt);
 }
 
 size_t PatchScript::GetMemoryUsed() const

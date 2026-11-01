@@ -36,6 +36,9 @@ patch = {
   gecko = {"C2xxxxxx 00000002", "..."},  -- Gecko lines installed while the patch runs
   conflicts = {texture = {"Cannon"}},     -- VR overrides (shader/elements/texture names) turned
                                           -- off while it runs (a visual anchor it replaces)
+  hide = {texture = {"d7f168afaf5c673a"}},  -- texture hashes of the draws hidden while the patch's
+                                          -- Camera Anchor holds the VR camera (the head the view
+                                          -- is in); they reappear when it lets go
 }
 
 function on_load() end          -- first field with memory after the patch starts (and after a
@@ -140,6 +143,39 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
       when aiming at a TV. For games that turn the camera on their own while the pointer is lost,
       or stop reading it from a remote held far up (Metroid Prime 3: past 45 degrees). Until false
       or the patch stops.
+
+Camera Anchor (first-person view: the VR camera in a character's head, from the game's memory)
+  vr.set_camera_anchor_options{rotation=, yaw=, right=, up=, forward=, upm=, up_axis=,
+      forward_axis=, bone_up_axis=, smoothing=, heading_smoothing=}   -- in on_load and
+      on_setting_changed; restarts the smoothing. rotation:
+        "level" (default): level, turned with the character's heading (forward_axis of the heading
+                 bone laid on the ground plane): the game camera's swings do not move the view
+        "fixed": level, with the heading the character had when the anchor engaged (the headset
+                 does all the turning)
+        "full":  the bone's whole orientation (forward_axis forward, bone_up_axis up): cockpits
+        "camera": the game camera's orientation (position only); "yaw": the bone's heading in the
+                 game camera's view. With these two the camera's turns still move the view.
+      yaw: degrees about up, + turns left. right/up/forward: meters (along the rig; along the game
+      camera for camera/yaw). upm: the anchor's world scale (nil: the profile's). up_axis: the
+      world's up ("y", "z", "-y"...). forward_axis: the bone's axis pointing where the character
+      faces ("x", "y", "z", "-x", "-y", "-z"; default "z"). smoothing (position) and
+      heading_smoothing: fraction kept per field, 0 to 0.95, nil: the Camera Anchor Smoothing
+      setting. The smoothing is in world space and starts over after a gap of 30 fields.
+  vr.set_camera_anchor_matrices(head, camera [, kind [, heading]]) -> bool   -- this field's
+      anchor from the head bone's world transform (a GameCube Mtx address) and the game camera's
+      matrix: kind "view" (default: world -> view, what the game multiplies its models by) or
+      "world" (the camera's transform: its translation is its position). heading: another bone's
+      transform for the heading (a body root turns more smoothly than a head). False (one warning
+      per load) when a matrix is not readable or not a transform. Call it every field while the
+      view should be in the head; a field without it publishes no anchor (the engine holds the last
+      one 15 frames, then glides back to the game camera).
+  vr.set_camera_anchor(r00, r01, r02, tx, r10, r11, r12, ty, r20, r21, r22, tz)   -- an anchor
+      the patch composed itself: the rig in game view space (columns = its axes, translation = its
+      position, game units). No smoothing; upm from the options.
+  vr.camera_anchor_active() -> bool   -- the Camera Anchor setting is on and a VR session runs in
+      stereo: only then does an anchor move the view (and hide the manifest's `hide` draws).
+  Do not combine "level"/"fixed"/"full" with vr.set_camera_pitch_source: they already remove the
+  game camera's pitch.
 
 pad / wiimote / nunchuk (emulated controllers, port 1-4; held until changed or released, under the
 agent's press_input; names as in Dolphin's controller settings, "Group/Control" when ambiguous)

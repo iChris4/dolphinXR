@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <bit>
 #include <cmath>
 #include <map>
@@ -904,4 +905,150 @@ TEST(VRPatch, SessionValuesStayInTheSession)
   ClearSessionSources();
   OnGameUnloaded(nullptr);
   EXPECT_FALSE(SetSessionEnabled("probe", true));
+}
+
+// ---- Camera Anchor ----
+
+namespace
+{
+void WriteMtx(FakeMemory& memory, u32 address, const std::array<float, 12>& m)
+{
+  for (u32 i = 0; i < 12; ++i)
+    memory.SetF32(address + i * 4, m[i]);
+}
+
+template <size_t N>
+void ExpectNearArray(const std::array<float, N>& actual, const std::array<float, N>& expected)
+{
+  for (size_t i = 0; i < N; ++i)
+  {
+    SCOPED_TRACE(i);
+    EXPECT_NEAR(actual[i], expected[i], 1e-4f);
+  }
+}
+}  // namespace
+
+TEST(VRPatch, PublishesACameraAnchor)
+{
+  Harness h;
+  PatchScript script("anchor");
+  ASSERT_TRUE(h.Load(script, R"(
+    function on_load() vr.set_camera_anchor_options{upm = 20} end
+    function on_frame() vr.set_camera_anchor(1, 0, 0, 5, 0, 1, 0, 6, 0, 0, 1, 7) end
+  )")) << script.Error();
+  EXPECT_FALSE(script.TakeCameraAnchor());
+  ASSERT_TRUE(script.Call(Hook::OnLoad, h.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  const auto anchor = script.TakeCameraAnchor();
+  ASSERT_TRUE(anchor);
+  EXPECT_EQ(anchor->position, (std::array<float, 3>{5, 6, 7}));
+  EXPECT_EQ(anchor->rotation, (std::array<float, 9>{1, 0, 0, 0, 1, 0, 0, 0, 1}));
+  EXPECT_EQ(anchor->units_per_meter, 20.0f);
+  // Taken once: a field without a call publishes none.
+  EXPECT_FALSE(script.TakeCameraAnchor());
+}
+
+TEST(VRPatch, RejectsBadCameraAnchorArguments)
+{
+  ExpectFrame("assert(not pcall(vr.set_camera_anchor, 1, 0, 0, 0/0, 0, 1, 0, 0, 0, 0, 1, 0))");
+  ExpectFrame("assert(not pcall(vr.set_camera_anchor_options, {rotation = 'roll'}))");
+  ExpectFrame("assert(not pcall(vr.set_camera_anchor_options, {forward_axis = 'w'}))");
+  ExpectFrame("assert(not pcall(vr.set_camera_anchor_options, {yaw = 'left'}))");
+  ExpectFrame("assert(not pcall(vr.set_camera_anchor_matrices, 0x80000000, 0x80000100, 'eye'))");
+}
+
+// The head bone's world transform and the game camera's matrix, read from memory: the rig faces
+// where the head's +Z points, level, whatever the camera does.
+TEST(VRPatch, ComposesTheCameraAnchorFromMemory)
+{
+  Harness h;
+  // The head at (1, 2, 3), facing +Z; the view 10 units behind it; the camera's own transform; a
+  // root bone facing +X.
+  WriteMtx(h.memory, 0x80010000, {1, 0, 0, 1, 0, 1, 0, 2, 0, 0, 1, 3});
+  WriteMtx(h.memory, 0x80010100, {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -10});
+  WriteMtx(h.memory, 0x80010200, {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 10});
+  WriteMtx(h.memory, 0x80010300, {0, 0, 1, 1, 0, 1, 0, 0, -1, 0, 0, 3});
+  PatchScript script("anchor");
+  ASSERT_TRUE(h.Load(script, R"(
+    function on_frame()
+      local mode = mem.u32(0x80020000)
+      local ok
+      if mode == 0 then
+        ok = vr.set_camera_anchor_matrices(0x80010000, 0x80010100)
+      elseif mode == 1 then
+        ok = vr.set_camera_anchor_matrices(0x80010000, 0x80010200, "world")
+      elseif mode == 2 then
+        ok = vr.set_camera_anchor_matrices(0x80010000, 0x80010100, "view", 0x80010300)
+      else
+        ok = vr.set_camera_anchor_matrices(0x7FFFFF00, 0x80010100)
+      end
+      mem.write_u32(0x80020004, ok and 1 or 0)
+    end
+  )")) << script.Error();
+
+  const std::array<float, 9> facing_z = {-1, 0, 0, 0, 1, 0, 0, 0, -1};
+  for (u32 mode : {0u, 1u})
+  {
+    SCOPED_TRACE(mode);
+    h.memory.Set32(0x80020000, mode);
+    ASSERT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+    EXPECT_EQ(h.memory.Get32(0x80020004), 1u);
+    const auto anchor = script.TakeCameraAnchor();
+    ASSERT_TRUE(anchor);
+    ExpectNearArray(anchor->position, {1, 2, -7});
+    ExpectNearArray(anchor->rotation, facing_z);
+    // The profile's scale.
+    EXPECT_EQ(anchor->units_per_meter, 0.0f);
+  }
+
+  // The heading from the root bone: facing +X.
+  h.memory.Set32(0x80020000, 2);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  const auto rooted = script.TakeCameraAnchor();
+  ASSERT_TRUE(rooted);
+  ExpectNearArray(rooted->position, {1, 2, -7});
+  ExpectNearArray(rooted->rotation, {0, 0, -1, 0, 1, 0, 1, 0, 0});
+
+  // Not in memory: false, no anchor, one warning.
+  h.memory.Set32(0x80020000, 3);
+  ASSERT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(h.memory.Get32(0x80020004), 0u);
+  EXPECT_FALSE(script.TakeCameraAnchor());
+  ASSERT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  int warnings = 0;
+  for (const LogLine& line : script.TakeLog())
+    warnings += line.level == 1 && line.text.find("head at 7FFFFF00") != std::string::npos;
+  EXPECT_EQ(warnings, 1);
+}
+
+TEST(VRPatch, ReportsTheCameraAnchorGate)
+{
+  Harness h;
+  PatchScript script("gate");
+  ASSERT_TRUE(h.Load(script, "function on_frame() mem.write_u32(0x80020000, "
+                             "vr.camera_anchor_active() and 1 or 0) end"))
+      << script.Error();
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(h.memory.Get32(0x80020000), 0u);
+  h.env.camera_anchor_active = true;
+  EXPECT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  EXPECT_EQ(h.memory.Get32(0x80020000), 1u);
+}
+
+TEST(VRPatch, ReadsTheHideField)
+{
+  const auto read = ReadManifest(
+      R"(patch = {title = "FP", hide = {texture = {"d7f168afaf5c673a", "00000000000000ff"}}})",
+      "fp");
+  ASSERT_TRUE(std::holds_alternative<Manifest>(read));
+  EXPECT_EQ(std::get<Manifest>(read).hide_textures,
+            (std::vector<u64>{0xd7f168afaf5c673aULL, 0xffULL}));
+
+  const auto short_hash =
+      ReadManifest(R"(patch = {title = "FP", hide = {texture = {"d7f168"}}})", "fp");
+  ASSERT_TRUE(std::holds_alternative<std::string>(short_hash));
+  EXPECT_NE(std::get<std::string>(short_hash).find("hide.texture"), std::string::npos);
+  const auto shader = ReadManifest(R"(patch = {title = "FP", hide = {shader = {"1234"}}})", "fp");
+  ASSERT_TRUE(std::holds_alternative<std::string>(shader));
+  EXPECT_NE(std::get<std::string>(shader).find("texture hashes only"), std::string::npos);
 }

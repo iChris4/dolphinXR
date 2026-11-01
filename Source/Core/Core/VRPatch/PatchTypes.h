@@ -87,6 +87,9 @@ struct Manifest
   // Overrides of the game's VR profile that are turned off while the patch runs (a visual anchor
   // of the object the patch already moves).
   std::vector<OverrideRef> conflicts;
+  // Textures of the draws hidden while the patch's Camera Anchor holds the VR camera: the head the
+  // view is in.
+  std::vector<u64> hide_textures;
 
   const SettingDef* FindSetting(std::string_view name) const;
 };

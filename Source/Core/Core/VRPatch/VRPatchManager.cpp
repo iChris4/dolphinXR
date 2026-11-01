@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <utility>
 #include <variant>
@@ -41,10 +43,12 @@
 #include "Core/VRPatch/PatchIni.h"
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/VRSettingsTable.h"
+#include "VideoCommon/VR/CameraAnchorSource.h"
 #include "VideoCommon/VR/CameraPitch.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/OverrideSuppression.h"
 #include "VideoCommon/VR/PatchFlags.h"
+#include "VideoCommon/VR/PatchHides.h"
 
 namespace VRPatch
 {
@@ -256,6 +260,9 @@ struct RunningPatch
   double window_max_us = 0;
   u64 window_start_field = 0;
   u64 frames = 0;
+  // Fields left during which the patch's Camera Anchor counts as recent (its hides apply while
+  // an anchor holds the camera).
+  int anchor_fields = 0;
 };
 
 // What the UIs see of a patch of the running game.
@@ -327,6 +334,8 @@ public:
   EmulatedPadResolver pad_resolver;
   // The flags published to VR::PatchFlags: a signature of the patches' flag generations.
   u64 flags_signature = 0;
+  // The hide flags of the patches whose Camera Anchor holds the camera (VR::PatchHides).
+  std::vector<std::string> anchor_flags;
 };
 
 Manager& GetManager()
@@ -522,6 +531,12 @@ void FillEnvironment(Environment* environment, MemoryAccess* memory)
   environment->env.units_per_meter = Config::Get(Config::GFX_VR_UNITS_PER_METER);
   environment->env.display_refresh_rate =
       VR::g_openxr ? VR::g_openxr->GetStartupDisplayRefreshRateHz() : 0.0;
+  environment->env.camera_anchor_active = Config::Get(Config::GFX_VR_ENABLE_CAMERA_ANCHOR) &&
+                                          Config::Get(Config::GFX_VR_ENABLE_OPENXR) &&
+                                          !Config::Get(Config::GFX_VR_FLAT_SCREEN) &&
+                                          VR::g_openxr && VR::g_openxr->IsSessionRunning();
+  environment->env.camera_anchor_smoothing =
+      std::clamp(Config::Get(Config::GFX_VR_CAMERA_ANCHOR_SMOOTHING), 0.0f, 0.95f);
 }
 
 // ---- Gecko region, overrides, controller holds ----
@@ -532,11 +547,14 @@ void UpdateSharedState()
   Gecko::VRPatchRegion region;
   std::vector<AddressRange> scratch_blocks;
   std::vector<std::pair<VR::OverrideSuppression::Kind, std::string>> suppressed;
+  std::vector<VR::PatchHides::Hide> hides;
   for (const auto& patch : m.patches)
   {
     if (patch->state != PatchState::Running)
       continue;
     const Manifest& manifest = patch->manifest;
+    if (!manifest.hide_textures.empty())
+      hides.push_back({patch->id, manifest.hide_textures, VR::PatchHides::FlagFor(patch->id)});
     if (!manifest.gecko_lines.empty())
     {
       Gecko::GeckoCode code;
@@ -574,6 +592,7 @@ void UpdateSharedState()
   region.code_list_end = GeckoCodeListEnd(scratch_blocks);
   Gecko::SetVRPatchRegion(std::move(region));
   VR::OverrideSuppression::Set(std::move(suppressed));
+  VR::PatchHides::Set(std::move(hides));
 }
 
 void UpdatePadHolds()
@@ -654,7 +673,50 @@ void UpdatePointerKeptOnScreen()
   Wiimote::SetOpenXRPointerKeptOnScreen(keep);
 }
 
-// Publishes the flags the running patches raise (vr.set_flag) for the override managers.
+// Publishes the Camera Anchor of the first running patch that gave one in this field's hooks
+// (vr.set_camera_anchor*), and which patches' hides apply: those whose anchor is recent while an
+// anchor holds the VR camera (the video thread reports it), so the head the view is in disappears
+// with the anchor's engagement and comes back once the camera has glided out of it.
+void UpdateCameraAnchorSource()
+{
+  // About 5 s: longer than the engine holds and glides back an anchor that stopped.
+  constexpr int ANCHOR_RECENT_FIELDS = 300;
+  Manager& m = GetManager();
+  std::optional<VR::CameraAnchorMath::Anchor> published;
+  for (const auto& patch : m.patches)
+  {
+    if (!patch->script || patch->state != PatchState::Running)
+      continue;
+    const std::optional<VR::CameraAnchorMath::Anchor> anchor = patch->script->TakeCameraAnchor();
+    if (anchor && !published)
+    {
+      published = anchor;
+      patch->anchor_fields = ANCHOR_RECENT_FIELDS;
+    }
+    else if (patch->anchor_fields > 0)
+    {
+      --patch->anchor_fields;
+    }
+  }
+  VR::CameraAnchorSource::Set(published);
+
+  std::vector<std::string> flags;
+  if (VR::CameraAnchorSource::IsEngaged())
+  {
+    for (const auto& patch : m.patches)
+    {
+      if (patch->state == PatchState::Running && patch->anchor_fields > 0 &&
+          !patch->manifest.hide_textures.empty())
+      {
+        flags.push_back(VR::PatchHides::FlagFor(patch->id));
+      }
+    }
+  }
+  m.anchor_flags = std::move(flags);
+}
+
+// Publishes the flags the running patches raise (vr.set_flag) for the override managers, and the
+// flags of their hides.
 void UpdatePatchFlags()
 {
   UpdateCameraPitchSource();
@@ -667,11 +729,14 @@ void UpdatePatchFlags()
       signature = signature * 31 + patch->script->GetFlagsGeneration() + 1;
   }
   signature = signature * 31 + m.patches.size();
+  for (const std::string& flag : m.anchor_flags)
+    signature = signature * 31 + std::hash<std::string>{}(flag);
+  signature = signature * 31 + m.anchor_flags.size();
   if (signature == m.flags_signature)
     return;
   m.flags_signature = signature;
 
-  std::vector<std::string> flags;
+  std::vector<std::string> flags = m.anchor_flags;
   for (const auto& patch : m.patches)
   {
     if (patch->script && patch->state == PatchState::Running)
@@ -1118,6 +1183,8 @@ void RunHooks(const ScriptEnvironment& env, bool frame_hooks)
   }
   DropStopped();
   UpdatePadHolds();
+  if (frame_hooks)
+    UpdateCameraAnchorSource();
   UpdatePatchFlags();
 }
 
@@ -1135,6 +1202,7 @@ void HandleBlockReason(Core::System& system, const ScriptEnvironment& env)
     m.patches.clear();
     UpdateSharedState();
     UpdatePadHolds();
+    UpdateCameraAnchorSource();
     UpdatePatchFlags();
     return;
   }
@@ -1191,8 +1259,9 @@ void RunFrame(const Core::CPUThreadGuard& guard)
   }
   else
   {
-    // The last patch stopped: its controller holds go.
+    // The last patch stopped: its controller holds and its Camera Anchor go.
     UpdatePadHolds();
+    UpdateCameraAnchorSource();
     UpdatePatchFlags();
   }
   std::lock_guard lock(m.mutex);
@@ -1219,6 +1288,9 @@ void OnGameUnloaded(const Core::CPUThreadGuard* guard)
   Gecko::SetVRPatchRegion({});
   VR::OverrideSuppression::Set({});
   VR::PatchFlags::Set({});
+  VR::PatchHides::Set({});
+  VR::CameraAnchorSource::Set(std::nullopt);
+  m.anchor_flags.clear();
   VR::CameraPitch::SetSource(std::nullopt);
   Wiimote::SetOpenXRPointerKeptOnScreen(false);
   m.flags_signature = 0;

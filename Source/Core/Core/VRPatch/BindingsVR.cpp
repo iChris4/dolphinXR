@@ -4,11 +4,18 @@
 // vr.*: the VR controllers and headset (raw functions; the prelude wraps the poses into objects).
 // See ScriptContext.h for the rules a binding follows.
 
+#include <bit>
 #include <cctype>
+#include <cmath>
 #include <cstring>
+#include <optional>
+#include <string>
+
+#include <fmt/format.h>
 
 #include "Common/Config/Config.h"
 #include "Common/VR/OpenXRInputState.h"
+#include "Core/VRPatch/MemoryAccess.h"
 #include "Core/VRPatch/ScriptContext.h"
 #include "Core/VRPatch/VRSettingsTable.h"
 #include "VideoCommon/VR/CameraPitch.h"
@@ -363,6 +370,232 @@ int VRKeepPointerOnScreen(lua_State* L)
   return 0;
 }
 
+// ---- Camera Anchor: the VR camera in a character's head ----
+
+namespace CAM = VR::CameraAnchorMath;
+
+// The axis named by the string field `key` of the table at 1 (`fallback` when absent). False when
+// it is not an axis name.
+bool ReadAxisField(lua_State* L, const char* key, CAM::Axis fallback, CAM::Axis* out)
+{
+  *out = fallback;
+  const int type = lua_getfield(L, 1, key);
+  bool ok = type == LUA_TNIL;
+  if (type == LUA_TSTRING)
+  {
+    if (const std::optional<CAM::Axis> axis = CAM::ParseAxis(lua_tostring(L, -1)))
+    {
+      *out = *axis;
+      ok = true;
+    }
+  }
+  lua_pop(L, 1);
+  return ok;
+}
+
+// The number field `key` of the table at 1, or nullopt when absent. False when it is not a
+// finite number.
+bool ReadNumberField(lua_State* L, const char* key, std::optional<double>* out)
+{
+  out->reset();
+  const int type = lua_getfield(L, 1, key);
+  bool ok = type == LUA_TNIL;
+  if (type == LUA_TNUMBER)
+  {
+    const double value = lua_tonumber(L, -1);
+    ok = std::isfinite(value);
+    if (ok)
+      *out = value;
+  }
+  lua_pop(L, 1);
+  return ok;
+}
+
+// vr.set_camera_anchor_options{rotation=, yaw=, right=, up=, forward=, upm=, up_axis=,
+// forward_axis=, bone_up_axis=, smoothing=, heading_smoothing=}: how the anchors of
+// vr.set_camera_anchor_matrices are composed. Restarts the smoothing.
+int VRSetCameraAnchorOptions(lua_State* L)
+{
+  luaL_checktype(L, 1, LUA_TTABLE);
+  CAM::Options options;
+  const int type = lua_getfield(L, 1, "rotation");
+  bool rotation_ok = type == LUA_TNIL;
+  if (type == LUA_TSTRING)
+  {
+    if (const std::optional<CAM::Rotation> rotation = CAM::ParseRotation(lua_tostring(L, -1)))
+    {
+      options.rotation = *rotation;
+      rotation_ok = true;
+    }
+  }
+  lua_pop(L, 1);
+  if (!rotation_ok)
+    return luaL_argerror(L, 1, "rotation is \"level\", \"fixed\", \"full\", \"camera\" or \"yaw\"");
+  if (!ReadAxisField(L, "up_axis", CAM::Axis::Y, &options.up_axis) ||
+      !ReadAxisField(L, "forward_axis", CAM::Axis::Z, &options.forward_axis) ||
+      !ReadAxisField(L, "bone_up_axis", CAM::Axis::Y, &options.bone_up_axis))
+  {
+    return luaL_argerror(L, 1, "an axis is \"x\", \"y\", \"z\", \"-x\", \"-y\" or \"-z\"");
+  }
+  std::optional<double> yaw, right, up, forward, upm, smoothing, heading_smoothing;
+  if (!ReadNumberField(L, "yaw", &yaw) || !ReadNumberField(L, "right", &right) ||
+      !ReadNumberField(L, "up", &up) || !ReadNumberField(L, "forward", &forward) ||
+      !ReadNumberField(L, "upm", &upm) || !ReadNumberField(L, "smoothing", &smoothing) ||
+      !ReadNumberField(L, "heading_smoothing", &heading_smoothing))
+  {
+    return luaL_argerror(L, 1, "yaw, right, up, forward, upm and the smoothings are numbers");
+  }
+  options.yaw_deg = static_cast<float>(yaw.value_or(0.0));
+  options.offset_m = {static_cast<float>(right.value_or(0.0)), static_cast<float>(up.value_or(0.0)),
+                      static_cast<float>(forward.value_or(0.0))};
+  ScriptContext* context = GetContext(L);
+  context->camera_anchor_options = options;
+  context->camera_anchor_units_per_meter = static_cast<float>(upm.value_or(0.0));
+  context->camera_anchor_smoothing.reset();
+  if (smoothing)
+    context->camera_anchor_smoothing = static_cast<float>(*smoothing);
+  context->camera_anchor_heading_smoothing.reset();
+  if (heading_smoothing)
+    context->camera_anchor_heading_smoothing = static_cast<float>(*heading_smoothing);
+  context->camera_anchor_state.Reset();
+  return 0;
+}
+
+// vr.set_camera_anchor(r00, r01, r02, tx, r10, ..., tz): this field's anchor, composed by the
+// patch: the camera rig in game view space (its axes are the 3x3's columns, its position the
+// translation, game units).
+int VRSetCameraAnchor(lua_State* L)
+{
+  CAM::Mtx34 m;
+  for (int i = 0; i < 12; ++i)
+    m[i] = static_cast<float>(luaL_checknumber(L, i + 1));
+  if (!CAM::IsFinite(m))
+    return luaL_error(L, "vr.set_camera_anchor: the numbers must be finite");
+  ScriptContext* context = GetContext(L);
+  CAM::Anchor anchor;
+  anchor.position = CAM::Translation(m);
+  anchor.rotation = CAM::Basis(m);
+  anchor.units_per_meter = context->camera_anchor_units_per_meter;
+  context->camera_anchor = anchor;
+  return 0;
+}
+
+// The GameCube Mtx at `address`, or an explanation.
+bool ReadMtx34(const MemoryAccess& memory, u32 address, CAM::Mtx34* out, const char* what,
+               std::string* reason)
+{
+  if ((address & 3) != 0 || !memory.IsRAM(address, 48))
+  {
+    *reason = fmt::format("the {} at {:08X} is not in the game's memory", what, address);
+    return false;
+  }
+  for (u32 i = 0; i < 12; ++i)
+  {
+    const std::optional<u32> word = memory.Read32(address + i * 4);
+    if (!word)
+    {
+      *reason = fmt::format("the {} at {:08X} is not readable", what, address);
+      return false;
+    }
+    (*out)[i] = std::bit_cast<float>(*word);
+  }
+  if (!CAM::IsPlausibleTransform(*out))
+  {
+    *reason = fmt::format("the {} at {:08X} is not a transform", what, address);
+    return false;
+  }
+  return true;
+}
+
+// Reads the matrices and composes this field's anchor. Warns once per load when it fails.
+bool ComposeCameraAnchor(ScriptContext* context, lua_Integer head_address,
+                         lua_Integer camera_address, CAM::CameraKind kind,
+                         std::optional<lua_Integer> heading_address)
+{
+  const ScriptEnvironment* env = context->env;
+  if (!env || !env->memory)
+    return false;
+  const auto to_address = [](lua_Integer address) {
+    return address >= 0 && address <= 0xFFFFFFFF ? static_cast<u32>(address) : 0u;
+  };
+  std::string reason;
+  CAM::Mtx34 head, camera, heading;
+  bool ok = ReadMtx34(*env->memory, to_address(head_address), &head, "head", &reason) &&
+            ReadMtx34(*env->memory, to_address(camera_address), &camera, "camera", &reason);
+  if (ok && heading_address)
+  {
+    ok = ReadMtx34(*env->memory, to_address(*heading_address), &heading, "heading bone", &reason);
+  }
+  std::optional<CAM::Mtx34> view;
+  if (ok)
+  {
+    view = CAM::ViewFromCamera(camera, kind);
+    if (!view)
+    {
+      ok = false;
+      reason = "the camera matrix cannot be inverted";
+    }
+  }
+  std::optional<CAM::Anchor> anchor;
+  if (ok)
+  {
+    // After a gap (a menu, a cutscene) the smoothing starts over: the view snaps into the head.
+    if (env->field > context->camera_anchor_field + 30 || env->field < context->camera_anchor_field)
+      context->camera_anchor_state.Reset();
+    context->camera_anchor_field = env->field;
+    CAM::Options options = context->camera_anchor_options;
+    options.smoothing =
+        context->camera_anchor_smoothing.value_or(static_cast<float>(env->camera_anchor_smoothing));
+    options.heading_smoothing =
+        context->camera_anchor_heading_smoothing.value_or(options.smoothing);
+    const float upm = context->camera_anchor_units_per_meter > 0.0f ?
+                          context->camera_anchor_units_per_meter :
+                          static_cast<float>(env->units_per_meter);
+    anchor = CAM::Compose(head, heading_address ? &heading : nullptr, *view, options, upm,
+                          &context->camera_anchor_state);
+    if (!anchor)
+      reason = "no heading: the forward axis points along the up axis";
+  }
+  if (!anchor)
+  {
+    if (!context->warned_camera_anchor)
+    {
+      context->warned_camera_anchor = true;
+      AppendLog(context, 1, "vr.set_camera_anchor_matrices: " + reason + " (warned once)");
+    }
+    return false;
+  }
+  anchor->units_per_meter = context->camera_anchor_units_per_meter;
+  context->camera_anchor = *anchor;
+  return true;
+}
+
+// vr.set_camera_anchor_matrices(head, camera, kind [, heading]) -> bool: this field's anchor from
+// the head bone's world transform and the game camera's matrix ("view": world -> view, "world":
+// the camera's transform), the heading from another bone's transform when given.
+int VRSetCameraAnchorMatrices(lua_State* L)
+{
+  const lua_Integer head = luaL_checkinteger(L, 1);
+  const lua_Integer camera = luaL_checkinteger(L, 2);
+  const std::optional<CAM::CameraKind> kind = CAM::ParseCameraKind(luaL_optstring(L, 3, "view"));
+  if (!kind)
+    return luaL_argerror(L, 3, "\"view\" (world -> view) or \"world\" (the camera's transform)");
+  std::optional<lua_Integer> heading;
+  if (!lua_isnoneornil(L, 4))
+    heading = luaL_checkinteger(L, 4);
+  lua_pushboolean(L, ComposeCameraAnchor(GetContext(L), head, camera, *kind, heading));
+  return 1;
+}
+
+// vr.camera_anchor_active() -> bool: a Camera Anchor applies (the setting is on, a VR session
+// runs in stereo).
+int VRCameraAnchorActive(lua_State* L)
+{
+  const ScriptContext* context = GetContext(L);
+  lua_pushboolean(L, context->env && context->env->camera_anchor_active);
+  return 1;
+}
+
 // vr.clear_flags(): lowers every flag of the patch.
 int VRClearFlags(lua_State* L)
 {
@@ -399,6 +632,10 @@ void RegisterVRBindings(lua_State* L)
       {"set_camera_pitch_source", VRSetCameraPitchSource},
       {"camera_pitch_source", VRCameraPitchSource},
       {"keep_pointer_on_screen", VRKeepPointerOnScreen},
+      {"set_camera_anchor_options", VRSetCameraAnchorOptions},
+      {"set_camera_anchor", VRSetCameraAnchor},
+      {"set_camera_anchor_matrices", VRSetCameraAnchorMatrices},
+      {"camera_anchor_active", VRCameraAnchorActive},
       {nullptr, nullptr},
   };
   luaL_newlib(L, FUNCTIONS);

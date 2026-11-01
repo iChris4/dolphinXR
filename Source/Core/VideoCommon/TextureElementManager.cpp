@@ -20,6 +20,7 @@
 #include "Core/ConfigLoaders/GameConfigLoader.h"
 #include "VideoCommon/DrawDepth.h"
 #include "VideoCommon/VR/OverrideSuppression.h"
+#include "VideoCommon/VR/PatchHides.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace
@@ -528,12 +529,26 @@ void TextureElementManager::ApplyOverrideList(const std::string& game_id,
   m_has_controller_anchor_overrides.store(false, std::memory_order_relaxed);
   m_applied_overrides = all;
   m_suppression_generation = VR::OverrideSuppression::GetGeneration();
+  m_patch_hides_generation = VR::PatchHides::GetGeneration();
 
   if (game_id.empty())
     return;
 
   bool has_overrides = false;
   bool has_controller_anchor_overrides = false;
+
+  // A VR patch's hides first: while its flag is raised they win over the profile's entries for
+  // the same textures (the head the patch's Camera Anchor puts the view in), and they let the
+  // profile's entries apply when it is lowered.
+  for (const VR::PatchHides::Hide& hide : VR::PatchHides::Get())
+  {
+    ResolvedHandling resolved;
+    resolved.handling = HandlingType::Skip;
+    resolved.condition_flag = hide.condition_flag;
+    for (u64 texture_hash : hide.texture_hashes)
+      m_texture_handling[texture_hash].push_back(resolved);
+    has_overrides = has_overrides || !hide.texture_hashes.empty();
+  }
 
   for (auto& ovr : all)
   {
@@ -597,8 +612,10 @@ void TextureElementManager::LoadOverridesIfNeeded(const std::string& game_id)
 {
   if (game_id == m_loaded_game_id)
   {
-    // A VR patch started or stopped suppressing overrides: activate the same list again.
-    if (m_suppression_generation != VR::OverrideSuppression::GetGeneration())
+    // A VR patch started or stopped suppressing overrides, or hiding draws: activate the same list
+    // again.
+    if (m_suppression_generation != VR::OverrideSuppression::GetGeneration() ||
+        m_patch_hides_generation != VR::PatchHides::GetGeneration())
     {
       std::vector<TextureElementOverride> all;
       {

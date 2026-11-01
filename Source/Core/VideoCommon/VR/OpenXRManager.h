@@ -601,6 +601,12 @@ public:
   void SetPendingCameraAnchor(float x, float y, float z, const std::array<float, 9>& rotation,
                               float units_per_meter);
   void CommitCameraAnchorFrame();
+  // A VR patch's anchor (VR::CameraAnchorSource), taken when a game frame starts drawing, with the
+  // camera pitch: that frame is drawn from it. It wins over a draw's anchor in the commit, and is
+  // applied without the view-space smoothing (the patch smoothed it in world space). Video thread.
+  void LatchCameraAnchorSource();
+  // A Camera Anchor holds the camera: engaged, held while its source is missing, or gliding home.
+  bool IsCameraAnchorEngaged() const;
 
   // World scale everything VR-side must use this frame: the active camera anchor's scale while
   // one is engaged (smoothed, so engaging/releasing glides), else the live global setting.
@@ -799,6 +805,8 @@ private:
   float m_camera_anchor_pending_upm = 0.0f;
   float m_camera_anchor_target_upm = 0.0f;
   float m_camera_anchor_upm = 0.0f;
+  // The frame being drawn took a VR patch's anchor (LatchCameraAnchorSource).
+  bool m_camera_anchor_from_source = false;
 
   // Cached xrGetInstanceProcAddr result for the platform time-conversion function
   // (xrConvertWin32PerformanceCounterToTimeKHR / xrConvertTimespecTimeToTimeKHR).

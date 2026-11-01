@@ -716,10 +716,12 @@ void GeometryShaderManager::RefreshVREyeRowCache()
   // remove. Only then: without the head-pose lock the rows are also rebuilt for each new head
   // pose, in the middle of a frame, when the CPU thread may already have moved the camera for a
   // later frame, and the draws after it would get that frame's pitch (parts of the world jumped
-  // while the camera tilted).
+  // while the camera tilted). A VR patch's Camera Anchor, composed with the game camera of a recent
+  // field, is taken at the same point.
   if (m_vr_camera_pitch_needs_latch)
   {
     VR::g_openxr->LatchGameCameraPitch();
+    VR::g_openxr->LatchCameraAnchorSource();
     m_vr_camera_pitch_needs_latch = false;
   }
 }

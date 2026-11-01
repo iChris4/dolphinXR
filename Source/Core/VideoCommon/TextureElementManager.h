@@ -215,9 +215,11 @@ private:
   std::unordered_map<u64, std::vector<ResolvedHandling>> m_texture_handling;
   std::vector<FlagRule> m_flag_rules;
   std::string m_loaded_game_id;
-  // The whole list given to ApplyOverrideList, re-applied when VR::OverrideSuppression changes.
+  // The whole list given to ApplyOverrideList, re-applied when VR::OverrideSuppression or
+  // VR::PatchHides changes.
   std::vector<TextureElementOverride> m_applied_overrides;
   u64 m_suppression_generation = 0;
+  u64 m_patch_hides_generation = 0;
   std::atomic_bool m_has_overrides = false;
   std::atomic_bool m_has_controller_anchor_overrides = false;
 

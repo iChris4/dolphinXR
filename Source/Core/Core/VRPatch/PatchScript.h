@@ -18,6 +18,7 @@
 
 #include "Common/CommonTypes.h"
 #include "Core/VRPatch/PatchTypes.h"
+#include "VideoCommon/VR/CameraAnchorMath.h"
 
 namespace VRPatch
 {
@@ -79,6 +80,10 @@ struct ScriptEnvironment
   // The headset's refresh rate (Hz) as the VR session reported it; 0 without a session or before
   // the runtime reports it.
   double display_refresh_rate = 0.0;
+  // A Camera Anchor applies: the setting is on and a VR session runs in stereo.
+  bool camera_anchor_active = false;
+  // The Camera Anchor Smoothing setting (0 to 0.95).
+  double camera_anchor_smoothing = 0.0;
 };
 
 // Per call of a patch function.
@@ -154,6 +159,8 @@ public:
   std::optional<u32> GetCameraPitchSource() const;
   // The patch keeps the VR pointer on the screen (vr.keep_pointer_on_screen).
   bool KeepsPointerOnScreen() const;
+  // The Camera Anchor the patch gave since the last call (vr.set_camera_anchor*), then none.
+  std::optional<VR::CameraAnchorMath::Anchor> TakeCameraAnchor();
 
   size_t GetMemoryUsed() const;
   // Microseconds the last call took.

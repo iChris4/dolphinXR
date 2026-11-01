@@ -48,6 +48,7 @@
 #include "VideoCommon/Statistics.h"
 #include "VideoCommon/TextureCacheBase.h"
 #include "VideoCommon/TextureElementManager.h"
+#include "VideoCommon/VR/CameraAnchorSource.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/VRFrameRegion.h"
 #include "VideoCommon/VertexLoaderManager.h"
@@ -2823,6 +2824,9 @@ void VertexManagerBase::OnEndFrame()
   Core::System::GetInstance().GetGeometryShaderManager().OnEndFrame();
   if (VR::g_openxr)
     VR::g_openxr->CommitCameraAnchorFrame();
+  // A VR patch hides the character's head only while an anchor holds the camera.
+  VR::CameraAnchorSource::SetEngaged(VR::g_openxr && VR::g_openxr->IsSessionRunning() &&
+                                     VR::g_openxr->IsCameraAnchorEngaged());
   TextureElementManager::GetInstance().OnFrameEnd();
   HideObjectEngine::Engine::GetInstance().OnFrameEnd();
   GetMetroidElementClassifier().ResetFrame();
