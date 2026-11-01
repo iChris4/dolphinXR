@@ -255,3 +255,91 @@ TEST(FirstPersonPatch, OnlyLinksModel)
   game.memory.Write32(PLAYER, ACTOR);
   EXPECT_TRUE(game.Frame());
 }
+
+// ---- The Wind Waker (Data/Sys/VRPatches/GZLE01/first-person.lua) ----
+
+namespace
+{
+constexpr u32 WW_PLAYER = 0x803CA74C;
+constexpr u32 WW_ACTOR = 0x80AB86BC;
+constexpr u32 WW_MODEL = 0x815FEF90;
+constexpr u32 WW_MODEL_DATA = 0x8153AAEC;
+constexpr u32 WW_NODES = 0x815FF13C;
+constexpr u32 WW_CAMERA = 0x803EDA58;
+
+struct WindWaker
+{
+  WindWaker()
+  {
+    memory.Write32(WW_PLAYER, WW_ACTOR);
+    memory.Write32(WW_ACTOR + 0x32C, WW_MODEL);
+    memory.Write32(WW_MODEL, 0x8039EA50);
+    memory.Write32(WW_MODEL + 4, WW_MODEL_DATA);
+    memory.Write32(WW_MODEL + 0x14, WW_ACTOR);
+    memory.Write16(WW_MODEL_DATA + 0x28, 42);
+    // Link faces 40 degrees from +Z; his head joint's +Y faces forward, its +X up.
+    memory.SetMtx(WW_MODEL + 0x24, Make(RotY(40), {100, 145, -200}));
+    memory.Write32(WW_MODEL + 0x8C, WW_NODES);
+    const Mat33 head = VR::CameraAnchorMath::Multiply33(RotY(40), {0, 1, 0, 0, 0, 1, 1, 0, 0});
+    memory.SetMtx(WW_NODES + 15 * 0x30, Make(head, HEAD_POSITION));
+    memory.SetMtx(WW_CAMERA, VIEW);
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "GZLE01";
+    env.field = 100;
+    env.units_per_meter = 100;
+  }
+
+  ::testing::AssertionResult Load()
+  {
+    std::string source;
+    File::ReadFileToString(File::GetSysDirectory() + VRPATCHES_DIR "/GZLE01/first-person.lua",
+                           source);
+    if (!script.Load(source, env) || !script.Call(Hook::OnLoad, env))
+      return ::testing::AssertionFailure() << script.Error();
+    return ::testing::AssertionSuccess();
+  }
+
+  std::optional<VR::CameraAnchorMath::Anchor> Frame()
+  {
+    EXPECT_TRUE(script.Call(Hook::OnFrame, env)) << script.Error();
+    return script.TakeCameraAnchor();
+  }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+  PatchScript script{"first-person"};
+};
+}  // namespace
+
+// In Link's head, level and turned with his body, his head's draws hidden around the head joint.
+TEST(WindWakerFirstPersonPatch, LevelInTheHeadWithTheHeadHidden)
+{
+  WindWaker game;
+  ASSERT_TRUE(game.Load());
+  EXPECT_EQ(game.script.GetManifest().games, std::vector<std::string>{"GZLE01"});
+  const auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNear(anchor->position, VR::CameraAnchorMath::TransformPoint(VIEW, HEAD_POSITION));
+  ExpectNear(VR::CameraAnchorMath::Multiply33(Transpose(VR::CameraAnchorMath::Basis(VIEW)),
+                                              anchor->rotation),
+             RotY(220));
+  ExpectNear(anchor->hide_center, VR::CameraAnchorMath::TransformPoint(VIEW, HEAD_POSITION));
+  EXPECT_EQ(anchor->hide_radius, 40.0f);
+  EXPECT_EQ(anchor->hide_below, 5.0f);
+}
+
+// No anchor unless the model is Link's: his actor's, pointing back at it, with 42 joints.
+TEST(WindWakerFirstPersonPatch, OnlyLinksModel)
+{
+  WindWaker game;
+  ASSERT_TRUE(game.Load());
+  game.memory.Write32(WW_MODEL + 0x14, 0x80AB0000);
+  EXPECT_FALSE(game.Frame());
+  game.memory.Write32(WW_MODEL + 0x14, WW_ACTOR);
+  game.memory.Write16(WW_MODEL_DATA + 0x28, 35);
+  EXPECT_FALSE(game.Frame());
+  game.memory.Write16(WW_MODEL_DATA + 0x28, 42);
+  EXPECT_TRUE(game.Frame());
+}
