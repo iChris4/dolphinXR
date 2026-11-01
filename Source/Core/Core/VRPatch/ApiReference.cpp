@@ -161,6 +161,12 @@ Camera Anchor (first-person view: the VR camera in a character's head, from the 
       faces ("x", "y", "z", "-x", "-y", "-z"; default "z"). smoothing (position) and
       heading_smoothing: fraction kept per field, 0 to 0.95, nil: the Camera Anchor Smoothing
       setting. The smoothing is in world space and starts over after a gap of 30 fields.
+      hide_radius and hide_below (game units, default 0 and no limit): while the anchor holds the
+      camera, the draws centred within hide_radius of the head bone and at most hide_below under it
+      (along up_axis) are hidden, for games whose head shares its textures with the body or
+      changes them with its expression. The head's parts sit above its bone (the bone is at the
+      neck), the body below: e.g. hide_radius 40, hide_below 5 for Wind Waker's Link. Measure the
+      draws' centres from the head bone with get_draw before choosing.
   vr.set_camera_anchor_matrices(head, camera [, kind [, heading]]) -> bool   -- this field's
       anchor from the head bone's world transform (a GameCube Mtx address) and the game camera's
       matrix: kind "view" (default: world -> view, what the game multiplies its models by) or

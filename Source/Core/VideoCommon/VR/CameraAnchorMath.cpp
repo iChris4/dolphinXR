@@ -339,7 +339,24 @@ std::optional<Anchor> Compose(const Mtx34& head, const Mtx34* heading, const Mtx
   }
   state->position = position;
   state->valid = true;
+  anchor.hide_center = TransformPoint(view, head_position);
+  anchor.hide_radius = std::max(options.hide_radius, 0.0f);
+  anchor.hide_below = options.hide_below;
+  Vec3 up = Rotate(view_rotation, AxisVector(options.up_axis));
+  if (Normalize(&up))
+    anchor.hide_up = up;
   return anchor;
+}
+
+bool IsInHideRegion(const Anchor& anchor, const Vec3& point)
+{
+  if (!(anchor.hide_radius > 0.0f))
+    return false;
+  const Vec3 d = {point[0] - anchor.hide_center[0], point[1] - anchor.hide_center[1],
+                  point[2] - anchor.hide_center[2]};
+  if (!(Dot(d, d) <= anchor.hide_radius * anchor.hide_radius))
+    return false;
+  return anchor.hide_below < 0.0f || Dot(d, anchor.hide_up) >= -anchor.hide_below;
 }
 
 std::optional<Rotation> ParseRotation(std::string_view name)

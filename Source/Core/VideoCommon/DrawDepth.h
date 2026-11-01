@@ -74,6 +74,18 @@ DrawDistanceRange ComputeDrawDistanceRange(const u8* vertices, u32 count, u32 st
                                            const float* pos_matrices, u32 shared_matrix_index,
                                            u32 max_samples = DRAW_DEPTH_MAX_SAMPLES);
 
+// The view-space centre of the bounding box of at most `max_samples` vertices, without keeping
+// them. Not valid when the positions cannot be read.
+struct DrawViewCentre
+{
+  std::array<float, 3> centre{};
+  bool valid = false;
+};
+DrawViewCentre ComputeDrawViewCentre(const u8* vertices, u32 count, u32 stride,
+                                     const PortableVertexDeclaration& decl,
+                                     const float* pos_matrices, u32 shared_matrix_index,
+                                     u32 max_samples);
+
 // The same vertices and sampling, for their view-space extent and the sampled points.
 DrawViewBounds ComputeDrawViewBounds(const u8* vertices, u32 count, u32 stride,
                                      const PortableVertexDeclaration& decl,
@@ -100,6 +112,10 @@ public:
   // The view-space bounds and sampled points (Get()'s sampling), computed on first use. Get()
   // then derives its depth range from them without reading the vertices again.
   const DrawViewBounds& GetViewBounds() const;
+  // The view-space position of one vertex (the last one), then the bounding-box centre of at most
+  // DRAW_DISTANCE_MAX_SAMPLES vertices: cheap tests of where a draw is. Computed on first use.
+  const DrawViewCentre& GetOneVertex() const;
+  const DrawViewCentre& GetFewCentre() const;
 
   // Whether the vertices carry their own position matrix index (decl.posmtx).
   bool HasPerVertexMatrix() const;
@@ -122,6 +138,10 @@ private:
   mutable DrawDistanceRange m_distance;
   mutable bool m_bounds_computed = false;
   mutable DrawViewBounds m_bounds;
+  mutable bool m_one_vertex_computed = false;
+  mutable DrawViewCentre m_one_vertex;
+  mutable bool m_few_centre_computed = false;
+  mutable DrawViewCentre m_few_centre;
 };
 
 // The min_depth / max_depth rule of the VR overrides (a value <= 0 is unset). True when neither

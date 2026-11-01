@@ -1052,3 +1052,28 @@ TEST(VRPatch, ReadsTheHideField)
   ASSERT_TRUE(std::holds_alternative<std::string>(shader));
   EXPECT_NE(std::get<std::string>(shader).find("texture hashes only"), std::string::npos);
 }
+
+// hide_radius: the anchor carries the head as the view sees it and the radius, for the engine to
+// hide the draws skinned to it.
+TEST(VRPatch, CameraAnchorHideRadius)
+{
+  Harness h;
+  WriteMtx(h.memory, 0x80010000, {1, 0, 0, 1, 0, 1, 0, 2, 0, 0, 1, 3});
+  WriteMtx(h.memory, 0x80010100, {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -10});
+  PatchScript script("anchor");
+  ASSERT_TRUE(h.Load(script, R"(
+    function on_load() vr.set_camera_anchor_options{hide_radius = 5, hide_below = 2, up = 1} end
+    function on_frame() vr.set_camera_anchor_matrices(0x80010000, 0x80010100) end
+  )")) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, h.env)) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+  const auto anchor = script.TakeCameraAnchor();
+  ASSERT_TRUE(anchor);
+  EXPECT_EQ(anchor->hide_radius, 5.0f);
+  EXPECT_EQ(anchor->hide_below, 2.0f);
+  ExpectNearArray(anchor->hide_center, {1, 2, -7});
+  ExpectNearArray(anchor->hide_up, {0, 1, 0});
+  // The view is 1 m (1.5 units) above the head; the hide stays on the head.
+  ExpectNearArray(anchor->position, {1, 3.5f, -7});
+  ExpectFrame("assert(not pcall(vr.set_camera_anchor_options, {hide_radius = 'big'}))");
+}

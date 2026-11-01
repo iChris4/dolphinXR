@@ -71,6 +71,8 @@ enum class SkipReason : u8
   BackgroundFill,
   // The agent's own preview (skip or isolate).
   AgentPreview,
+  // Skinned to the bone a VR patch's Camera Anchor puts the view in (the head).
+  AnchorBone,
 };
 
 // Which override system chose the draw's VR handling.

@@ -118,6 +118,40 @@ DrawDistanceRange ComputeDrawDistanceRange(const u8* vertices, u32 count, u32 st
   return range;
 }
 
+DrawViewCentre ComputeDrawViewCentre(const u8* vertices, u32 count, u32 stride,
+                                     const PortableVertexDeclaration& decl,
+                                     const float* pos_matrices, u32 shared_matrix_index,
+                                     u32 max_samples)
+{
+  DrawViewCentre result;
+  std::array<float, 3> min{std::numeric_limits<float>::infinity(),
+                           std::numeric_limits<float>::infinity(),
+                           std::numeric_limits<float>::infinity()};
+  std::array<float, 3> max{-std::numeric_limits<float>::infinity(),
+                           -std::numeric_limits<float>::infinity(),
+                           -std::numeric_limits<float>::infinity()};
+  const auto visit = [&](const float* p, const float* m) {
+    for (int row = 0; row < 3; ++row)
+    {
+      const float* r = &m[row * 4];
+      const float v = r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3];
+      min[row] = std::min(min[row], v);
+      max[row] = std::max(max[row], v);
+    }
+  };
+  bool sampled = false;
+  if (!VisitSampledVertices(vertices, count, stride, decl, pos_matrices, shared_matrix_index,
+                            max_samples, &sampled, visit))
+  {
+    return result;
+  }
+  for (int row = 0; row < 3; ++row)
+    result.centre[row] = (min[row] + max[row]) * 0.5f;
+  result.valid = std::isfinite(result.centre[0]) && std::isfinite(result.centre[1]) &&
+                 std::isfinite(result.centre[2]);
+  return result;
+}
+
 DrawViewBounds ComputeDrawViewBounds(const u8* vertices, u32 count, u32 stride,
                                      const PortableVertexDeclaration& decl,
                                      const float* pos_matrices, u32 shared_matrix_index,
@@ -212,6 +246,34 @@ const DrawDistanceRange& DrawDepthSource::GetDistance() const
     m_distance_computed = true;
   }
   return m_distance;
+}
+
+const DrawViewCentre& DrawDepthSource::GetOneVertex() const
+{
+  if (!m_one_vertex_computed)
+  {
+    if (m_decl != nullptr)
+    {
+      m_one_vertex = ComputeDrawViewCentre(m_vertices, m_count, m_stride, *m_decl, m_pos_matrices,
+                                           m_shared_matrix_index, 1);
+    }
+    m_one_vertex_computed = true;
+  }
+  return m_one_vertex;
+}
+
+const DrawViewCentre& DrawDepthSource::GetFewCentre() const
+{
+  if (!m_few_centre_computed)
+  {
+    if (m_decl != nullptr)
+    {
+      m_few_centre = ComputeDrawViewCentre(m_vertices, m_count, m_stride, *m_decl, m_pos_matrices,
+                                           m_shared_matrix_index, DRAW_DISTANCE_MAX_SAMPLES);
+    }
+    m_few_centre_computed = true;
+  }
+  return m_few_centre;
 }
 
 const DrawViewBounds& DrawDepthSource::GetViewBounds() const

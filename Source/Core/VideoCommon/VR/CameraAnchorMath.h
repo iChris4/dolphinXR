@@ -80,6 +80,11 @@ struct Options
   // Fraction of the previous position and rotation kept at each update, 0 to 0.95.
   float smoothing = 0.0f;
   float heading_smoothing = 0.0f;
+  // Game units: the draws whose centre is within this distance of the head bone and at most
+  // hide_below under it (along the world's up) are hidden while the anchor holds the camera; 0 =
+  // none. hide_below < 0: no limit.
+  float hide_radius = 0.0f;
+  float hide_below = -1.0f;
 };
 
 // Smoothing state, in world space. Reset() when the anchor engages again.
@@ -105,6 +110,13 @@ struct Anchor
   Mat33 rotation{};
   // The anchor's own world scale; <= 0 keeps the profile's.
   float units_per_meter = 0.0f;
+  // The head bone in game view space, as the game's draw matrices place it (not smoothed, without
+  // the offsets), the world's up in view space, and the region of the draws hidden around it
+  // (radius 0 = none; below < 0 = no limit).
+  Vec3 hide_center{};
+  Vec3 hide_up{0.0f, 1.0f, 0.0f};
+  float hide_radius = 0.0f;
+  float hide_below = -1.0f;
 };
 
 bool IsFinite(const Mtx34& m);
@@ -134,6 +146,10 @@ bool Orthonormalize(Mat33* m);
 // or the heading cannot be found (the forward axis points straight up) before any was.
 std::optional<Anchor> Compose(const Mtx34& head, const Mtx34* heading, const Mtx34& view,
                               const Options& options, float upm, State* state);
+
+// Whether a draw centred at `point` (game view space) is in the anchor's hide region: within its
+// radius of the head bone, and at most hide_below under it along the world's up.
+bool IsInHideRegion(const Anchor& anchor, const Vec3& point);
 
 std::optional<Rotation> ParseRotation(std::string_view name);
 std::optional<Axis> ParseAxis(std::string_view name);

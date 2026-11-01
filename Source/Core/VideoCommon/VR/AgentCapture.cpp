@@ -712,6 +712,8 @@ const char* GetSkipReasonName(SkipReason reason)
     return "background_fill";
   case SkipReason::AgentPreview:
     return "agent_preview";
+  case SkipReason::AnchorBone:
+    return "anchor_bone";
   }
   return "?";
 }

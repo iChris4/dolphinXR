@@ -412,7 +412,8 @@ bool ReadNumberField(lua_State* L, const char* key, std::optional<double>* out)
 }
 
 // vr.set_camera_anchor_options{rotation=, yaw=, right=, up=, forward=, upm=, up_axis=,
-// forward_axis=, bone_up_axis=, smoothing=, heading_smoothing=}: how the anchors of
+// forward_axis=, bone_up_axis=, smoothing=, heading_smoothing=, hide_radius=, hide_below=}: how
+// the anchors of
 // vr.set_camera_anchor_matrices are composed. Restarts the smoothing.
 int VRSetCameraAnchorOptions(lua_State* L)
 {
@@ -437,15 +438,21 @@ int VRSetCameraAnchorOptions(lua_State* L)
   {
     return luaL_argerror(L, 1, "an axis is \"x\", \"y\", \"z\", \"-x\", \"-y\" or \"-z\"");
   }
-  std::optional<double> yaw, right, up, forward, upm, smoothing, heading_smoothing;
+  std::optional<double> yaw, right, up, forward, upm, smoothing, heading_smoothing, hide_radius,
+      hide_below;
   if (!ReadNumberField(L, "yaw", &yaw) || !ReadNumberField(L, "right", &right) ||
       !ReadNumberField(L, "up", &up) || !ReadNumberField(L, "forward", &forward) ||
       !ReadNumberField(L, "upm", &upm) || !ReadNumberField(L, "smoothing", &smoothing) ||
-      !ReadNumberField(L, "heading_smoothing", &heading_smoothing))
+      !ReadNumberField(L, "heading_smoothing", &heading_smoothing) ||
+      !ReadNumberField(L, "hide_radius", &hide_radius) ||
+      !ReadNumberField(L, "hide_below", &hide_below))
   {
-    return luaL_argerror(L, 1, "yaw, right, up, forward, upm and the smoothings are numbers");
+    return luaL_argerror(L, 1,
+                         "yaw, right, up, forward, upm, the smoothings and the hide are numbers");
   }
   options.yaw_deg = static_cast<float>(yaw.value_or(0.0));
+  options.hide_radius = static_cast<float>(hide_radius.value_or(0.0));
+  options.hide_below = static_cast<float>(hide_below.value_or(-1.0));
   options.offset_m = {static_cast<float>(right.value_or(0.0)), static_cast<float>(up.value_or(0.0)),
                       static_cast<float>(forward.value_or(0.0))};
   ScriptContext* context = GetContext(L);

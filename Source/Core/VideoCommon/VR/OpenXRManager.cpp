@@ -3992,6 +3992,8 @@ void OpenXRManager::CommitCameraAnchorFrame()
   // glides back to the default position (rides out transient culling).
   constexpr int HOLD_FRAMES = 15;
 
+  // The bone hide lasts the frame it was latched for.
+  m_camera_anchor_hide.hide_radius = 0.0f;
   // The frame was drawn from a VR patch's anchor, already latched as the current one: it wins
   // over an anchor draw of the same frame, and there is nothing to blend.
   if (m_camera_anchor_from_source)
@@ -4123,6 +4125,7 @@ void OpenXRManager::LatchCameraAnchorSource()
     }
   }
   m_camera_anchor_from_source = true;
+  m_camera_anchor_hide = *anchor;
   ++m_pose_generation;
 }
 

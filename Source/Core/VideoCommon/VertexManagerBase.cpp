@@ -1086,7 +1086,7 @@ static VR::AgentCapture::DrawRecord* BeginAgentDrawRecord(u32 index, u32 sequenc
 
 static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool agent_preview_skip,
                                   bool background_fill_skip, bool hunter_skip, bool elements_skip,
-                                  bool texmgr_skip, bool pink,
+                                  bool anchor_bone_skip, bool texmgr_skip, bool pink,
                                   const GeometryShaderManager& geometry_shader_manager,
                                   const DrawDepthSource& draw_depth)
 {
@@ -1095,6 +1095,7 @@ static void FinishAgentDrawRecord(VR::AgentCapture::DrawRecord* record, bool age
                  background_fill_skip ? SkipReason::BackgroundFill :
                  hunter_skip          ? SkipReason::Shader :
                  elements_skip        ? SkipReason::Elements :
+                 anchor_bone_skip     ? SkipReason::AnchorBone :
                  texmgr_skip          ? SkipReason::Texture :
                                         SkipReason::None;
   record->pink = pink;
@@ -1445,6 +1446,8 @@ void VertexManagerBase::Flush()
         bool hunter_skip = false;
         bool elements_skip = false;
         bool texmgr_skip = false;
+        // Skinned to the bone a VR patch's Camera Anchor puts the view in (also sets texmgr_skip).
+        bool anchor_bone_skip = false;
         // The camera depth and distance of this draw's vertices, read only when an override with
         // min_depth / max_depth, Detect Skybox or the agent capture asks for it. This batch's
         // vertices are the GetNumVerts() * stride bytes before m_cur_buffer_pointer
@@ -1479,9 +1482,13 @@ void VertexManagerBase::Flush()
 #ifdef ENABLE_VR
         const bool agent_capturing = VR::AgentCapture::IsCapturing();
         const bool agent_preview_active = VR::AgentCapture::HasPreview();
+        const bool anchor_bone_hide = g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+                                      VR::g_openxr && VR::g_openxr->HasCameraAnchorBoneHide() &&
+                                      xfmem.projection.type == ProjectionType::Perspective;
 #else
         constexpr bool agent_capturing = false;
         constexpr bool agent_preview_active = false;
+        constexpr bool anchor_bone_hide = false;
 #endif
         // In flat 2D "cinema" mode the game renders mono exactly like a normal flat game. The
         // Shader/Elements/Textures overrides (and the hunter) only skip or reproject draws for
@@ -1490,7 +1497,7 @@ void VertexManagerBase::Flush()
         const bool vr_flat_mode = g_ActiveConfig.vr_flat_screen;
         if (!vr_flat_mode && (hunter_enabled || hunter_has_overrides || hunter_debug_logging ||
                               elements_runtime_active || texmgr_active || agent_capturing ||
-                              agent_preview_active || pink_preview_batch))
+                              agent_preview_active || pink_preview_batch || anchor_bone_hide))
         {
           const auto& vs = m_current_pipeline_config.vs_uid;
           const auto& ps = m_current_pipeline_config.ps_uid;
@@ -1750,6 +1757,30 @@ void VertexManagerBase::Flush()
           // Texture Element Override skip: match purely on bound texture hash (fallback).
           if (!hunter_skip && !elements_skip && texmgr_has_overrides)
             texmgr_skip = texmgr.ShouldSkipByTexture(tex_hashes, &draw_depth);
+
+#ifdef ENABLE_VR
+          // A VR patch's Camera Anchor hides the head the view is in: the draws centred in its
+          // region around the head bone (in the game's view; the region also covers the field
+          // the anchor may lag behind). One vertex first, a few more only for draws near it.
+          if (anchor_bone_hide && !hunter_skip && !elements_skip && !texmgr_skip)
+          {
+            const VR::CameraAnchorMath::Anchor& hide = VR::g_openxr->GetCameraAnchorHide();
+            const DrawViewCentre& vertex = draw_depth.GetOneVertex();
+            const float reach = hide.hide_radius * 2.0f;
+            const float dx = vertex.centre[0] - hide.hide_center[0];
+            const float dy = vertex.centre[1] - hide.hide_center[1];
+            const float dz = vertex.centre[2] - hide.hide_center[2];
+            if (vertex.valid && dx * dx + dy * dy + dz * dz <= reach * reach)
+            {
+              const DrawViewCentre& centre = draw_depth.GetFewCentre();
+              if (centre.valid && VR::CameraAnchorMath::IsInHideRegion(hide, centre.centre))
+              {
+                anchor_bone_skip = true;
+                texmgr_skip = true;
+              }
+            }
+          }
+#endif
 
           // Live preview while the Texture Hunter browser is open: skip or pink-highlight draws
           // binding a checked texture (Skip/Pink chosen in the browser's Preview mode toggle).
@@ -2364,8 +2395,8 @@ void VertexManagerBase::Flush()
         if (agent_record) [[unlikely]]
         {
           FinishAgentDrawRecord(agent_record, agent_preview_skip, background_fill_skip, hunter_skip,
-                                elements_skip, texmgr_skip, shader_hunter_force_pink,
-                                geometry_shader_manager, draw_depth);
+                                elements_skip, anchor_bone_skip, texmgr_skip,
+                                shader_hunter_force_pink, geometry_shader_manager, draw_depth);
         }
 #endif
 

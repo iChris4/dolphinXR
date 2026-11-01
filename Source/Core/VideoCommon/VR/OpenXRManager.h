@@ -27,6 +27,7 @@
 #include "Common/Matrix.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "VideoCommon/AbstractFramebuffer.h"
+#include "VideoCommon/VR/CameraAnchorMath.h"
 #include "VideoCommon/VR/VRPanelMath.h"
 
 // OpenXRManager owns the XrInstance, XrSystemId, XrSession, and reference XrSpace.
@@ -607,6 +608,11 @@ public:
   void LatchCameraAnchorSource();
   // A Camera Anchor holds the camera: engaged, held while its source is missing, or gliding home.
   bool IsCameraAnchorEngaged() const;
+  // The frame took a patch's anchor that hides the draws skinned to its bone (the head the view is
+  // in), until the frame ends. Video thread.
+  bool HasCameraAnchorBoneHide() const { return m_camera_anchor_hide.hide_radius > 0.0f; }
+  // The hide region of the frame's patch anchor (CameraAnchorMath::IsInHideRegion). Video thread.
+  const CameraAnchorMath::Anchor& GetCameraAnchorHide() const { return m_camera_anchor_hide; }
 
   // World scale everything VR-side must use this frame: the active camera anchor's scale while
   // one is engaged (smoothed, so engaging/releasing glides), else the live global setting.
@@ -805,8 +811,9 @@ private:
   float m_camera_anchor_pending_upm = 0.0f;
   float m_camera_anchor_target_upm = 0.0f;
   float m_camera_anchor_upm = 0.0f;
-  // The frame being drawn took a VR patch's anchor (LatchCameraAnchorSource).
+  // The frame being drawn took a VR patch's anchor (LatchCameraAnchorSource), and its bone hide.
   bool m_camera_anchor_from_source = false;
+  CameraAnchorMath::Anchor m_camera_anchor_hide;
 
   // Cached xrGetInstanceProcAddr result for the platform time-conversion function
   // (xrConvertWin32PerformanceCounterToTimeKHR / xrConvertTimespecTimeToTimeKHR).

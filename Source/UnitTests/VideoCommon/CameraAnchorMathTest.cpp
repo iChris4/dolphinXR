@@ -203,6 +203,60 @@ TEST(CameraAnchorMath, OffsetsAlongTheRig)
   // Forward is the head's +Z: (sin 40, 0, cos 40), 2 units; up 5 units.
   const Vec3 eye = {1 + 2 * std::sin(40 * DEG), 2 + 5.0f, 3 + 2 * std::cos(40 * DEG)};
   ExpectNear(anchor->position, TransformPoint(PITCHED_VIEW, eye));
+  // No bone hide unless asked.
+  EXPECT_EQ(anchor->hide_radius, 0.0f);
+}
+
+// The bone hide is centred on the head as the game's draw matrices place it: no offsets, no
+// smoothing.
+TEST(CameraAnchorMath, HideCentreIsTheRawHead)
+{
+  Options options;
+  options.offset_m = {0.0f, 0.5f, 0.2f};
+  options.smoothing = 0.5f;
+  options.hide_radius = 12.0f;
+  State state;
+  ASSERT_TRUE(Compose(HEAD, nullptr, PITCHED_VIEW, options, 10.0f, &state));
+  const std::optional<Anchor> moved =
+      Compose(Make(RotY(40), {1.4f, 2, 3}), nullptr, PITCHED_VIEW, options, 10.0f, &state);
+  ASSERT_TRUE(moved);
+  ExpectNear(moved->hide_center, TransformPoint(PITCHED_VIEW, {1.4f, 2, 3}));
+  EXPECT_EQ(moved->hide_radius, 12.0f);
+}
+
+// The hide region: within the radius of the head bone, and not lower than hide_below under it
+// along the world's up, whatever the camera's pitch (Wind Waker: the hair above the neck bone,
+// the shoulders under it).
+TEST(CameraAnchorMath, HideRegionAroundTheHead)
+{
+  Options options;
+  options.hide_radius = 40.0f;
+  options.hide_below = 5.0f;
+  State state;
+  const Mtx34 head = Make(RotY(40), {0, 100, 0});
+  const std::optional<Anchor> anchor = Compose(head, nullptr, PITCHED_VIEW, options, 1.0f, &state);
+  ASSERT_TRUE(anchor);
+  const auto seen = [&](const Vec3& world) { return TransformPoint(PITCHED_VIEW, world); };
+  // Hair 25 above and to the side, a face part 3 above, the neck 4 under: hidden.
+  EXPECT_TRUE(IsInHideRegion(*anchor, seen({18, 125, 5})));
+  EXPECT_TRUE(IsInHideRegion(*anchor, seen({0, 103, 8})));
+  EXPECT_TRUE(IsInHideRegion(*anchor, seen({0, 96, 0})));
+  // The shoulders 13 under, the torso: drawn. Far away: drawn.
+  EXPECT_FALSE(IsInHideRegion(*anchor, seen({15, 87, 0})));
+  EXPECT_FALSE(IsInHideRegion(*anchor, seen({0, 70, 2})));
+  EXPECT_FALSE(IsInHideRegion(*anchor, seen({60, 100, 0})));
+  // No limit under: a sphere.
+  options.hide_below = -1.0f;
+  state.Reset();
+  const std::optional<Anchor> sphere = Compose(head, nullptr, PITCHED_VIEW, options, 1.0f, &state);
+  ASSERT_TRUE(sphere);
+  EXPECT_TRUE(IsInHideRegion(*sphere, seen({15, 87, 0})));
+  // No radius: nothing.
+  options.hide_radius = 0.0f;
+  state.Reset();
+  const std::optional<Anchor> none = Compose(head, nullptr, PITCHED_VIEW, options, 1.0f, &state);
+  ASSERT_TRUE(none);
+  EXPECT_FALSE(IsInHideRegion(*none, seen({0, 100, 0})));
 }
 
 // Smoothing is in world space, and a jump over 2 m snaps.
