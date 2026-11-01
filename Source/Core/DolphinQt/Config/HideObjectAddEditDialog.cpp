@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QGridLayout>
@@ -17,9 +18,14 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSlider>
+#include <QTimer>
 #include <QVBoxLayout>
 
+#include "Core/Config/MainSettings.h"
 #include "VideoCommon/HideObjectEngine.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/DrawPick.h"
+#endif
 
 namespace
 {
@@ -218,6 +224,9 @@ HideObjectAddEditDialog::HideObjectAddEditDialog(
 
   setWindowTitle(m_is_edit ? tr("Edit Hide Object Code") : tr("Add Hide Object Code"));
   setMinimumWidth(560);
+  // Modal for its parent windows only: a game in its own window stays clickable, for Pick on
+  // Screen and to watch the code's effect.
+  setWindowModality(Qt::WindowModal);
 
   CreateWidgets();
   ConnectWidgets();
@@ -279,7 +288,32 @@ void HideObjectAddEditDialog::CreateWidgets()
   m_up_button->setToolTip(tooltip);
   m_down_button->setToolTip(tooltip);
 
+  m_hide_in_game_check = new QCheckBox(tr("Hide in Game While Editing"));
+  m_hide_in_game_check->setChecked(true);
+  m_hide_in_game_check->setToolTip(
+      tr("Applies the code being edited in the running game, on top of the saved codes, so you "
+         "can see what it hides. Unchecked, only the saved codes apply."));
+  auto* hunt_layout = new QHBoxLayout;
+  hunt_layout->addWidget(m_hide_in_game_check);
+#ifdef ENABLE_VR
+  m_pick_button = new QPushButton(tr("Pick on Screen"));
+  m_pick_button->setToolTip(
+      tr("Then click an object in the game window: the code is made from the start of its "
+         "vertex data, and hides it. Shorten or extend it with the lines below. The game must be "
+         "running in its own window."));
+  hunt_layout->addWidget(m_pick_button);
+  m_pick_label = new QLabel;
+  m_pick_label->setWordWrap(true);
+  // Shown once there is something to say.
+  m_pick_label->hide();
+  m_pick_timer = new QTimer(this);
+  m_pick_timer->setInterval(100);
+#endif
+  hunt_layout->addStretch();
+
   auto* button_box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+  // At the bottom, on the line of OK and Cancel.
+  hunt_layout->addWidget(button_box);
 
   auto* grid = new QGridLayout;
   grid->addWidget(name_label, 0, 0);
@@ -297,7 +331,10 @@ void HideObjectAddEditDialog::CreateWidgets()
 
   auto* layout = new QVBoxLayout{this};
   layout->addLayout(grid);
-  layout->addWidget(button_box);
+#ifdef ENABLE_VR
+  layout->addWidget(m_pick_label);
+#endif
+  layout->addLayout(hunt_layout);
 
   connect(button_box, &QDialogButtonBox::accepted, this, &HideObjectAddEditDialog::OnAccept);
   connect(button_box, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -320,6 +357,68 @@ void HideObjectAddEditDialog::ConnectWidgets()
           &HideObjectAddEditDialog::OnRemoveEntryClicked);
   connect(m_up_button, &QPushButton::clicked, this, &HideObjectAddEditDialog::OnUpClicked);
   connect(m_down_button, &QPushButton::clicked, this, &HideObjectAddEditDialog::OnDownClicked);
+  connect(m_hide_in_game_check, &QCheckBox::toggled, this,
+          &HideObjectAddEditDialog::ApplyTemporarily);
+#ifdef ENABLE_VR
+  connect(m_pick_button, &QPushButton::clicked, this, &HideObjectAddEditDialog::OnPickClicked);
+  connect(m_pick_timer, &QTimer::timeout, this, &HideObjectAddEditDialog::CheckPickResult);
+#endif
+}
+
+void HideObjectAddEditDialog::ShowPickStatus(const QString& text)
+{
+  m_pick_label->setText(text);
+  m_pick_label->show();
+}
+
+void HideObjectAddEditDialog::OnPickClicked()
+{
+#ifdef ENABLE_VR
+  if (Config::Get(Config::MAIN_RENDER_TO_MAIN))
+  {
+    ShowPickStatus(tr("The game is in the main window, which this window blocks: turn off "
+                      "Render to Main Window (Interface settings) to pick from here."));
+    return;
+  }
+  m_pick_serial = VR::DrawPick::GetLastResult().serial;
+  VR::DrawPick::ArmClick(VR::DrawPick::Target::HideCode);
+  ShowPickStatus(tr("Click the object in the game window."));
+  m_pick_timer->start();
+#endif
+}
+
+void HideObjectAddEditDialog::CheckPickResult()
+{
+#ifdef ENABLE_VR
+  const VR::DrawPick::Result pick = VR::DrawPick::GetLastResult();
+  if (pick.serial == m_pick_serial)
+    return;
+  m_pick_serial = pick.serial;
+  if (pick.target != VR::DrawPick::Target::HideCode)
+    return;
+  m_pick_timer->stop();
+  ShowPickStatus(QString::fromStdString(pick.message));
+  if (!pick.ok || pick.hide_entries.empty())
+    return;
+
+  m_result.entries = pick.hide_entries;
+  m_entry_enabled.assign(m_result.entries.size(), true);
+  m_current_entry_index = 0;
+  m_current_entry = m_result.entries[0];
+  {
+    const QSignalBlocker blocker(m_type_combo);
+    m_type_combo->setCurrentIndex(static_cast<int>(m_current_entry.type));
+  }
+  if (m_name_edit->text().trimmed().isEmpty() && pick.draw)
+    m_name_edit->setText(tr("Picked Draw %1").arg(pick.draw->index));
+  UpdateEntryList();
+  UpdateValueDisplay();
+  {
+    const QSignalBlocker blocker(m_hide_in_game_check);
+    m_hide_in_game_check->setChecked(true);
+  }
+  ApplyTemporarily();
+#endif
 }
 
 void HideObjectAddEditDialog::UpdateEntryList()
@@ -570,7 +669,7 @@ void HideObjectAddEditDialog::ApplyTemporarily()
   }
   temp_code.active = true;
   temp_code.user_defined = false;
-  if (!temp_code.entries.empty())
+  if (!temp_code.entries.empty() && m_hide_in_game_check->isChecked())
     temp_list.push_back(std::move(temp_code));
 
   HideObjectEngine::Engine::GetInstance().ApplyCodes(temp_list);

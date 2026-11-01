@@ -10,12 +10,15 @@
 
 #include "VideoCommon/HideObjectEngine.h"
 
+class QCheckBox;
 class QComboBox;
+class QLabel;
 class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 class QSlider;
+class QTimer;
 
 class HideObjectAddEditDialog : public QDialog
 {
@@ -43,6 +46,11 @@ private:
   void OnAddEntryClicked();
   void OnRemoveEntryClicked();
   void OnAccept();
+  // "Pick on Screen" (VR::DrawPick): the next click in the game window makes the code from the
+  // start of the clicked object's vertex data.
+  void OnPickClicked();
+  void CheckPickResult();
+  void ShowPickStatus(const QString& text);
 
   void UpdateEntryList();
   void UpdateCurrentEntryListItem();
@@ -72,4 +80,10 @@ private:
   QSlider* m_value_slider;
   QPushButton* m_up_button;
   QPushButton* m_down_button;
+  // While checked, the code being edited is applied in the game (on top of the saved codes).
+  QCheckBox* m_hide_in_game_check;
+  QPushButton* m_pick_button = nullptr;
+  QLabel* m_pick_label = nullptr;
+  QTimer* m_pick_timer = nullptr;
+  u64 m_pick_serial = 0;
 };
