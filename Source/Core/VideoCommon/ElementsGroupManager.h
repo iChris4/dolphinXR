@@ -363,6 +363,7 @@ private:
   int m_popup_open_count = 0;
   std::atomic_bool m_popup_open = false;
   std::atomic_bool m_has_overrides = false;
+  std::atomic_bool m_has_controller_anchor_overrides = false;
   bool m_hunt_enabled = false;
   HuntingOption m_hunting_option = HuntingOption::Skip;
   RuntimeElementSignature m_seed_signature{};

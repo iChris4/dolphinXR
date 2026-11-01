@@ -617,11 +617,13 @@ void VertexManagerBase::UpdateVRCullPolicy()
   auto& texmgr = TextureElementManager::GetInstance();
 
   // Hunting lists and previews show draws as the game issues them; ControllerAnchor elements
-  // are drawn at the controller, so neither the cone nor the game's view describes them.
+  // are drawn at the controller, so neither the cone nor the game's view describes them. With
+  // the Controller Anchor setting off they stay where the game draws them.
   const bool hunting = hunter.IsEnabled() || elements.IsPopupOpen() || texmgr.IsHunterActive();
-  const bool controller_anchors = hunter.HasControllerAnchorOverrides() ||
-                                  elements.HasControllerAnchorOverrides() ||
-                                  texmgr.HasControllerAnchorOverrides();
+  const bool controller_anchors =
+      g_ActiveConfig.vr_enable_controller_anchor &&
+      (hunter.HasControllerAnchorOverrides() || elements.HasControllerAnchorOverrides() ||
+       texmgr.HasControllerAnchorOverrides());
   m_vr_cull_allowed = g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
                       g_ActiveConfig.vr_head_cpu_cull && !hunting && !controller_anchors;
   m_vr_cull_cone_only = !hunter.HasOverrides() && !elements.HasOverrides() &&

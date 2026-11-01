@@ -1232,6 +1232,7 @@ void ElementsGroupManager::ApplyOverrideList(const std::string& game_id,
   if (game_id.empty())
   {
     m_has_overrides.store(false);
+    m_has_controller_anchor_overrides.store(false);
     return;
   }
 
@@ -1245,6 +1246,10 @@ void ElementsGroupManager::ApplyOverrideList(const std::string& game_id,
   }
 
   m_has_overrides.store(!m_overrides.empty());
+  m_has_controller_anchor_overrides.store(
+      std::ranges::any_of(m_overrides, [](const ElementGroupOverride& entry) {
+        return entry.handling == HandlingType::ControllerAnchor;
+      }));
 
   if (!m_overrides.empty())
   {
@@ -1281,10 +1286,7 @@ bool ElementsGroupManager::HasOverrides() const
 
 bool ElementsGroupManager::HasControllerAnchorOverrides() const
 {
-  std::lock_guard lock(m_mutex);
-  return std::ranges::any_of(m_overrides, [](const ElementGroupOverride& entry) {
-    return entry.handling == HandlingType::ControllerAnchor;
-  });
+  return m_has_controller_anchor_overrides.load();
 }
 
 void ElementsGroupManager::SetPopupOpen(bool open)

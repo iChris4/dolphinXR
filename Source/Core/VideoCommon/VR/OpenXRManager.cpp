@@ -3991,6 +3991,15 @@ void OpenXRManager::CommitCameraAnchorFrame()
   // glides back to the default position (rides out transient culling).
   constexpr int HOLD_FRAMES = 15;
 
+  // No anchor draw this frame and the camera back at rest (the end state of a return glide):
+  // nothing to blend.
+  if (!m_camera_anchor_pending_valid && !m_camera_anchor_has_target &&
+      !m_camera_anchor_rotation_active && m_camera_anchor_upm <= 0.0f &&
+      m_camera_anchor_position == std::array<float, 3>{})
+  {
+    return;
+  }
+
   if (m_camera_anchor_pending_valid)
   {
     m_camera_anchor_target = m_camera_anchor_pending;

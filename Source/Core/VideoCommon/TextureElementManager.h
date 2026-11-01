@@ -219,6 +219,7 @@ private:
   std::vector<TextureElementOverride> m_applied_overrides;
   u64 m_suppression_generation = 0;
   std::atomic_bool m_has_overrides = false;
+  std::atomic_bool m_has_controller_anchor_overrides = false;
 
   // Texture Hunter: double-buffered "all textures seen this frame" (mutex-guarded).
   std::atomic_bool m_hunter_active = false;

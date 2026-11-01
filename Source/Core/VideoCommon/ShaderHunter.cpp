@@ -1461,6 +1461,7 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
   m_applied_overrides = all;
   m_suppression_generation = VR::OverrideSuppression::GetGeneration();
   m_has_overrides.store(false, std::memory_order_relaxed);
+  m_has_controller_anchor_overrides.store(false, std::memory_order_relaxed);
   m_needs_shader_family_signatures.store(false, std::memory_order_relaxed);
   m_needs_texture_hashes.store(false, std::memory_order_relaxed);
 
@@ -1468,6 +1469,7 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
     return;
 
   bool has_overrides = false;
+  bool has_controller_anchor_overrides = false;
   bool needs_shader_family_signatures = false;
   bool needs_texture_hashes = false;
 
@@ -1480,6 +1482,9 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
     }
 
     has_overrides = true;
+    // Conditional entries included: they are not in m_controller_anchors.
+    if (ovr.handling == HandlingType::ControllerAnchor)
+      has_controller_anchor_overrides = true;
     if (ovr.hash_family_match)
       needs_shader_family_signatures = true;
     if (!ovr.texture_hashes.empty())
@@ -1571,6 +1576,8 @@ void ShaderHunter::ApplyOverrideList(const std::string& game_id, std::vector<Sha
   }
 
   m_has_overrides.store(has_overrides, std::memory_order_relaxed);
+  m_has_controller_anchor_overrides.store(has_controller_anchor_overrides,
+                                          std::memory_order_relaxed);
   m_needs_shader_family_signatures.store(needs_shader_family_signatures,
                                          std::memory_order_relaxed);
   m_needs_texture_hashes.store(needs_texture_hashes, std::memory_order_relaxed);
@@ -1658,8 +1665,7 @@ bool ShaderHunter::HasOverrides() const
 
 bool ShaderHunter::HasControllerAnchorOverrides() const
 {
-  std::lock_guard lock(m_mutex);
-  return !m_controller_anchors.empty();
+  return m_has_controller_anchor_overrides.load(std::memory_order_relaxed);
 }
 
 bool ShaderHunter::NeedsShaderFamilySignatures() const

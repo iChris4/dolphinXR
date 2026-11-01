@@ -525,6 +525,7 @@ void TextureElementManager::ApplyOverrideList(const std::string& game_id,
   m_flag_rules.clear();
   m_loaded_game_id = game_id;
   m_has_overrides.store(false, std::memory_order_relaxed);
+  m_has_controller_anchor_overrides.store(false, std::memory_order_relaxed);
   m_applied_overrides = all;
   m_suppression_generation = VR::OverrideSuppression::GetGeneration();
 
@@ -532,6 +533,7 @@ void TextureElementManager::ApplyOverrideList(const std::string& game_id,
     return;
 
   bool has_overrides = false;
+  bool has_controller_anchor_overrides = false;
 
   for (auto& ovr : all)
   {
@@ -542,6 +544,8 @@ void TextureElementManager::ApplyOverrideList(const std::string& game_id,
     }
 
     has_overrides = true;
+    if (ovr.handling == HandlingType::ControllerAnchor)
+      has_controller_anchor_overrides = true;
 
     if (!ovr.flag_group.empty())
     {
@@ -579,6 +583,8 @@ void TextureElementManager::ApplyOverrideList(const std::string& game_id,
   }
 
   m_has_overrides.store(has_overrides, std::memory_order_relaxed);
+  m_has_controller_anchor_overrides.store(has_controller_anchor_overrides,
+                                          std::memory_order_relaxed);
 
   if (!m_overrides.empty())
   {
@@ -613,10 +619,7 @@ bool TextureElementManager::HasOverrides() const
 
 bool TextureElementManager::HasControllerAnchorOverrides() const
 {
-  std::lock_guard lock(m_mutex);
-  return std::ranges::any_of(m_overrides, [](const TextureElementOverride& ovr) {
-    return ovr.handling == HandlingType::ControllerAnchor;
-  });
+  return m_has_controller_anchor_overrides.load(std::memory_order_relaxed);
 }
 
 bool TextureElementManager::NeedsTextureHashes() const

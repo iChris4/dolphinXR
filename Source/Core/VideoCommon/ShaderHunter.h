@@ -468,6 +468,7 @@ private:
   std::vector<ShaderOverride> m_applied_overrides;
   u64 m_suppression_generation = 0;
   std::atomic_bool m_has_overrides = false;
+  std::atomic_bool m_has_controller_anchor_overrides = false;
   std::atomic_bool m_needs_shader_family_signatures = false;
   std::atomic_bool m_needs_texture_hashes = false;
 
