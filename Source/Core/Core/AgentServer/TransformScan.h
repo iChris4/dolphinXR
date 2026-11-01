@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "Common/CommonTypes.h"
+#include "VideoCommon/VR/CameraAnchorMath.h"
 
 namespace AgentServer::TransformScan
 {
@@ -73,9 +74,25 @@ struct Change
 };
 
 // The hits of `after` at the addresses of `before` whose rotation turned by at least
-// `min_angle_deg` or whose translation moved by at least `min_move`, largest turn first.
+// `min_angle_deg` or whose translation moved by at least `min_move` (a threshold of 0 is not a
+// criterion; with none, whatever changed), largest turn first.
 std::vector<Change> Compare(const std::vector<Hit>& before, const std::vector<Hit>& after,
                             double min_angle_deg, double min_move);
+
+struct Ranked
+{
+  Hit hit;
+  // The translation seen through the camera: game view space.
+  std::array<float, 3> view_position{};
+  float distance = 0;
+};
+
+// The hits by the distance of their translation, seen through `view` (a world -> view GameCube
+// Mtx), from `point` (game view space), nearest first: given the view-space position of a
+// character's head (a draw's position matrix), its bones come first.
+std::vector<Ranked> RankByViewDistance(std::span<const Hit> hits,
+                                       const VR::CameraAnchorMath::Mtx34& view,
+                                       const std::array<float, 3>& point);
 
 // "r0 (..) r1 (..) r2 (..) t (..)".
 std::string FormatHit(const Hit& hit, Layout layout);

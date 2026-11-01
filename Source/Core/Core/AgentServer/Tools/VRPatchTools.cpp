@@ -5,6 +5,7 @@
 // writing one needs (the VR input as a patch sees it, an assembler, a transform search).
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <deque>
 #include <map>
@@ -15,19 +16,25 @@
 #include <fmt/ranges.h>
 
 #include "Common/Assembler/GekkoAssembler.h"
+#include "Common/Config/Config.h"
 #include "Common/FileUtil.h"
 #include "Common/StringUtil.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "Core/AgentServer/AgentServer.h"
+#include "Core/AgentServer/PointerScan.h"
 #include "Core/AgentServer/ToolHelpers.h"
 #include "Core/AgentServer/Tools/Tools.h"
 #include "Core/AgentServer/TransformScan.h"
+#include "Core/Config/GraphicsSettings.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/HW/Memmap.h"
+#include "Core/PowerPC/MMU.h"
 #include "Core/System.h"
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/VRPatch.h"
+#include "VideoCommon/VR/CameraAnchorMath.h"
+#include "VideoCommon/VR/OpenXRManager.h"
 
 namespace AgentServer
 {
@@ -512,10 +519,37 @@ ToolResult FindTransforms(const ToolArgs& args)
   const u32 address_max = args.GetAddress("address_max").value_or(0xFFFFFFFF);
   const std::string compare_to = args.GetString("compare_to");
   std::string label = args.GetString("label");
+  // near_x/y/z with camera: rank by the distance from a point of the game's view space.
+  const std::optional<double> near_x = args.GetOptionalNumber("near_x");
+  const std::optional<double> near_y = args.GetOptionalNumber("near_y");
+  const std::optional<double> near_z = args.GetOptionalNumber("near_z");
+  const std::optional<u32> camera = args.GetAddress("camera");
+  const bool rank = near_x || near_y || near_z;
+  if (rank && (!near_x || !near_y || !near_z || !camera))
+    throw ToolError("Ranking needs near_x, near_y, near_z and camera.");
+  const auto camera_kind =
+      VR::CameraAnchorMath::ParseCameraKind(args.GetString("camera_kind", "view"));
+  if (!camera_kind)
+    throw ToolError("camera_kind is view (world -> view) or world (the camera's transform).");
+  std::optional<VR::CameraAnchorMath::Mtx34> view;
 
   TransformScan::Result result;
   {
     Core::CPUThreadGuard guard(GetSystem());
+    if (rank)
+    {
+      VR::CameraAnchorMath::Mtx34 matrix;
+      for (u32 i = 0; i < 12; ++i)
+      {
+        const auto word = PowerPC::MMU::HostTryRead<u32>(guard, *camera + i * 4);
+        if (!word)
+          throw ToolError(fmt::format("The camera at {:08X} is not readable.", *camera));
+        matrix[i] = std::bit_cast<float>(word->value);
+      }
+      view = VR::CameraAnchorMath::ViewFromCamera(matrix, *camera_kind);
+      if (!view)
+        throw ToolError(fmt::format("The camera at {:08X} is not a transform.", *camera));
+    }
     Memory::MemoryManager& memory = GetSystem().GetMemory();
     const auto scan_range = [&](u8* data, u32 base, u32 size) {
       if (!data || size == 0)
@@ -540,6 +574,39 @@ ToolResult FindTransforms(const ToolArgs& args)
   }
 
   std::string text;
+  picojson::array ranked_json;
+  // The hits (or the changed ones) by their distance from the point, seen through the camera.
+  const auto append_ranked = [&](std::span<const TransformScan::Hit> hits) {
+    const std::array<float, 3> point = {static_cast<float>(*near_x), static_cast<float>(*near_y),
+                                        static_cast<float>(*near_z)};
+    const std::vector<TransformScan::Ranked> ranked =
+        TransformScan::RankByViewDistance(hits, *view, point);
+    text += fmt::format("Nearest to ({:.1f} {:.1f} {:.1f}) in the view of the camera at {:08X} "
+                        "({}):\n",
+                        point[0], point[1], point[2], *camera,
+                        *camera_kind == VR::CameraAnchorMath::CameraKind::View ? "view" : "world");
+    for (size_t i = 0; i < ranked.size() && i < max_results; ++i)
+    {
+      const TransformScan::Ranked& entry = ranked[i];
+      text +=
+          fmt::format("  {:08X} d={:.2f} view=({:.2f} {:.2f} {:.2f}) {}\n", entry.hit.address,
+                      entry.distance, entry.view_position[0], entry.view_position[1],
+                      entry.view_position[2], TransformScan::FormatHit(entry.hit, options.layout));
+      picojson::array position, translation, rotation;
+      for (float v : entry.view_position)
+        position.push_back(JsonFloat(v));
+      for (float v : entry.hit.translation)
+        translation.push_back(JsonFloat(v));
+      for (float v : entry.hit.rotation)
+        rotation.push_back(JsonFloat(v));
+      ranked_json.push_back(picojson::value(
+          picojson::object{{"address", JsonString(fmt::format("{:08X}", entry.hit.address))},
+                           {"distance", JsonFloat(entry.distance)},
+                           {"view", picojson::value(position)},
+                           {"translation", picojson::value(translation)},
+                           {"rotation", picojson::value(rotation)}}));
+    }
+  };
   if (!compare_to.empty())
   {
     StoredScan before;
@@ -556,12 +623,19 @@ ToolResult FindTransforms(const ToolArgs& args)
     const std::vector<TransformScan::Change> changes =
         TransformScan::Compare(before.hits, result.hits, args.GetNumber("min_angle_deg", 2.0),
                                args.GetNumber("min_move", 0.0));
-    text +=
-        fmt::format("{} {} transform(s) now; {} of the {} in \"{}\" turned at least {} "
-                    "degrees (largest turn first):\n",
-                    result.hits.size(), TransformScan::LayoutName(options.layout), changes.size(),
-                    before.hits.size(), compare_to, args.GetNumber("min_angle_deg", 2.0));
-    for (size_t i = 0; i < changes.size() && i < max_results; ++i)
+    text += fmt::format("{} {} transform(s) now; {} of the {} in \"{}\" turned at least {} "
+                        "degrees or moved at least {} (largest turn first):\n",
+                        result.hits.size(), TransformScan::LayoutName(options.layout),
+                        changes.size(), before.hits.size(), compare_to,
+                        args.GetNumber("min_angle_deg", 2.0), args.GetNumber("min_move", 0.0));
+    if (rank)
+    {
+      std::vector<TransformScan::Hit> changed;
+      for (const TransformScan::Change& change : changes)
+        changed.push_back(change.after);
+      append_ranked(changed);
+    }
+    for (size_t i = 0; !rank && i < changes.size() && i < max_results; ++i)
     {
       const TransformScan::Change& change = changes[i];
       text += fmt::format("  {:08X} turned {:.1f} deg, moved {:.2f}: {}\n", change.after.address,
@@ -574,7 +648,9 @@ ToolResult FindTransforms(const ToolArgs& args)
     text += fmt::format("{}{} {} transform(s):\n", result.hits.size(),
                         result.truncated ? "+ (truncated)" : "",
                         TransformScan::LayoutName(options.layout));
-    for (size_t i = 0; i < result.hits.size() && i < max_results; ++i)
+    if (rank)
+      append_ranked(result.hits);
+    for (size_t i = 0; !rank && i < result.hits.size() && i < max_results; ++i)
     {
       text += fmt::format("  {:08X} {}\n", result.hits[i].address,
                           TransformScan::FormatHit(result.hits[i], options.layout));
@@ -593,7 +669,192 @@ ToolResult FindTransforms(const ToolArgs& args)
   text += fmt::format("Stored as \"{}\": change the view or move the object, then scan again with "
                       "compare_to=\"{}\".",
                       label, label);
-  return ToolResult::Text(std::move(text));
+  ToolResult tool_result = ToolResult::Text(std::move(text));
+  if (rank)
+    tool_result.SetStructured({{"camera", JsonString(fmt::format("{:08X}", *camera))},
+                               {"hits", picojson::value(ranked_json)}});
+  return tool_result;
+}
+
+// ---- test_camera_anchor ----
+
+// A Lua expression for an address argument: a hex address or a path ("[[805C4F98]+2184]+3C",
+// "mem.chain(...)"), which is followed again at every field.
+std::string AddressExpression(const ToolArgs& args, const char* key, bool required)
+{
+  const std::string text = std::string(StripWhitespace(args.GetString(key)));
+  if (text.empty())
+  {
+    if (required)
+      throw ToolError(
+          fmt::format("{} is required: an address or a path like [[805C4F98]+2184]+3C.", key));
+    return "nil";
+  }
+  if (const std::optional<PointerScan::Path> path = PointerScan::ParsePath(text))
+    return PointerScan::FormatLua(*path);
+  if (const std::optional<u64> address = ParseHexString(text); address && *address <= 0xFFFFFFFF)
+    return fmt::format("0x{:08X}", *address);
+  throw ToolError(fmt::format("{} is not an address or a path: {}", key, text));
+}
+
+std::string LuaString(std::string_view text)
+{
+  std::string out = "\"";
+  for (const char c : text)
+  {
+    if (c == '\\' || c == '"')
+      out += '\\';
+    if (c == '\n')
+      out += "\\n";
+    else
+      out += c;
+  }
+  return out + "\"";
+}
+
+std::string LuaNumber(double value)
+{
+  // Locale-independent, unlike the C library's.
+  return fmt::format("{}", value);
+}
+
+// The patch test_camera_anchor runs, and the agent saves once the user confirms it.
+std::string CameraAnchorPatchSource(const ToolArgs& args, const std::string& title)
+{
+  static constexpr std::array<std::string_view, 5> ROTATIONS = {"level", "fixed", "full", "camera",
+                                                                "yaw"};
+  const std::string rotation = args.GetString("rotation", "level");
+  const auto rotation_it = std::ranges::find(ROTATIONS, rotation);
+  if (rotation_it == ROTATIONS.end())
+    throw ToolError("rotation is level, fixed, full, camera or yaw.");
+  const std::string kind = args.GetString("camera_kind", "view");
+  if (!VR::CameraAnchorMath::ParseCameraKind(kind))
+    throw ToolError("camera_kind is view (world -> view) or world (the camera's transform).");
+  for (const char* key : {"up_axis", "forward_axis", "bone_up_axis"})
+  {
+    if (!VR::CameraAnchorMath::ParseAxis(args.GetString(key, "y")))
+      throw ToolError(fmt::format("{} is x, y, z, -x, -y or -z.", key));
+  }
+  const std::string head = AddressExpression(args, "head", true);
+  const std::string camera = AddressExpression(args, "camera", true);
+  const std::string heading = AddressExpression(args, "heading", false);
+
+  std::string hide;
+  for (const u64 hash : args.GetHexArray("hide_textures"))
+    hide += fmt::format("{}\"{:016x}\"", hide.empty() ? "" : ", ", hash);
+  const std::string hide_flag = args.GetString("hide_flag");
+
+  std::string source = fmt::format(
+      "-- {}: first-person view from a bone (made with the agent server's test_camera_anchor).\n"
+      "-- The VR camera sits in the head bone; the view is level and turns with the character's\n"
+      "-- heading, whatever the game's camera does. Needs Camera Anchor on (VR settings).\n"
+      "--\n"
+      "-- SPDX-License-Identifier: GPL-2.0-or-later\n\n"
+      "patch = {{\n"
+      "  title = {},\n"
+      "  description = \"The VR camera in the character's head (Camera Anchor on).\",\n"
+      "  games = {{\"{}\"}},\n",
+      GameId(), LuaString(title), GameId());
+  if (!hide.empty())
+    source += fmt::format("  hide = {{texture = {{{}}}}},\n", hide);
+  source += fmt::format(
+      "  settings = {{\n"
+      "    {{name = \"rotation\", label = \"View rotation\", type = \"choice\",\n"
+      "     options = {{\"Level\", \"Fixed\", \"Full\", \"Camera\", \"Yaw\"}}, default = {},\n"
+      "     description = \"Level: turns with the character, the game camera does not move the \"\n"
+      "       .. \"view. Fixed: the headset does all the turning. Full: the bone's orientation. "
+      "\"\n"
+      "       .. \"Camera and Yaw: the game camera's turns move the view.\"}},\n"
+      "    {{name = \"yaw\", label = \"Yaw offset\", unit = \"deg\", default = {}, min = -180, "
+      "max = 180, step = 1}},\n"
+      "    {{name = \"right\", label = \"Right\", unit = \"m\", default = {}, min = -1, max = 1, "
+      "step = 0.01}},\n"
+      "    {{name = \"up\", label = \"Up\", unit = \"m\", default = {}, min = -1, max = 1, "
+      "step = 0.01}},\n"
+      "    {{name = \"forward\", label = \"Forward\", unit = \"m\", default = {}, min = -1, "
+      "max = 1, step = 0.01}},\n"
+      "    {{name = \"upm\", label = \"Units per meter (0: the profile's)\", default = {}, "
+      "min = 0, max = 2000, step = 0.5}},\n"
+      "    {{name = \"smoothing\", label = \"Smoothing (-1: the Camera Anchor setting)\", "
+      "default = {}, min = -1, max = 0.95, step = 0.05}},\n"
+      "  }},\n"
+      "}}\n\n",
+      rotation_it - ROTATIONS.begin(), LuaNumber(args.GetNumber("yaw_deg", 0)),
+      LuaNumber(args.GetNumber("right_m", 0)), LuaNumber(args.GetNumber("up_m", 0)),
+      LuaNumber(args.GetNumber("forward_m", 0)), LuaNumber(args.GetNumber("upm", 0)),
+      LuaNumber(args.GetNumber("smoothing", -1)));
+  source +=
+      fmt::format("local ROTATIONS = {{\"level\", \"fixed\", \"full\", \"camera\", \"yaw\"}}\n\n"
+                  "local function apply_options()\n"
+                  "  vr.set_camera_anchor_options{{\n"
+                  "    rotation = ROTATIONS[settings.rotation + 1], yaw = settings.yaw,\n"
+                  "    right = settings.right, up = settings.up, forward = settings.forward,\n"
+                  "    upm = settings.upm > 0 and settings.upm or nil,\n"
+                  "    smoothing = settings.smoothing >= 0 and settings.smoothing or nil,\n"
+                  "    up_axis = \"{}\", forward_axis = \"{}\", bone_up_axis = \"{}\",\n"
+                  "  }}\n"
+                  "end\n\n"
+                  "function on_load() apply_options() end\n"
+                  "function on_setting_changed() apply_options() end\n\n"
+                  "-- Followed again at every field: the objects move between rooms.\n"
+                  "local function head() return {} end\n"
+                  "local function camera() return {} end\n"
+                  "local function heading() return {} end\n\n"
+                  "local fields = 0\n"
+                  "function on_frame()\n"
+                  "  local h, c = head(), camera()\n"
+                  "  local ok = h ~= nil and c ~= nil and\n"
+                  "             vr.set_camera_anchor_matrices(h, c, \"{}\", heading())\n",
+                  args.GetString("up_axis", "y"), args.GetString("forward_axis", "z"),
+                  args.GetString("bone_up_axis", "y"), head, camera, heading, kind);
+  if (!hide_flag.empty())
+  {
+    source +=
+        fmt::format("  vr.set_flag({}, ok and vr.camera_anchor_active())\n", LuaString(hide_flag));
+  }
+  source +=
+      "  fields = fields + 1\n"
+      "  if fields % 120 == 1 then\n"
+      "    log(ok and \"anchor in the head\" or \"no anchor\", h and mem.hex(h) or \"no head\")\n"
+      "  end\n"
+      "end\n";
+  return source;
+}
+
+ToolResult TestCameraAnchor(const ToolArgs& args)
+{
+  RequireGame();
+  const std::string id = args.GetString("id", "camera-anchor-test");
+  const std::string title = args.GetString("title", "First-person view");
+  const std::string source = CameraAnchorPatchSource(args, title);
+  if (const std::string error = VRPatch::SetSessionSource(id, source); !error.empty())
+    throw ToolError("The generated patch does not load: " + error + "\n" + source);
+  std::string pending = ApplyChanges();
+  const s64 frames = std::clamp<s64>(args.GetInt("frames", 60), 0, 600);
+  if (frames > 0)
+    AdvanceFrames(static_cast<u32>(frames));
+
+  const bool enabled = Config::Get(Config::GFX_VR_ENABLE_CAMERA_ANCHOR);
+  const bool session = VR::g_openxr && VR::g_openxr->IsSessionRunning();
+  const bool flat = Config::Get(Config::GFX_VR_FLAT_SCREEN);
+  const bool gate_open = enabled && session && !flat;
+  std::string text = StatusAndLog(id, 20);
+  text += fmt::format(
+      "\nCamera Anchor engine gate: {} (EnableCameraAnchor={}, VR session={}, flat={}).{}\n",
+      gate_open ? "open: the view is in the head" : "closed: nothing moves the view", enabled,
+      session, flat,
+      gate_open ? "" :
+                  " The patch still composes the anchor and logs it; without a stereo session "
+                  "compare its log with get_draw's position matrix of the head.");
+  if (frames == 0)
+    text += pending;
+  text += "\nLoaded live for this session (not saved): tune with set_vr_patch_setting, save with "
+          "save_vr_patch id=" +
+          id + " once the user confirms it in the headset.\nSource:\n" + source;
+  ToolResult result = ToolResult::Text(std::move(text));
+  result.SetStructured(
+      {{"id", JsonString(id)}, {"gate_open", JsonBool(gate_open)}, {"source", JsonString(source)}});
+  return result;
 }
 }  // namespace
 
@@ -777,10 +1038,74 @@ void RegisterVRPatchTools(ToolRegistry& registry, Server& server)
                .Integer("max_results", "Lines shown, default 40.", 1, 200)
                .String("label", "Name to store this scan under (default scanN).")
                .String("compare_to", "Label of an earlier scan: list what turned since.")
-               .Number("min_angle_deg", "With compare_to: smallest turn listed, default 2.")
-               .Number("min_move", "With compare_to: smallest move listed, default 0.")
+               .Number("min_angle_deg",
+                       "With compare_to: smallest turn listed, default 2 (0: not a criterion).")
+               .Number("min_move", "With compare_to: smallest move listed, default 0 (not a "
+                                   "criterion); a change is listed when it passes either.")
+               .Number("near_x", "With camera: rank by the distance from this point of the "
+                                 "game's view space (e.g. get_draw's position matrix "
+                                 "translation of a character's head).")
+               .Number("near_y", "See near_x.")
+               .Number("near_z", "See near_x.")
+               .Hex("camera", "The game camera's matrix (a GameCube Mtx) for near_x/y/z.")
+               .String("camera_kind",
+                       "view (default: world -> view) or world (the camera's own transform).",
+                       {"view", "world"})
                .Build(),
        .read_only = true,
        .handler = FindTransforms});
+  registry.Add(
+      {.name = "test_camera_anchor",
+       .title = "Try a first-person camera from a bone",
+       .description =
+           "Generates and runs (live, this session) a VR patch that puts the VR camera in a "
+           "character's head from memory: the head bone's world transform and the game "
+           "camera's matrix (Workflow 7). rotation=level keeps the view level and turned with "
+           "the character, so the game's third-person camera no longer moves it. hide_textures "
+           "hides the head's draws while the anchor holds the camera. Returns the patch log, "
+           "whether the engine applies it (Camera Anchor on, a stereo VR session) and the Lua "
+           "source to save with save_vr_patch.",
+       .input_schema =
+           Schema()
+               .String("head", "The head bone's world transform: an address, or a path "
+                               "([[805C4F98]+2184]+3C) followed at every field.")
+               .String("camera", "The game camera's matrix: an address or a path.")
+               .String("camera_kind",
+                       "view (default: world -> view, what the game multiplies its models by) "
+                       "or world (the camera's own transform).",
+                       {"view", "world"})
+               .String("heading", "Another bone's transform for the heading (a body root turns "
+                                  "more smoothly than a head); default the head.")
+               .String("rotation",
+                       "level (default), fixed (the heading at engagement), full (the bone's "
+                       "orientation), camera or yaw (the game camera's turns move the view).",
+                       {"level", "fixed", "full", "camera", "yaw"})
+               .String("up_axis", "The world's up: y (default), z, -y, -z, x, -x.",
+                       {"x", "y", "z", "-x", "-y", "-z"})
+               .String("forward_axis",
+                       "The bone axis pointing where the character faces: z (default), x, y, "
+                       "-x, -y, -z.",
+                       {"x", "y", "z", "-x", "-y", "-z"})
+               .String("bone_up_axis", "rotation=full: the bone axis pointing up (default y).",
+                       {"x", "y", "z", "-x", "-y", "-z"})
+               .Number("yaw_deg", "Degrees about up, + turns left (default 0).")
+               .Number("right_m", "Meters to the right (default 0).")
+               .Number("up_m", "Meters up (default 0).")
+               .Number("forward_m", "Meters forward (default 0).")
+               .Number("upm", "The anchor's world scale in game units per meter (default 0: the "
+                              "profile's).")
+               .Number("smoothing", "Fraction kept per field, 0 to 0.95 (default -1: the Camera "
+                                    "Anchor Smoothing setting).")
+               .HexArray("hide_textures", "Texture hashes of the head's draws, hidden while the "
+                                          "anchor holds the camera.")
+               .String("hide_flag", "Also raise this override flag while the anchor applies, for "
+                                    "profile entries (condition=<flag>) that hide by shader.")
+               .Integer("frames", "Frames to advance after loading (default 60).", 0, 600)
+               .String("id", "Patch id (default camera-anchor-test).")
+               .String("title", "Patch title (default \"First-person view\").")
+               .Required({"head", "camera"})
+               .Build(),
+       .destructive = true,
+       .handler = TestCameraAnchor});
 }
 }  // namespace AgentServer

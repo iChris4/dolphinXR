@@ -185,15 +185,40 @@ std::vector<Change> Compare(const std::vector<Hit>& before, const std::vector<Hi
     const float dy = hit.translation[1] - it->second->translation[1];
     const float dz = hit.translation[2] - it->second->translation[2];
     change.moved = std::sqrt(dx * dx + dy * dy + dz * dz);
-    if (change.angle_deg >= min_angle_deg && change.moved >= min_move &&
-        (change.angle_deg > 0 || change.moved > 0))
-    {
+    // A threshold of 0 is not a criterion; with none, anything that changed is listed (over the
+    // float noise of the angle of a rotation with itself, a few hundredths of a degree).
+    const bool by_angle = min_angle_deg > 0 && change.angle_deg >= min_angle_deg;
+    const bool by_move = min_move > 0 && change.moved >= min_move;
+    const bool listed = min_angle_deg > 0 || min_move > 0 ?
+                            by_angle || by_move :
+                            change.angle_deg > 0.1 || change.moved > 0;
+    if (listed)
       changes.push_back(change);
-    }
   }
-  std::ranges::sort(changes,
-                    [](const Change& a, const Change& b) { return a.angle_deg > b.angle_deg; });
+  std::ranges::sort(changes, [](const Change& a, const Change& b) {
+    return a.angle_deg != b.angle_deg ? a.angle_deg > b.angle_deg : a.moved > b.moved;
+  });
   return changes;
+}
+
+std::vector<Ranked> RankByViewDistance(std::span<const Hit> hits,
+                                       const VR::CameraAnchorMath::Mtx34& view,
+                                       const std::array<float, 3>& point)
+{
+  std::vector<Ranked> ranked;
+  ranked.reserve(hits.size());
+  for (const Hit& hit : hits)
+  {
+    Ranked entry{hit, VR::CameraAnchorMath::TransformPoint(view, hit.translation), 0.0f};
+    const float dx = entry.view_position[0] - point[0];
+    const float dy = entry.view_position[1] - point[1];
+    const float dz = entry.view_position[2] - point[2];
+    entry.distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+    ranked.push_back(entry);
+  }
+  std::ranges::stable_sort(
+      ranked, [](const Ranked& a, const Ranked& b) { return a.distance < b.distance; });
+  return ranked;
 }
 
 std::string FormatHit(const Hit& hit, Layout layout)

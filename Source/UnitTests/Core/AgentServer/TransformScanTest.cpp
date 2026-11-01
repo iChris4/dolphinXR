@@ -106,3 +106,52 @@ TEST(TransformScan, Layouts)
   ASSERT_EQ(result.hits.size(), 1u);
   EXPECT_EQ(result.hits[0].address, 0x80001020u);
 }
+
+// A change is listed when it turned or moved past a threshold; a threshold of 0 is not a
+// criterion (a bone that only moves is found with min_move alone).
+TEST(TransformScan, ComparesMovesOrTurns)
+{
+  std::vector<u8> memory(0x400, 0);
+  PutTransform(memory, 0x000, 10, 0, 0, 0);
+  PutTransform(memory, 0x100, 45, 5, 5, 5);
+  const Result before = Scan(memory, 0x80000000, {});
+  // The first moved 10 units without turning, the second turned 30 degrees in place.
+  PutTransform(memory, 0x000, 10, 10, 0, 0);
+  PutTransform(memory, 0x100, 75, 5, 5, 5);
+  const Result after = Scan(memory, 0x80000000, {});
+
+  const std::vector<Change> moved = Compare(before.hits, after.hits, 0.0, 5.0);
+  ASSERT_EQ(moved.size(), 1u);
+  EXPECT_EQ(moved[0].after.address, 0x80000000u);
+  EXPECT_NEAR(moved[0].moved, 10.0, 1e-3);
+  EXPECT_TRUE(Compare(before.hits, after.hits, 0.0, 20.0).empty());
+  // Either criterion: both, largest turn first.
+  const std::vector<Change> either = Compare(before.hits, after.hits, 2.0, 5.0);
+  ASSERT_EQ(either.size(), 2u);
+  EXPECT_EQ(either[0].after.address, 0x80000100u);
+  // No criterion: whatever changed.
+  EXPECT_EQ(Compare(before.hits, after.hits, 0.0, 0.0).size(), 2u);
+  EXPECT_TRUE(Compare(before.hits, before.hits, 0.0, 0.0).empty());
+}
+
+// Seen through the game camera, the bones nearest a draw's view-space position come first.
+TEST(TransformScan, RanksByViewDistance)
+{
+  std::vector<u8> memory(0x400, 0);
+  PutTransform(memory, 0x000, 10, 0, 0, 0);
+  PutTransform(memory, 0x100, 20, 0, 2, 0);
+  PutTransform(memory, 0x200, 30, 0, 1.7f, 0.1f);
+  const Result scan = Scan(memory, 0x80000000, {});
+  ASSERT_EQ(scan.hits.size(), 3u);
+  // The camera 10 units back on +Z, looking down -Z: world -> view.
+  const VR::CameraAnchorMath::Mtx34 view = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -10};
+  const std::vector<Ranked> ranked = RankByViewDistance(scan.hits, view, {0, 1.75f, -10});
+  ASSERT_EQ(ranked.size(), 3u);
+  EXPECT_EQ(ranked[0].hit.address, 0x80000200u);
+  EXPECT_EQ(ranked[1].hit.address, 0x80000100u);
+  EXPECT_EQ(ranked[2].hit.address, 0x80000000u);
+  EXPECT_NEAR(ranked[0].view_position[2], -9.9f, 1e-4f);
+  EXPECT_NEAR(ranked[0].distance, std::sqrt(0.05f * 0.05f + 0.1f * 0.1f), 1e-4f);
+  EXPECT_LE(ranked[0].distance, ranked[1].distance);
+  EXPECT_LE(ranked[1].distance, ranked[2].distance);
+}
