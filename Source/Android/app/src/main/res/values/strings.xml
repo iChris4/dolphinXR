@@ -846,7 +846,7 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_forced_vbi_90">90 Hz</string>
     <string name="quest_forced_vbi_120">120 Hz</string>
     <string name="quest_eager_heartbeat">Eager Frame Heartbeat</string>
-    <string name="quest_eager_heartbeat_description">Resubmits the last frame every headset refresh so every slot is filled when the game renders slower than the display. Recommended on Quest, which has no runtime motion smoothing of its own. Can be toggled while a game is running.</string>
+    <string name="quest_eager_heartbeat_description">Resubmits the last frame every headset refresh so every slot is filled when the game renders slower than the display. Off by default: frames are submitted at the game\'s own rate. Can be toggled while a game is running.</string>
     <string name="quest_reference_space_mode">Default VR Position</string>
     <string name="quest_reference_space_mode_description">Chooses how the default VR position is set when OpenXR starts. LOCAL sets home from the initial headset position. STAGE uses the play-space origin. Falls back to LOCAL if STAGE is unavailable. Takes effect on next launch.</string>
     <string name="quest_reference_space_local">LOCAL</string>

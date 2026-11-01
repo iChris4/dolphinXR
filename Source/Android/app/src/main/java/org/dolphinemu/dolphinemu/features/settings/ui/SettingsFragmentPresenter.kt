@@ -3106,7 +3106,7 @@ class SettingsFragmentPresenter(
         )
         builder.boolean(
             "EagerHeartbeat",
-            true,
+            false,
             R.string.quest_eager_heartbeat,
             R.string.quest_eager_heartbeat_description
         )

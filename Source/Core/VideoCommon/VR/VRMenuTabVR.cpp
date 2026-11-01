@@ -305,10 +305,11 @@ private:
     MenuWidgets::Checkbox(
         "Eager Frame Heartbeat",
         "How the VR pacing thread fills the headset's refresh rate when the game renders slower "
-        "than the display. On resubmits the last frame at every headset refresh: best on "
-        "standalone headsets (Quest), and on PC it keeps the runtime's motion smoothing (SteamVR "
-        "reprojection, ASW, SSW) and its artifacts from starting. Off paces submissions to the "
-        "game's frame rate so the PC runtime's motion smoothing can remove head-tracking judder.",
+        "than the display. On resubmits the last frame at every headset refresh, which fills "
+        "every display slot, and on PC keeps the runtime's motion smoothing (SteamVR "
+        "reprojection, ASW, SSW) and its artifacts from starting. Off (the default) paces "
+        "submissions to the game's frame rate so the PC runtime's motion smoothing can remove "
+        "head-tracking judder.",
         Config::GFX_VR_EAGER_HEARTBEAT, touched);
   }
 

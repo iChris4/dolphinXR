@@ -1502,11 +1502,11 @@ void OpenXRManager::FrameThreadLoop()
   // Heartbeat mode (g_ActiveConfig.vr_eager_heartbeat, read live each cycle so it can be
   // toggled mid-session for A/B testing):
   //
-  // Eager (standalone default): run one cycle per display period and re-submit the last
+  // Eager (opt-in): run one cycle per display period and re-submit the last
   // frame whenever the game is slower — there is no runtime motion smoothing on Quest,
   // so filling every compositor slot is a straight win (measured: 72/72, 0 stales).
   //
-  // Lazy (PC default): wait for the game to publish BEFORE starting a frame cycle, so the
+  // Lazy (the default): wait for the game to publish BEFORE starting a frame cycle, so the
   // runtime sees the app's true cadence. PC runtimes (Virtual Desktop, SteamVR, Meta
   // Link) key their motion smoothing (SSW/ASW) off the app frame rate — a full-rate
   // heartbeat makes them disable it and exposes the raw sub-refresh cadence beat as

@@ -272,10 +272,10 @@ extern const Info<bool> GFX_VR_PERF_COUNTERS;
 // so they never migrate onto a slow core or contend with each other. INI-only escape
 // hatch; default on for Android/Quest.
 extern const Info<bool> GFX_VR_PIN_EMULATION_CORES;
-// Pacing thread heartbeat mode. Eager (default on standalone): re-submit the last frame
-// at HMD cadence to fill every compositor slot — best where the runtime has no motion
-// smoothing (Quest standalone). Lazy (default on PC): pace to the game's cadence so the
-// runtime's SSW/ASW motion smoothing engages; heartbeat only as a keep-alive.
+// Pacing thread heartbeat mode. Eager (opt-in): re-submit the last frame at HMD cadence to
+// fill every compositor slot, for runtimes without motion smoothing (Quest standalone). Lazy
+// (the default on every platform): pace to the game's cadence so the runtime's SSW/ASW
+// motion smoothing engages; heartbeat only as a keep-alive.
 extern const Info<bool> GFX_VR_EAGER_HEARTBEAT;
 extern const Info<bool> GFX_VR_AUTO_VBI_FROM_HMD;
 extern const Info<bool> GFX_VR_EXACT_SCREEN_DEPTH;

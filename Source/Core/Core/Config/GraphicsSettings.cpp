@@ -260,16 +260,9 @@ constexpr bool DEFAULT_VR_PIN_EMULATION_CORES = false;
 #endif
 const Info<bool> GFX_VR_PIN_EMULATION_CORES{{System::GFX, "VR", "PinEmulationCores"},
                                             DEFAULT_VR_PIN_EMULATION_CORES};
-// Eager on standalone headsets, which have no motion smoothing: re-submitting the last frame fills
-// every display slot. Lazy on PC, whose runtimes key their motion smoothing off the app's frame
-// rate (see the pacing loop in OpenXRManager).
-#if defined(__ANDROID__)
-constexpr bool DEFAULT_VR_EAGER_HEARTBEAT = true;
-#else
-constexpr bool DEFAULT_VR_EAGER_HEARTBEAT = false;
-#endif
-const Info<bool> GFX_VR_EAGER_HEARTBEAT{{System::GFX, "VR", "EagerHeartbeat"},
-                                        DEFAULT_VR_EAGER_HEARTBEAT};
+// Off on every platform: submissions follow the game's frame rate. On re-submits the last frame to
+// fill every display slot (see the pacing loop in OpenXRManager).
+const Info<bool> GFX_VR_EAGER_HEARTBEAT{{System::GFX, "VR", "EagerHeartbeat"}, false};
 #if defined(__ANDROID__) && defined(ENABLE_VR)
 constexpr bool DEFAULT_VR_ANDROID_DIRECT_TO_HMD = true;
 constexpr bool DEFAULT_IMMEDIATE_XFB = true;

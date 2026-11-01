@@ -48,8 +48,8 @@ object QuestVrSettings {
 
     fun forcedVbiFrequencySetting(): AbstractIntSetting = ForcedVbiFrequencySetting
 
-    // On by default on the Quest, off on PC (GFX_VR_EAGER_HEARTBEAT).
-    fun eagerHeartbeatSetting() = vrBooleanSetting("EagerHeartbeat", true)
+    // Off by default, as on PC (GFX_VR_EAGER_HEARTBEAT).
+    fun eagerHeartbeatSetting() = vrBooleanSetting("EagerHeartbeat", false)
 
     fun referenceSpaceModeSetting() = vrIntSetting("ReferenceSpaceMode", 0)
 

@@ -302,7 +302,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
       tr("Controls how the VR pacing thread fills the headset's refresh rate when the game "
          "renders slower than the display.<br><br>"
          "<b>On</b> resubmits the last frame every headset refresh so every slot is filled. "
-         "Best for standalone runtimes with no motion smoothing (Quest). On PC, this also "
+         "Meant for standalone runtimes with no motion smoothing (Quest). On PC, this also "
          "prevents the runtime's own motion smoothing (SteamVR reprojection, Virtual Desktop "
          "SSW, Meta Link ASW) from engaging in the first place, which avoids that smoothing's "
          "own warping/ghosting artifacts — useful if you find those more distracting than the "
