@@ -14,6 +14,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
@@ -394,4 +395,150 @@ TEST(WindWakerFirstPersonPatch, OnlyLinksModel)
   EXPECT_FALSE(game.Frame());
   game.memory.Write16(WW_MODEL_DATA + 0x28, 42);
   EXPECT_TRUE(game.Frame());
+}
+
+// ---- Wii Sports (Data/Sys/VRPatches/RSPE01/first-person.lua) ----
+
+namespace
+{
+// [[804DFB90]] is the sport's scene; its g3d root (vtable 80361260) a little way in.
+constexpr u32 WS_SCENE_HOLDER = 0x80600000;
+constexpr u32 WS_SCENE = 0x80610000;
+constexpr u32 WS_ROOT = WS_SCENE + 0xD4;
+constexpr u32 WS_GROUP = 0x80620000;
+constexpr u32 WS_ARRAY = 0x80630000;
+constexpr u32 WS_BODY_MDL = 0x80640000;
+constexpr u32 WS_NET_MDL = 0x80650000;
+
+struct WiiSports
+{
+  WiiSports()
+  {
+    memory.Write32(0x804DFB90, WS_SCENE_HOLDER);
+    memory.Write32(WS_SCENE_HOLDER, WS_SCENE);
+    memory.Write32(WS_ROOT, 0x80361260);
+    memory.SetMtx(WS_ROOT + 0x6C, VIEW);
+    memory.Write32(WS_ROOT + 0xB8, WS_GROUP);
+    memory.Write32(WS_GROUP, 0x80361238);
+    memory.Write32(WS_GROUP + 4, WS_ARRAY);
+    WriteMdl0(WS_BODY_MDL, "ava_bodyA1");
+    WriteMdl0(WS_NET_MDL, "tns_net_a");
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "RSPE01";
+    env.field = 100;
+    env.units_per_meter = 10;
+  }
+
+  void WriteMdl0(u32 mdl, std::string_view name)
+  {
+    memory.Write32(mdl, 0x4D444C30);
+    memory.Write32(mdl + 0x3C, 0x100);
+    for (size_t i = 0; i < name.size(); ++i)
+      memory.Write8(mdl + 0x100 + static_cast<u32>(i), static_cast<u8>(name[i]));
+  }
+
+  // A model in the scene's group: its head joint (+Y where it looks, +X up) at `distance` from the
+  // game camera, straight ahead of it, facing `facing_deg`; `mirror` flips it (a reflection).
+  void AddModel(u32 model, u32 mdl, float distance, float facing_deg, float scale = 1,
+                bool mirror = false)
+  {
+    memory.Write32(WS_ARRAY + count * 4, model);
+    memory.Write32(WS_GROUP + 0x10, ++count);
+    memory.Write32(model, 0x80361310);
+    memory.Write32(model + 0xB8, mdl);
+    memory.Write32(model + 0xBC, model + 0x160);
+    const Mtx34 camera = *VR::CameraAnchorMath::Invert(VIEW);
+    const std::array<float, 3> ahead = {-camera[2] * distance, -camera[6] * distance,
+                                        -camera[10] * distance};
+    const std::array<float, 3> head = {camera[3] + ahead[0], camera[7] + ahead[1],
+                                       camera[11] + ahead[2]};
+    memory.SetMtx(model + 0x0C, Make(RotY(facing_deg), {head[0], head[1] - 8.7f, head[2]}));
+    Mat33 r = VR::CameraAnchorMath::Multiply33(RotY(facing_deg), {0, 1, 0, 0, 0, 1, 1, 0, 0});
+    for (float& v : r)
+      v *= scale;
+    if (mirror)
+    {
+      for (int c = 0; c < 3; ++c)
+        r[3 + c] = -r[3 + c];
+    }
+    memory.SetMtx(model + 0x190, Make(r, head));
+    heads[model] = head;
+  }
+
+  ::testing::AssertionResult Load()
+  {
+    std::string source;
+    File::ReadFileToString(File::GetSysDirectory() + VRPATCHES_DIR "/RSPE01/first-person.lua",
+                           source);
+    if (!script.Load(source, env) || !script.Call(Hook::OnLoad, env))
+      return ::testing::AssertionFailure() << script.Error();
+    return ::testing::AssertionSuccess();
+  }
+
+  std::optional<VR::CameraAnchorMath::Anchor> Frame()
+  {
+    ++env.field;
+    EXPECT_TRUE(script.Call(Hook::OnFrame, env)) << script.Error();
+    return script.TakeCameraAnchor();
+  }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+  PatchScript script{"first-person"};
+  u32 count = 0;
+  std::map<u32, std::array<float, 3>> heads;
+};
+}  // namespace
+
+// In the head of the Mii nearest the game camera (yours: every sport keeps the camera behind you),
+// level and turned with its body; the reflection, the other models and the farther Miis are not
+// used.
+TEST(WiiSportsFirstPersonPatch, InTheHeadOfTheNearestMii)
+{
+  WiiSports game;
+  game.AddModel(0x80700000, WS_BODY_MDL, 120, 0);
+  game.AddModel(0x80710000, WS_NET_MDL, 10, 0);
+  game.AddModel(0x80720000, WS_BODY_MDL, 15, 0, 1, true);
+  game.AddModel(0x80730000, WS_BODY_MDL, 30, 40);
+  ASSERT_TRUE(game.Load());
+  EXPECT_EQ(game.script.GetManifest().games, std::vector<std::string>{"RSPE01"});
+  const auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNear(anchor->position, VR::CameraAnchorMath::TransformPoint(VIEW, game.heads[0x80730000]));
+  ExpectNear(VR::CameraAnchorMath::Multiply33(Transpose(VR::CameraAnchorMath::Basis(VIEW)),
+                                              anchor->rotation),
+             RotY(220));
+  // Eyes 1.6 m above the feet of a full-size Mii, and its head hidden.
+  EXPECT_NEAR(anchor->units_per_meter, 8.7f / 1.6f, 1e-4f);
+  EXPECT_EQ(anchor->hide_radius, 5.0f);
+  EXPECT_EQ(anchor->hide_below, 1.0f);
+}
+
+// Bowling draws its Miis at 0.7: the world's scale and the hidden region follow.
+TEST(WiiSportsFirstPersonPatch, ScaledMii)
+{
+  WiiSports game;
+  game.AddModel(0x80700000, WS_BODY_MDL, 30, 0, 0.7f);
+  ASSERT_TRUE(game.Load());
+  game.Frame();
+  const auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_NEAR(anchor->units_per_meter, 8.7f * 0.7f / 1.6f, 1e-4f);
+  EXPECT_NEAR(anchor->hide_radius, 3.5f, 1e-5f);
+  EXPECT_NEAR(anchor->hide_below, 0.7f, 1e-5f);
+}
+
+// No scene, or a scene without Miis: no anchor.
+TEST(WiiSportsFirstPersonPatch, NoMii)
+{
+  WiiSports game;
+  ASSERT_TRUE(game.Load());
+  EXPECT_FALSE(game.Frame());
+  game.AddModel(0x80710000, WS_NET_MDL, 10, 0);
+  game.env.field += 400;
+  EXPECT_FALSE(game.Frame());
+  game.memory.Write32(0x804DFB90, 0);
+  EXPECT_FALSE(game.Frame());
 }
