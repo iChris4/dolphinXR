@@ -1084,8 +1084,8 @@ private:
   // The desktop Elements Hunting window, without its match and texture filters: pick a seed among
   // the last frame's draws, then the parts of its runtime signature (Group By) other draws must
   // share with it. Every draw of that group is hidden or painted pink; Save Override adds an
-  // Elements Group override for the group, Save as Hide Code a hide code from its draws' vertex
-  // data. Like the other hunters, it keeps running while the menu is closed.
+  // Elements Group override for the group. Like the other hunters, it keeps running while the menu
+  // is closed.
   void DrawElementsHunting(VRMenuContext& context)
   {
     ElementsGroupManager& manager = ElementsGroupManager::GetInstance();
@@ -1165,11 +1165,6 @@ private:
     if (ImGui::Button("Save Override"))
       SaveHuntedElement(context, status);
     MenuWidgets::ItemTooltip("Adds an Elements Group override for the seed's group.");
-    ImGui::SameLine();
-    if (ImGui::Button("Save as Hide Code"))
-      SaveElementsAsHideCode(context);
-    MenuWidgets::ItemTooltip("Adds a hide code made from the vertex data of the group's draws "
-                             "of the last frame, to the Hide Object Codes list.");
     ImGui::EndDisabled();
     ImGui::EndDisabled();
 
@@ -1214,11 +1209,10 @@ private:
   }
 
   // Like the desktop window, which holds the hunt open while it shows, the menu holds it while
-  // hunting; the hide-code capture runs meanwhile for Save as Hide Code.
+  // hunting.
   void SetElementsHunting(bool enabled)
   {
     ElementsGroupManager& manager = ElementsGroupManager::GetInstance();
-    HideObjectEngine::Engine& hide_engine = HideObjectEngine::Engine::GetInstance();
     if (enabled)
     {
       if (!m_elements_hunt_held)
@@ -1227,11 +1221,9 @@ private:
         m_elements_hunt_held = true;
       }
       manager.SetHuntEnabled(true);
-      hide_engine.SetCaptureEnabled(true);
       return;
     }
     manager.SetHuntEnabled(false);
-    hide_engine.SetCaptureEnabled(false);
     if (m_elements_hunt_held)
     {
       manager.SetPopupOpen(false);
@@ -1255,41 +1247,6 @@ private:
     ElementsGroupManager::SaveOverridesToINI(context.game_id, m_elements);
     ElementsGroupManager::GetInstance().LoadOverrides(context.game_id);
     OnHuntedSaved(context, m_element_save, entry.name);
-  }
-
-  void SaveElementsAsHideCode(VRMenuContext& context)
-  {
-    std::vector<u32> draw_sequences;
-    for (const auto& draw : ElementsGroupManager::GetInstance().GetCurrentTextureSourceDraws())
-    {
-      if (draw.draw_sequence != 0)
-        draw_sequences.push_back(draw.draw_sequence);
-    }
-    const HideObjectEngine::CapturedHideObjectEntries captured =
-        HideObjectEngine::Engine::GetInstance().GetCapturedEntriesForDrawSequences(draw_sequences);
-    if (captured.entries.empty())
-    {
-      context.actions.SetStatus("Not saved: no vertex data was captured for the group yet. Let "
-                                "it draw, then save again");
-      return;
-    }
-
-    HideObjectEngine::HideObject code;
-    const std::string name(StripWhitespace(m_element_save.name));
-    code.name = UniqueName(m_hide_objects,
-                           !name.empty() ? name :
-                                           fmt::format("Element Hide {} Draws",
-                                                       draw_sequences.size()));
-    code.entries = captured.entries;
-    m_hide_objects.push_back(code);
-    HideObjectEngine::SaveToINI(context.game_id, m_hide_objects);
-    ApplyHideCodes();
-
-    m_element_save.name.clear();
-    m_element_save.name_request = 0;
-    context.actions.SetStatus(fmt::format("Saved hide code \"{}\": {} patterns from {} draws",
-                                          code.name, captured.entries.size(),
-                                          captured.matched_draws));
   }
 
   // The code Hide Code Hunting is finding or editing.
