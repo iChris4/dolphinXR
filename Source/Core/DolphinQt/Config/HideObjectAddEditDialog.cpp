@@ -6,7 +6,6 @@
 #include <utility>
 #include <vector>
 
-#include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QGridLayout>
@@ -288,13 +287,7 @@ void HideObjectAddEditDialog::CreateWidgets()
   m_up_button->setToolTip(tooltip);
   m_down_button->setToolTip(tooltip);
 
-  m_hide_in_game_check = new QCheckBox(tr("Hide in Game While Editing"));
-  m_hide_in_game_check->setChecked(true);
-  m_hide_in_game_check->setToolTip(
-      tr("Applies the code being edited in the running game, on top of the saved codes, so you "
-         "can see what it hides. Unchecked, only the saved codes apply."));
   auto* hunt_layout = new QHBoxLayout;
-  hunt_layout->addWidget(m_hide_in_game_check);
 #ifdef ENABLE_VR
   m_pick_button = new QPushButton(tr("Pick on Screen"));
   m_pick_button->setToolTip(
@@ -357,8 +350,6 @@ void HideObjectAddEditDialog::ConnectWidgets()
           &HideObjectAddEditDialog::OnRemoveEntryClicked);
   connect(m_up_button, &QPushButton::clicked, this, &HideObjectAddEditDialog::OnUpClicked);
   connect(m_down_button, &QPushButton::clicked, this, &HideObjectAddEditDialog::OnDownClicked);
-  connect(m_hide_in_game_check, &QCheckBox::toggled, this,
-          &HideObjectAddEditDialog::ApplyTemporarily);
 #ifdef ENABLE_VR
   connect(m_pick_button, &QPushButton::clicked, this, &HideObjectAddEditDialog::OnPickClicked);
   connect(m_pick_timer, &QTimer::timeout, this, &HideObjectAddEditDialog::CheckPickResult);
@@ -413,10 +404,6 @@ void HideObjectAddEditDialog::CheckPickResult()
     m_name_edit->setText(tr("Picked Draw %1").arg(pick.draw->index));
   UpdateEntryList();
   UpdateValueDisplay();
-  {
-    const QSignalBlocker blocker(m_hide_in_game_check);
-    m_hide_in_game_check->setChecked(true);
-  }
   ApplyTemporarily();
 #endif
 }
@@ -669,7 +656,7 @@ void HideObjectAddEditDialog::ApplyTemporarily()
   }
   temp_code.active = true;
   temp_code.user_defined = false;
-  if (!temp_code.entries.empty() && m_hide_in_game_check->isChecked())
+  if (!temp_code.entries.empty())
     temp_list.push_back(std::move(temp_code));
 
   HideObjectEngine::Engine::GetInstance().ApplyCodes(temp_list);

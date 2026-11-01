@@ -10,7 +10,6 @@
 
 #include "VideoCommon/HideObjectEngine.h"
 
-class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -80,8 +79,6 @@ private:
   QSlider* m_value_slider;
   QPushButton* m_up_button;
   QPushButton* m_down_button;
-  // While checked, the code being edited is applied in the game (on top of the saved codes).
-  QCheckBox* m_hide_in_game_check;
   QPushButton* m_pick_button = nullptr;
   QLabel* m_pick_label = nullptr;
   QTimer* m_pick_timer = nullptr;
