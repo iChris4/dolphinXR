@@ -146,7 +146,8 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
 
 Camera Anchor (first-person view: the VR camera in a character's head, from the game's memory)
   vr.set_camera_anchor_options{rotation=, yaw=, right=, up=, forward=, upm=, up_axis=,
-      forward_axis=, bone_up_axis=, smoothing=, heading_smoothing=}   -- in on_load and
+      forward_axis=, bone_up_axis=, smoothing=, heading_smoothing=, hide_radius=, hide_below=,
+      stick=, stick_lead=}   -- in on_load and
       on_setting_changed; restarts the smoothing. rotation:
         "level" (default): level, turned with the character's heading (forward_axis of the heading
                  bone laid on the ground plane): the game camera's swings do not move the view
@@ -167,6 +168,20 @@ Camera Anchor (first-person view: the VR camera in a character's head, from the 
       changes them with its expression. The head's parts sit above its bone (the bone is at the
       neck), the body below: e.g. hide_radius 40, hide_below 5 for Wind Waker's Link. Measure the
       draws' centres from the head bone with get_draw before choosing.
+      stick: what up on the first GameCube controller's main stick means while the anchor holds
+      the camera (games move their character relative to their own camera, which no longer turns
+      the view): "camera" (default: the game's own), "facing" (where the character faces: the
+      heading bone's forward, not smoothed; up keeps him straight, a sideways push turns him
+      while it is held), "view" (straight ahead in the view: the smoothed rig, so a sideways push
+      runs across the view while it turns after him; where the headset looks with "fixed") or
+      "head" (where the headset looks; with "level", looking aside while walking keeps turning
+      the character). The engine turns the stick by the angle between the game camera's heading
+      and that one.
+      stick_lead (0 to 4, default 0): camera updates the game's control angle runs ahead of the
+      camera matrix the patch reads. Games that read the pad, then move the camera, then the
+      player with it (Wind Waker, Twilight Princess: 1) would otherwise let each camera turn
+      bend the character's path by as much: hold up, swing the game camera, and compare the
+      character's heading before and after (Workflow 7).
   vr.set_camera_anchor_matrices(head, camera [, kind [, heading]]) -> bool   -- this field's
       anchor from the head bone's world transform (a GameCube Mtx address) and the game camera's
       matrix: kind "view" (default: world -> view, what the game multiplies its models by) or
@@ -178,6 +193,10 @@ Camera Anchor (first-person view: the VR camera in a character's head, from the 
   vr.set_camera_anchor(r00, r01, r02, tx, r10, r11, r12, ty, r20, r21, r22, tz)   -- an anchor
       the patch composed itself: the rig in game view space (columns = its axes, translation = its
       position, game units). No smoothing; upm from the options.
+  vr.set_camera_anchor_stick(enabled)   -- whether the options' stick mode turns the stick, kept
+      until the next call (default true). Call it every field with false while the game reads the
+      stick for something else than moving its character: a menu, a dialog's choices, a
+      cutscene. Find the game's state byte with cheat_search or a logging patch (Workflow 7).
   vr.camera_anchor_active() -> bool   -- the Camera Anchor setting is on and a VR session runs in
       stereo: only then does an anchor move the view (and hide the manifest's `hide` draws).
   Do not combine "level"/"fixed"/"full" with vr.set_camera_pitch_source: they already remove the

@@ -95,6 +95,9 @@ struct ScriptContext
   // This field's anchor, taken by the engine after the hooks (VR::CameraAnchorSource).
   std::optional<VR::CameraAnchorMath::Anchor> camera_anchor;
   bool warned_camera_anchor = false;
+  // vr.set_camera_anchor_stick: false while the game reads the stick for something else than
+  // moving its character (a menu, a dialog).
+  bool camera_anchor_stick = true;
 };
 
 ScriptContext* GetContext(lua_State* L);

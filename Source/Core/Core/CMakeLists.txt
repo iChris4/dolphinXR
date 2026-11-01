@@ -753,6 +753,8 @@ if(ENABLE_VR)
     VRPatch/PatchTypes.h
     VRPatch/Prelude.cpp
     VRPatch/ScriptContext.h
+    VRPatch/StickTurn.cpp
+    VRPatch/StickTurn.h
     VRPatch/VRPatch.h
     VRPatch/VRPatchManager.cpp
     VRPatch/VRSettingsTable.cpp

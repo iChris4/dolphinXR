@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <optional>
+#include <utility>
 
 #include "VideoCommon/VR/CameraAnchorMath.h"
 
@@ -299,6 +300,133 @@ TEST(CameraAnchorMath, ZUpWorlds)
   EXPECT_FALSE(LevelBasis({0.0f, 0.0f, 1.0f}, {0, 0, 1}, 0));
 }
 
+// The stick: up walks straight ahead in the view. The rig's heading is 220 degrees, the game
+// camera's 0 (pitched) or 70 (turned left): the stick turns by the difference.
+TEST(CameraAnchorMath, StickTurnsFromTheCameraToTheView)
+{
+  Options options;
+  options.stick = Stick::View;
+  const std::pair<Mtx34, float> cases[] = {{PITCHED_VIEW, -140.0f}, {TURNED_VIEW, 150.0f}};
+  for (const auto& [view, expected] : cases)
+  {
+    State state;
+    const std::optional<Anchor> anchor = Compose(HEAD, nullptr, view, options, 1.0f, &state);
+    ASSERT_TRUE(anchor);
+    EXPECT_FALSE(anchor->stick_head);
+    const std::optional<float> turn = StickTurn(*anchor, nullptr);
+    ASSERT_TRUE(turn);
+    EXPECT_NEAR(*turn / DEG, expected, 0.01f);
+  }
+  // With the rig in the game camera's orientation there is nothing to turn.
+  options.rotation = Rotation::Camera;
+  State camera_state;
+  const std::optional<Anchor> camera =
+      Compose(HEAD, nullptr, TURNED_VIEW, options, 1.0f, &camera_state);
+  ASSERT_TRUE(camera);
+  EXPECT_NEAR(*StickTurn(*camera, nullptr), 0.0f, 1e-5f);
+  // Stick::Camera, the default: the game's own.
+  State default_state;
+  const std::optional<Anchor> game = Compose(HEAD, nullptr, TURNED_VIEW, {}, 1.0f, &default_state);
+  ASSERT_TRUE(game);
+  EXPECT_FALSE(StickTurn(*game, nullptr));
+}
+
+// Where the headset looks: its yaw adds, also when it looks straight down or up.
+TEST(CameraAnchorMath, StickFollowsTheHead)
+{
+  // Yaw about Y, then pitch about X (x, y, z, w).
+  const auto head = [](float yaw_deg, float pitch_deg) {
+    const float cy = std::cos(yaw_deg * DEG / 2), sy = std::sin(yaw_deg * DEG / 2);
+    const float cp = std::cos(pitch_deg * DEG / 2), sp = std::sin(pitch_deg * DEG / 2);
+    return std::array<float, 4>{cy * sp, sy * cp, -sy * sp, cy * cp};
+  };
+  EXPECT_NEAR(HeadYaw(head(30, 0)) / DEG, 30.0f, 0.01f);
+  EXPECT_NEAR(HeadYaw(head(-45, 20)) / DEG, -45.0f, 0.01f);
+  EXPECT_NEAR(HeadYaw(head(30, -60)) / DEG, 30.0f, 0.01f);
+  EXPECT_NEAR(HeadYaw(head(30, -90)) / DEG, 30.0f, 0.01f);
+  EXPECT_NEAR(HeadYaw(head(30, 90)) / DEG, 30.0f, 0.01f);
+
+  Options options;
+  options.stick = Stick::Head;
+  State state;
+  const std::optional<Anchor> anchor = Compose(HEAD, nullptr, PITCHED_VIEW, options, 1.0f, &state);
+  ASSERT_TRUE(anchor);
+  EXPECT_TRUE(anchor->stick_head);
+  const std::array<float, 4> looking_left = head(30, -10);
+  EXPECT_NEAR(*StickTurn(*anchor, &looking_left) / DEG, -110.0f, 0.01f);
+  EXPECT_NEAR(*StickTurn(*anchor, nullptr) / DEG, -140.0f, 0.01f);
+  // Through the half turn: wrapped.
+  const std::array<float, 4> looking_back = head(-60, 0);
+  EXPECT_NEAR(*StickTurn(*anchor, &looking_back) / DEG, 160.0f, 0.01f);
+
+  // The view with Fixed is where the headset looks: its rig never turns.
+  options.stick = Stick::View;
+  options.rotation = Rotation::Fixed;
+  State fixed_state;
+  const std::optional<Anchor> fixed =
+      Compose(HEAD, nullptr, PITCHED_VIEW, options, 1.0f, &fixed_state);
+  ASSERT_TRUE(fixed);
+  EXPECT_TRUE(fixed->stick_head);
+}
+
+// Facing: the heading bone's own heading, not the smoothed rig the view shows.
+TEST(CameraAnchorMath, StickAlongTheFacing)
+{
+  Options options;
+  options.stick = Stick::Facing;
+  options.heading_smoothing = 0.9f;
+  State state;
+  ASSERT_TRUE(Compose(HEAD, nullptr, PITCHED_VIEW, options, 1.0f, &state));
+  // Link turns 30 degrees to his left: the view lags behind, the stick does not.
+  const Mtx34 turned = Make(RotY(70), {1, 2, 3});
+  State view_state = state;
+  const std::optional<Anchor> anchor =
+      Compose(turned, nullptr, PITCHED_VIEW, options, 1.0f, &state);
+  ASSERT_TRUE(anchor);
+  EXPECT_NEAR(*StickTurn(*anchor, nullptr) / DEG, -110.0f, 0.01f);
+  options.stick = Stick::View;
+  const std::optional<Anchor> view =
+      Compose(turned, nullptr, PITCHED_VIEW, options, 1.0f, &view_state);
+  ASSERT_TRUE(view);
+  EXPECT_LT(*StickTurn(*view, nullptr) / DEG, -130.0f);
+}
+
+// The game camera turning 5 degrees per update (every other field): with stick_lead 1 the stick
+// aims from the camera the game will move the character with, one update ahead.
+TEST(CameraAnchorMath, StickLeadsTheTurningCamera)
+{
+  Options options;
+  options.stick = Stick::Facing;
+  options.stick_lead = 1.0f;
+  State state;
+  // World -> view of a camera whose heading is `deg` (+ = left).
+  const auto view = [](float deg) { return Make(RotY(-deg), {0, 0, -10}); };
+  const auto turn = [&](float deg) {
+    const std::optional<Anchor> anchor = Compose(HEAD, nullptr, view(deg), options, 1.0f, &state);
+    EXPECT_TRUE(anchor);
+    return anchor ? *StickTurn(*anchor, nullptr) / DEG : 0.0f;
+  };
+  EXPECT_NEAR(turn(0), -140.0f, 0.01f);
+  // The rig's 220 degrees from the camera's next 10.
+  EXPECT_NEAR(turn(5), -150.0f, 0.01f);
+  EXPECT_NEAR(turn(5), -150.0f, 0.01f);
+  EXPECT_NEAR(turn(5), -150.0f, 0.01f);
+  // Three fields without a move: it stopped.
+  EXPECT_NEAR(turn(5), -145.0f, 0.01f);
+  // A cut is no turn.
+  EXPECT_NEAR(turn(65), 155.0f, 0.01f);
+  // Without a lead, the camera as it is.
+  options.stick_lead = 0.0f;
+  EXPECT_NEAR(turn(70), 150.0f, 0.01f);
+}
+
+TEST(CameraAnchorMath, TurnsTheStick)
+{
+  ExpectNear(TurnStick(0, 1, 90 * DEG), {-1, 0});
+  ExpectNear(TurnStick(1, 0, 90 * DEG), {0, 1});
+  ExpectNear(TurnStick(0, 100, -140 * DEG), {64.2788f, -76.6044f}, 1e-3f);
+}
+
 TEST(CameraAnchorMath, ParsesNames)
 {
   EXPECT_EQ(ParseRotation("level"), Rotation::Level);
@@ -309,4 +437,8 @@ TEST(CameraAnchorMath, ParsesNames)
   EXPECT_FALSE(ParseAxis("w"));
   EXPECT_EQ(ParseCameraKind("world"), CameraKind::World);
   EXPECT_FALSE(ParseCameraKind("eye"));
+  EXPECT_EQ(ParseStick("facing"), Stick::Facing);
+  EXPECT_EQ(ParseStick("view"), Stick::View);
+  EXPECT_EQ(ParseStick("head"), Stick::Head);
+  EXPECT_FALSE(ParseStick("body"));
 }

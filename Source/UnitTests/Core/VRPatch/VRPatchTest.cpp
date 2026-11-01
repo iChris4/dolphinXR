@@ -18,7 +18,9 @@
 #include "Core/VRPatch/PatchIni.h"
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/PatchTypes.h"
+#include "Core/VRPatch/StickTurn.h"
 #include "Core/VRPatch/VRPatch.h"
+#include "InputCommon/GCPadStatus.h"
 #include "VideoCommon/VR/PatchFlags.h"
 
 using namespace VRPatch;
@@ -1076,4 +1078,71 @@ TEST(VRPatch, CameraAnchorHideRadius)
   // The view is 1 m (1.5 units) above the head; the hide stays on the head.
   ExpectNearArray(anchor->position, {1, 3.5f, -7});
   ExpectFrame("assert(not pcall(vr.set_camera_anchor_options, {hide_radius = 'big'}))");
+}
+
+// stick = "view": the anchor turns the stick from the game camera's heading to the view's, on the
+// fields the patch lets it (vr.set_camera_anchor_stick).
+TEST(VRPatch, CameraAnchorStick)
+{
+  Harness h;
+  // The head faces -X, to the left of a camera looking down -Z.
+  WriteMtx(h.memory, 0x80010000, {0, 0, -1, 1, 0, 1, 0, 2, 1, 0, 0, 3});
+  WriteMtx(h.memory, 0x80010100, {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -10});
+  PatchScript script("anchor");
+  ASSERT_TRUE(h.Load(script, R"(
+    function on_load() vr.set_camera_anchor_options{stick = "view"} end
+    local fields = 0
+    function on_frame()
+      fields = fields + 1
+      vr.set_camera_anchor_stick(fields ~= 2)
+      if fields == 3 then
+        vr.set_camera_anchor(0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, 0)
+      else
+        vr.set_camera_anchor_matrices(0x80010000, 0x80010100)
+      end
+    end
+  )")) << script.Error();
+  ASSERT_TRUE(script.Call(Hook::OnLoad, h.env)) << script.Error();
+  for (int field = 1; field <= 3; ++field)
+  {
+    SCOPED_TRACE(field);
+    ASSERT_TRUE(script.Call(Hook::OnFrame, h.env)) << script.Error();
+    const auto anchor = script.TakeCameraAnchor();
+    ASSERT_TRUE(anchor);
+    const std::optional<float> turn = VR::CameraAnchorMath::StickTurn(*anchor, nullptr);
+    EXPECT_EQ(turn.has_value(), field != 2);
+    if (turn)
+      EXPECT_NEAR(*turn, 1.5707963f, 1e-4f);
+  }
+  ExpectFrame("assert(not pcall(vr.set_camera_anchor_options, {stick = 'body'}))");
+  ExpectFrame("assert(not pcall(vr.set_camera_anchor_stick, 1))");
+}
+
+// The turn reaches the first GameCube controller's main stick only.
+TEST(VRPatch, TurnsTheFirstControllersStick)
+{
+  GCPadStatus up;
+  up.stickY = 228;
+  GCPadStatus status = up;
+  StickTurn::Set(std::nullopt);
+  StickTurn::Apply(0, &status);
+  EXPECT_EQ(status.stickX, 128);
+  EXPECT_EQ(status.stickY, 228);
+  // A quarter turn to the left: up walks left.
+  StickTurn::Set(1.5707963f);
+  StickTurn::Apply(0, &status);
+  EXPECT_EQ(status.stickX, 28);
+  EXPECT_EQ(status.stickY, 128);
+  status = up;
+  StickTurn::Apply(1, &status);
+  EXPECT_EQ(status.stickY, 228);
+  // Within the stick's radius.
+  GCPadStatus corner;
+  corner.stickX = 228;
+  corner.stickY = 228;
+  StickTurn::Set(-0.7853982f);
+  StickTurn::Apply(0, &corner);
+  EXPECT_EQ(corner.stickX, 255);
+  EXPECT_EQ(corner.stickY, 128);
+  StickTurn::Set(std::nullopt);
 }

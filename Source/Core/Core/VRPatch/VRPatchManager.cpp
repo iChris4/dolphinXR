@@ -42,6 +42,7 @@
 #include "Core/VRPatch/MemoryAccess.h"
 #include "Core/VRPatch/PatchIni.h"
 #include "Core/VRPatch/PatchScript.h"
+#include "Core/VRPatch/StickTurn.h"
 #include "Core/VRPatch/VRSettingsTable.h"
 #include "VideoCommon/VR/CameraAnchorSource.h"
 #include "VideoCommon/VR/CameraPitch.h"
@@ -677,7 +678,9 @@ void UpdatePointerKeptOnScreen()
 // (vr.set_camera_anchor*), and which patches' hides apply: those whose anchor is recent while an
 // anchor holds the VR camera (the video thread reports it), so the head the view is in disappears
 // with the anchor's engagement and comes back once the camera has glided out of it.
-void UpdateCameraAnchorSource()
+// Publishes this field's Camera Anchor, the flags of the head hides and the stick's turn. `input`:
+// this field's VR input (the headset's yaw for the stick), null when no hook ran.
+void UpdateCameraAnchorSource(const VRInputFrame* input = nullptr)
 {
   // About 5 s: longer than the engine holds and glides back an anchor that stopped.
   constexpr int ANCHOR_RECENT_FIELDS = 300;
@@ -699,6 +702,15 @@ void UpdateCameraAnchorSource()
     }
   }
   VR::CameraAnchorSource::Set(published);
+
+  // The stick turns while the anchor holds the camera, as the video thread reports.
+  std::optional<float> stick;
+  if (published && VR::CameraAnchorSource::IsEngaged())
+  {
+    const bool head = input != nullptr && input->head.valid;
+    stick = VR::CameraAnchorMath::StickTurn(*published, head ? &input->head.orientation : nullptr);
+  }
+  StickTurn::Set(stick);
 
   std::vector<std::string> flags;
   if (VR::CameraAnchorSource::IsEngaged())
@@ -1184,7 +1196,7 @@ void RunHooks(const ScriptEnvironment& env, bool frame_hooks)
   DropStopped();
   UpdatePadHolds();
   if (frame_hooks)
-    UpdateCameraAnchorSource();
+    UpdateCameraAnchorSource(env.input);
   UpdatePatchFlags();
 }
 
@@ -1290,6 +1302,7 @@ void OnGameUnloaded(const Core::CPUThreadGuard* guard)
   VR::PatchFlags::Set({});
   VR::PatchHides::Set({});
   VR::CameraAnchorSource::Set(std::nullopt);
+  StickTurn::Set(std::nullopt);
   m.anchor_flags.clear();
   VR::CameraPitch::SetSource(std::nullopt);
   Wiimote::SetOpenXRPointerKeptOnScreen(false);

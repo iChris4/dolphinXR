@@ -86,6 +86,35 @@ std::optional<Mat33> BoneBasis(const Mtx34& bone, const Options& options)
                      {s * x[0] + c * z[0], s * x[1] + c * z[1], s * x[2] + c * z[2]});
 }
 
+// Follows the game camera's heading about the world's up from update to update: its last turn,
+// while it keeps turning (a game at 30 fps moves it every other field; a cut is no turn).
+float TrackCameraTurn(const Mat33& view_rotation, const Vec3& up, State* state)
+{
+  constexpr float PI = 3.14159265359f;
+  constexpr float CUT = 30.0f * DEG_TO_RAD;
+  // The camera's axes in the world: the view rotation transposed.
+  const Mat33 camera = {view_rotation[0], view_rotation[3], view_rotation[6],
+                        view_rotation[1], view_rotation[4], view_rotation[7],
+                        view_rotation[2], view_rotation[5], view_rotation[8]};
+  const float heading = RigYaw(camera, up);
+  if (state->camera_valid)
+  {
+    const float turn = std::remainder(heading - state->camera_heading, 2.0f * PI);
+    if (std::abs(turn) > 1e-5f)
+    {
+      state->camera_turn = std::abs(turn) < CUT ? turn : 0.0f;
+      state->camera_still = 0;
+    }
+    else if (++state->camera_still >= 3)
+    {
+      state->camera_turn = 0.0f;
+    }
+  }
+  state->camera_valid = true;
+  state->camera_heading = heading;
+  return state->camera_turn;
+}
+
 // The rig in world space for Level, Fixed and Full.
 std::optional<Mat33> WorldRig(const Mtx34& heading_bone, const Options& options, State* state)
 {
@@ -345,6 +374,21 @@ std::optional<Anchor> Compose(const Mtx34& head, const Mtx34* heading, const Mtx
   Vec3 up = Rotate(view_rotation, AxisVector(options.up_axis));
   if (Normalize(&up))
     anchor.hide_up = up;
+  // The stick: up walks along the character's facing, or the rig as it is shown (smoothed), from
+  // the camera the game will move him with (stick_lead updates ahead of this one).
+  const float camera_turn = TrackCameraTurn(view_rotation, AxisVector(options.up_axis), state);
+  Mat33 stick_rig = anchor.rotation;
+  if (options.stick == Stick::Facing)
+  {
+    const std::optional<Mat33> facing = LevelBasis(Column(heading_bone, options.forward_axis),
+                                                   AxisVector(options.up_axis), options.yaw_deg);
+    if (facing)
+      stick_rig = Multiply33(view_rotation, *facing);
+  }
+  anchor.stick_turn = options.stick != Stick::Camera;
+  anchor.stick_yaw = RigYaw(stick_rig, anchor.hide_up) - options.stick_lead * camera_turn;
+  anchor.stick_head = options.stick == Stick::Head ||
+                      (options.stick == Stick::View && options.rotation == Rotation::Fixed);
   return anchor;
 }
 
@@ -357,6 +401,64 @@ bool IsInHideRegion(const Anchor& anchor, const Vec3& point)
   if (!(Dot(d, d) <= anchor.hide_radius * anchor.hide_radius))
     return false;
   return anchor.hide_below < 0.0f || Dot(d, anchor.hide_up) >= -anchor.hide_below;
+}
+
+float RigYaw(const Mat33& rig, const Vec3& up)
+{
+  Vec3 u = up;
+  if (!Normalize(&u))
+    return 0.0f;
+  // A direction's heading on the plane normal to u, or nothing when it is (nearly) along u.
+  const auto flatten = [&u](const Vec3& v) -> std::optional<Vec3> {
+    const float along = Dot(v, u);
+    Vec3 flat = {v[0] - u[0] * along, v[1] - u[1] * along, v[2] - u[2] * along};
+    if (Length(flat) < 0.1f * Length(v) || !Normalize(&flat))
+      return std::nullopt;
+    return flat;
+  };
+  // The camera looks along -Z. Looking straight down, its up (+Y) points ahead on the ground;
+  // straight up, its down does.
+  std::optional<Vec3> camera = flatten({0.0f, 0.0f, -1.0f});
+  if (!camera)
+    camera = flatten(u[2] > 0.0f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{0.0f, -1.0f, 0.0f});
+  const Vec3 z = GetColumn(rig, 2);
+  std::optional<Vec3> forward = flatten({-z[0], -z[1], -z[2]});
+  if (!forward)
+  {
+    const Vec3 y = GetColumn(rig, 1);
+    const float down = Dot(z, u) > 0.0f ? 1.0f : -1.0f;
+    forward = flatten({y[0] * down, y[1] * down, y[2] * down});
+  }
+  if (!camera || !forward)
+    return 0.0f;
+  return std::atan2(Dot(Cross(*camera, *forward), u), Dot(*camera, *forward));
+}
+
+float HeadYaw(const std::array<float, 4>& orientation)
+{
+  const auto [x, y, z, w] = orientation;
+  // The rotation's columns: the headset's Y (up) and Z (back) axes.
+  const Vec3 up = {2.0f * (x * y - w * z), 1.0f - 2.0f * (x * x + z * z), 2.0f * (y * z + w * x)};
+  const Vec3 back = {2.0f * (x * z + w * y), 2.0f * (y * z - w * x), 1.0f - 2.0f * (x * x + y * y)};
+  return RigYaw(FromColumns(Cross(up, back), up, back), {0.0f, 1.0f, 0.0f});
+}
+
+std::optional<float> StickTurn(const Anchor& anchor, const std::array<float, 4>* head)
+{
+  if (!anchor.stick_turn)
+    return std::nullopt;
+  float yaw = anchor.stick_yaw;
+  if (anchor.stick_head && head != nullptr)
+    yaw += HeadYaw(*head);
+  if (!std::isfinite(yaw))
+    return std::nullopt;
+  return std::remainder(yaw, 6.28318530718f);
+}
+
+std::array<float, 2> TurnStick(float x, float y, float radians)
+{
+  const float c = std::cos(radians), s = std::sin(radians);
+  return {x * c - y * s, x * s + y * c};
 }
 
 std::optional<Rotation> ParseRotation(std::string_view name)
@@ -388,6 +490,19 @@ std::optional<Axis> ParseAxis(std::string_view name)
     return Axis::NegY;
   if (name == "-z")
     return Axis::NegZ;
+  return std::nullopt;
+}
+
+std::optional<Stick> ParseStick(std::string_view name)
+{
+  if (name == "camera")
+    return Stick::Camera;
+  if (name == "facing")
+    return Stick::Facing;
+  if (name == "view")
+    return Stick::View;
+  if (name == "head")
+    return Stick::Head;
   return std::nullopt;
 }
 

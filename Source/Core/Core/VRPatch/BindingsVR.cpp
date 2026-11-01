@@ -4,6 +4,7 @@
 // vr.*: the VR controllers and headset (raw functions; the prelude wraps the poses into objects).
 // See ScriptContext.h for the rules a binding follows.
 
+#include <algorithm>
 #include <bit>
 #include <cctype>
 #include <cmath>
@@ -393,6 +394,25 @@ bool ReadAxisField(lua_State* L, const char* key, CAM::Axis fallback, CAM::Axis*
   return ok;
 }
 
+// The stick mode named by the field "stick" of the table at 1 (Camera when absent). False when it
+// is not a mode name.
+bool ReadStickField(lua_State* L, CAM::Stick* out)
+{
+  *out = CAM::Stick::Camera;
+  const int type = lua_getfield(L, 1, "stick");
+  bool ok = type == LUA_TNIL;
+  if (type == LUA_TSTRING)
+  {
+    if (const std::optional<CAM::Stick> stick = CAM::ParseStick(lua_tostring(L, -1)))
+    {
+      *out = *stick;
+      ok = true;
+    }
+  }
+  lua_pop(L, 1);
+  return ok;
+}
+
 // The number field `key` of the table at 1, or nullopt when absent. False when it is not a
 // finite number.
 bool ReadNumberField(lua_State* L, const char* key, std::optional<double>* out)
@@ -412,9 +432,9 @@ bool ReadNumberField(lua_State* L, const char* key, std::optional<double>* out)
 }
 
 // vr.set_camera_anchor_options{rotation=, yaw=, right=, up=, forward=, upm=, up_axis=,
-// forward_axis=, bone_up_axis=, smoothing=, heading_smoothing=, hide_radius=, hide_below=}: how
-// the anchors of
-// vr.set_camera_anchor_matrices are composed. Restarts the smoothing.
+// forward_axis=, bone_up_axis=, smoothing=, heading_smoothing=, hide_radius=, hide_below=,
+// stick=, stick_lead=}: how the anchors of vr.set_camera_anchor_matrices are composed. Restarts the
+// smoothing.
 int VRSetCameraAnchorOptions(lua_State* L)
 {
   luaL_checktype(L, 1, LUA_TTABLE);
@@ -438,21 +458,26 @@ int VRSetCameraAnchorOptions(lua_State* L)
   {
     return luaL_argerror(L, 1, "an axis is \"x\", \"y\", \"z\", \"-x\", \"-y\" or \"-z\"");
   }
+  if (!ReadStickField(L, &options.stick))
+    return luaL_argerror(L, 1, "stick is \"camera\", \"facing\", \"view\" or \"head\"");
   std::optional<double> yaw, right, up, forward, upm, smoothing, heading_smoothing, hide_radius,
-      hide_below;
+      hide_below, stick_lead;
   if (!ReadNumberField(L, "yaw", &yaw) || !ReadNumberField(L, "right", &right) ||
       !ReadNumberField(L, "up", &up) || !ReadNumberField(L, "forward", &forward) ||
       !ReadNumberField(L, "upm", &upm) || !ReadNumberField(L, "smoothing", &smoothing) ||
       !ReadNumberField(L, "heading_smoothing", &heading_smoothing) ||
       !ReadNumberField(L, "hide_radius", &hide_radius) ||
-      !ReadNumberField(L, "hide_below", &hide_below))
+      !ReadNumberField(L, "hide_below", &hide_below) ||
+      !ReadNumberField(L, "stick_lead", &stick_lead))
   {
     return luaL_argerror(L, 1,
-                         "yaw, right, up, forward, upm, the smoothings and the hide are numbers");
+                         "yaw, right, up, forward, upm, the smoothings, the hide and "
+                         "stick_lead are numbers");
   }
   options.yaw_deg = static_cast<float>(yaw.value_or(0.0));
   options.hide_radius = static_cast<float>(hide_radius.value_or(0.0));
   options.hide_below = static_cast<float>(hide_below.value_or(-1.0));
+  options.stick_lead = static_cast<float>(std::clamp(stick_lead.value_or(0.0), 0.0, 4.0));
   options.offset_m = {static_cast<float>(right.value_or(0.0)), static_cast<float>(up.value_or(0.0)),
                       static_cast<float>(forward.value_or(0.0))};
   ScriptContext* context = GetContext(L);
@@ -483,6 +508,12 @@ int VRSetCameraAnchor(lua_State* L)
   anchor.position = CAM::Translation(m);
   anchor.rotation = CAM::Basis(m);
   anchor.units_per_meter = context->camera_anchor_units_per_meter;
+  // The rig's own Y is the up its heading is measured about.
+  const CAM::Stick stick = context->camera_anchor_options.stick;
+  anchor.stick_turn = stick != CAM::Stick::Camera && context->camera_anchor_stick;
+  anchor.stick_yaw =
+      CAM::RigYaw(anchor.rotation, {anchor.rotation[1], anchor.rotation[4], anchor.rotation[7]});
+  anchor.stick_head = stick == CAM::Stick::Head;
   context->camera_anchor = anchor;
   return 0;
 }
@@ -573,6 +604,7 @@ bool ComposeCameraAnchor(ScriptContext* context, lua_Integer head_address,
     return false;
   }
   anchor->units_per_meter = context->camera_anchor_units_per_meter;
+  anchor->stick_turn = anchor->stick_turn && context->camera_anchor_stick;
   context->camera_anchor = *anchor;
   return true;
 }
@@ -592,6 +624,16 @@ int VRSetCameraAnchorMatrices(lua_State* L)
     heading = luaL_checkinteger(L, 4);
   lua_pushboolean(L, ComposeCameraAnchor(GetContext(L), head, camera, *kind, heading));
   return 1;
+}
+
+// vr.set_camera_anchor_stick(enabled): whether the options' stick mode turns the main stick (kept
+// until the next call); false while the game reads the stick for something else than moving its
+// character: a menu, a dialog, a cutscene.
+int VRSetCameraAnchorStick(lua_State* L)
+{
+  luaL_checktype(L, 1, LUA_TBOOLEAN);
+  GetContext(L)->camera_anchor_stick = lua_toboolean(L, 1) != 0;
+  return 0;
 }
 
 // vr.camera_anchor_active() -> bool: a Camera Anchor applies (the setting is on, a VR session
@@ -642,6 +684,7 @@ void RegisterVRBindings(lua_State* L)
       {"set_camera_anchor_options", VRSetCameraAnchorOptions},
       {"set_camera_anchor", VRSetCameraAnchor},
       {"set_camera_anchor_matrices", VRSetCameraAnchorMatrices},
+      {"set_camera_anchor_stick", VRSetCameraAnchorStick},
       {"camera_anchor_active", VRCameraAnchorActive},
       {nullptr, nullptr},
   };

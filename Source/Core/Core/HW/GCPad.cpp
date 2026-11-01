@@ -5,6 +5,9 @@
 
 #include "Common/Common.h"
 #include "Core/HW/GCPadEmu.h"
+#ifdef ENABLE_VR
+#include "Core/VRPatch/StickTurn.h"
+#endif
 #include "InputCommon/ControllerEmu/ControlGroup/ControlGroup.h"
 #include "InputCommon/GCPadStatus.h"
 #include "InputCommon/InputConfig.h"
@@ -55,7 +58,12 @@ bool IsInitialized()
 
 GCPadStatus GetStatus(int pad_num)
 {
-  return static_cast<GCPad*>(s_config.GetController(pad_num))->GetInput();
+  GCPadStatus status = static_cast<GCPad*>(s_config.GetController(pad_num))->GetInput();
+#ifdef ENABLE_VR
+  // A VR patch's first-person camera: up walks where the view looks, not the game camera.
+  VRPatch::StickTurn::Apply(pad_num, &status);
+#endif
+  return status;
 }
 
 ControllerEmu::ControlGroup* GetGroup(int pad_num, PadGroup group)
