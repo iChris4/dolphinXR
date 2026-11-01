@@ -257,6 +257,19 @@ void HideObjectAddEditDialog::CreateWidgets()
   entry_button_layout->addWidget(m_entry_add);
   entry_button_layout->addWidget(m_entry_remove);
   entry_button_layout->addStretch();
+#ifdef ENABLE_VR
+  m_pick_button = new QPushButton(tr("Pick on Screen"));
+  m_pick_button->setToolTip(
+      tr("Then click an object in the game window: the code lines are made from the start of "
+         "its vertex data, and hide it. The game must be running in its own window."));
+  entry_button_layout->addWidget(m_pick_button);
+  m_pick_label = new QLabel;
+  m_pick_label->setWordWrap(true);
+  // Shown once there is something to say.
+  m_pick_label->hide();
+  m_pick_timer = new QTimer(this);
+  m_pick_timer->setInterval(100);
+#endif
 
   auto* type_label = new QLabel(tr("Size:"));
   m_type_combo = new QComboBox;
@@ -287,26 +300,7 @@ void HideObjectAddEditDialog::CreateWidgets()
   m_up_button->setToolTip(tooltip);
   m_down_button->setToolTip(tooltip);
 
-  auto* hunt_layout = new QHBoxLayout;
-#ifdef ENABLE_VR
-  m_pick_button = new QPushButton(tr("Pick on Screen"));
-  m_pick_button->setToolTip(
-      tr("Then click an object in the game window: the code is made from the start of its "
-         "vertex data, and hides it. Shorten or extend it with the lines below. The game must be "
-         "running in its own window."));
-  hunt_layout->addWidget(m_pick_button);
-  m_pick_label = new QLabel;
-  m_pick_label->setWordWrap(true);
-  // Shown once there is something to say.
-  m_pick_label->hide();
-  m_pick_timer = new QTimer(this);
-  m_pick_timer->setInterval(100);
-#endif
-  hunt_layout->addStretch();
-
   auto* button_box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-  // At the bottom, on the line of OK and Cancel.
-  hunt_layout->addWidget(button_box);
 
   auto* grid = new QGridLayout;
   grid->addWidget(name_label, 0, 0);
@@ -327,7 +321,7 @@ void HideObjectAddEditDialog::CreateWidgets()
 #ifdef ENABLE_VR
   layout->addWidget(m_pick_label);
 #endif
-  layout->addLayout(hunt_layout);
+  layout->addWidget(button_box);
 
   connect(button_box, &QDialogButtonBox::accepted, this, &HideObjectAddEditDialog::OnAccept);
   connect(button_box, &QDialogButtonBox::rejected, this, &QDialog::reject);
