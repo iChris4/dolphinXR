@@ -59,6 +59,8 @@ Workflow 5: 60fps code
 4. test_memory_write reference=ref writes={address, type, value=1} (rewritten at every field like an AR 04 code); frames/field should go to about 1.0. Then check the game speed: timers, animations and physics must not run twice as fast (watch_memory a timer, or ask the user). Many games need more than one write.
 5. add_code type=ar with the AR lines (04xxxxxx 00000001 writes a u32 every frame), enabled, then ask the user to play-test.
 - A 60fps code doubles the GPU work: check performance on Quest.
+- Above 60 fps, at the headset's refresh rate: a game that waits for the retrace cannot show frames faster than the VBI, and a frame rate above it plays in slow motion. Write a VR patch that sets both: the game's rate from vr.refresh_rate(), and vr.set_setting("ForcedVBIFrequency", rate) (30-240 Hz; the emulated CPU speeds up by the same factor). Example: Sys/VRPatches/GUP/headset-frame-rate.lua (Shadow the Hedgehog).
+- RenderWare games take their frame rate from the video mode: RwEngineGetCurrentVideoMode() (returns an index) then RwEngineGetVideoModeInfo(&mode, index), then a load of mode.refRate (RwVideoMode: width, height, depth, flags, refRate at +0x10). The GameCube driver reports 0, so the game falls back to li 50 / li 60 by TV format: look for the li 0x32 / li 0x3C pair after that call. Replacing the refRate load by li r0, <rate> sets the game's rate; its time steps divide by it. Shadow re-reads it every frame (one instruction applies at once); a game that reads it once at boot needs the patch before that.
 )INSTRUCTIONS"
          R"INSTRUCTIONS(
 Workflow 6: VR control patch (a game object follows the VR controller, motion controls)
