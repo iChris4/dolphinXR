@@ -451,6 +451,28 @@ void Engine::ApplyCodes(const std::vector<HideObject>& codes)
   m_updating.store(false, std::memory_order_release);
 }
 
+void Engine::SetPinkPreview(const std::vector<HideObjectEntry>& entries)
+{
+  std::vector<SkipEntry> patterns;
+  patterns.reserve(entries.size());
+  for (const HideObjectEntry& entry : entries)
+    patterns.push_back(BuildSkipEntry(entry));
+  std::lock_guard lock(m_pink_mutex);
+  m_pink_entries = std::move(patterns);
+  m_has_pink_preview.store(!m_pink_entries.empty(), std::memory_order_relaxed);
+}
+
+bool Engine::MatchesPinkPreview(const u8* src) const
+{
+  std::lock_guard lock(m_pink_mutex);
+  for (const SkipEntry& entry : m_pink_entries)
+  {
+    if (std::memcmp(src, entry.data(), entry.size()) == 0)
+      return true;
+  }
+  return false;
+}
+
 void Engine::SetCaptureEnabled(bool enabled)
 {
   m_capture_enabled.store(enabled, std::memory_order_release);

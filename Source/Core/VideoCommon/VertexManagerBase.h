@@ -140,6 +140,9 @@ public:
 
   void Flush();
   bool HasSendableVertices() const { return !m_is_flushed && !m_cull_all; }
+  // The current draw holds vertex data a hide code's pink preview matches
+  // (HideObjectEngine::SetPinkPreview): it is drawn pink.
+  void MarkPinkPreviewBatch() { m_pink_preview_batch = true; }
 
   void DoState(PointerWrap& p);
 
@@ -323,6 +326,7 @@ private:
 
   std::unique_ptr<AbstractShader> m_pink_pixel_shader;
   bool m_force_pink_ps = false;
+  bool m_pink_preview_batch = false;
   u64 m_ticks_elapsed = 0;
 
   Common::EventHook m_frame_end_event;

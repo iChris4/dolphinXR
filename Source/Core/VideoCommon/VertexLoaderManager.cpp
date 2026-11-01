@@ -472,8 +472,11 @@ int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int coun
       count -= run;
       DataReader dst = g_vertex_manager->PrepareForAdditionalData(primitive, run, stride,
                                                                   cullall || can_cpu_cull);
-      HideObjectEngine::Engine::GetInstance().CaptureVertexPrefix(
-          src, static_cast<size_t>(run) * loader->m_vertex_size);
+      HideObjectEngine::Engine& hide_engine = HideObjectEngine::Engine::GetInstance();
+      hide_engine.CaptureVertexPrefix(src, static_cast<size_t>(run) * loader->m_vertex_size);
+      // A picked hide code's preview: what it would hide is drawn pink.
+      if (hide_engine.HasPinkPreview() && hide_engine.MatchesPinkPreview(src)) [[unlikely]]
+        g_vertex_manager->MarkPinkPreviewBatch();
 
       const int num_loaded = loader->RunVertices(src, dst.GetPointer(), run);
       src += loader->m_vertex_size * max_vertices;

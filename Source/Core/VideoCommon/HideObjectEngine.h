@@ -111,6 +111,13 @@ public:
 
   // Called from VertexLoaderManager::RunVertices — returns true if src matches any active code
   bool ShouldHide(const u8* src) const;
+
+  // The hunters' pick preview (VR::DrawPick): vertex data starting with one of these lines is
+  // drawn pink instead of hidden, so a picked code shows what it would hide. Empty: none.
+  void SetPinkPreview(const std::vector<HideObjectEntry>& entries);
+  bool HasPinkPreview() const { return m_has_pink_preview.load(std::memory_order_relaxed); }
+  // Called from VertexLoaderManager::RunVertices (video thread), like ShouldHide.
+  bool MatchesPinkPreview(const u8* src) const;
   bool HasCodes() const;
 
 private:
@@ -128,6 +135,10 @@ private:
 
   mutable std::mutex m_capture_mutex;
   std::atomic<bool> m_capture_enabled{false};
+
+  mutable std::mutex m_pink_mutex;
+  std::vector<SkipEntry> m_pink_entries;
+  std::atomic<bool> m_has_pink_preview{false};
   std::vector<SkipEntry> m_pending_capture_prefixes;
   std::vector<CapturedPrefix> m_collecting_capture_prefixes;
   std::vector<CapturedPrefix> m_display_capture_prefixes;

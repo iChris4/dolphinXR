@@ -1176,6 +1176,7 @@ void VertexManagerBase::Flush()
   m_is_flushed = true;
   const bool vr_culled = std::exchange(m_vr_culled_pending, false);
   const bool vr_cone_only = std::exchange(m_vr_cone_only_pending, false);
+  const bool pink_preview_batch = std::exchange(m_pink_preview_batch, false);
 
   // A lost GPU device draws nothing (VideoCommon::ReportGPUDeviceLost).
   if (VideoCommon::IsGPUDeviceLost()) [[unlikely]]
@@ -1484,9 +1485,9 @@ void VertexManagerBase::Flush()
         // stereo VR, so running them here would corrupt the flat image and waste work — skip the
         // whole override/hunter pass when the panel path is active.
         const bool vr_flat_mode = g_ActiveConfig.vr_flat_screen;
-        if (!vr_flat_mode &&
-            (hunter_enabled || hunter_has_overrides || hunter_debug_logging ||
-             elements_runtime_active || texmgr_active || agent_capturing || agent_preview_active))
+        if (!vr_flat_mode && (hunter_enabled || hunter_has_overrides || hunter_debug_logging ||
+                              elements_runtime_active || texmgr_active || agent_capturing ||
+                              agent_preview_active || pink_preview_batch))
         {
           const auto& vs = m_current_pipeline_config.vs_uid;
           const auto& ps = m_current_pipeline_config.ps_uid;
@@ -2365,6 +2366,8 @@ void VertexManagerBase::Flush()
         }
 #endif
 
+        // A picked hide code's preview matched this draw's vertex data.
+        shader_hunter_force_pink = shader_hunter_force_pink || pink_preview_batch;
         if (!hunter_skip && !elements_skip && !texmgr_skip)
         {
           if (shader_hunter_force_pink && !m_pink_pixel_shader)

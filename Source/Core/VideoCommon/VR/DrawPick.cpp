@@ -46,12 +46,12 @@ struct Pending
 struct Hover
 {
   // The previews force the target hunter's Pink option; its own option comes back when the pick
-  // ends (RestoreHover). Hide codes preview with the agent preview (pink by draw index) instead.
+  // ends (RestoreHover). A hide code previews what it would hide in pink instead
+  // (HideObjectEngine::SetPinkPreview).
   std::optional<Target> forced;
   ShaderHunter::HuntingOption shader_option = ShaderHunter::HuntingOption::Skip;
   bool texture_pink = false;
   ShaderHunter::HuntingOption elements_option = ShaderHunter::HuntingOption::Skip;
-  AgentCapture::PreviewSet agent_preview;
   // Where the laser rests and since when, and where the last preview was taken.
   std::array<float, 2> resting{-1.0f, -1.0f};
   u64 resting_since_us = 0;
@@ -136,8 +136,6 @@ void ForcePinkPreview(Target target)
     break;
   }
   case Target::HideCode:
-    s_hover.agent_preview = AgentCapture::GetPreview();
-    break;
   case Target::Auto:
     break;
   }
@@ -160,7 +158,7 @@ void RestoreHover()
       ElementsGroupManager::GetInstance().SetHuntingOption(s_hover.elements_option);
       break;
     case Target::HideCode:
-      AgentCapture::SetPreview(s_hover.agent_preview);
+      HideObjectEngine::Engine::GetInstance().SetPinkPreview({});
       break;
     case Target::Auto:
       break;
@@ -252,14 +250,10 @@ Result Resolve(const Pending& pending, const AgentCapture::CapturedFrame& captur
     result.message =
         result.ok ? fmt::format("{}: a hide code of {} line(s)", what, captured.entries.size()) :
                     fmt::format("{}, but its vertex data was not captured: pick again", what);
-    if (pending.preview)
-    {
-      // Hide code hunting hides; the preview paints the draw itself instead.
-      AgentCapture::PreviewSet pink;
-      pink.mode = AgentCapture::PreviewSet::Mode::Pink;
-      pink.indices = {draw->index};
-      AgentCapture::SetPreview(std::move(pink));
-    }
+    // Hide code hunting hides; the preview paints pink what the code would hide (draw indices
+    // move from frame to frame, the vertex data does not).
+    if (pending.preview && result.ok)
+      HideObjectEngine::Engine::GetInstance().SetPinkPreview(captured.entries);
     break;
   }
   case Target::Auto:

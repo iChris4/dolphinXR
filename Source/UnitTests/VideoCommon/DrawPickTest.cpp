@@ -187,3 +187,21 @@ TEST(DrawPick, SelectsATextureByHash)
   EXPECT_EQ(textures.GetHuntingSelection().position, -1);
   textures.SetHunterActive(false);
 }
+
+// A picked hide code's preview paints pink what the code would hide: its lines, matched against
+// the start of a batch's vertex data like the code itself.
+TEST(DrawPick, HideCodePreviewMatchesItsVertexData)
+{
+  HideObjectEngine::Engine& engine = HideObjectEngine::Engine::GetInstance();
+  HideObjectEngine::HideObjectEntry entry;
+  entry.type = HideObjectEngine::HideObjectType::Bits16;
+  entry.value_lower = 0xABCD;
+  engine.SetPinkPreview({entry});
+  EXPECT_TRUE(engine.HasPinkPreview());
+  const u8 match[4] = {0xAB, 0xCD, 0x00, 0x11};
+  const u8 other[4] = {0xAB, 0xCE, 0x00, 0x11};
+  EXPECT_TRUE(engine.MatchesPinkPreview(match));
+  EXPECT_FALSE(engine.MatchesPinkPreview(other));
+  engine.SetPinkPreview({});
+  EXPECT_FALSE(engine.HasPinkPreview());
+}
