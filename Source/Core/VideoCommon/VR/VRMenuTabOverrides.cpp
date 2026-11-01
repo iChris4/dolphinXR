@@ -945,17 +945,9 @@ private:
                                              style.FramePadding.x * 2.0f + style.ItemSpacing.x :
                                          0.0f;
 
-    // Read-only: the text comes from the keyboard. ImGui shows the live string while it is.
-    std::array<char, 256> buffer{};
-    name.copy(buffer.data(), buffer.size() - 1);
-    ImGui::SetNextItemWidth(MenuWidgets::ControlWidth() - clear_width);
-    ImGui::InputTextWithHint("##name", hint.c_str(), buffer.data(), buffer.size(),
-                             ImGuiInputTextFlags_ReadOnly);
-    // Clicked, not activated: the field stays active after the keyboard closes, and a second click
-    // must open the keyboard again.
-    if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+    if (MenuWidgets::KeyboardField("##name", name, &request, hint.c_str(),
+                                   MenuWidgets::ControlWidth() - clear_width))
     {
-      request = TextInput::Request(name);
       context.actions.SetStatus("Type the name on the keyboard, then press Enter");
     }
     if (has_name)
@@ -1450,13 +1442,9 @@ private:
       ImGui::TextUnformatted(hex.c_str());
       return changed;
     }
-    std::array<char, 40> buffer{};
-    hex.copy(buffer.data(), buffer.size() - 1);
-    ImGui::SetNextItemWidth(MenuWidgets::ControlWidth());
-    ImGui::InputText("##value", buffer.data(), buffer.size(), ImGuiInputTextFlags_ReadOnly);
-    if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+    if (MenuWidgets::KeyboardField("##value", hex, &hunt.value_request, "",
+                                   MenuWidgets::ControlWidth()))
     {
-      hunt.value_request = TextInput::Request(hex);
       context.actions.SetStatus("Type the value in hex on the keyboard, then press Enter");
     }
     return changed;

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -18,6 +19,7 @@
 
 #include "Common/Config/Config.h"
 #include "Common/FileSearch.h"
+#include "Common/FileUtil.h"
 #include "Common/IniFile.h"
 #include "Common/MsgHandler.h"
 #include "Common/StringUtil.h"
@@ -42,6 +44,7 @@
 #include "VideoCommon/VR/VRMenuActions.h"
 #include "VideoCommon/VR/VRMenuTabs.h"
 #include "VideoCommon/VR/VRMenuWidgets.h"
+#include "VideoCommon/VR/VRTextInput.h"
 
 namespace VR
 {
@@ -63,10 +66,15 @@ constexpr float INPUT_NEUTRAL_THRESHOLD = 0.2f;
 constexpr u64 NEUTRAL_DEBOUNCE_US = 150'000;
 constexpr u64 RELEASE_TIMEOUT_US = 10'000'000;
 
+// A save over one of the user's profiles waits this long for its confirming second press.
+constexpr u64 CONFIRM_TIMEOUT_US = 4'000'000;
+
 struct Profile
 {
   std::string name;
   std::string path;
+  // Shipped with Dolphin (Sys/Profiles): saving never changes it.
+  bool stock = false;
 };
 
 struct Binding
@@ -174,21 +182,38 @@ std::string DisplayExpression(std::string_view expression)
   return display;
 }
 
+// The user's profiles, then the stock ones, as the desktop lists them.
 std::vector<Profile> FindProfiles(const InputConfig& config)
 {
-  const std::string user_dir = config.GetUserProfileDirectoryPath();
-  const std::string sys_dir = config.GetSysProfileDirectoryPath();
-  const std::array<std::string_view, 2> directories{user_dir, sys_dir};
+  const std::array<std::pair<std::string, bool>, 2> directories{
+      {{config.GetUserProfileDirectoryPath(), false}, {config.GetSysProfileDirectoryPath(), true}}};
   std::vector<Profile> profiles;
-  for (const std::string& path : Common::DoFileSearch(directories, ".ini", true))
+  for (const auto& [directory, stock] : directories)
   {
-    std::string name;
-    SplitPath(path, nullptr, &name, nullptr);
-    // A user profile shadows the system profile of the same name.
-    if (std::ranges::none_of(profiles, [&](const Profile& p) { return p.name == name; }))
-      profiles.push_back({std::move(name), path});
+    for (std::string& path : Common::DoFileSearch(directory, ".ini", true))
+    {
+      std::string name;
+      SplitPath(path, nullptr, &name, nullptr);
+      if (!name.empty())
+        profiles.push_back({std::move(name), std::move(path), stock});
+    }
   }
   return profiles;
+}
+
+std::string ProfileLabel(const Profile& profile)
+{
+  return profile.stock ? fmt::format("{} (Stock)", profile.name) : profile.name;
+}
+
+// Why `name` cannot name a profile file, or empty when it can.
+std::string CheckProfileName(std::string_view name)
+{
+  if (name.empty())
+    return "Type a name for the profile";
+  if (name.find_first_of("\\/:*?\"<>|") != std::string_view::npos)
+    return "A profile name cannot contain \\ / : * ? \" < > |";
+  return {};
 }
 
 ControllerEmu::Attachments* GetWiimoteAttachments()
@@ -210,6 +235,19 @@ std::string LoadProfile(InputConfig* config, const Profile& profile)
   config->GenerateControllerTextures(ini);
   config->SaveConfig();
   return fmt::format("Loaded profile \"{}\"", profile.name);
+}
+
+// Host thread. Saves the controller's mapping to the profile file `path`, as the desktop's Save.
+std::string SaveProfile(InputConfig* config, const std::string& name, const std::string& path)
+{
+  Common::IniFile ini;
+  {
+    const auto lock = ControllerEmu::EmulatedController::GetStateLock();
+    config->GetController(0)->SaveConfig(ini.GetOrCreateSection("Profile"));
+  }
+  if (!File::CreateFullPath(path) || !ini.Save(path))
+    return fmt::format("Could not save profile \"{}\"", name);
+  return fmt::format("Saved profile \"{}\"", name);
 }
 
 class ControlsTab final : public VRMenuTab
@@ -539,8 +577,8 @@ private:
       }
     }
 
-    DrawProfileRow(context, "##wiimote_profile", info.wiimote_profiles, &m_wiimote_profile,
-                   Wiimote::GetConfig());
+    DrawProfileRows(context, "##wiimote_profile", info.wiimote_profiles, &m_wiimote_profile,
+                    Wiimote::GetConfig());
 
     MenuWidgets::Checkbox("Left-Handed",
                           "Point with the left controller; the Nunchuk follows the right one.",
@@ -552,37 +590,72 @@ private:
   void DrawGameCube(VRMenuContext& context, const ControlsInfo& info)
   {
     MenuWidgets::SectionHeader("GameCube Controller 1");
-    DrawProfileRow(context, "##gcpad_profile", info.gcpad_profiles, &m_gcpad_profile,
-                   Pad::GetConfig());
+    DrawProfileRows(context, "##gcpad_profile", info.gcpad_profiles, &m_gcpad_profile,
+                    Pad::GetConfig());
     DrawMapping(context, "##gcpad_mapping", info.gcpad_mapping);
   }
 
-  void DrawProfileRow(VRMenuContext& context, const char* id,
-                      const std::vector<Profile>& profiles, std::string* selected,
-                      InputConfig* config)
+  // The profile rows of one controller.
+  struct ProfileState
   {
-    MenuWidgets::BeginRow("Profile", "Load a saved controller mapping.",
+    // The profile picked in the list.
+    std::string selected;
+    bool selected_stock = false;
+    // The name typed on the system keyboard to save under (empty: the picked profile's name).
+    std::string save_name;
+    u32 save_name_request = 0;
+    // A save over one of the user's profiles, waiting for its second press.
+    std::string overwrite_armed;
+    u64 overwrite_armed_until_us = 0;
+  };
+
+  void DrawProfileRows(VRMenuContext& context, const char* id, const std::vector<Profile>& profiles,
+                       ProfileState* state, InputConfig* config)
+  {
+    ImGui::PushID(id);
+    const Profile* selected = DrawLoadProfileRow(context, profiles, state, config);
+    DrawSaveProfileRow(context, profiles, selected, state, config);
+    ImGui::PopID();
+  }
+
+  // Returns the profile picked in the list.
+  const Profile* DrawLoadProfileRow(VRMenuContext& context, const std::vector<Profile>& profiles,
+                                    ProfileState* state, InputConfig* config)
+  {
+    MenuWidgets::BeginRow("Profile",
+                          "Load a saved controller mapping. Stock profiles come with Dolphin.",
                           Config::LayerType::Base);
     if (profiles.empty())
     {
       ImGui::AlignTextToFramePadding();
       ImGui::TextDisabled("No profiles found");
-      return;
+      return nullptr;
     }
 
-    const auto it = std::ranges::find(profiles, *selected, &Profile::name);
+    const auto it = std::ranges::find_if(profiles, [&](const Profile& p) {
+      return p.name == state->selected && p.stock == state->selected_stock;
+    });
     const Profile* profile = it != profiles.end() ? &*it : &profiles.front();
 
-    ImGui::PushID(id);
     const float load_width = ImGui::GetFontSize() * 4.0f;
     ImGui::SetNextItemWidth(MenuWidgets::ControlWidth() - load_width -
                             ImGui::GetStyle().ItemSpacing.x);
-    if (ImGui::BeginCombo("##profile", profile->name.c_str(), ImGuiComboFlags_HeightLargest))
+    if (ImGui::BeginCombo("##profile", ProfileLabel(*profile).c_str(),
+                          ImGuiComboFlags_HeightLargest))
     {
-      for (const Profile& candidate : profiles)
+      for (size_t i = 0; i < profiles.size(); ++i)
       {
-        if (ImGui::Selectable(candidate.name.c_str(), &candidate == profile))
-          *selected = candidate.name;
+        const Profile& candidate = profiles[i];
+        // The user's profiles, then the stock ones.
+        if (i > 0 && candidate.stock && !profiles[i - 1].stock)
+          ImGui::Separator();
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::Selectable(ProfileLabel(candidate).c_str(), &candidate == profile))
+        {
+          state->selected = candidate.name;
+          state->selected_stock = candidate.stock;
+        }
+        ImGui::PopID();
       }
       ImGui::EndCombo();
     }
@@ -595,12 +668,103 @@ private:
                           });
       Refresh(context);
     }
-    ImGui::PopID();
+    return profile;
+  }
+
+  // Saves the current mapping as one of the user's profiles, by default under the picked
+  // profile's name. A stock profile is never changed: its name makes the user's own copy, listed
+  // above it. Overwriting one of the user's profiles takes a second press.
+  void DrawSaveProfileRow(VRMenuContext& context, const std::vector<Profile>& profiles,
+                          const Profile* selected, ProfileState* state, InputConfig* config)
+  {
+    const bool can_type = TextInput::IsAvailable();
+    if (const std::optional<TextInput::Edit> edit = TextInput::TakeEdit(state->save_name_request))
+      state->save_name = std::move(edit->text);
+    const std::string default_name = selected ? selected->name : "Profile";
+    const std::string name(
+        StripWhitespace(state->save_name.empty() ? default_name : state->save_name));
+
+    MenuWidgets::BeginRow(
+        "Save Profile",
+        can_type ? "Save the current mapping as one of your profiles. Empty uses the selected "
+                   "profile's name; a stock profile is never changed, you get your own copy. "
+                   "Saving over one of your profiles asks for a second press. Click the name to "
+                   "type another one." :
+                   "Save the current mapping as one of your profiles, under the selected "
+                   "profile's name. A stock profile is never changed: you get your own copy. "
+                   "Saving over one of your profiles asks for a second press.",
+        Config::LayerType::Base);
+    const float save_width = ImGui::GetFontSize() * 5.5f;
+    const float field_width =
+        MenuWidgets::ControlWidth() - save_width - ImGui::GetStyle().ItemSpacing.x;
+    if (can_type)
+    {
+      if (MenuWidgets::KeyboardField("##save_name", state->save_name, &state->save_name_request,
+                                     default_name.c_str(), field_width))
+      {
+        context.actions.SetStatus("Type the profile's name on the keyboard, then press Enter");
+      }
+    }
+    else
+    {
+      // No keyboard: the name it saves under.
+      std::array<char, 256> buffer{};
+      name.copy(buffer.data(), buffer.size() - 1);
+      ImGui::BeginDisabled();
+      ImGui::SetNextItemWidth(field_width);
+      ImGui::InputText("##save_name", buffer.data(), buffer.size(), ImGuiInputTextFlags_ReadOnly);
+      ImGui::EndDisabled();
+    }
+
+    const u64 now_us = Common::Timer::NowUs();
+    if (now_us > state->overwrite_armed_until_us || state->overwrite_armed != name)
+      state->overwrite_armed.clear();
+    const bool armed = !state->overwrite_armed.empty();
+    ImGui::SameLine();
+    if (armed)
+    {
+      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.75f, 0.35f, 0.1f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.45f, 0.15f, 1.0f));
+    }
+    const bool pressed = ImGui::Button(armed ? "Overwrite?" : "Save", ImVec2(save_width, 0.0f));
+    if (armed)
+      ImGui::PopStyleColor(2);
+    if (!pressed)
+      return;
+
+    if (const std::string error = CheckProfileName(name); !error.empty())
+    {
+      context.actions.SetStatus(error);
+      return;
+    }
+    // The file systems of Windows and the Quest ignore case.
+    const auto existing = std::ranges::find_if(profiles, [&](const Profile& p) {
+      return !p.stock && Common::CaseInsensitiveEquals(p.name, name);
+    });
+    if (existing != profiles.end() && !armed)
+    {
+      state->overwrite_armed = name;
+      state->overwrite_armed_until_us = now_us + CONFIRM_TIMEOUT_US;
+      context.actions.SetStatus(fmt::format("Press again to overwrite your profile \"{}\"", name));
+      return;
+    }
+
+    state->overwrite_armed.clear();
+    const std::string path = existing != profiles.end() ?
+                                 existing->path :
+                                 config->GetUserProfileDirectoryPath() + name + ".ini";
+    context.actions.Run(
+        fmt::format("Saving profile \"{}\"...", name),
+        [config, name, path](Core::System&) { return SaveProfile(config, name, path); });
+    state->selected = existing != profiles.end() ? existing->name : name;
+    state->selected_stock = false;
+    state->save_name.clear();
+    Refresh(context);
   }
 
   std::shared_ptr<SharedInfo> m_info = std::make_shared<SharedInfo>();
-  std::string m_wiimote_profile;
-  std::string m_gcpad_profile;
+  ProfileState m_wiimote_profile;
+  ProfileState m_gcpad_profile;
 
   // Binding capture (video thread).
   CapturePhase m_capture_phase = CapturePhase::Idle;

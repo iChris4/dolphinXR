@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Core/Config/GraphicsSettings.h"
+#include "VideoCommon/VR/VRTextInput.h"
 
 namespace VR::MenuWidgets
 {
@@ -101,6 +102,22 @@ void ValueRow(const char* label, const std::string& value, const char* tooltip)
   BeginRow(label, tooltip, Config::LayerType::Base);
   ImGui::AlignTextToFramePadding();
   ImGui::TextUnformatted(value.c_str());
+}
+
+bool KeyboardField(const char* id, const std::string& text, u32* request, const char* hint,
+                   float width)
+{
+  // Read-only: the text comes from the keyboard. ImGui shows the live string while it is.
+  std::array<char, 256> buffer{};
+  text.copy(buffer.data(), buffer.size() - 1);
+  ImGui::SetNextItemWidth(width);
+  ImGui::InputTextWithHint(id, hint, buffer.data(), buffer.size(), ImGuiInputTextFlags_ReadOnly);
+  // Clicked, not activated: the field stays active after the keyboard closes, and a second click
+  // must open the keyboard again.
+  if (!ImGui::IsItemClicked(ImGuiMouseButton_Left))
+    return false;
+  *request = TextInput::Request(text);
+  return true;
 }
 
 namespace

@@ -12,6 +12,7 @@
 
 #include <imgui.h>
 
+#include "Common/CommonTypes.h"
 #include "Common/Config/Config.h"
 
 // Config-bound ImGui rows for the in-game VR menu: label column on the left, the control on
@@ -84,6 +85,13 @@ bool InternalResolutionCombo(TouchedKeys* touched);
 
 // Text-only row.
 void ValueRow(const char* label, const std::string& value, const char* tooltip = nullptr);
+
+// A text field typed on the system keyboard (VR::TextInput, only when it IsAvailable): it shows
+// `text` (`hint` while empty) and is read-only in ImGui; a click opens the keyboard on `text` and
+// returns true with `*request` set. The caller takes the edits of `*request`
+// (TextInput::TakeEdit) into its text, so it follows each key press.
+bool KeyboardField(const char* id, const std::string& text, u32* request, const char* hint,
+                   float width);
 
 // The rows' wrapped tooltip, for the last item drawn (shown while it is disabled too).
 void ItemTooltip(const char* text);
