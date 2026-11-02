@@ -1,10 +1,10 @@
 -- Wii Sports (NTSC-U): first-person view from your Mii's head, in every sport.
 --
 -- With Camera Anchor on (VR settings, or its hotkey), the VR camera sits in the head of your Mii:
--- the Mii nearest the game camera in front of it, which every sport keeps behind you (Tennis: your
--- Mii at the back of the court; Baseball: the batter, not the catcher behind the camera). The
--- view is level and turns with the Mii's body, so the game camera's moves no longer move it, and
--- the Mii's head is hidden while the view is inside it.
+-- the player nearest the game camera in front of it, which every sport keeps behind you (Tennis:
+-- your Mii at the back of the court, not a spectator on the side line; Baseball: the batter, not
+-- the catcher behind the camera). The view is level and turns with the Mii's body, so the game
+-- camera's moves no longer move it, and the Mii's head is hidden while the view is inside it.
 --
 -- Memory (NTSC-U, found with the agent server's Workflow 7):
 -- - [[804DFB90]]: the running sport's scene; its g3d scene root (vtable 80361260) lies in its
@@ -12,9 +12,10 @@
 --   + 4 the array of models, + 0x10 their number.
 -- - A model (vtable 80361310): + 0x0C its base transform (the Mii's position and facing, +Z),
 --   + 0xB8 its MDL0 resource (name at MDL0 + [MDL0 + 0x3C]), + 0x160 its joints' world matrices
---   (+ 0xBC points there), 0x30 bytes each. The Mii bodies are named "ava_body..." (A1 and B1
---   with 28 matrices, Boxing's C0 with 9; A0/B0 have none set). Joint 1 is the head (+Y where
---   the Mii looks, +X up).
+--   (+ 0xBC points there), 0x30 bytes each. The Mii bodies are named "ava_body...": the players
+--   A1 and B1 (28 matrices) and Boxing's C0 (9); A0 and B0 are the others (Tennis's spectators,
+--   Baseball's catcher and fielders, Bowling's next bowler). Joint 1 is the head (+Y where the
+--   Mii looks, +X up).
 -- - Scene root + 0x6C: the scene's view matrix (the root's own; world -> view of its camera).
 --   803B5D74 is the current one, which Golf turns to a top-down view for its map last.
 --
@@ -23,7 +24,7 @@
 patch = {
   title = "First-person view",
   author = "DolphinXR",
-  version = "1.1",
+  version = "1.2",
   description = "With Camera Anchor on, the VR camera is in your Mii's head: level, turning with "
     .. "the Mii, whatever the game's camera does, its head hidden. For Wii Sports NTSC-U.",
   games = {"RSPE01"},
@@ -88,25 +89,33 @@ end
 function on_load() apply_options(1) end
 function on_setting_changed() apply_options(applied_scale or 1) end
 
--- Whether `m` is a Mii body model.
-local function is_mii(m)
+-- 1 when `m` is a player's Mii body (ava_body A1, B1, C0), 2 another Mii's (A0, B0), else nil.
+local function mii_rank(m)
   if not m or not mem.valid(m, HEAD + 0x30) or mem.u32(m) ~= MODEL_VTABLE or
      mem.u32(m + 0xBC) ~= m + MATRICES then
-    return false
+    return nil
   end
   local mdl = mem.u32(m + 0xB8)
   if not mdl or not mem.valid(mdl, 0x40) or mem.u32(mdl) ~= MDL0 then
-    return false
+    return nil
   end
   local name = mdl + (mem.s32(mdl + 0x3C) or 0)
-  return mem.valid(name, 8) and mem.u32(name) == AVA and mem.u32(name + 4) == BODY
+  if not mem.valid(name, 10) or mem.u32(name) ~= AVA or mem.u32(name + 4) ~= BODY then
+    return nil
+  end
+  local kind, number = mem.u8(name + 8), mem.u8(name + 9)
+  return (number == 0x31 or kind == 0x43) and 1 or 2
 end
 
--- The scene's Mii bodies, found again when the scene changes and every 5 s.
-local miis, scene, camera, scan_field = {}, nil, nil, -1000
+local function is_mii(m)
+  return mii_rank(m) ~= nil
+end
+
+-- The scene's Mii bodies and their ranks, found again when the scene changes and every 5 s.
+local miis, ranks, scene, camera, scan_field = {}, {}, nil, nil, -1000
 
 local function scan(y)
-  miis, camera = {}, nil
+  miis, ranks, camera = {}, {}, nil
   if not y or not mem.valid(y, 0x800) then
     return
   end
@@ -128,8 +137,10 @@ local function scan(y)
   end
   for i = 0, count - 1 do
     local m = mem.u32(array + i * 4)
-    if is_mii(m) then
+    local rank = mii_rank(m)
+    if rank then
       miis[#miis + 1] = m
+      ranks[m] = rank
     end
   end
 end
@@ -167,18 +178,20 @@ function on_frame()
   local cx = -(r00 * tx + r10 * ty + r20 * tz)
   local cy = -(r01 * tx + r11 * ty + r21 * tz)
   local cz = -(r02 * tx + r12 * ty + r22 * tz)
-  -- The Mii nearest the game camera in front of it (Baseball's catcher crouches behind it); the
-  -- current one keeps it until another is clearly nearer.
-  local best, best_d
+  -- The player nearest the game camera in front of it (Baseball's catcher crouches behind it;
+  -- Tennis's spectators can be nearer than you), else the nearest other Mii; the current one keeps
+  -- it until another is clearly nearer.
+  local best, best_rank, best_d
   for _, m in ipairs(miis) do
     local hx, hy, hz = head_position(m)
     if hx and r20 * hx + r21 * hy + r22 * hz + tz < 0 then
+      local rank = ranks[m]
       local d = (hx - cx) ^ 2 + (hy - cy) ^ 2 + (hz - cz) ^ 2
       if m == current then
         d = d * 0.6
       end
-      if not best_d or d < best_d then
-        best, best_d = m, d
+      if not best_d or rank < best_rank or (rank == best_rank and d < best_d) then
+        best, best_rank, best_d = m, rank, d
       end
     end
   end

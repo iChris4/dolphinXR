@@ -409,6 +409,7 @@ constexpr u32 WS_GROUP = 0x80620000;
 constexpr u32 WS_ARRAY = 0x80630000;
 constexpr u32 WS_BODY_MDL = 0x80640000;
 constexpr u32 WS_NET_MDL = 0x80650000;
+constexpr u32 WS_CROWD_MDL = 0x80660000;
 
 struct WiiSports
 {
@@ -423,6 +424,7 @@ struct WiiSports
     memory.Write32(WS_GROUP + 4, WS_ARRAY);
     WriteMdl0(WS_BODY_MDL, "ava_bodyA1");
     WriteMdl0(WS_NET_MDL, "tns_net_a");
+    WriteMdl0(WS_CROWD_MDL, "ava_bodyA0");
     env.memory = &memory;
     env.input = &input;
     env.game_id = "RSPE01";
@@ -514,6 +516,25 @@ TEST(WiiSportsFirstPersonPatch, InTheHeadOfTheNearestMii)
   EXPECT_NEAR(anchor->units_per_meter, 8.7f / 1.6f, 1e-4f);
   EXPECT_EQ(anchor->hide_radius, 5.0f);
   EXPECT_EQ(anchor->hide_below, 1.0f);
+}
+
+// Tennis's serve camera is nearer a spectator on the side line (ava_bodyA0) than your Mii: the
+// players' bodies (A1, B1, Boxing's C0) come first, the others only when no player is in front.
+TEST(WiiSportsFirstPersonPatch, PlayersBeforeSpectators)
+{
+  WiiSports game;
+  game.AddModel(0x80700000, WS_CROWD_MDL, 20, 0);
+  game.AddModel(0x80710000, WS_BODY_MDL, 30, 40);
+  ASSERT_TRUE(game.Load());
+  auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNear(anchor->position, VR::CameraAnchorMath::TransformPoint(VIEW, game.heads[0x80710000]));
+
+  // Your Mii behind the camera (moved, listed twice): the spectator.
+  game.AddModel(0x80710000, WS_BODY_MDL, -30, 40);
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNear(anchor->position, VR::CameraAnchorMath::TransformPoint(VIEW, game.heads[0x80700000]));
 }
 
 // Bowling draws its Miis at 0.7: the world's scale and the hidden region follow.
