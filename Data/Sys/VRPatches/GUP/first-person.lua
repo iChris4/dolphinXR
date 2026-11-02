@@ -1,13 +1,15 @@
 -- Shadow the Hedgehog (NTSC-U) and Shadow the Hedgehog: Reloaded: first-person view.
 --
--- With Camera Anchor on (VR settings, or its hotkey), the VR camera is at Shadow's eyes: level,
--- turning with him, so the game's camera, which swings around him, no longer moves the view. By
--- default it follows his root (the point at his feet that the game moves and turns with him),
--- raised to his eyes: his head spins with him in a jump or a homing attack, and a view following
--- it would spin too. "Follow: his head" uses his head joint instead (the view then bobs with his
--- head). The game moves Shadow relative to its camera: the main stick is turned so that up runs
--- where he faces, except while the game holds the controls (pause menu, events). During events the
--- view goes back to the game's camera, unless the "In events" setting keeps it.
+-- With Camera Anchor on (VR settings, or its hotkey), the VR camera is at Shadow's eyes, level,
+-- so the game's camera, which swings around him, no longer moves the view. By default it follows
+-- his root (the point at his feet that the game moves and turns with him), raised to his eyes: his
+-- head spins with him in a jump or a homing attack, and a view following it would spin too.
+-- "Follow: his head" uses his head joint instead (the view then bobs with his head). The game
+-- moves Shadow relative to its camera, so the main stick is turned: by default (Stick forward: VR)
+-- up and back walk where you look and left and right turn the view, as in VR games (his body is
+-- hidden while he runs away from the view); with "Shadow's facing" the view turns with him and up
+-- runs where he faces. Not while the game holds the controls (pause menu, events). During events
+-- the view goes back to the game's camera, unless the "In events" setting keeps it.
 --
 -- His head is hidden while the view is in it, and his whole body while he is in the air, where he
 -- somersaults and curls up around the view. With "Gun in your hand", his left hand and the weapon
@@ -67,7 +69,7 @@
 patch = {
   title = "First-person view",
   author = "DolphinXR",
-  version = "1.2",
+  version = "1.3",
   description = "With Camera Anchor on, the VR camera is at Shadow's eyes: level, turning with "
     .. "him whatever the game's camera does, his head hidden, his gun in your hand, and up on "
     .. "the stick runs where he faces. For Shadow the Hedgehog NTSC-U and Reloaded.",
@@ -84,7 +86,8 @@ patch = {
        .. "person."},
     {name = "hide_body", label = "Hide his body", type = "choice",
      options = {"In the air", "Never", "Always"}, default = 0,
-     description = "In the air he somersaults and curls up around the view."},
+     description = "In the air he somersaults and curls up around the view. With Stick forward: "
+       .. "VR, also while he runs away from where you look (walking backward)."},
     {name = "gun", label = "Gun in your hand", type = "choice",
      options = {"Off", "Right controller", "Left controller"}, default = 1,
      description = "His left hand and the weapon it holds follow a VR controller in first "
@@ -122,10 +125,15 @@ patch = {
     {name = "heading_smoothing", label = "Turn smoothing", default = 0.5, min = 0, max = 0.95,
      step = 0.05},
     {name = "stick", label = "Stick forward", type = "choice",
-     options = {"Shadow's facing", "Where you look", "The game's camera"}, default = 0,
-     description = "What up on the stick means. Shadow's facing: up keeps him going straight, a "
-       .. "sideways push turns him. Where you look: the headset's direction. The game's camera: "
-       .. "as the game does."},
+     options = {"Shadow's facing", "VR: where you look, left and right turn",
+                "The game's camera"}, default = 1,
+     description = "What the stick does. Shadow's facing: up keeps him going straight, a sideways "
+       .. "push turns him, a push back turns him around. VR: up and back walk forward and backward "
+       .. "where you look and left and right turn the view (Turn speed), as in VR games; the view "
+       .. "rotation is then Fixed. The game's camera: as the game does."},
+    {name = "turn_speed", label = "Turn speed", unit = "deg/s", default = 180, min = 30,
+     max = 360, step = 5,
+     description = "How fast left and right on the stick turn the view with Stick forward: VR."},
     {name = "events", label = "In events", type = "choice",
      options = {"The game's camera", "First person"}, default = 0,
      description = "While the game holds the controls (outside the pause menu)."},
@@ -293,11 +301,14 @@ local holding = nil   -- whether the weapon was in the controller's hand last fi
 local function apply_options()
   local upm = settings.upm > 0 and settings.upm or vr.units_per_meter()
   local eyes = EYES[settings.follow + 1]
+  -- VR controls: the stick's left and right turn a Fixed view, up and back walk where you look.
+  local vr_controls = settings.stick == 1
   vr.set_camera_anchor_options{
-    rotation = ROTATIONS[settings.rotation + 1], yaw = settings.yaw,
+    rotation = vr_controls and "fixed" or ROTATIONS[settings.rotation + 1], yaw = settings.yaw,
     up = eyes[1] / upm + settings.up, forward = eyes[2] / upm + settings.forward,
     upm = upm, smoothing = settings.smoothing, heading_smoothing = settings.heading_smoothing,
-    stick = STICKS[settings.stick + 1], stick_lead = 2,
+    stick = vr_controls and "head" or STICKS[settings.stick + 1], stick_lead = 2,
+    stick_turn_speed = vr_controls and settings.turn_speed or 0,
     up_axis = "y", forward_axis = "-z", bone_up_axis = "y",
   }
 end
@@ -530,6 +541,23 @@ local function move_gun(player, bones, view)
 end
 
 -- The view of this field: in Shadow's head (true), or the game's camera (false).
+-- Whether he faces away from where the headset looks (VR controls, walking backward: his legs
+-- swing in front of the view).
+local function facing_away(bones, view)
+  local valid, _, _, _, qx, qy, qz, qw = vr.raw_pose("head", "view")
+  if not valid then return false end
+  -- The headset's forward (-Z) in the game camera's view axes, then in the world (the view's
+  -- rotation transposed).
+  local fx, fy = -2 * (qx * qz + qy * qw), -2 * (qy * qz - qx * qw)
+  local fz = 2 * (qx * qx + qy * qy) - 1
+  local v = {mem.f32s(view, 12)}
+  local wx = v[1] * fx + v[5] * fy + v[9] * fz
+  local wz = v[3] * fx + v[7] * fy + v[11] * fz
+  -- His facing: the root's -Z.
+  local r = {mem.f32s(bones, 12)}
+  return wx * -r[3] + wz * -r[11] < 0
+end
+
 local function first_person(bones, view)
   local held = mem.u8(CONTROLS_HELD) ~= 0
   vr.set_camera_anchor_stick(view ~= nil and not held)
@@ -574,7 +602,8 @@ function on_frame()
     mem.write_u32(MOVE_COUNT, 0)
   end
   local in_the_air = (mem.u32(player + STATUS_IN_PLAYER) or 0) & ON_THE_GROUND == 0
-  if settings.hide_body == 2 or (settings.hide_body == 0 and in_the_air) then
+  local away = settings.stick == 1 and facing_away(bones, view)
+  if settings.hide_body == 2 or (settings.hide_body == 0 and (in_the_air or away)) then
     -- His right glove with him (his left hand is a piece on bone 25: hidden with him, or
     -- moved to the controller with the weapon).
     local right_first, right_end = right_glove(player, bones)

@@ -197,11 +197,13 @@ TEST(FirstPersonPatch, ManifestIsValid)
   EXPECT_TRUE(manifest.FindSetting("heading"));
 }
 
-// In the head, level, facing where Link's body faces: the camera's pitch and yaw are gone.
+// In the head, level, facing where Link's body faces: the camera's pitch and yaw are gone. (With
+// "Link's facing": the VR controls' Fixed view does not turn with him.)
 TEST(FirstPersonPatch, LevelInTheHeadWithTheBodysHeading)
 {
   TwilightPrincess game;
   ASSERT_TRUE(game.Load());
+  game.SetSetting("stick", 0);
   const auto anchor = game.Frame();
   ASSERT_TRUE(anchor);
   ExpectNear(anchor->position, VR::CameraAnchorMath::TransformPoint(VIEW, HEAD_POSITION));
@@ -230,6 +232,7 @@ TEST(FirstPersonPatch, CameraRotation)
 {
   TwilightPrincess game;
   ASSERT_TRUE(game.Load());
+  game.SetSetting("stick", 0);
   game.SetSetting("rotation", 3);
   game.SetSetting("upm", 90);
   const auto anchor = game.Frame();
@@ -284,6 +287,24 @@ TEST(FirstPersonPatch, StickWalksStraightAheadInFreePlay)
   EXPECT_TRUE(VR::CameraAnchorMath::StickTurn(*anchor, nullptr));
 }
 
+// VR controls, the default: the view stays where it engaged while Link turns (Fixed), the stick's
+// reference is where the headset looks, and its left and right turn the view at the turn speed.
+TEST(FirstPersonPatch, VRControls)
+{
+  TwilightPrincess game;
+  ASSERT_TRUE(game.Load());
+  auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  const Mat33 engaged = game.WorldRig(*anchor);
+  EXPECT_EQ(anchor->stick_turn_speed, 180.0f);
+  EXPECT_TRUE(anchor->stick_head);
+  EXPECT_FALSE(anchor->stick_hold);
+  game.memory.SetMtx(MODEL + 0x24, Make(RotY(130), {100, 800, -200}));
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNear(game.WorldRig(*anchor), engaged);
+}
+
 // ---- The Wind Waker (Data/Sys/VRPatches/GZLE01/first-person.lua) ----
 
 namespace
@@ -334,6 +355,12 @@ struct WindWaker
     return script.TakeCameraAnchor();
   }
 
+  void SetSetting(const std::string& name, double value)
+  {
+    ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting(name), value));
+    ASSERT_TRUE(script.CallSettingChanged(name, value, env)) << script.Error();
+  }
+
   Memory memory;
   VRInputFrame input;
   ScriptEnvironment env;
@@ -382,6 +409,28 @@ TEST(WindWakerFirstPersonPatch, StickWalksStraightAheadInFreePlay)
   anchor = game.Frame();
   ASSERT_TRUE(anchor);
   EXPECT_TRUE(VR::CameraAnchorMath::StickTurn(*anchor, nullptr));
+}
+
+// VR controls, the default: a Fixed view that Link's turns do not move, where the headset looks
+// for the stick, whose left and right turn the view at the turn speed.
+TEST(WindWakerFirstPersonPatch, VRControls)
+{
+  WindWaker game;
+  ASSERT_TRUE(game.Load());
+  auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_EQ(anchor->stick_turn_speed, 180.0f);
+  EXPECT_TRUE(anchor->stick_head);
+  EXPECT_FALSE(anchor->stick_hold);
+  game.SetSetting("turn_speed", 150);
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_EQ(anchor->stick_turn_speed, 150.0f);
+  game.SetSetting("stick", 0);
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_EQ(anchor->stick_turn_speed, 0.0f);
+  EXPECT_TRUE(anchor->stick_hold);
 }
 
 // No anchor unless the model is Link's: his actor's, pointing back at it, with 42 joints.
@@ -928,6 +977,28 @@ TEST(ShadowFirstPersonPatch, GunInYourHand)
   game.Frame();
   EXPECT_EQ(game.memory.Read32(SH_MOVE_COUNT).value_or(1), 0u);
   EXPECT_EQ(game.HiddenHead(), off);
+}
+
+// VR controls, the default: a Fixed view that his turns do not move, where the headset looks for
+// the stick, whose left and right turn the view at the turn speed.
+TEST(ShadowFirstPersonPatch, VRControls)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  const Mat33 engaged = VR::CameraAnchorMath::Multiply33(
+      Transpose(VR::CameraAnchorMath::Basis(VIEW)), anchor->rotation);
+  ExpectNear(engaged, RotY(40));
+  EXPECT_EQ(anchor->stick_turn_speed, 180.0f);
+  EXPECT_TRUE(anchor->stick_head);
+  EXPECT_FALSE(anchor->stick_hold);
+  game.memory.SetMtx(SH_BONES, Make(RotY(130), SH_ROOT));
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNear(VR::CameraAnchorMath::Multiply33(Transpose(VR::CameraAnchorMath::Basis(VIEW)),
+                                              anchor->rotation),
+             engaged);
 }
 
 // While the game holds the controls: the pause menu keeps the view without turning the stick;

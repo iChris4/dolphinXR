@@ -1,15 +1,17 @@
 -- The Legend of Zelda: The Wind Waker (NTSC-U): first-person view from Link's head.
 --
 -- With Camera Anchor on (VR settings, or its hotkey), the VR camera sits in Link's head: his head
--- joint, read from his model, composed with the game camera's view matrix. The view is level and
--- turns with Link (his model's own facing), so the game's camera, which swings around him, no
--- longer moves it. His head is hidden while the view is inside it: its face and hair share their
+-- joint, read from his model, composed with the game camera's view matrix. The view is level, so
+-- the game's camera, which swings around him, no longer moves it. His head is hidden while the
+-- view is inside it: its face and hair share their
 -- texture with his body, his mouth changes texture with his expression and some of his hair is
 -- skinned with weighted matrices, so the draws centred around his head joint are hidden: within
 -- 40 units and above 5 units under it (his head's parts are 3 to 33 units away, all above the
 -- joint; his body's centres are 12 units under it or lower). The eyes also by their textures.
--- The game moves Link relative to its camera: the main stick is turned so that up walks straight
--- ahead in the view, except in menus and dialogs, where the stick picks.
+-- The game moves Link relative to its camera, so the main stick is turned: by default (Stick
+-- forward: VR) up and back walk where you look and left and right turn the view, as in VR games;
+-- with "Link's facing" the view turns with Link and up walks where he faces. Not in menus and
+-- dialogs, where the stick picks.
 --
 -- Memory (NTSC-U rev 0, found with the agent server's Workflow 7):
 -- - 803CA74C (and 803C9DEC) in the game's global info point to Link's actor; actor + 0x32C is his
@@ -29,7 +31,7 @@
 patch = {
   title = "First-person view",
   author = "DolphinXR",
-  version = "1.1",
+  version = "1.2",
   description = "With Camera Anchor on, the VR camera is in Link's head: level, turning with Link "
     .. "whatever the game's camera does. For The Wind Waker NTSC-U.",
   games = {"GZLE01"},
@@ -63,10 +65,15 @@ patch = {
      description = "How far under the head joint a hidden draw's centre can be (the shoulders "
        .. "are 13 under it)."},
     {name = "stick", label = "Stick forward", type = "choice",
-     options = {"Link's facing", "Where you look", "The game's camera"}, default = 0,
-     description = "What up on the stick means. Link's facing: up keeps him going straight, a "
-       .. "sideways push turns him. Where you look: the headset's direction; with Level, looking "
-       .. "aside while walking keeps turning Link. The game's camera: as the game does."},
+     options = {"Link's facing", "VR: where you look, left and right turn",
+                "The game's camera"}, default = 1,
+     description = "What the stick does. Link's facing: up keeps him going straight, a sideways "
+       .. "push turns him, a push back turns him around. VR: up and back walk forward and backward "
+       .. "where you look and left and right turn the view (Turn speed), as in VR games; the view "
+       .. "rotation is then Fixed. The game's camera: as the game does."},
+    {name = "turn_speed", label = "Turn speed", unit = "deg/s", default = 180, min = 30,
+     max = 360, step = 5,
+     description = "How fast left and right on the stick turn the view with Stick forward: VR."},
   },
 }
 
@@ -84,14 +91,17 @@ local STICKS = {"facing", "head", "camera"}
 
 local function apply_options()
   local body = settings.heading == 0
+  -- VR controls: the stick's left and right turn a Fixed view, up and back walk where you look.
+  local vr_controls = settings.stick == 1
   vr.set_camera_anchor_options{
-    rotation = ROTATIONS[settings.rotation + 1], yaw = settings.yaw,
+    rotation = vr_controls and "fixed" or ROTATIONS[settings.rotation + 1], yaw = settings.yaw,
     up = settings.up, forward = settings.forward,
     upm = settings.upm > 0 and settings.upm or nil,
     smoothing = settings.smoothing >= 0 and settings.smoothing or nil,
     hide_radius = settings.hide_radius, hide_below = settings.hide_below,
     -- The game reads the pad, moves its camera, then Link with the new camera.
-    stick = STICKS[settings.stick + 1], stick_lead = 1,
+    stick = vr_controls and "head" or STICKS[settings.stick + 1], stick_lead = 1,
+    stick_turn_speed = vr_controls and settings.turn_speed or 0,
     up_axis = "y", forward_axis = body and "z" or "y", bone_up_axis = body and "y" or "x",
   }
 end

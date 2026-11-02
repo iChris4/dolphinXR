@@ -1,13 +1,14 @@
 -- The Legend of Zelda: Twilight Princess (GameCube, NTSC-U): first-person view from Link's head.
 --
 -- With Camera Anchor on (VR settings, or its hotkey), the VR camera sits in Link's head: his head
--- joint, read from his model, composed with the game camera's view matrix. The view is level and
--- turns with Link (his model's own facing), so the game's third-person camera, which keeps
--- swinging around him, no longer moves it, and his head (face, hair, eyes) is hidden while the
--- view is inside it. It replaces the profile's "Links Head" texture anchor, which followed a head
--- draw in the game camera's view. The game moves Link relative to its camera: the main stick is
--- turned so that up walks straight ahead in the view, except during events (dialogs) and in the
--- menus, where the stick picks.
+-- joint, read from his model, composed with the game camera's view matrix. The view is level, so
+-- the game's third-person camera, which keeps swinging around him, no longer moves it, and his
+-- head (face, hair, eyes) is hidden while the view is inside it. It replaces the profile's "Links
+-- Head" texture anchor, which followed a head draw in the game camera's view. The game moves Link
+-- relative to its camera, so the main stick is turned: by default (Stick forward: VR) up and back
+-- walk where you look and left and right turn the view, as in VR games; with "Link's facing" the
+-- view turns with Link and up walks where he faces. Not during events (dialogs) and in the menus,
+-- where the stick picks.
 --
 -- Memory (NTSC-U rev 0, found with the agent server's Workflow 7):
 -- - 8040BF6C (and 8040B098) in the game's global info point to Link's actor; actor + 0x524 is his
@@ -27,7 +28,7 @@
 patch = {
   title = "First-person view",
   author = "DolphinXR",
-  version = "1.2",
+  version = "1.3",
   description = "With Camera Anchor on, the VR camera is in Link's head: level, turning with Link "
     .. "whatever the game's camera does, his head hidden. As a wolf the game's camera returns; "
     .. "cutscenes stay in the head (the Camera Anchor hotkey leaves it). For Twilight Princess "
@@ -57,10 +58,15 @@ patch = {
     {name = "smoothing", label = "Smoothing (-1: the Camera Anchor setting)", default = -1,
      min = -1, max = 0.95, step = 0.05},
     {name = "stick", label = "Stick forward", type = "choice",
-     options = {"Link's facing", "Where you look", "The game's camera"}, default = 0,
-     description = "What up on the stick means. Link's facing: up keeps him going straight, a "
-       .. "sideways push turns him. Where you look: the headset's direction; with Level, looking "
-       .. "aside while walking keeps turning Link. The game's camera: as the game does."},
+     options = {"Link's facing", "VR: where you look, left and right turn",
+                "The game's camera"}, default = 1,
+     description = "What the stick does. Link's facing: up keeps him going straight, a sideways "
+       .. "push turns him, a push back turns him around. VR: up and back walk forward and backward "
+       .. "where you look and left and right turn the view (Turn speed), as in VR games; the view "
+       .. "rotation is then Fixed. The game's camera: as the game does."},
+    {name = "turn_speed", label = "Turn speed", unit = "deg/s", default = 180, min = 30,
+     max = 360, step = 5,
+     description = "How fast left and right on the stick turn the view with Stick forward: VR."},
   },
 }
 
@@ -79,13 +85,16 @@ local STICKS = {"facing", "head", "camera"}
 
 local function apply_options()
   local body = settings.heading == 0
+  -- VR controls: the stick's left and right turn a Fixed view, up and back walk where you look.
+  local vr_controls = settings.stick == 1
   vr.set_camera_anchor_options{
-    rotation = ROTATIONS[settings.rotation + 1], yaw = settings.yaw,
+    rotation = vr_controls and "fixed" or ROTATIONS[settings.rotation + 1], yaw = settings.yaw,
     up = settings.up, forward = settings.forward,
     upm = settings.upm > 0 and settings.upm or nil,
     smoothing = settings.smoothing >= 0 and settings.smoothing or nil,
     -- The game reads the pad, moves its camera, then Link with the new camera.
-    stick = STICKS[settings.stick + 1], stick_lead = 1,
+    stick = vr_controls and "head" or STICKS[settings.stick + 1], stick_lead = 1,
+    stick_turn_speed = vr_controls and settings.turn_speed or 0,
     up_axis = "y", forward_axis = body and "z" or "x", bone_up_axis = body and "y" or "-y",
   }
 end
