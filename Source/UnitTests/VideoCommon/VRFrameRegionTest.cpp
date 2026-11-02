@@ -186,12 +186,8 @@ TEST(VRFrameRegion, MKDDCharacterBandRemapsToItsOriginalScreenPosition)
 {
   // These are the raw values captured in the element signature. GX's 342-pixel scissor
   // offset turns the viewport into a 608x348 pane at (0,100) in the 608x448 frame.
-  const Viewport viewport{.wd = 304.0f,
-                          .ht = -174.0f,
-                          .zRange = 0.0f,
-                          .xOrig = 646.0f,
-                          .yOrig = 616.0f,
-                          .farZ = 0.0f};
+  const Viewport viewport{
+      .wd = 304.0f, .ht = -174.0f, .zRange = 0.0f, .xOrig = 646.0f, .yOrig = 616.0f, .farZ = 0.0f};
   const VR::VRFrameRegion frame{0, 0, 608, 448, true};
 
   const auto remap = VR::CalculateVRPaneRemap(viewport, 342, 342, frame);
@@ -206,12 +202,8 @@ TEST(VRFrameRegion, OffCenterScreenPanesKeepTheirViewportOffsets)
   const VR::VRFrameRegion frame{0, 0, 640, 480, true};
 
   // F-Zero's 128x128 race portrait pane is anchored to the lower-right EFB corner.
-  const Viewport fzero_portrait{.wd = 64.0f,
-                                .ht = -64.0f,
-                                .zRange = 0.0f,
-                                .xOrig = 918.0f,
-                                .yOrig = 758.0f,
-                                .farZ = 0.0f};
+  const Viewport fzero_portrait{
+      .wd = 64.0f, .ht = -64.0f, .zRange = 0.0f, .xOrig = 918.0f, .yOrig = 758.0f, .farZ = 0.0f};
   const auto portrait_remap = VR::CalculateVRPaneRemap(fzero_portrait, 342, 342, frame);
   EXPECT_NEAR(portrait_remap[0], 128.0f / 640.0f, 0.0001f);
   EXPECT_NEAR(portrait_remap[1], 128.0f / 480.0f, 0.0001f);
@@ -220,12 +212,8 @@ TEST(VRFrameRegion, OffCenterScreenPanesKeepTheirViewportOffsets)
 
   // Star Fox Adventures uses a full-size viewport shifted right/up; its projection places the
   // inventory within that viewport. The non-zero remap offset must survive the full-frame raster.
-  const Viewport starfox_inventory{.wd = 320.0f,
-                                   .ht = -240.0f,
-                                   .zRange = 0.0f,
-                                   .xOrig = 906.0f,
-                                   .yOrig = 537.0f,
-                                   .farZ = 0.0f};
+  const Viewport starfox_inventory{
+      .wd = 320.0f, .ht = -240.0f, .zRange = 0.0f, .xOrig = 906.0f, .yOrig = 537.0f, .farZ = 0.0f};
   const auto inventory_remap = VR::CalculateVRPaneRemap(starfox_inventory, 342, 342, frame);
   EXPECT_FLOAT_EQ(inventory_remap[0], 1.0f);
   EXPECT_FLOAT_EQ(inventory_remap[1], 1.0f);
@@ -458,4 +446,28 @@ TEST(VRFrameRegion, ReticleCopyRectangles)
   EXPECT_FALSE(VR::IsVRPerEyeCopyRectangle({232, 140, 424, 332}, VR::VRFrameRegion{}));
   EXPECT_FALSE(VR::IsVRCentredCopyRectangle({114, 86, 522, 372}, frame));
   EXPECT_FALSE(VR::IsVRCentredCopyRectangle({304, 192, 336, 256}, VR::VRFrameRegion{}));
+}
+
+// The Mii library composes faces with an orthographic projection over the whole frame and a
+// scissor clipping it to a small box at the EFB's corner (Wii Sports: 64x64 in a 608x448
+// viewport), then copies the box: a render-to-texture pass. The same scissor elsewhere, or one
+// as large as the viewport, is not.
+TEST(VRFrameRegion, SmallScissorAtTheCornerIsRenderToTexture)
+{
+  VR::ResetVRFrameRegion();
+  LatchDisplayRegion(640, 456);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(0, 0, 608, 448), ScissorOf(0, 0, 64, 64), 0, 0),
+            VR::VRViewportClass::RenderToTexture);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(0, 0, 608, 448), ScissorOf(0, 0, 8, 8), 0, 0),
+            VR::VRViewportClass::RenderToTexture);
+  // With the EFB origin offset (342) the game's raw coordinates.
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 342, 608, 448), ScissorOf(342, 342, 64, 64),
+                                   342, 342),
+            VR::VRViewportClass::RenderToTexture);
+  EXPECT_NE(VR::ClassifyVRViewport(MakeViewport(0, 0, 608, 448), ScissorOf(40, 40, 64, 64), 0, 0),
+            VR::VRViewportClass::RenderToTexture);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(0, 0, 640, 456), ScissorOf(0, 0, 640, 456), 0, 0),
+            VR::VRViewportClass::MainScene);
+  EXPECT_NE(VR::ClassifyVRViewport(MakeViewport(0, 0, 300, 200), ScissorOf(0, 0, 300, 200), 0, 0),
+            VR::VRViewportClass::RenderToTexture);
 }

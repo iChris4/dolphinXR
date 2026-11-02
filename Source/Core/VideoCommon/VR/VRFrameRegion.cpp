@@ -104,7 +104,8 @@ VRScissor GetVRScissor()
 //  - "full" means >= 90% of the frame extent, anchored within the remaining 10%.
 //  - Full-width bands that aren't split-screen halves are LETTERBOXED (this includes
 //    Metroid Prime's morph-ball 640x358 viewport, which must stay head-tracked).
-//  - Square, edge-anchored, multiple-of-8 viewports are render-to-texture passes.
+//  - Square, edge-anchored, multiple-of-8 viewports are render-to-texture passes, and so are
+//    draws scissored to a small box at the top-left corner.
 VRViewportClass ClassifyVRViewport(const Viewport& v, const VRScissor& scissor, int x_off,
                                    int y_off)
 {
@@ -133,6 +134,20 @@ VRViewportClass ClassifyVRViewport(const Viewport& v, const VRScissor& scissor, 
       (left == 0.0f || top == 0.0f || top == screen_height - height ||
        left == screen_width - width) &&
       !(width == 512.0f && screen_width == 512.0f && screen_height == 512.0f))
+  {
+    return VRViewportClass::RenderToTexture;
+  }
+  // A draw clipped by its scissor to a small box at the frame's top-left corner, whatever its
+  // viewport: the Mii library (RFL) composes faces, colour swatches and icons there with an
+  // orthographic projection over the whole frame and a 8x8 to 256x256 scissor (Wii Sports,
+  // Mario Kart Wii), then copies the box to a texture.
+  const float scissor_left = static_cast<float>(scissor.left - x_off - frame.left);
+  const float scissor_top = static_cast<float>(scissor.top - y_off - frame.top);
+  const float scissor_width = static_cast<float>(scissor.right - scissor.left + 1);
+  const float scissor_height = static_cast<float>(scissor.bottom - scissor.top + 1);
+  if (scissor_left == 0.0f && scissor_top == 0.0f && scissor_width >= 1.0f &&
+      scissor_height >= 1.0f && scissor_width <= 256.0f && scissor_height <= 256.0f &&
+      scissor_width < width && scissor_height < height)
   {
     return VRViewportClass::RenderToTexture;
   }
@@ -214,8 +229,7 @@ VRViewportClass ClassifyVRViewport(const Viewport& v, const VRScissor& scissor, 
   }
 
   // Entirely outside the displayed region.
-  if (left >= screen_width || top >= screen_height || left + width <= 0.0f ||
-      top + height <= 0.0f)
+  if (left >= screen_width || top >= screen_height || left + width <= 0.0f || top + height <= 0.0f)
   {
     return VRViewportClass::Offscreen;
   }
@@ -325,9 +339,9 @@ bool ConsumeVRPresentationSourceRegion(const VRFrameRegion& xfb_source,
   {
     INFO_LOG_FMT(VIDEO,
                  "VR_FRAME: presentation samples EFB {}x{} at ({},{}) into XFB {}x{} at ({},{})",
-                 presentation_source->width, presentation_source->height,
-                 presentation_source->left, presentation_source->top, xfb_source.width,
-                 xfb_source.height, xfb_source.left, xfb_source.top);
+                 presentation_source->width, presentation_source->height, presentation_source->left,
+                 presentation_source->top, xfb_source.width, xfb_source.height, xfb_source.left,
+                 xfb_source.top);
     s_last_presentation_source = *presentation_source;
     s_last_presentation_xfb = xfb_source;
   }
@@ -384,8 +398,7 @@ std::array<float, 4> CalculateVRPaneClip(int scissor_left, int scissor_top, int 
   return clip;
 }
 
-float CalculateVRPaneReferenceW(float model_origin_view_z, float projection_z,
-                                float projection_w)
+float CalculateVRPaneReferenceW(float model_origin_view_z, float projection_z, float projection_w)
 {
   if (std::isfinite(model_origin_view_z) && model_origin_view_z < -1.0e-4f)
     return -model_origin_view_z;
@@ -395,8 +408,8 @@ float CalculateVRPaneReferenceW(float model_origin_view_z, float projection_z,
   {
     const float far_distance = projection_w / projection_z;
     const float near_distance = far_distance * projection_z / (projection_z - 1.0f);
-    if (std::isfinite(near_distance) && std::isfinite(far_distance) &&
-        near_distance > 1.0e-4f && far_distance > near_distance)
+    if (std::isfinite(near_distance) && std::isfinite(far_distance) && near_distance > 1.0e-4f &&
+        far_distance > near_distance)
     {
       return std::sqrt(near_distance * far_distance);
     }
