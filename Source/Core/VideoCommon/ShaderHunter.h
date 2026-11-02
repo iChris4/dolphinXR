@@ -184,9 +184,11 @@ public:
     // Pattern only: the alpha test matches by its compare functions and logic, whatever its two
     // reference values, for effects that animate them (the Metroid Prime scan lens).
     bool any_alpha_ref = false;
-    // A draw: 1 when it samples a texture copied from the EFB, else 0. A pattern: -1 matches
-    // either, 0 or 1 only that, so a generic 2D entry can leave the EFB effects (blur, bloom) to
-    // AutoNativeEfbEffects.
+    // A draw: 1 when it samples a texture copied from the EFB, 2 when that copy is reduced (at
+    // most half the EFB in each direction: a blur or bloom buffer, not a copy of the whole screen
+    // drawn back), else 0. A pattern: -1 matches any draw, 0 only draws sampling no EFB copy, 1
+    // draws sampling one (1 or 2), 2 draws sampling a reduced one. A generic 2D entry can leave the
+    // EFB effects (blur, bloom) to AutoNativeEfbEffects with 0, and skip a blur with 2.
     int efb_copy = -1;
   };
 

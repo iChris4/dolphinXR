@@ -180,7 +180,7 @@ bool ParseRuntimeElementSignatureField(ShaderHunter::RuntimeElementSignature* si
   else if (key == "sig_any_alpha_ref")
     signature->any_alpha_ref = (value == "1" || value == "true");
   else if (key == "sig_efb_copy")
-    signature->efb_copy = std::clamp(ParseGroupedInt(value), -1, 1);
+    signature->efb_copy = std::clamp(ParseGroupedInt(value), -1, 2);
   else
     return false;
 

@@ -109,8 +109,12 @@ bool Matches(const ShaderHunter::RuntimeElementSignature& pattern,
     }
   }
 
-  if (pattern.efb_copy >= 0 && pattern.efb_copy != candidate.efb_copy)
+  // 1 matches any EFB copy, 2 only a reduced one.
+  if (pattern.efb_copy >= 0 && pattern.efb_copy != candidate.efb_copy &&
+      !(pattern.efb_copy == 1 && candidate.efb_copy == 2))
+  {
     return false;
+  }
 
   return true;
 }

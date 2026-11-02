@@ -93,13 +93,13 @@ struct MetroidHydraHudSettings
 ShaderHunter::RuntimeElementSignature BuildRuntimeElementSignature(const XFMemory& xf_memory,
                                                                    const BPMemory& bp_memory,
                                                                    u32 projection_load,
-                                                                   bool samples_efb_copy)
+                                                                   int efb_copy)
 {
   ShaderHunter::RuntimeElementSignature signature;
   signature.valid = true;
   signature.perspective = xf_memory.projection.type == ProjectionType::Perspective;
   signature.projection_load = static_cast<int>(projection_load);
-  signature.efb_copy = samples_efb_copy ? 1 : 0;
+  signature.efb_copy = efb_copy;
 
   const float* projection = xf_memory.projection.rawProjection.data();
   if (signature.perspective)
@@ -1575,20 +1575,24 @@ void VertexManagerBase::Flush()
           ShaderHunter::RuntimeElementSignature draw_signature{};
           if (hunter_enabled || elements_runtime_active)
           {
-            // Whether a bound texture was copied from the EFB (the textures are bound above).
-            bool samples_efb_copy = false;
+            // Whether a bound texture was copied from the EFB (the textures are bound above): 2
+            // when one is at most half the EFB in each direction (a blur or bloom buffer), else 1.
+            int efb_copy = 0;
             for (const u32 i : used_textures)
             {
               u32 copy_width = 0;
               u32 copy_height = 0;
               if (g_texture_cache->IsBoundEfbCopy(i, &copy_width, &copy_height))
               {
-                samples_efb_copy = true;
-                break;
+                efb_copy = 1;
+                if (copy_width <= EFB_WIDTH / 2 && copy_height <= EFB_HEIGHT / 2)
+                {
+                  efb_copy = 2;
+                  break;
+                }
               }
             }
-            draw_signature =
-                BuildRuntimeElementSignature(xfmem, bpmem, projection_load, samples_efb_copy);
+            draw_signature = BuildRuntimeElementSignature(xfmem, bpmem, projection_load, efb_copy);
             if (hunter_enabled)
               hunter.SetCurrentDrawSignature(draw_signature);
           }

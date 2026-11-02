@@ -129,6 +129,30 @@ TEST(RuntimeElementMatcher, EfbCopySamplingCanBeRequired)
   EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, text));
 }
 
+// A blur or bloom chain samples reduced copies (Wii Sports' Boxing: 320x228 and smaller); a menu
+// frozen behind a dialog is a copy of the whole screen drawn back. 2 takes only the first.
+TEST(RuntimeElementMatcher, ReducedEfbCopySamplingCanBeRequired)
+{
+  auto pattern = MakePerspectiveSignature();
+  auto redraw = pattern;
+  redraw.efb_copy = 1;
+  auto blur = pattern;
+  blur.efb_copy = 2;
+  auto text = pattern;
+  text.efb_copy = 0;
+
+  pattern.efb_copy = 2;
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, blur));
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, redraw));
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, text));
+  // Entries saved before still take every draw sampling a copy.
+  pattern.efb_copy = 1;
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, blur));
+  EXPECT_TRUE(RuntimeElementMatcher::Matches(pattern, redraw));
+  pattern.efb_copy = 0;
+  EXPECT_FALSE(RuntimeElementMatcher::Matches(pattern, blur));
+}
+
 TEST(RuntimeElementMatcher, ProjectionLoadMatchesItsRange)
 {
   const auto exact = MakeLoadPattern(4, 4);
