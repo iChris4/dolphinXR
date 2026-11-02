@@ -329,6 +329,9 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
         framebuffer_copy_data.half_scale = PE_copy.half_scale;
         framebuffer_copy_data.y_scale = 1.0;
         framebuffer_copy_data.copy_height = copy_height;
+        // VR: a pane copied whole to a texture is a render target for the viewport classifier.
+        if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
+          VR::NotifyVRTextureCopyRegion(srcRect.left, srcRect.top, srcRect.right, srcRect.bottom);
         auto resolved_data = g_texture_cache->ResolveFramebufferCopyData(framebuffer_copy_data);
         g_texture_cache->CopyRenderTargetToTexture(std::ref(resolved_data));
       }

@@ -50,7 +50,8 @@ enum class VRViewportClass
   Letterboxed,      // full-width but not full-height (cinematic bars, Trilogy 448-in-480)
   SplitScreen,      // multiplayer half/quadrant viewport
   HudElement,       // small / off-center sub-viewport (e.g. MKDD character select panes)
-  RenderToTexture,  // square edge-anchored render target (shadow/env maps)
+  RenderToTexture,  // square edge-anchored render target (shadow/env maps), or a pane the game
+                    // copies to a texture
   Offscreen,        // outside the displayed frame region
   DisplacedScene,   // frame-sized viewport and scissor moved off the frame together by more
                     // than 10% (PSO pans the scene aside under its menus): still the
@@ -63,6 +64,11 @@ enum class VRViewportClass
 // see the PREVIOUS completed frame's display region (same latency as Hydra's
 // g_final_screen_region, updated at Swap).
 void NotifyVRXFBCopyRegion(int left, int top, int right, int bottom);
+
+// Called from BPStructs for every EFB->texture copy (srcRect in native EFB coordinates). The
+// classifier reads the copies of the previous completed frame (the frame's first XFB copy
+// completes it): a pane the game copied whole is a render target.
+void NotifyVRTextureCopyRegion(int left, int top, int right, int bottom);
 
 // Previous completed frame's display region. Not valid until two XFB copies were seen.
 VRFrameRegion GetVRFrameRegion();

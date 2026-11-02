@@ -471,3 +471,44 @@ TEST(VRFrameRegion, SmallScissorAtTheCornerIsRenderToTexture)
   EXPECT_NE(VR::ClassifyVRViewport(MakeViewport(0, 0, 300, 200), ScissorOf(0, 0, 300, 200), 0, 0),
             VR::VRViewportClass::RenderToTexture);
 }
+
+// Wii Sports' Boxing draws each boxer of its "VS" screen in a 350x456 pane at the EFB's corner,
+// copies the pane to a texture and composes both copies on the screen: the pane is a render
+// target from the frame after the copy, not the left half of a split screen.
+TEST(VRFrameRegion, PaneCopiedToATextureIsRenderToTexture)
+{
+  VR::ResetVRFrameRegion();
+  LatchDisplayRegion(640, 456);
+  const Viewport pane = MakeViewport(342, 342, 350, 456);
+  const VR::VRScissor pane_scissor = ScissorOf(342, 342, 350, 456);
+  EXPECT_EQ(VR::ClassifyVRViewport(pane, pane_scissor, 342, 342), VR::VRViewportClass::SplitScreen);
+
+  // The copies count once the frame is complete (its XFB copy).
+  VR::NotifyVRTextureCopyRegion(0, 0, 350, 456);
+  VR::NotifyVRTextureCopyRegion(0, 0, 175, 228);
+  EXPECT_EQ(VR::ClassifyVRViewport(pane, pane_scissor, 342, 342), VR::VRViewportClass::SplitScreen);
+  VR::NotifyVRXFBCopyRegion(0, 0, 640, 456);
+  EXPECT_EQ(VR::ClassifyVRViewport(pane, pane_scissor, 342, 342),
+            VR::VRViewportClass::RenderToTexture);
+  // Another pane, the whole frame and a letterboxed scene copied whole stay what they are.
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 342, 320, 456), ScissorOf(342, 342, 320, 456),
+                                   342, 342),
+            VR::VRViewportClass::SplitScreen);
+  VR::NotifyVRTextureCopyRegion(0, 0, 640, 456);
+  VR::NotifyVRTextureCopyRegion(0, 0, 640, 400);
+  VR::NotifyVRXFBCopyRegion(0, 0, 640, 456);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 342, 640, 456), ScissorOf(342, 342, 640, 456),
+                                   342, 342),
+            VR::VRViewportClass::MainScene);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 342, 640, 400), ScissorOf(342, 342, 640, 400),
+                                   342, 342),
+            VR::VRViewportClass::Letterboxed);
+  // The pane was not copied in that frame: a split-screen half again.
+  EXPECT_EQ(VR::ClassifyVRViewport(pane, pane_scissor, 342, 342), VR::VRViewportClass::SplitScreen);
+  // A copied pane away from the corner is not taken for a render target.
+  VR::NotifyVRTextureCopyRegion(320, 0, 640, 456);
+  VR::NotifyVRXFBCopyRegion(0, 0, 640, 456);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(662, 342, 320, 456), ScissorOf(662, 342, 320, 456),
+                                   342, 342),
+            VR::VRViewportClass::SplitScreen);
+}

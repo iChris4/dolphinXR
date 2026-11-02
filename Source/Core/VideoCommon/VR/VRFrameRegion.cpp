@@ -37,9 +37,43 @@ size_t s_scene_region_sample_count = 0;
 VRFrameRegion s_last_presentation_source{};
 VRFrameRegion s_last_presentation_xfb{};
 
+// The distinct rectangles (EFB pixels) of the EFB->texture copies of the frame being drawn, and
+// of the previous completed frame, which the classifier reads.
+constexpr size_t MAX_TEXTURE_COPIES = 16;
+struct TextureCopies
+{
+  std::array<MathUtil::Rectangle<int>, MAX_TEXTURE_COPIES> rects{};
+  size_t count = 0;
+};
+TextureCopies s_pending_texture_copies{};
+TextureCopies s_current_texture_copies{};
+
 bool SameRegion(const VRFrameRegion& a, const VRFrameRegion& b)
 {
   return a.left == b.left && a.top == b.top && a.width == b.width && a.height == b.height;
+}
+
+// Whether the viewport is a pane at the EFB's top-left corner which the previous frame copied
+// whole to a texture: Wii Sports' Boxing draws each boxer of its "VS" screen in a 350x456 pane
+// there, blurs it and copies it, then composes both copies on the screen.
+bool IsCopiedPane(const Viewport& v, int x_off, int y_off)
+{
+  const int left = static_cast<int>(std::lround(v.xOrig - std::fabs(v.wd))) - x_off;
+  const int top = static_cast<int>(std::lround(v.yOrig - std::fabs(v.ht))) - y_off;
+  const int right = left + static_cast<int>(std::lround(2.0f * std::fabs(v.wd)));
+  const int bottom = top + static_cast<int>(std::lround(2.0f * std::fabs(v.ht)));
+  if (std::abs(left) > 1 || std::abs(top) > 1)
+    return false;
+  for (size_t i = 0; i < s_current_texture_copies.count; ++i)
+  {
+    const MathUtil::Rectangle<int>& copy = s_current_texture_copies.rects[i];
+    if (std::abs(copy.left - left) <= 1 && std::abs(copy.top - top) <= 1 &&
+        std::abs(copy.right - right) <= 1 && std::abs(copy.bottom - bottom) <= 1)
+    {
+      return true;
+    }
+  }
+  return false;
 }
 }  // namespace
 
@@ -54,6 +88,8 @@ void NotifyVRXFBCopyRegion(int left, int top, int right, int bottom)
   {
     // First copy of a new frame (games emit strips top-down; a copy starting at or above
     // the pending union restarts the accumulation). Commit the finished union.
+    s_current_texture_copies = s_pending_texture_copies;
+    s_pending_texture_copies = {};
     if (s_pending.valid)
     {
       if (!SameRegion(s_pending, s_current))
@@ -90,6 +126,22 @@ void ResetVRFrameRegion()
   s_scene_region_sample_count = 0;
   s_last_presentation_source = VRFrameRegion{};
   s_last_presentation_xfb = VRFrameRegion{};
+  s_pending_texture_copies = {};
+  s_current_texture_copies = {};
+}
+
+void NotifyVRTextureCopyRegion(int left, int top, int right, int bottom)
+{
+  if (right <= left || bottom <= top)
+    return;
+  const MathUtil::Rectangle<int> rect{left, top, right, bottom};
+  for (size_t i = 0; i < s_pending_texture_copies.count; ++i)
+  {
+    if (s_pending_texture_copies.rects[i] == rect)
+      return;
+  }
+  if (s_pending_texture_copies.count < MAX_TEXTURE_COPIES)
+    s_pending_texture_copies.rects[s_pending_texture_copies.count++] = rect;
 }
 
 VRScissor GetVRScissor()
@@ -105,9 +157,12 @@ VRScissor GetVRScissor()
 //  - Full-width bands that aren't split-screen halves are LETTERBOXED (this includes
 //    Metroid Prime's morph-ball 640x358 viewport, which must stay head-tracked).
 //  - Square, edge-anchored, multiple-of-8 viewports are render-to-texture passes, and so are
-//    draws scissored to a small box at the top-left corner.
-VRViewportClass ClassifyVRViewport(const Viewport& v, const VRScissor& scissor, int x_off,
-                                   int y_off)
+//    draws scissored to a small box at the top-left corner and split-screen or HUD panes at the
+//    top-left corner which the game copies whole to a texture.
+namespace
+{
+VRViewportClass ClassifyVRViewportShape(const Viewport& v, const VRScissor& scissor, int x_off,
+                                        int y_off)
 {
   const VRFrameRegion frame = GetVRFrameRegion();
   if (!frame.valid)
@@ -235,6 +290,21 @@ VRViewportClass ClassifyVRViewport(const Viewport& v, const VRScissor& scissor, 
   }
 
   return VRViewportClass::HudElement;
+}
+}  // namespace
+
+VRViewportClass ClassifyVRViewport(const Viewport& v, const VRScissor& scissor, int x_off,
+                                   int y_off)
+{
+  const VRViewportClass vclass = ClassifyVRViewportShape(v, scissor, x_off, y_off);
+  // A real split-screen pane goes to the screen with the rest of the frame. One the game copies
+  // to a texture renders natively, so that the copy holds what the game drew.
+  if ((vclass == VRViewportClass::SplitScreen || vclass == VRViewportClass::HudElement) &&
+      IsCopiedPane(v, x_off, y_off))
+  {
+    return VRViewportClass::RenderToTexture;
+  }
+  return vclass;
 }
 
 void ObserveVRPerspectiveViewport(const Viewport& v, const VRScissor& scissor, int x_off, int y_off)
