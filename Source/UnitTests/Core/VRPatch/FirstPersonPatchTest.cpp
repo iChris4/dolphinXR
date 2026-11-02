@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
@@ -562,4 +563,339 @@ TEST(WiiSportsFirstPersonPatch, NoMii)
   EXPECT_FALSE(game.Frame());
   game.memory.Write32(0x804DFB90, 0);
   EXPECT_FALSE(game.Frame());
+}
+
+// ---- Shadow the Hedgehog: Reloaded (Data/Sys/VRPatches/GUP/first-person.lua) ----
+
+namespace
+{
+constexpr u32 SH_HOLDER = 0x807D71A0;
+constexpr u32 SH_HOLDER_TARGET = 0x807D2DD8;
+constexpr u32 SH_OTHER_HOLDER = 0x805EF324;
+constexpr u32 SH_OTHER_TARGET = 0x81013098;
+constexpr u32 SH_PLAYER = 0x80F44128;
+constexpr u32 SH_MOTION = 0x80F40AB0;
+constexpr u32 SH_SKELETON = 0x812DE240;
+constexpr u32 SH_BONES = SH_SKELETON + 0x160;
+constexpr u32 SH_CAMERAS = 0x8056EE14;
+constexpr u32 SH_CAMERA_LIST = 0x807D1768;
+constexpr u32 SH_IDLE_CAMERA = 0x807D7858;
+constexpr u32 SH_CAMERA = 0x807D76A8;
+constexpr u32 SH_CONTROLS_HELD = 0x8057D768;
+constexpr u32 SH_PAUSE_MENU = 0x8057D724;
+constexpr u32 SH_HOOK = 0x80015774;
+constexpr u32 SH_HOOK_ORIGINAL = 0x48000C1D;  // bl glxCopyMatrix
+// The other hooked calls: {address, original word, cave entry}.
+constexpr std::array<std::array<u32, 3>, 3> SH_OTHER_HOOKS = {
+    {{0x802A5590, 0x4BD70E01, 0}, {0x802A5804, 0x4BD70B8D, 0}, {0x800B60CC, 0x4BFA3125, 1}}};
+constexpr u32 SH_SCRATCH = 0x80002F10;
+constexpr u32 SH_CAVE = SH_SCRATCH + 0x18;
+constexpr u32 SH_STATUS = SH_PLAYER + 0xAC;
+// The pistol in his hand: a 7-bone skeleton, one of its bones in the motion controller's records.
+constexpr u32 SH_GUN_SKELETON = 0x812F24E0;
+constexpr u32 SH_GUN_BONES = SH_GUN_SKELETON + 0x160;
+
+// Shadow's feet, facing 40 degrees from -Z (he faces his bones' -Z), and his head joint at his
+// neck, 5.8 units above.
+const std::array<float, 3> SH_ROOT = {21.6f, -4730.0f, -2651.9f};
+const std::array<float, 3> SH_HEAD = {21.8f, -4724.2f, -2652.1f};
+
+struct Shadow
+{
+  Shadow()
+  {
+    memory.Write32(0x80270840, 0x387F003C);
+    memory.Write32(0x80270848, 0x4819B901);
+    memory.Write32(0x80015768, 0x80860004);
+    memory.Write32(SH_HOOK, SH_HOOK_ORIGINAL);
+    memory.Write32(0x80015778, 0x4800001C);
+    memory.Write32(0x802A558C, 0x38650010);
+    memory.Write32(0x802A5800, 0x38650010);
+    memory.Write32(0x800B60C8, 0x80840000);
+    memory.Write32(0x800B60D0, 0x80810008);
+    for (const auto& hook : SH_OTHER_HOOKS)
+      memory.Write32(hook[0], hook[1]);
+    memory.Write32(SH_STATUS, 0x40000000);  // on the ground
+    // The motion controller's records: his head joint, a hand and the pistol's bone 3.
+    memory.Write32(SH_MOTION + 0xD0 + 2 * 0x38, SH_BONES + 12 * 0x70);
+    memory.Write32(SH_MOTION + 0xD0 + 3 * 0x38, SH_BONES + 29 * 0x70);
+    memory.Write32(SH_MOTION + 0xD0 + 4 * 0x38, SH_GUN_BONES + 3 * 0x70);
+    memory.Write32(SH_GUN_SKELETON, 7);
+    memory.Write32(SH_GUN_SKELETON + 4, SH_GUN_BONES);
+    memory.Write32(SH_HOLDER, SH_HOLDER_TARGET);
+    memory.Write32(SH_HOLDER_TARGET, SH_PLAYER);
+    memory.Write32(SH_OTHER_HOLDER, SH_OTHER_TARGET);
+    memory.Write32(SH_OTHER_TARGET + 0x60, SH_PLAYER);
+    memory.Write32(SH_PLAYER + 0x3C, 0x53686164);  // "Shadow"
+    memory.Write32(SH_PLAYER + 0x40, 0x6F770000);
+    memory.Write32(SH_PLAYER + 0x230, SH_MOTION);
+    memory.Write32(SH_MOTION + 0x3E8, SH_SKELETON);
+    memory.Write32(SH_SKELETON, 30);
+    memory.Write32(SH_SKELETON + 4, SH_BONES);
+    memory.SetMtx(SH_BONES, Make(RotY(40), SH_ROOT));
+    // The head nods 20 degrees: the view stays level.
+    memory.SetMtx(SH_BONES + 12 * 0x70,
+                  Make(VR::CameraAnchorMath::Multiply33(RotY(40), RotX(-20)), SH_HEAD));
+    // Two cameras, the first idle.
+    memory.Write32(SH_CAMERAS + 8, 2);
+    memory.Write32(SH_CAMERAS + 0xC, SH_CAMERA_LIST);
+    memory.Write32(SH_CAMERA_LIST, SH_IDLE_CAMERA);
+    memory.Write32(SH_CAMERA_LIST + 8, SH_CAMERA);
+    memory.Write8(SH_CAMERA, 1);
+    memory.SetMtx(SH_IDLE_CAMERA + 0x3C, Make(RotY(90), {0, 0, 0}));
+    memory.SetMtx(SH_CAMERA + 0x3C, VIEW);
+    env.memory = &memory;
+    env.input = &input;
+    env.game_id = "GUPR8P";
+    env.field = 100;
+    env.units_per_meter = 30;
+    env.scratch_base = SH_SCRATCH;
+    env.scratch_size = 0xE0;
+    env.camera_anchor_active = true;
+  }
+
+  // The bones the cave hides: the first one's and the end's addresses, 0 when it is off.
+  std::pair<u32, u32> HiddenHead() const
+  {
+    return {memory.Read32(SH_SCRATCH).value_or(1), memory.Read32(SH_SCRATCH + 4).value_or(1)};
+  }
+
+  // The bones of what he holds that the cave hides with his.
+  std::pair<u32, u32> HiddenItem() const
+  {
+    return {memory.Read32(SH_SCRATCH + 8).value_or(1), memory.Read32(SH_SCRATCH + 12).value_or(1)};
+  }
+
+  ::testing::AssertionResult Load()
+  {
+    std::string source;
+    File::ReadFileToString(File::GetSysDirectory() + VRPATCHES_DIR "/GUP/first-person.lua", source);
+    if (!script.Load(source, env) || !script.Call(Hook::OnLoad, env))
+      return ::testing::AssertionFailure() << script.Error();
+    return ::testing::AssertionSuccess();
+  }
+
+  std::optional<VR::CameraAnchorMath::Anchor> Frame()
+  {
+    EXPECT_TRUE(script.Call(Hook::OnFrame, env)) << script.Error();
+    ++env.field;
+    return script.TakeCameraAnchor();
+  }
+
+  void SetSetting(const std::string& name, double value)
+  {
+    ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting(name), value));
+    ASSERT_TRUE(script.CallSettingChanged(name, value, env)) << script.Error();
+  }
+
+  bool Warned(std::string_view text)
+  {
+    bool warned = false;
+    for (const LogLine& line : script.TakeLog())
+      warned |= line.level == 1 && line.text.find(text) != std::string::npos;
+    return warned;
+  }
+
+  // `up` units above `from` and `forward` units ahead of Shadow, in the camera's view.
+  static std::array<float, 3> Eyes(const std::array<float, 3>& from, float up, float forward)
+  {
+    const Mat33 facing = RotY(40);
+    // His forward is the rig's -Z: (0, up, -forward) turned with him.
+    const std::array<float, 3> offset = {facing[1] * up - facing[2] * forward,
+                                         facing[4] * up - facing[5] * forward,
+                                         facing[7] * up - facing[8] * forward};
+    return VR::CameraAnchorMath::TransformPoint(
+        VIEW, {from[0] + offset[0], from[1] + offset[1], from[2] + offset[2]});
+  }
+
+  Memory memory;
+  VRInputFrame input;
+  ScriptEnvironment env;
+  PatchScript script{"first-person"};
+};
+
+void ExpectNearPosition(const std::array<float, 3>& actual, const std::array<float, 3>& expected)
+{
+  for (size_t i = 0; i < 3; ++i)
+  {
+    SCOPED_TRACE(i);
+    EXPECT_NEAR(actual[i], expected[i], 0.01f);
+  }
+}
+}  // namespace
+
+// At his eyes above his feet, level and turned with him, true to scale, from the active camera.
+TEST(ShadowFirstPersonPatch, LevelAtTheEyesAboveHisFeet)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  EXPECT_EQ(game.script.GetManifest().games, (std::vector<std::string>{"GUPE8P", "GUPR8P"}));
+  const auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNearPosition(anchor->position, Shadow::Eyes(SH_ROOT, 6.7f, 2.2f));
+  ExpectNear(VR::CameraAnchorMath::Multiply33(Transpose(VR::CameraAnchorMath::Basis(VIEW)),
+                                              anchor->rotation),
+             RotY(40));
+  EXPECT_EQ(anchor->units_per_meter, 10.0f);
+  EXPECT_TRUE(anchor->stick_turn);
+}
+
+// Following his head: from the head joint, still level.
+TEST(ShadowFirstPersonPatch, FollowsHisHead)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  game.SetSetting("follow", 1);
+  const auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNearPosition(anchor->position, Shadow::Eyes(SH_HEAD, 0.9f, 1.6f));
+  ExpectNear(VR::CameraAnchorMath::Multiply33(Transpose(VR::CameraAnchorMath::Basis(VIEW)),
+                                              anchor->rotation),
+             RotY(40));
+}
+
+// The cave that collapses his bones is hooked into the four calls that hand them to RenderWare; it
+// hides bones 12 to 21 only while the view is in his head, and the game's calls come back when the
+// patch stops.
+TEST(ShadowFirstPersonPatch, HidesHisHeadWhileTheViewIsInIt)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  EXPECT_EQ(game.memory.Read32(SH_HOOK).value_or(0),
+            0x48000001u | ((SH_CAVE - SH_HOOK) & 0x03FFFFFCu));
+  for (const auto& hook : SH_OTHER_HOOKS)
+  {
+    const u32 entry = SH_CAVE + hook[2] * 12;
+    EXPECT_EQ(game.memory.Read32(hook[0]).value_or(0),
+              0x48000001u | ((entry - hook[0]) & 0x03FFFFFCu));
+  }
+  EXPECT_NE(game.memory.Read32(SH_CAVE).value_or(0), 0u);
+  const std::pair<u32, u32> head = {SH_BONES + 12 * 0x70, SH_BONES + 22 * 0x70};
+  const std::pair<u32, u32> off = {0, 0};
+  EXPECT_TRUE(game.Frame());
+  EXPECT_EQ(game.HiddenHead(), head);
+
+  // Camera Anchor off, the setting off, or an event in the game's camera: the head shows.
+  game.env.camera_anchor_active = false;
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), off);
+  game.env.camera_anchor_active = true;
+  game.SetSetting("hide_head", 0);
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), off);
+  game.SetSetting("hide_head", 1);
+  game.memory.Write8(SH_CONTROLS_HELD, 1);
+  EXPECT_FALSE(game.Frame());
+  EXPECT_EQ(game.HiddenHead(), off);
+  game.memory.Write8(SH_CONTROLS_HELD, 0);
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), head);
+
+  // A savestate made without the patch: the hook comes back.
+  game.memory.Write32(SH_HOOK, SH_HOOK_ORIGINAL);
+  ASSERT_TRUE(game.script.Call(Hook::OnStateLoaded, game.env)) << game.script.Error();
+  EXPECT_NE(game.memory.Read32(SH_HOOK).value_or(0), SH_HOOK_ORIGINAL);
+
+  ASSERT_TRUE(game.script.Call(Hook::OnUnload, game.env)) << game.script.Error();
+  EXPECT_EQ(game.memory.Read32(SH_HOOK).value_or(0), SH_HOOK_ORIGINAL);
+  for (const auto& hook : SH_OTHER_HOOKS)
+    EXPECT_EQ(game.memory.Read32(hook[0]).value_or(0), hook[1]);
+  EXPECT_EQ(game.HiddenHead(), off);
+}
+
+// In the air his whole body is hidden, with the pistol he holds (found from the motion
+// controller's records); on the ground again, only his head. "Always" hides his body on the
+// ground too, "Never" not in the air either.
+TEST(ShadowFirstPersonPatch, HidesHisBodyInTheAir)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  const std::pair<u32, u32> head = {SH_BONES + 12 * 0x70, SH_BONES + 22 * 0x70};
+  const std::pair<u32, u32> body = {SH_BONES, SH_BONES + 30 * 0x70};
+  const std::pair<u32, u32> gun = {SH_GUN_BONES, SH_GUN_BONES + 7 * 0x70};
+  const std::pair<u32, u32> off = {0, 0};
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), head);
+  EXPECT_EQ(game.HiddenItem(), off);
+
+  game.memory.Write32(SH_STATUS, 0x00200000);  // jumping
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), body);
+  EXPECT_EQ(game.HiddenItem(), gun);
+
+  // Without a weapon: his body only.
+  game.memory.Write32(SH_MOTION + 0xD0 + 4 * 0x38, 0);
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), body);
+  EXPECT_EQ(game.HiddenItem(), off);
+
+  game.memory.Write32(SH_STATUS, 0x40000000);
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), head);
+  game.SetSetting("hide_body", 2);
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), body);
+  game.SetSetting("hide_body", 1);
+  game.memory.Write32(SH_STATUS, 0x00200000);
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), head);
+}
+
+// While the game holds the controls: the pause menu keeps the view without turning the stick;
+// events go back to the game's camera unless the setting keeps first person.
+TEST(ShadowFirstPersonPatch, PauseMenuAndEvents)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  game.memory.Write8(SH_CONTROLS_HELD, 1);
+  game.memory.Write8(SH_PAUSE_MENU, 1);
+  auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_FALSE(anchor->stick_turn);
+
+  game.memory.Write8(SH_PAUSE_MENU, 0);
+  EXPECT_FALSE(game.Frame());
+  game.SetSetting("events", 1);
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_FALSE(anchor->stick_turn);
+
+  game.memory.Write8(SH_CONTROLS_HELD, 0);
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_TRUE(anchor->stick_turn);
+}
+
+// Only Shadow's 30-bone skeleton, through the second path when the first is gone, and only with
+// an active camera.
+TEST(ShadowFirstPersonPatch, OnlyShadowsSkeleton)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  game.memory.Write32(SH_SKELETON, 29);
+  EXPECT_FALSE(game.Frame());
+  game.memory.Write32(SH_SKELETON, 30);
+  game.memory.Write32(SH_PLAYER + 0x40, 0x6F770001);
+  EXPECT_FALSE(game.Frame());
+  game.memory.Write32(SH_PLAYER + 0x40, 0x6F770000);
+
+  game.memory.Write32(SH_HOLDER, 0);
+  EXPECT_TRUE(game.Frame());
+  game.memory.Write32(SH_OTHER_TARGET + 0x60, 0);
+  EXPECT_FALSE(game.Frame());
+  game.memory.Write32(SH_HOLDER, SH_HOLDER_TARGET);
+
+  game.memory.Write8(SH_CAMERA, 0);
+  EXPECT_FALSE(game.Frame());
+  EXPECT_FALSE(game.Warned(""));
+}
+
+TEST(ShadowFirstPersonPatch, RefusesOtherCode)
+{
+  Shadow game;
+  game.memory.Write32(0x80270840, 0x60000000);
+  ASSERT_TRUE(game.Load());
+  EXPECT_FALSE(game.Frame());
+  EXPECT_TRUE(game.Warned("not installed"));
+  EXPECT_EQ(game.memory.Read32(SH_HOOK).value_or(0), SH_HOOK_ORIGINAL);
 }
