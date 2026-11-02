@@ -115,8 +115,9 @@ float TrackCameraTurn(const Mat33& view_rotation, const Vec3& up, State* state)
   return state->camera_turn;
 }
 
-// The rig in world space for Level, Fixed and Full.
-std::optional<Mat33> WorldRig(const Mtx34& heading_bone, const Options& options, State* state)
+// The rig in world space for Level, Fixed and Full; turn_deg turns a Fixed rig.
+std::optional<Mat33> WorldRig(const Mtx34& heading_bone, const Options& options, State* state,
+                              float turn_deg)
 {
   const Vec3 up = AxisVector(options.up_axis);
   switch (options.rotation)
@@ -134,6 +135,14 @@ std::optional<Mat33> WorldRig(const Mtx34& heading_bone, const Options& options,
       const Vec3 z = GetColumn(*rig, 2);
       state->fixed_forward = {-z[0], -z[1], -z[2]};
       state->fixed_valid = true;
+    }
+    if (turn_deg != 0.0f)
+    {
+      if (const std::optional<Mat33> turned = LevelBasis(state->fixed_forward, up, turn_deg))
+      {
+        const Vec3 z = GetColumn(*turned, 2);
+        state->fixed_forward = {-z[0], -z[1], -z[2]};
+      }
     }
     return LevelBasis(state->fixed_forward, up, options.yaw_deg);
   case Rotation::Full:
@@ -292,7 +301,7 @@ bool Orthonormalize(Mat33* m)
 }
 
 std::optional<Anchor> Compose(const Mtx34& head, const Mtx34* heading, const Mtx34& view,
-                              const Options& options, float upm, State* state)
+                              const Options& options, float upm, State* state, float turn_deg)
 {
   if (!IsPlausibleTransform(head) || !IsPlausibleTransform(view) ||
       (heading != nullptr && !IsPlausibleTransform(*heading)))
@@ -338,7 +347,7 @@ std::optional<Anchor> Compose(const Mtx34& head, const Mtx34* heading, const Mtx
   }
   else
   {
-    std::optional<Mat33> rig = WorldRig(heading_bone, options, state);
+    std::optional<Mat33> rig = WorldRig(heading_bone, options, state, turn_deg);
     if (!rig)
     {
       // The forward axis points straight up for a moment: keep the last heading.
@@ -389,6 +398,12 @@ std::optional<Anchor> Compose(const Mtx34& head, const Mtx34* heading, const Mtx
   anchor.stick_yaw = RigYaw(stick_rig, anchor.hide_up) - options.stick_lead * camera_turn;
   anchor.stick_head = options.stick == Stick::Head ||
                       (options.stick == Stick::View && options.rotation == Rotation::Fixed);
+  anchor.stick_camera_yaw = state->camera_heading + options.stick_lead * camera_turn;
+  anchor.stick_hold = options.stick == Stick::Facing || options.rotation != Rotation::Fixed;
+  anchor.stick_steer_behind =
+      options.rotation == Rotation::Level || options.rotation == Rotation::Full;
+  anchor.stick_turn_speed =
+      options.rotation == Rotation::Fixed ? std::max(options.stick_turn_speed, 0.0f) : 0.0f;
   return anchor;
 }
 
@@ -459,6 +474,22 @@ std::array<float, 2> TurnStick(float x, float y, float radians)
 {
   const float c = std::cos(radians), s = std::sin(radians);
   return {x * c - y * s, x * s + y * c};
+}
+
+std::array<float, 2> TurnStickHeld(float x, float y, float dead_zone, float radians,
+                                   float camera_yaw, bool steer_behind, StickHold* hold)
+{
+  const float length = std::hypot(x, y);
+  if (length <= dead_zone || y >= 0.0f)
+    hold->held = false;
+  else if (!hold->held && y < -0.5f * length)
+    *hold = {true, radians + camera_yaw};
+  if (!hold->held)
+    return TurnStick(x, y, radians);
+  const float held = std::remainder(hold->heading - camera_yaw, 6.28318530718f);
+  // From behind him, turned around: the held reference turned by half a turn, the stick's y
+  // flipped (back runs toward the held back).
+  return steer_behind ? TurnStick(-x, y, held) : TurnStick(x, y, held);
 }
 
 std::optional<Rotation> ParseRotation(std::string_view name)

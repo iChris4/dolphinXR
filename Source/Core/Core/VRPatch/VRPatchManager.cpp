@@ -704,11 +704,17 @@ void UpdateCameraAnchorSource(const VRInputFrame* input = nullptr)
   VR::CameraAnchorSource::Set(published);
 
   // The stick turns while the anchor holds the camera, as the video thread reports.
-  std::optional<float> stick;
+  std::optional<StickTurn::Turn> stick;
   if (published && VR::CameraAnchorSource::IsEngaged())
   {
     const bool head = input != nullptr && input->head.valid;
-    stick = VR::CameraAnchorMath::StickTurn(*published, head ? &input->head.orientation : nullptr);
+    const std::optional<float> radians =
+        VR::CameraAnchorMath::StickTurn(*published, head ? &input->head.orientation : nullptr);
+    if (radians)
+    {
+      stick = StickTurn::Turn{*radians, published->stick_camera_yaw, published->stick_steer_behind,
+                              published->stick_hold, published->stick_turn_speed};
+    }
   }
   StickTurn::Set(stick);
 

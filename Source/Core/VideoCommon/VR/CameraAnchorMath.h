@@ -62,7 +62,8 @@ enum class Stick : u8
   // The game's camera (the stick is not turned).
   Camera,
   // Where the character faces: the heading bone's forward axis, not smoothed (with the yaw offset).
-  // Up keeps him going straight; a sideways push turns him for as long as it is held.
+  // Up keeps him going straight; a sideways push turns him for as long as it is held; a push back
+  // turns him around once (TurnStickHeld).
   Facing,
   // Straight ahead in the view: the rig's heading as shown (smoothed), the character's with Level
   // (where the headset looks with Fixed, whose rig never turns).
@@ -108,6 +109,10 @@ struct Options
   // reads the stick: the camera's last turn is added that many times. Zelda games (Wind Waker,
   // Twilight Princess) read the pad, then update the camera, then move the player with it: 1.
   float stick_lead = 0.0f;
+  // Degrees per second; 0 = off. With Fixed, the stick's left and right turn the rig at up to this
+  // speed instead of reaching the game, and up and back walk along the stick's reference (with View
+  // or Head: where the headset looks): back walks backward, the view does not turn with him.
+  float stick_turn_speed = 0.0f;
 };
 
 // Smoothing state, in world space. Reset() when the anchor engages again.
@@ -152,6 +157,25 @@ struct Anchor
   bool stick_turn = false;
   float stick_yaw = 0.0f;
   bool stick_head = false;
+  // The game camera's heading about the world's up as the game will move the character with it
+  // (stick_lead included; radians, + = left, from a fixed world direction): stick_yaw plus this is
+  // the stick reference's heading in the world. Whether the reference turns with the character
+  // (Facing, or a rig that is not Fixed): a push back is held (TurnStickHeld). And whether the rig
+  // turns with him (Level, Full): a stick held back then steers as seen from behind him.
+  float stick_camera_yaw = 0.0f;
+  bool stick_hold = false;
+  bool stick_steer_behind = false;
+  // Options::stick_turn_speed when it applies (Fixed), else 0: the stick's left and right turn the
+  // rig (Compose's turn_deg) and do not reach the game.
+  float stick_turn_speed = 0.0f;
+};
+
+// A push back on the main stick, held (TurnStickHeld).
+struct StickHold
+{
+  bool held = false;
+  // The stick reference's heading about the world's up when the push began (radians, + = left).
+  float heading = 0.0f;
 };
 
 bool IsFinite(const Mtx34& m);
@@ -178,9 +202,11 @@ bool Orthonormalize(Mat33* m);
 // The anchor of a head bone (world transform), the bone giving the heading (world transform;
 // null: the head's) and the game camera's world->view transform. `upm` converts the meter offsets
 // to game units. Smooths in world space through `state`. nullopt when a transform is implausible
-// or the heading cannot be found (the forward axis points straight up) before any was.
+// or the heading cannot be found (the forward axis points straight up) before any was. turn_deg:
+// the stick's turn since the last update (+ = left), which turns a Fixed rig.
 std::optional<Anchor> Compose(const Mtx34& head, const Mtx34* heading, const Mtx34& view,
-                              const Options& options, float upm, State* state);
+                              const Options& options, float upm, State* state,
+                              float turn_deg = 0.0f);
 
 // Whether a draw centred at `point` (game view space) is in the anchor's hide region: within its
 // radius of the head bone, and at most hide_below under it along the world's up.
@@ -197,6 +223,15 @@ float HeadYaw(const std::array<float, 4>& orientation);
 std::optional<float> StickTurn(const Anchor& anchor, const std::array<float, 4>* head);
 // Turns a stick position (x right, y up) by `radians` (+ = counterclockwise).
 std::array<float, 2> TurnStick(float x, float y, float radians);
+// TurnStick for the stick the game reads. The reference turns with the character (Facing; View and
+// Head with Level), so a push back would turn him toward a back that turns with him, round and
+// round. From the moment the stick points back (more than 120 degrees from up) until it comes
+// back to the front half or within `dead_zone` of the centre, the reference keeps the heading in
+// the world it had then: he turns around once and runs. With `steer_behind` the stick then steers
+// as seen from behind him once turned (back runs ahead, back-left to his left); without, as seen
+// from the held heading. (x, y): the stick from its centre; camera_yaw: Anchor::stick_camera_yaw.
+std::array<float, 2> TurnStickHeld(float x, float y, float dead_zone, float radians,
+                                   float camera_yaw, bool steer_behind, StickHold* hold);
 
 std::optional<Rotation> ParseRotation(std::string_view name);
 std::optional<Axis> ParseAxis(std::string_view name);

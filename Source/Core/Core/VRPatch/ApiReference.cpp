@@ -147,7 +147,7 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
 Camera Anchor (first-person view: the VR camera in a character's head, from the game's memory)
   vr.set_camera_anchor_options{rotation=, yaw=, right=, up=, forward=, upm=, up_axis=,
       forward_axis=, bone_up_axis=, smoothing=, heading_smoothing=, hide_radius=, hide_below=,
-      stick=, stick_lead=}   -- in on_load and
+      stick=, stick_lead=, stick_turn_speed=}   -- in on_load and
       on_setting_changed; restarts the smoothing. rotation:
         "level" (default): level, turned with the character's heading (forward_axis of the heading
                  bone laid on the ground plane): the game camera's swings do not move the view
@@ -176,7 +176,16 @@ Camera Anchor (first-person view: the VR camera in a character's head, from the 
       runs across the view while it turns after him; where the headset looks with "fixed") or
       "head" (where the headset looks; with "level", looking aside while walking keeps turning
       the character). The engine turns the stick by the angle between the game camera's heading
-      and that one.
+      and that one. While the reference turns with the character ("facing", or a rotation other
+      than "fixed"), a push back (more than 120 degrees from up) keeps the reference's heading in
+      the world until the stick comes back to the front half or the centre: he turns around once
+      instead of round and round; with "level" or "full" the stick then steers as seen from behind
+      him.
+      stick_turn_speed (degrees per second, 0 to 720, default 0 = off; with "fixed"): the main
+      stick's left and right turn the view at up to that speed instead of reaching the game, and
+      up and back walk along the stick reference ("head": where the headset looks): back walks
+      backward without turning the view, as in VR games. A patch offers it as its own stick
+      choice with rotation "fixed" and stick "head" (Shadow, Zelda first-person patches).
       stick_lead (0 to 4, default 0): camera updates the game's control angle runs ahead of the
       camera matrix the patch reads. Games that read the pad, then move the camera, then the
       player with it (Wind Waker, Twilight Princess: 1) would otherwise let each camera turn

@@ -5,10 +5,12 @@
 
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <map>
 #include <set>
 #include <string>
+#include <thread>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1118,7 +1120,7 @@ TEST(VRPatch, CameraAnchorStick)
   ExpectFrame("assert(not pcall(vr.set_camera_anchor_stick, 1))");
 }
 
-// The turn reaches the first GameCube controller's main stick only.
+// The turn reaches the first GameCube controller's main stick only; a push back holds it.
 TEST(VRPatch, TurnsTheFirstControllersStick)
 {
   GCPadStatus up;
@@ -1129,7 +1131,7 @@ TEST(VRPatch, TurnsTheFirstControllersStick)
   EXPECT_EQ(status.stickX, 128);
   EXPECT_EQ(status.stickY, 228);
   // A quarter turn to the left: up walks left.
-  StickTurn::Set(1.5707963f);
+  StickTurn::Set(StickTurn::Turn{1.5707963f});
   StickTurn::Apply(0, &status);
   EXPECT_EQ(status.stickX, 28);
   EXPECT_EQ(status.stickY, 128);
@@ -1140,9 +1142,60 @@ TEST(VRPatch, TurnsTheFirstControllersStick)
   GCPadStatus corner;
   corner.stickX = 228;
   corner.stickY = 228;
-  StickTurn::Set(-0.7853982f);
+  StickTurn::Set(StickTurn::Turn{-0.7853982f});
   StickTurn::Apply(0, &corner);
   EXPECT_EQ(corner.stickX, 255);
   EXPECT_EQ(corner.stickY, 128);
+  // Held back while the reference turns around with the character: still the same back.
+  GCPadStatus back;
+  back.stickY = 28;
+  StickTurn::Set(StickTurn::Turn{0.0f, 0.0f, true});
+  status = back;
+  StickTurn::Apply(0, &status);
+  EXPECT_EQ(status.stickY, 28);
+  StickTurn::Set(StickTurn::Turn{3.1415927f, 0.0f, true});
+  status = back;
+  StickTurn::Apply(0, &status);
+  EXPECT_EQ(status.stickX, 128);
+  EXPECT_EQ(status.stickY, 28);
+  // Let go: the turn as it is.
+  status = GCPadStatus{};
+  StickTurn::Apply(0, &status);
+  status = back;
+  StickTurn::Apply(0, &status);
+  EXPECT_EQ(status.stickY, 228);
   StickTurn::Set(std::nullopt);
+}
+
+// With a turn speed, the stick's left and right turn the view instead of reaching the game; up and
+// back still walk along the reference, and a push back is not held without `hold`.
+TEST(VRPatch, StickLeftAndRightTurnTheView)
+{
+  StickTurn::Set(StickTurn::Turn{0.0f, 0.0f, false, false, 90.0f});
+  StickTurn::TakeTurnDegrees();
+  GCPadStatus left;
+  left.stickX = 28;
+  GCPadStatus status = left;
+  StickTurn::Apply(0, &status);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  status = left;
+  StickTurn::Apply(0, &status);
+  EXPECT_EQ(status.stickX, 128);
+  EXPECT_EQ(status.stickY, 128);
+  // To the left (+), at most the speed over the longest step.
+  const float turned = StickTurn::TakeTurnDegrees();
+  EXPECT_GT(turned, 0.5f);
+  EXPECT_LE(turned, 9.0f);
+  EXPECT_EQ(StickTurn::TakeTurnDegrees(), 0.0f);
+  // Not held: back follows the reference as it turns.
+  GCPadStatus back;
+  back.stickY = 28;
+  status = back;
+  StickTurn::Apply(0, &status);
+  StickTurn::Set(StickTurn::Turn{3.1415927f, 0.0f, false, false, 90.0f});
+  status = back;
+  StickTurn::Apply(0, &status);
+  EXPECT_EQ(status.stickY, 228);
+  StickTurn::Set(std::nullopt);
+  EXPECT_EQ(StickTurn::TakeTurnDegrees(), 0.0f);
 }

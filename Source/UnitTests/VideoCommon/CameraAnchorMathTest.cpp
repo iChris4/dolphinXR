@@ -420,11 +420,121 @@ TEST(CameraAnchorMath, StickLeadsTheTurningCamera)
   EXPECT_NEAR(turn(70), 150.0f, 0.01f);
 }
 
+// The stick reference's heading in the world (stick_yaw from the camera, plus the camera's) stays
+// the rig's while the camera turns, with its lead.
+TEST(CameraAnchorMath, StickReferenceInTheWorld)
+{
+  Options options;
+  options.stick = Stick::Facing;
+  options.stick_lead = 1.0f;
+  State state;
+  const auto view = [](float deg) { return Make(RotY(-deg), {0, 0, -10}); };
+  for (const float deg : {0.0f, 5.0f, 10.0f, 70.0f})
+  {
+    SCOPED_TRACE(deg);
+    const std::optional<Anchor> anchor = Compose(HEAD, nullptr, view(deg), options, 1.0f, &state);
+    ASSERT_TRUE(anchor);
+    EXPECT_NEAR(std::remainder(anchor->stick_yaw + anchor->stick_camera_yaw, 360 * DEG) / DEG,
+                -140.0f, 0.01f);
+    EXPECT_TRUE(anchor->stick_steer_behind);
+  }
+  options.rotation = Rotation::Fixed;
+  const std::optional<Anchor> fixed = Compose(HEAD, nullptr, view(70), options, 1.0f, &state);
+  ASSERT_TRUE(fixed);
+  EXPECT_FALSE(fixed->stick_steer_behind);
+}
+
 TEST(CameraAnchorMath, TurnsTheStick)
 {
   ExpectNear(TurnStick(0, 1, 90 * DEG), {-1, 0});
   ExpectNear(TurnStick(1, 0, 90 * DEG), {0, 1});
   ExpectNear(TurnStick(0, 100, -140 * DEG), {64.2788f, -76.6044f}, 1e-3f);
+}
+
+// A push back holds the reference's heading in the world: while the character turns around (the
+// reference with him) and the game camera swings, the stick keeps sending him to the same back.
+// Turned around, it steers from behind him; back in the front half or the centre, it lets go.
+TEST(CameraAnchorMath, StickHeldBackTurnsAroundOnce)
+{
+  StickHold hold;
+  // The reference 30 degrees left of the game camera, which heads 10 degrees left: 40 in the world.
+  ExpectNear(TurnStickHeld(0, -100, 25, 30 * DEG, 10 * DEG, true, &hold),
+             TurnStick(0, -100, 30 * DEG), 1e-3f);
+  EXPECT_TRUE(hold.held);
+  // He turned 80 degrees and the camera 40: the stick's back is still the world's 220.
+  const float camera = 50 * DEG;
+  ExpectNear(TurnStickHeld(0, -100, 25, 120 * DEG - camera, camera, true, &hold),
+             TurnStick(0, -100, 40 * DEG - camera), 1e-3f);
+  // Turned around (the reference at 220): back runs ahead, back-left to his front-left.
+  const float turned = 220 * DEG - camera;
+  ExpectNear(TurnStickHeld(0, -100, 25, turned, camera, true, &hold), TurnStick(0, 100, turned),
+             1e-3f);
+  ExpectNear(TurnStickHeld(-70.7f, -70.7f, 25, turned, camera, true, &hold),
+             TurnStick(-70.7f, 70.7f, turned), 1e-3f);
+  EXPECT_TRUE(hold.held);
+  // The front half lets go: the plain turn.
+  ExpectNear(TurnStickHeld(-100, 10, 25, turned, camera, true, &hold), TurnStick(-100, 10, turned),
+             1e-3f);
+  EXPECT_FALSE(hold.held);
+  // Less than 120 degrees from up: a sideways push, not held.
+  ExpectNear(TurnStickHeld(-100, -40, 25, turned, camera, true, &hold),
+             TurnStick(-100, -40, turned), 1e-3f);
+  EXPECT_FALSE(hold.held);
+  // Held again from the new heading, then let go at the centre.
+  TurnStickHeld(0, -100, 25, turned, camera, true, &hold);
+  EXPECT_TRUE(hold.held);
+  EXPECT_NEAR(hold.heading / DEG, 220.0f, 0.01f);
+  TurnStickHeld(5, -10, 25, 0, camera, true, &hold);
+  EXPECT_FALSE(hold.held);
+}
+
+// VR controls: the stick's turn turns a Fixed rig, which the character's turns do not move; the
+// stick reference is where the headset looks and is not held back. The turn speed applies with
+// Fixed only.
+TEST(CameraAnchorMath, StickTurnsAFixedRig)
+{
+  Options options;
+  options.rotation = Rotation::Fixed;
+  options.stick = Stick::Head;
+  options.stick_turn_speed = 90.0f;
+  State state;
+  const auto world_rig = [](const Anchor& anchor) {
+    return Multiply33(Transpose(Basis(PITCHED_VIEW)), anchor.rotation);
+  };
+  const std::optional<Anchor> engaged = Compose(HEAD, nullptr, PITCHED_VIEW, options, 1.0f, &state);
+  ASSERT_TRUE(engaged);
+  ExpectNear(world_rig(*engaged), RotY(220));
+  EXPECT_EQ(engaged->stick_turn_speed, 90.0f);
+  EXPECT_TRUE(engaged->stick_head);
+  EXPECT_FALSE(engaged->stick_hold);
+  // Turned 30 degrees left by the stick while the character turns 90: the rig follows the stick.
+  const std::optional<Anchor> turned =
+      Compose(Make(RotY(130), {1, 2, 3}), nullptr, PITCHED_VIEW, options, 1.0f, &state, 30.0f);
+  ASSERT_TRUE(turned);
+  ExpectNear(world_rig(*turned), RotY(250));
+  const std::optional<Anchor> still =
+      Compose(Make(RotY(130), {1, 2, 3}), nullptr, PITCHED_VIEW, options, 1.0f, &state);
+  ASSERT_TRUE(still);
+  ExpectNear(world_rig(*still), RotY(250));
+
+  options.stick = Stick::Facing;
+  EXPECT_TRUE(Compose(HEAD, nullptr, PITCHED_VIEW, options, 1.0f, &state)->stick_hold);
+  options.rotation = Rotation::Level;
+  options.stick = Stick::Head;
+  const std::optional<Anchor> level = Compose(HEAD, nullptr, PITCHED_VIEW, options, 1.0f, &state);
+  ASSERT_TRUE(level);
+  EXPECT_EQ(level->stick_turn_speed, 0.0f);
+  EXPECT_TRUE(level->stick_hold);
+}
+
+// Without steer_behind (the view does not turn with him), a held push steers as seen from the held
+// heading.
+TEST(CameraAnchorMath, StickHeldBackFromTheHeldHeading)
+{
+  StickHold hold;
+  TurnStickHeld(0, -100, 25, 30 * DEG, 10 * DEG, false, &hold);
+  ExpectNear(TurnStickHeld(-70.7f, -70.7f, 25, 200 * DEG, 10 * DEG, false, &hold),
+             TurnStick(-70.7f, -70.7f, 30 * DEG), 1e-3f);
 }
 
 TEST(CameraAnchorMath, ParsesNames)
