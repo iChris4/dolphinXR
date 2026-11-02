@@ -586,14 +586,22 @@ constexpr u32 SH_PAUSE_MENU = 0x8057D724;
 constexpr u32 SH_HOOK = 0x80015774;
 constexpr u32 SH_HOOK_ORIGINAL = 0x48000C1D;  // bl glxCopyMatrix
 // The other hooked calls: {address, original word, cave entry}.
-constexpr std::array<std::array<u32, 3>, 3> SH_OTHER_HOOKS = {
-    {{0x802A5590, 0x4BD70E01, 0}, {0x802A5804, 0x4BD70B8D, 0}, {0x800B60CC, 0x4BFA3125, 1}}};
-constexpr u32 SH_SCRATCH = 0x80002F10;
-constexpr u32 SH_CAVE = SH_SCRATCH + 0x18;
+constexpr std::array<std::array<u32, 3>, 5> SH_OTHER_HOOKS = {{{0x802A5590, 0x4BD70E01, 0},
+                                                               {0x802A5804, 0x4BD70B8D, 0},
+                                                               {0x800B60CC, 0x4BFA3125, 1},
+                                                               {0x800B0EEC, 0x4835B25D, 2},
+                                                               {0x8023AA48, 0x4BE6FD19, 3}}};
+constexpr u32 SH_SCRATCH = 0x80002C20;
+constexpr u32 SH_SCRATCH_SIZE = 0x3D0;
+constexpr u32 SH_ROOT_POINTER = SH_SCRATCH + 0x18;
+constexpr u32 SH_MOVE_COUNT = SH_SCRATCH + 0x1C;
+constexpr u32 SH_TABLE = SH_SCRATCH + 0x78;
+constexpr u32 SH_CAVE = SH_TABLE + 2 * 0x34;
 constexpr u32 SH_STATUS = SH_PLAYER + 0xAC;
-// The pistol in his hand: a 7-bone skeleton, one of its bones in the motion controller's records.
-constexpr u32 SH_GUN_SKELETON = 0x812F24E0;
-constexpr u32 SH_GUN_BONES = SH_GUN_SKELETON + 0x160;
+// The right glove: a 7-bone skeleton, one of its bones in the motion controller's records.
+constexpr u32 SH_RIGHT_GLOVE = 0x812F24E0;
+constexpr u32 SH_RIGHT_GLOVE_BONES = SH_RIGHT_GLOVE + 0x160;
+constexpr u32 SH_LEFT_HAND = SH_BONES + 25 * 0x70;
 
 // Shadow's feet, facing 40 degrees from -Z (he faces his bones' -Z), and his head joint at his
 // neck, 5.8 units above.
@@ -613,15 +621,20 @@ struct Shadow
     memory.Write32(0x802A5800, 0x38650010);
     memory.Write32(0x800B60C8, 0x80840000);
     memory.Write32(0x800B60D0, 0x80810008);
+    memory.Write32(0x800B0EE8, 0x809E0000);
+    memory.Write32(0x800B0EF4, 0x386100C0);
+    memory.Write32(0x8023AA30, 0x38800005);
+    memory.Write32(0x8023AA44, 0x80630230);
+    memory.Write32(0x8023AA4C, 0x7C7F1B78);
     for (const auto& hook : SH_OTHER_HOOKS)
       memory.Write32(hook[0], hook[1]);
     memory.Write32(SH_STATUS, 0x40000000);  // on the ground
-    // The motion controller's records: his head joint, a hand and the pistol's bone 3.
+    // The motion controller's records: his head joint, a hand and the right glove's bone 3.
     memory.Write32(SH_MOTION + 0xD0 + 2 * 0x38, SH_BONES + 12 * 0x70);
     memory.Write32(SH_MOTION + 0xD0 + 3 * 0x38, SH_BONES + 29 * 0x70);
-    memory.Write32(SH_MOTION + 0xD0 + 4 * 0x38, SH_GUN_BONES + 3 * 0x70);
-    memory.Write32(SH_GUN_SKELETON, 7);
-    memory.Write32(SH_GUN_SKELETON + 4, SH_GUN_BONES);
+    memory.Write32(SH_MOTION + 0xD0 + 4 * 0x38, SH_RIGHT_GLOVE_BONES + 3 * 0x70);
+    memory.Write32(SH_RIGHT_GLOVE, 7);
+    memory.Write32(SH_RIGHT_GLOVE + 4, SH_RIGHT_GLOVE_BONES);
     memory.Write32(SH_HOLDER, SH_HOLDER_TARGET);
     memory.Write32(SH_HOLDER_TARGET, SH_PLAYER);
     memory.Write32(SH_OTHER_HOLDER, SH_OTHER_TARGET);
@@ -650,20 +663,29 @@ struct Shadow
     env.field = 100;
     env.units_per_meter = 30;
     env.scratch_base = SH_SCRATCH;
-    env.scratch_size = 0xE0;
+    env.scratch_size = SH_SCRATCH_SIZE;
     env.camera_anchor_active = true;
   }
 
-  // The bones the cave hides: the first one's and the end's addresses, 0 when it is off.
-  std::pair<u32, u32> HiddenHead() const
+  // A range of bones the cave hides (0 his, 1 his right glove): the first one's and the end's
+  // addresses, 0 when it is off.
+  std::pair<u32, u32> Hidden(u32 range) const
   {
-    return {memory.Read32(SH_SCRATCH).value_or(1), memory.Read32(SH_SCRATCH + 4).value_or(1)};
+    return {memory.Read32(SH_SCRATCH + range * 8).value_or(1),
+            memory.Read32(SH_SCRATCH + range * 8 + 4).value_or(1)};
   }
+  std::pair<u32, u32> HiddenHead() const { return Hidden(0); }
+  std::pair<u32, u32> HiddenItem() const { return Hidden(1); }
 
-  // The bones of what he holds that the cave hides with his.
-  std::pair<u32, u32> HiddenItem() const
+  // A matrix of the cave's table (12 floats after the key).
+  Mtx34 TableMatrix(u32 entry) const
   {
-    return {memory.Read32(SH_SCRATCH + 8).value_or(1), memory.Read32(SH_SCRATCH + 12).value_or(1)};
+    Mtx34 m{};
+    for (u32 i = 0; i < 12; ++i)
+    {
+      m[i] = std::bit_cast<float>(memory.Read32(SH_TABLE + entry * 0x34 + 4 + i * 4).value_or(0));
+    }
+    return m;
   }
 
   ::testing::AssertionResult Load()
@@ -754,9 +776,9 @@ TEST(ShadowFirstPersonPatch, FollowsHisHead)
              RotY(40));
 }
 
-// The cave that collapses his bones is hooked into the four calls that hand them to RenderWare; it
-// hides bones 12 to 21 only while the view is in his head, and the game's calls come back when the
-// patch stops.
+// The cave that collapses his bones is hooked into the five calls that hand them to RenderWare
+// and the weapon's call for his hand's record; it hides bones 12 to 21 only while the view is in
+// his head, and the game's calls come back when the patch stops.
 TEST(ShadowFirstPersonPatch, HidesHisHeadWhileTheViewIsInIt)
 {
   Shadow game;
@@ -765,7 +787,7 @@ TEST(ShadowFirstPersonPatch, HidesHisHeadWhileTheViewIsInIt)
             0x48000001u | ((SH_CAVE - SH_HOOK) & 0x03FFFFFCu));
   for (const auto& hook : SH_OTHER_HOOKS)
   {
-    const u32 entry = SH_CAVE + hook[2] * 12;
+    const u32 entry = SH_CAVE + hook[2] * 16;
     EXPECT_EQ(game.memory.Read32(hook[0]).value_or(0),
               0x48000001u | ((entry - hook[0]) & 0x03FFFFFCu));
   }
@@ -803,16 +825,16 @@ TEST(ShadowFirstPersonPatch, HidesHisHeadWhileTheViewIsInIt)
   EXPECT_EQ(game.HiddenHead(), off);
 }
 
-// In the air his whole body is hidden, with the pistol he holds (found from the motion
-// controller's records); on the ground again, only his head. "Always" hides his body on the
-// ground too, "Never" not in the air either.
+// In the air his whole body is hidden, with his right glove (found from the motion controller's
+// records); on the ground again, only his head. "Always" hides his body on the ground too, "Never"
+// not in the air either.
 TEST(ShadowFirstPersonPatch, HidesHisBodyInTheAir)
 {
   Shadow game;
   ASSERT_TRUE(game.Load());
   const std::pair<u32, u32> head = {SH_BONES + 12 * 0x70, SH_BONES + 22 * 0x70};
   const std::pair<u32, u32> body = {SH_BONES, SH_BONES + 30 * 0x70};
-  const std::pair<u32, u32> gun = {SH_GUN_BONES, SH_GUN_BONES + 7 * 0x70};
+  const std::pair<u32, u32> right_glove = {SH_RIGHT_GLOVE_BONES, SH_RIGHT_GLOVE_BONES + 7 * 0x70};
   const std::pair<u32, u32> off = {0, 0};
   game.Frame();
   EXPECT_EQ(game.HiddenHead(), head);
@@ -821,9 +843,9 @@ TEST(ShadowFirstPersonPatch, HidesHisBodyInTheAir)
   game.memory.Write32(SH_STATUS, 0x00200000);  // jumping
   game.Frame();
   EXPECT_EQ(game.HiddenHead(), body);
-  EXPECT_EQ(game.HiddenItem(), gun);
+  EXPECT_EQ(game.HiddenItem(), right_glove);
 
-  // Without a weapon: his body only.
+  // No glove found: his body only.
   game.memory.Write32(SH_MOTION + 0xD0 + 4 * 0x38, 0);
   game.Frame();
   EXPECT_EQ(game.HiddenHead(), body);
@@ -839,6 +861,73 @@ TEST(ShadowFirstPersonPatch, HidesHisBodyInTheAir)
   game.memory.Write32(SH_STATUS, 0x00200000);
   game.Frame();
   EXPECT_EQ(game.HiddenHead(), head);
+}
+
+// With a controller, his left hand (a piece on bone 25) is drawn at the controller, and the weapon
+// it holds asks for his hand's record (keyed by his motion controller) and gets the controller's
+// pose: the cave's table holds both relative to his root. His left forearm is hidden with his head;
+// in the air the hand and weapon stay shown. Without the controller, or with the setting off, the
+// weapon stays in his hand.
+TEST(ShadowFirstPersonPatch, GunInYourHand)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  PoseInput& pose = game.input.hands[1].view;
+  pose.valid = true;
+  pose.position = {0.2f, -0.3f, -0.5f};
+  const std::pair<u32, u32> head_and_arm = {SH_BONES + 12 * 0x70, SH_BONES + 26 * 0x70};
+  const std::pair<u32, u32> head = {SH_BONES + 12 * 0x70, SH_BONES + 22 * 0x70};
+  const std::pair<u32, u32> off = {0, 0};
+  game.Frame();
+  ASSERT_EQ(game.memory.Read32(SH_MOVE_COUNT).value_or(0), 2u);
+  EXPECT_EQ(game.memory.Read32(SH_ROOT_POINTER).value_or(0), SH_BONES);
+  EXPECT_EQ(game.memory.Read32(SH_TABLE).value_or(0), SH_LEFT_HAND + 1);
+  EXPECT_EQ(game.memory.Read32(SH_TABLE + 0x34).value_or(0), SH_MOTION);
+  EXPECT_EQ(game.HiddenHead(), head_and_arm);
+
+  // Drawn at the root times the table's matrix: the hand at the controller, 10 units per meter,
+  // turned by the grip; the weapon's record the same.
+  const Mtx34 root = Make(RotY(40), SH_ROOT);
+  const Mtx34 to_world = *VR::CameraAnchorMath::Invert(VIEW);
+  const auto controller = VR::CameraAnchorMath::TransformPoint(to_world, {2.0f, -3.0f, -5.0f});
+  for (u32 entry = 0; entry < 2; ++entry)
+  {
+    SCOPED_TRACE(entry);
+    const Mtx34 hand = VR::CameraAnchorMath::Multiply(root, game.TableMatrix(entry));
+    ExpectNearPosition(VR::CameraAnchorMath::Translation(hand), controller);
+    ExpectNear(VR::CameraAnchorMath::Basis(hand),
+               VR::CameraAnchorMath::Multiply33(VR::CameraAnchorMath::Basis(to_world),
+                                                {0.9934f, -0.0673f, -0.0984f, -0.0844f, -0.9817f,
+                                                 -0.1775f, -0.0848f, 0.1850f, -0.9798f}));
+  }
+
+  // In the air: his body and the right glove are hidden; the hand and weapon stay moved.
+  game.memory.Write32(SH_STATUS, 0x00200000);
+  game.Frame();
+  EXPECT_EQ(game.HiddenHead(), (std::pair<u32, u32>{SH_BONES, SH_BONES + 30 * 0x70}));
+  EXPECT_EQ(game.HiddenItem(),
+            (std::pair<u32, u32>{SH_RIGHT_GLOVE_BONES, SH_RIGHT_GLOVE_BONES + 7 * 0x70}));
+  EXPECT_EQ(game.memory.Read32(SH_MOVE_COUNT).value_or(0), 2u);
+  game.memory.Write32(SH_STATUS, 0x40000000);
+
+  pose.valid = false;
+  game.Frame();
+  EXPECT_EQ(game.memory.Read32(SH_MOVE_COUNT).value_or(1), 0u);
+  EXPECT_EQ(game.HiddenHead(), head);
+  pose.valid = true;
+  game.SetSetting("gun", 0);
+  game.Frame();
+  EXPECT_EQ(game.memory.Read32(SH_MOVE_COUNT).value_or(1), 0u);
+  EXPECT_EQ(game.HiddenHead(), head);
+  game.SetSetting("gun", 1);
+  game.Frame();
+  EXPECT_EQ(game.memory.Read32(SH_MOVE_COUNT).value_or(0), 2u);
+
+  // Camera Anchor off: nothing moved or hidden.
+  game.env.camera_anchor_active = false;
+  game.Frame();
+  EXPECT_EQ(game.memory.Read32(SH_MOVE_COUNT).value_or(1), 0u);
+  EXPECT_EQ(game.HiddenHead(), off);
 }
 
 // While the game holds the controls: the pause menu keeps the view without turning the stick;
