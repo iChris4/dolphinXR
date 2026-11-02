@@ -105,6 +105,9 @@ const std::vector<VRSetting>& GetVRSettings()
       Entry(Config::GFX_VR_PASSTHROUGH_COVERAGE_MODE, "0 exact, 1 fast"),
       Entry(Config::GFX_VR_PERF_COUNTERS, "global only: VKPERF per-draw timing"),
       Entry(Config::GFX_VR_EFB_COPY_DIAGNOSTICS, "global only: EFBCopyRAM log lines"),
+      Entry(Config::GFX_DUMP_EFB_TARGET,
+            "global only: saves every EFB copy (its first layer: the left eye in stereo) as a PNG "
+            "in Dump/Textures/"),
       Entry(Config::GFX_HACK_SKIP_EFB_COPY_TO_RAM,
             "Store EFB Copies to Texture Only, a [Hacks] setting: per game in GameSettings "
             "[Video_Hacks], not in the VR profile"),
