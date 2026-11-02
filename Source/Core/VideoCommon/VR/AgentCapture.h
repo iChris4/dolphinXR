@@ -107,6 +107,9 @@ struct DrawRecord
   float viewport_y = 0.0f;
   float viewport_wd = 0.0f;
   float viewport_ht = 0.0f;
+  // xfmem.viewport's depth: the far end and the range, in the console's 24-bit depth units.
+  float viewport_far_z = 0.0f;
+  float viewport_z_range = 0.0f;
   // bpmem scissor corners, raw (GX coordinates offset by 342).
   s32 scissor_left = 0;
   s32 scissor_top = 0;
@@ -142,6 +145,8 @@ struct DrawRecord
   bool zupdate = false;
   bool blend = false;
   u8 zfunc = 0;
+  // ZTexOp: 0 off, 1 a Z texture adds to the depth, 2 it replaces it.
+  u8 ztex_op = 0;
   u32 alpha_test = 0;
 
   SkipReason skip = SkipReason::None;

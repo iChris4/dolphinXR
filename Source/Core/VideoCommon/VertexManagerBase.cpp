@@ -1055,6 +1055,8 @@ static VR::AgentCapture::DrawRecord* BeginAgentDrawRecord(u32 index, u32 sequenc
   record->viewport_y = xfmem.viewport.yOrig;
   record->viewport_wd = xfmem.viewport.wd;
   record->viewport_ht = xfmem.viewport.ht;
+  record->viewport_far_z = xfmem.viewport.farZ;
+  record->viewport_z_range = xfmem.viewport.zRange;
   record->scissor_left = bpmem.scissorTL.x;
   record->scissor_top = bpmem.scissorTL.y;
   record->scissor_right = bpmem.scissorBR.x;
@@ -1079,6 +1081,7 @@ static VR::AgentCapture::DrawRecord* BeginAgentDrawRecord(u32 index, u32 sequenc
   record->ztest = bpmem.zmode.test_enable != 0;
   record->zupdate = bpmem.zmode.update_enable != 0;
   record->zfunc = static_cast<u8>(bpmem.zmode.func.Value());
+  record->ztex_op = static_cast<u8>(bpmem.ztex2.op.Value());
   record->blend = bpmem.blendmode.blend_enable || bpmem.blendmode.subtract;
   record->alpha_test = bpmem.alpha_test.hex;
   return record;

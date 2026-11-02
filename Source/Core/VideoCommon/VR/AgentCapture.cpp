@@ -939,6 +939,9 @@ std::string FormatDrawDetails(const DrawRecord& draw)
   text += fmt::format("Viewport: center {:.1f},{:.1f} half size {:.1f}x{:.1f} ({})\n",
                       draw.viewport_x, draw.viewport_y, draw.viewport_wd, draw.viewport_ht,
                       GetVRViewportClassName(static_cast<VRViewportClass>(draw.viewport_class)));
+  text += fmt::format("Viewport depth: far {:.0f}, range {:.0f} (24-bit depth: far + range * clip "
+                      "z/w, -1 at the near plane, 0 at the far plane)\n",
+                      draw.viewport_far_z, draw.viewport_z_range);
   text += fmt::format("Scissor: {},{} - {},{}\n", draw.scissor_left, draw.scissor_top,
                       draw.scissor_right, draw.scissor_bottom);
   text += fmt::format("Shaders: VS {:016x} PS {:016x} GS {:016x}\n", draw.vs, draw.ps, draw.gs);
@@ -1032,8 +1035,11 @@ std::string FormatDrawDetails(const DrawRecord& draw)
                                               "not a skybox");
   }
   text += fmt::format("Render state: color write {}, alpha write {}, z test {} (func {}), z write "
-                      "{}, blend {}, alpha test {:08x}\n",
+                      "{}{}, blend {}, alpha test {:08x}\n",
                       draw.color_update, draw.alpha_update, draw.ztest, draw.zfunc, draw.zupdate,
+                      draw.ztex_op == 1 ? " (a Z texture adds to the depth)" :
+                      draw.ztex_op == 2 ? " (the depth from a Z texture)" :
+                                          "",
                       draw.blend, draw.alpha_test);
   text += fmt::format("Override handling: {}{}\n", GetHandlingName(draw.handling),
                       draw.handling_source != HandlingSource::None ?
