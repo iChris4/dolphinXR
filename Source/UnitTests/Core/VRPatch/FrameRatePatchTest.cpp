@@ -219,6 +219,32 @@ TEST(FrameRatePatch, FixedRateNeedsAVRSession)
   EXPECT_EQ(game.memory.Get32(NTSC_FALLBACK), LiR0(90));
 }
 
+TEST(FrameRatePatch, SavestateFromVRWithoutASession)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  EXPECT_EQ(game.Frame(), Values{});
+
+  // A savestate made in a 120 Hz session, loaded without one: the game's own code comes back,
+  // or it would play at half speed on the 60 Hz VBI.
+  game.memory.Set32(RATE_LOAD, LiR0(120));
+  game.memory.Set32(NTSC_FALLBACK, LiR0(120));
+  ASSERT_TRUE(game.script.Call(Hook::OnStateLoaded, game.env)) << game.script.Error();
+  EXPECT_EQ(game.Requests(), Values{});
+  EXPECT_EQ(game.memory.Get32(RATE_LOAD), RATE_LOAD_ORIGINAL);
+  EXPECT_EQ(game.memory.Get32(NTSC_FALLBACK), NTSC_FALLBACK_ORIGINAL);
+
+  // Loaded in a 90 Hz session: 90.
+  game.memory.Set32(RATE_LOAD, LiR0(120));
+  game.memory.Set32(NTSC_FALLBACK, LiR0(120));
+  game.env.display_refresh_rate = 90.0;
+  ASSERT_TRUE(game.script.Call(Hook::OnStateLoaded, game.env)) << game.script.Error();
+  EXPECT_EQ(game.Requests(), Values{"90"});
+  EXPECT_EQ(game.memory.Get32(RATE_LOAD), LiR0(90));
+  EXPECT_EQ(game.memory.Get32(NTSC_FALLBACK), LiR0(90));
+  EXPECT_FALSE(game.Warned(""));
+}
+
 TEST(FrameRatePatch, WarnsAboutAFrameRateCode)
 {
   Shadow game;

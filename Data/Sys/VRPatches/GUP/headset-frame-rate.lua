@@ -26,7 +26,7 @@
 patch = {
   title = "Frame rate follows the headset",
   author = "DolphinXR",
-  version = "1.0",
+  version = "1.1",
   description = "The game renders at the headset's refresh rate (72, 90, 120 Hz...) instead of "
     .. "60 fps, at its normal speed: the frame rate code and the VBI frequency are set to match. "
     .. "Turn the 90/120 FPS Action Replay codes off. A higher rate needs a faster PC: the console "
@@ -106,11 +106,14 @@ local function set_vbi(rate)
   end
 end
 
+-- The game's own code back: a rate written there (this patch's at any rate, or a frame rate
+-- code's, which writes it again at its next run) is undone, and the VBI the patch found.
 local function restore()
-  if mem.u32(RATE_LOAD) == li_r0(applied) then
+  if is_li_r0(mem.u32(RATE_LOAD) or 0) then
     mem.write_code(RATE_LOAD, RATE_LOAD_ORIGINAL)
   end
-  if mem.u32(NTSC_FALLBACK) == li_r0(applied) then
+  local fallback = mem.u32(NTSC_FALLBACK) or NTSC_FALLBACK_ORIGINAL
+  if is_li_r0(fallback) and fallback ~= NTSC_FALLBACK_ORIGINAL then
     mem.write_code(NTSC_FALLBACK, NTSC_FALLBACK_ORIGINAL)
   end
   set_vbi(nil)
@@ -156,8 +159,14 @@ function on_frame()
 end
 
 function on_state_loaded()
-  -- The loaded RAM holds the code of the time it was saved.
-  update(target_rate())
+  -- The loaded RAM holds the code of the time it was saved: a savestate made in VR keeps the
+  -- headset's rate, which plays in slow motion when it is loaded without a VR session.
+  local rate = target_rate()
+  if rate == nil and is_this_game() and is_li_r0(mem.u32(RATE_LOAD) or 0) then
+    restore()
+    log("the savestate held a frame rate: back to the game's own")
+  end
+  update(rate)
 end
 
 function on_unload()
