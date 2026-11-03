@@ -716,9 +716,11 @@ private:
   // (reference space) into game view space. Frame/video-thread only.
   // `remove_camera_pitch` false: relative to the game camera's level frame (no
   // LatchGameCameraPitch).
+  // apply_camera_anchor false: as the virtual screen is drawn (the tracked eye rows), in front of
+  // the head whatever the Camera Anchor does.
   bool MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim, float units_per_meter,
                             std::array<float, 3>* out_position, std::array<float, 9>* out_rotation,
-                            bool remove_camera_pitch = true) const;
+                            bool remove_camera_pitch = true, bool apply_camera_anchor = true) const;
   // Computes the intersection of the aim ray with the virtual screen (flat panel quad in
   // flat-screen mode, ortho virtual screen otherwise), using the same transform chain the
   // renderer uses to place that screen.

@@ -4290,10 +4290,11 @@ void OpenXRManager::ComputeRigPose(const Common::VR::OpenXRPoseState& aim,
 bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
                                          float units_per_meter, std::array<float, 3>* out_position,
                                          std::array<float, 9>* out_rotation,
-                                         bool remove_camera_pitch) const
+                                         bool remove_camera_pitch, bool apply_camera_anchor) const
 {
   if (!aim.valid || !out_position)
     return false;
+  const bool anchor_rotation = apply_camera_anchor && m_camera_anchor_rotation_active;
 
   // Replay of the GetEyeProjectionRows eye-position chain (home offset, camera
   // height/forward, anchor rotation, anchor position) with the controller substituted
@@ -4304,7 +4305,7 @@ bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
   float px = rig[0] * s;
   float py = rig[1] * s;
   float pz = rig[2] * s;
-  if (m_camera_anchor_rotation_active)
+  if (anchor_rotation)
   {
     const std::array<float, 9>& A = m_camera_anchor_rotation;
     const float rx = px, ry = py, rz = pz;
@@ -4322,9 +4323,12 @@ bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
     py = pitch_cos * ry + pitch_sin * rz;
     pz = -pitch_sin * ry + pitch_cos * rz;
   }
-  px += m_camera_anchor_position[0];
-  py += m_camera_anchor_position[1];
-  pz += m_camera_anchor_position[2];
+  if (apply_camera_anchor)
+  {
+    px += m_camera_anchor_position[0];
+    py += m_camera_anchor_position[1];
+    pz += m_camera_anchor_position[2];
+  }
 
   // Controller orientation in view space. Standard quaternion-to-matrix, columns =
   // controller-local axes in reference space (X right, Y up, -Z the aim direction);
@@ -4338,7 +4342,7 @@ bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
   std::array<float, 9> rot = {1.0f - y2 - z2, xy - wz,        xz + wy,
                               xy + wz,        1.0f - x2 - z2, yz - wx,
                               xz - wy,        yz + wx,        1.0f - x2 - y2};
-  if (m_camera_anchor_rotation_active)
+  if (anchor_rotation)
   {
     const std::array<float, 9>& A = m_camera_anchor_rotation;
     const std::array<float, 9> c = rot;
@@ -4492,7 +4496,7 @@ void OpenXRManager::ComputeVirtualScreenHit(const Common::VR::OpenXRPoseState& a
   const float upm = std::max(GetEffectiveUnitsPerMeter(), 0.0001f);
   std::array<float, 3> pos{};
   std::array<float, 9> rot{};
-  if (!MapAimPoseToGameView(aim, upm, &pos, &rot))
+  if (!MapAimPoseToGameView(aim, upm, &pos, &rot, true, false))
     return;
 
   // Aim forward in view space = -third column of the rotation.
