@@ -79,7 +79,7 @@ which an official Dolphin sharing the same user folder writes.
    release).
 5. Publish, from `..\DolphinXR-release`:
    ```
-   python Tools\dolphinxr-update.py publish --site ..\dolphinxr-updates --binaries Build\Binaries --name v0.6 --notes notes.md --key %USERPROFILE%\.dolphinxr\update-signing-key.pem --zip DolphinXR-v0.6-Windows.zip
+   python Tools\dolphinxr-update.py publish --site ..\dolphinxr-updates --binaries Build\Binaries --name v0.6 --notes notes.md --key %USERPROFILE%\.dolphinxr\update-signing-key.pem --zip DolphinVR-Redux-v0.6-Windows.zip
    ```
    It refuses a build that has uncommitted changes, was not built from the pushed `HEAD`, or
    ships a `Sys` folder that differs from `Data/Sys`. It also refuses a key that `Updater.exe`
