@@ -502,7 +502,11 @@ void FramebufferManager::ClearEFBForOpenXR()
   // (D3D11/D3D12, and GL in VR) store it as 0.0. Hardcoding 0.0 filled the Vulkan depth
   // buffer with *near*, so every depth-tested draw of the frame failed the test and only
   // depth-test-disabled 2D/HUD content survived.
-  const float far_depth = g_backend_info.bSupportsReversedDepthRange ? 1.0f : 0.0f;
+  // Far is the game's own far value, 0xFFFFFF, as ClearRegion stores it: an EFB depth copy turns
+  // exactly 1.0 into 0x1000000, which wraps to 0, the near plane (Wii Sports Resort's see-through
+  // Mii depth-tests against such a copy and darkened everything the game's camera did not see).
+  constexpr float game_far = 16777215.0f / 16777216.0f;
+  const float far_depth = g_backend_info.bSupportsReversedDepthRange ? game_far : 1.0f - game_far;
   if (m_draw_id_frame && EnsureDrawIdResources())
   {
     // Draw-ID frame: the colour is frozen; the IDs start empty and the depth far.
