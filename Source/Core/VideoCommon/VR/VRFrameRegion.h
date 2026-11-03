@@ -66,7 +66,7 @@ enum class VRViewportClass
 void NotifyVRXFBCopyRegion(int left, int top, int right, int bottom);
 
 // Called from BPStructs for every EFB->texture copy (srcRect in native EFB coordinates). The
-// classifier reads the copies of the previous completed frame (the frame's first XFB copy
+// classifier reads the copies of the last four completed frames (a frame's first XFB copy
 // completes it): a pane the game copied whole is a render target.
 void NotifyVRTextureCopyRegion(int left, int top, int right, int bottom);
 

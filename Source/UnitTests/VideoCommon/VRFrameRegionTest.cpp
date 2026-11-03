@@ -503,7 +503,16 @@ TEST(VRFrameRegion, PaneCopiedToATextureIsRenderToTexture)
   EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 342, 640, 400), ScissorOf(342, 342, 640, 400),
                                    342, 342),
             VR::VRViewportClass::Letterboxed);
-  // The pane was not copied in that frame: a split-screen half again.
+  // Copied in one of the last four frames: still a render target (Wii Sports Resort renders its
+  // water panes on alternate frames).
+  EXPECT_EQ(VR::ClassifyVRViewport(pane, pane_scissor, 342, 342),
+            VR::VRViewportClass::RenderToTexture);
+  VR::NotifyVRXFBCopyRegion(0, 0, 640, 456);
+  VR::NotifyVRXFBCopyRegion(0, 0, 640, 456);
+  EXPECT_EQ(VR::ClassifyVRViewport(pane, pane_scissor, 342, 342),
+            VR::VRViewportClass::RenderToTexture);
+  // Four frames without it: a split-screen half again.
+  VR::NotifyVRXFBCopyRegion(0, 0, 640, 456);
   EXPECT_EQ(VR::ClassifyVRViewport(pane, pane_scissor, 342, 342), VR::VRViewportClass::SplitScreen);
   // A copied pane away from the corner is not taken for a render target.
   VR::NotifyVRTextureCopyRegion(320, 0, 640, 456);
@@ -511,4 +520,45 @@ TEST(VRFrameRegion, PaneCopiedToATextureIsRenderToTexture)
   EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(662, 342, 320, 456), ScissorOf(662, 342, 320, 456),
                                    342, 342),
             VR::VRViewportClass::SplitScreen);
+}
+
+// Wii Sports Resort draws the textures that light its Miis in a full-width 608x72 band under its
+// 456-line frame: outside the displayed region, not a letterboxed scene.
+TEST(VRFrameRegion, FullWidthBandUnderTheFrameIsOffscreen)
+{
+  VR::ResetVRFrameRegion();
+  LatchDisplayRegion(608, 456);
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 798, 608, 72), ScissorOf(342, 798, 608, 72),
+                                   342, 342),
+            VR::VRViewportClass::Offscreen);
+  // The same band inside the frame is still a letterboxed scene.
+  EXPECT_EQ(VR::ClassifyVRViewport(MakeViewport(342, 600, 608, 72), ScissorOf(342, 600, 608, 72),
+                                   342, 342),
+            VR::VRViewportClass::Letterboxed);
+}
+
+// Wii Sports Resort's Wakeboarding renders the scene for its water into a 152x114 pane on one
+// frame and a 304x228 pane on the next, each copied at the end of its frame: during either frame
+// the last copy of its pane is two frames old, and both panes are render targets.
+TEST(VRFrameRegion, PanesCopiedOnAlternateFramesAreRenderTargets)
+{
+  VR::ResetVRFrameRegion();
+  LatchDisplayRegion(608, 456);
+  const Viewport small_pane = MakeViewport(342, 342, 152, 114);
+  const Viewport half_pane = MakeViewport(342, 342, 304, 228);
+  const VR::VRScissor scissor = ScissorOf(342, 342, 608, 456);
+  for (int frame = 0; frame < 6; ++frame)
+  {
+    const bool small = frame % 2 == 0;
+    if (frame >= 2)
+    {
+      EXPECT_EQ(VR::ClassifyVRViewport(small ? small_pane : half_pane, scissor, 342, 342),
+                VR::VRViewportClass::RenderToTexture);
+    }
+    if (small)
+      VR::NotifyVRTextureCopyRegion(0, 0, 152, 114);
+    else
+      VR::NotifyVRTextureCopyRegion(0, 0, 304, 228);
+    VR::NotifyVRXFBCopyRegion(0, 0, 608, 456);
+  }
 }

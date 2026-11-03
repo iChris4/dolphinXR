@@ -38,24 +38,28 @@ VRFrameRegion s_last_presentation_source{};
 VRFrameRegion s_last_presentation_xfb{};
 
 // The distinct rectangles (EFB pixels) of the EFB->texture copies of the frame being drawn, and
-// of the previous completed frame, which the classifier reads.
+// of the last completed frames, which the classifier reads. Several frames, because a game can
+// render its panes on alternate frames: Wii Sports Resort's Wakeboarding copies a 152x114
+// reflection on one frame and a 304x228 view under the water on the next.
 constexpr size_t MAX_TEXTURE_COPIES = 16;
+constexpr size_t TEXTURE_COPY_FRAMES = 4;
 struct TextureCopies
 {
   std::array<MathUtil::Rectangle<int>, MAX_TEXTURE_COPIES> rects{};
   size_t count = 0;
 };
 TextureCopies s_pending_texture_copies{};
-TextureCopies s_current_texture_copies{};
+std::array<TextureCopies, TEXTURE_COPY_FRAMES> s_recent_texture_copies{};
+size_t s_next_recent_texture_copies = 0;
 
 bool SameRegion(const VRFrameRegion& a, const VRFrameRegion& b)
 {
   return a.left == b.left && a.top == b.top && a.width == b.width && a.height == b.height;
 }
 
-// Whether the viewport is a pane at the EFB's top-left corner which the previous frame copied
-// whole to a texture: Wii Sports' Boxing draws each boxer of its "VS" screen in a 350x456 pane
-// there, blurs it and copies it, then composes both copies on the screen.
+// Whether the viewport is a pane at the EFB's top-left corner which one of the last completed
+// frames copied whole to a texture: Wii Sports' Boxing draws each boxer of its "VS" screen in a
+// 350x456 pane there, blurs it and copies it, then composes both copies on the screen.
 bool IsCopiedPane(const Viewport& v, int x_off, int y_off)
 {
   const int left = static_cast<int>(std::lround(v.xOrig - std::fabs(v.wd))) - x_off;
@@ -64,13 +68,16 @@ bool IsCopiedPane(const Viewport& v, int x_off, int y_off)
   const int bottom = top + static_cast<int>(std::lround(2.0f * std::fabs(v.ht)));
   if (std::abs(left) > 1 || std::abs(top) > 1)
     return false;
-  for (size_t i = 0; i < s_current_texture_copies.count; ++i)
+  for (const TextureCopies& frame_copies : s_recent_texture_copies)
   {
-    const MathUtil::Rectangle<int>& copy = s_current_texture_copies.rects[i];
-    if (std::abs(copy.left - left) <= 1 && std::abs(copy.top - top) <= 1 &&
-        std::abs(copy.right - right) <= 1 && std::abs(copy.bottom - bottom) <= 1)
+    for (size_t i = 0; i < frame_copies.count; ++i)
     {
-      return true;
+      const MathUtil::Rectangle<int>& copy = frame_copies.rects[i];
+      if (std::abs(copy.left - left) <= 1 && std::abs(copy.top - top) <= 1 &&
+          std::abs(copy.right - right) <= 1 && std::abs(copy.bottom - bottom) <= 1)
+      {
+        return true;
+      }
     }
   }
   return false;
@@ -88,7 +95,8 @@ void NotifyVRXFBCopyRegion(int left, int top, int right, int bottom)
   {
     // First copy of a new frame (games emit strips top-down; a copy starting at or above
     // the pending union restarts the accumulation). Commit the finished union.
-    s_current_texture_copies = s_pending_texture_copies;
+    s_recent_texture_copies[s_next_recent_texture_copies] = s_pending_texture_copies;
+    s_next_recent_texture_copies = (s_next_recent_texture_copies + 1) % TEXTURE_COPY_FRAMES;
     s_pending_texture_copies = {};
     if (s_pending.valid)
     {
@@ -127,7 +135,8 @@ void ResetVRFrameRegion()
   s_last_presentation_source = VRFrameRegion{};
   s_last_presentation_xfb = VRFrameRegion{};
   s_pending_texture_copies = {};
-  s_current_texture_copies = {};
+  s_recent_texture_copies = {};
+  s_next_recent_texture_copies = 0;
 }
 
 void NotifyVRTextureCopyRegion(int left, int top, int right, int bottom)
@@ -230,6 +239,14 @@ VRViewportClass ClassifyVRViewportShape(const Viewport& v, const VRScissor& scis
     return VRViewportClass::DisplacedScene;
   }
 
+  // Entirely outside the displayed region, whatever its shape: nobody sees it, the game copies it
+  // out (Wii Sports Resort lights its Miis with two 32x32 textures drawn in a 608x72 band under
+  // its 456-line frame).
+  if (left >= screen_width || top >= screen_height || left + width <= 0.0f || top + height <= 0.0f)
+  {
+    return VRViewportClass::Offscreen;
+  }
+
   // Full width: fullscreen, letterboxed, or top/bottom split-screen.
   if (width >= min_screen_width)
   {
@@ -281,12 +298,6 @@ VRViewportClass ClassifyVRViewportShape(const Viewport& v, const VRScissor& scis
     if ((left_col || right_col) && (top_row || bottom_row))
       return VRViewportClass::SplitScreen;
     return VRViewportClass::HudElement;
-  }
-
-  // Entirely outside the displayed region.
-  if (left >= screen_width || top >= screen_height || left + width <= 0.0f || top + height <= 0.0f)
-  {
-    return VRViewportClass::Offscreen;
   }
 
   return VRViewportClass::HudElement;
