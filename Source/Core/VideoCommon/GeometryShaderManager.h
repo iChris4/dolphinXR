@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -129,6 +130,16 @@ public:
   // Route one Screen Pane draw through the world-fixed 2D screen path with zero visual thickness.
   // The pane remap above still preserves its original X/Y placement.
   bool vr_flat_screen_pane_override = false;
+
+  // An orthographic draw in a pane of the frame (Wii Sports Resort's golf course map) that goes to
+  // the virtual screen: remap its NDC to the pane's place on the screen. VertexManagerBase sets it
+  // for one draw, with the full-frame GPU viewport and a scissor around the pane in the eyes.
+  bool vr_ortho_pane = false;
+
+  // Where a rectangle of the virtual screen, in frame NDC {left, right, bottom, top}, shows in
+  // the eyes: the box of its corners in both eyes' NDC, same layout. nullopt outside an OpenXR
+  // session or when a corner is behind an eye.
+  std::optional<std::array<float, 4>> GetVRScreenRectInEyes(const std::array<float, 4>& rect);
 
   // Nonzero only for a Physical VR Depth Screen Pane draw. Draws belonging to the same element
   // override share one reference W for the frame, preserving their original relative Z positions.

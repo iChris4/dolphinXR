@@ -479,6 +479,20 @@ std::array<float, 4> CalculateVRPaneClip(int scissor_left, int scissor_top, int 
   return clip;
 }
 
+std::array<float, 4> CalculateVRPaneRect(const Viewport& viewport, int scissor_left,
+                                         int scissor_top, int scissor_right, int scissor_bottom,
+                                         int x_off, int y_off, const VRFrameRegion& frame)
+{
+  const std::array<float, 4> remap = CalculateVRPaneRemap(viewport, x_off, y_off, frame);
+  std::array<float, 4> rect = CalculateVRPaneClip(scissor_left, scissor_top, scissor_right,
+                                                  scissor_bottom, x_off, y_off, frame);
+  rect[0] = std::max(rect[0], remap[2] - std::fabs(remap[0]));
+  rect[1] = std::min(rect[1], remap[2] + std::fabs(remap[0]));
+  rect[2] = std::max(rect[2], remap[3] - std::fabs(remap[1]));
+  rect[3] = std::min(rect[3], remap[3] + std::fabs(remap[1]));
+  return rect;
+}
+
 float CalculateVRPaneReferenceW(float model_origin_view_z, float projection_z, float projection_w)
 {
   if (std::isfinite(model_origin_view_z) && model_origin_view_z < -1.0e-4f)

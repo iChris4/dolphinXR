@@ -2472,6 +2472,38 @@ void VertexManagerBase::Flush()
             }
           }
 #endif
+          // An orthographic draw in a pane of the frame that goes to the virtual screen (Wii Sports
+          // Resort's golf course map, 145x250): placed on the screen as if its viewport were the
+          // frame, then squeezed into the pane's rectangle of the eye images by that viewport, it
+          // landed far from its frame. Put the pane in its place on the screen and clip it there.
+          bool ortho_pane_raster_overridden = false;
+#ifdef ENABLE_VR
+          if (!pane_raster_overridden && !band_raster_overridden &&
+              g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !vr_flat_mode &&
+              g_ActiveConfig.vr_virtual_screen &&
+              xfmem.projection.type == ProjectionType::Orthographic &&
+              (std::isnan(geometry_shader_manager.vr_stereo_override) ||
+               geometry_shader_manager.vr_stereo_override == -1.0f))
+          {
+            const int x_off = bpmem.scissorOffset.x << 1;
+            const int y_off = bpmem.scissorOffset.y << 1;
+            const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
+            if (frame.valid && VR::ClassifyVRViewport(xfmem.viewport, VR::GetVRScissor(), x_off,
+                                                      y_off) == VR::VRViewportClass::HudElement)
+            {
+              const auto eye_rect =
+                  geometry_shader_manager.GetVRScreenRectInEyes(VR::CalculateVRPaneRect(
+                      xfmem.viewport, bpmem.scissorTL.x, bpmem.scissorTL.y, bpmem.scissorBR.x,
+                      bpmem.scissorBR.y, x_off, y_off, frame));
+              if (eye_rect &&
+                  BPFunctions::SetVRScreenRectViewport(g_framebuffer_manager.get(), *eye_rect))
+              {
+                geometry_shader_manager.vr_ortho_pane = true;
+                ortho_pane_raster_overridden = true;
+              }
+            }
+          }
+#endif
           geometry_shader_manager.vr_hud_draw_depth = &draw_depth;
           RenderDrawCall(pixel_shader_manager, geometry_shader_manager, m_current_primitive_type,
                          m_current_pipeline_object);
@@ -2484,7 +2516,7 @@ void VertexManagerBase::Flush()
             if (route < 0.5f || route > 1.5f)
               ++m_vr_cull_stats.misrouted;
           }
-          if (pane_raster_overridden || band_raster_overridden)
+          if (pane_raster_overridden || band_raster_overridden || ortho_pane_raster_overridden)
           {
             BPFunctions::SetScissorAndViewport(g_framebuffer_manager.get(), bpmem.scissorTL,
                                                bpmem.scissorBR, bpmem.scissorOffset,

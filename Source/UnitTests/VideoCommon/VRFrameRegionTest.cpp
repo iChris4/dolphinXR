@@ -258,6 +258,31 @@ TEST(VRFrameRegion, ScreenPaneClipLeavesEdgesAtOrBeyondTheFrameOpen)
   EXPECT_FLOAT_EQ(no_frame[1], VR::VR_PANE_CLIP_OPEN);
 }
 
+// Wii Sports Resort's golf course map: a 145x250 viewport at 432,168 of a 608x456 frame, with
+// the same scissor. Its viewport limits it even where the scissor is wider, and a smaller scissor
+// cuts it.
+TEST(VRFrameRegion, OrthographicPaneRectIsItsViewportCutByTheScissor)
+{
+  const VR::VRFrameRegion frame{0, 0, 608, 456, true};
+  const Viewport map = MakeViewport(342 + 432, 342 + 168, 145, 250);
+  const auto rect =
+      VR::CalculateVRPaneRect(map, 342 + 432, 342 + 168, 342 + 576, 342 + 417, 342, 342, frame);
+  EXPECT_NEAR(rect[0], (432.0f - 304.0f) / 304.0f, 1e-5f);
+  EXPECT_NEAR(rect[1], (577.0f - 304.0f) / 304.0f, 1e-5f);
+  EXPECT_NEAR(rect[2], -(418.0f - 228.0f) / 228.0f, 1e-5f);
+  EXPECT_NEAR(rect[3], -(168.0f - 228.0f) / 228.0f, 1e-5f);
+
+  const auto open = VR::CalculateVRPaneRect(map, 0, 0, 1023, 1023, 342, 342, frame);
+  EXPECT_NEAR(open[0], rect[0], 1e-5f);
+  EXPECT_NEAR(open[1], rect[1], 1e-5f);
+  EXPECT_NEAR(open[2], rect[2], 1e-5f);
+  EXPECT_NEAR(open[3], rect[3], 1e-5f);
+
+  const auto cut =
+      VR::CalculateVRPaneRect(map, 342 + 432, 342 + 200, 342 + 576, 342 + 417, 342, 342, frame);
+  EXPECT_NEAR(cut[3], -(200.0f - 228.0f) / 228.0f, 1e-5f);
+}
+
 TEST(VRFrameRegion, ScreenPaneReferenceUsesProjectionForPerVertexMatrixDraws)
 {
   EXPECT_FLOAT_EQ(VR::CalculateVRPaneReferenceW(-25.0f, 0.5f, 10.0f), 25.0f);

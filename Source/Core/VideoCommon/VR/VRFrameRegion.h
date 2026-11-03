@@ -114,6 +114,13 @@ std::array<float, 4> CalculateVRPaneClip(int scissor_left, int scissor_top, int 
                                          int scissor_bottom, int x_off, int y_off,
                                          const VRFrameRegion& frame);
 
+// What an orthographic pane shows of the frame, in the same layout: its viewport cut by the game's
+// scissor (CalculateVRPaneClip). The viewport clips too, unlike in a Screen Pane: the course map
+// of Wii Sports Resort's golf draws the whole course, and only its pane may show.
+std::array<float, 4> CalculateVRPaneRect(const Viewport& viewport, int scissor_left,
+                                         int scissor_top, int scissor_right, int scissor_bottom,
+                                         int x_off, int y_off, const VRFrameRegion& frame);
+
 // Reference clip W for the perspective Screen Pane 3D transform. Most draws expose their model
 // origin through the current position matrix. Skinned/per-vertex-matrix draws do not, so use the
 // geometric centre of the projection's near/far range as a stable positive fallback.

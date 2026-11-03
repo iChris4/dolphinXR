@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
@@ -466,6 +467,21 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           vr_stereo_override = std::numeric_limits<float>::quiet_NaN();
         }
 
+        // An orthographic pane on the virtual screen: its NDC spans its viewport only. The pane
+        // clip is exact where the shaders apply it (the multiview VS); the scissor
+        // VertexManagerBase sets covers the pane in both eyes.
+        if (std::exchange(vr_ortho_pane, false) && !perspective &&
+            constants.stereoparams[3] == -1.0f)
+        {
+          const int x_off = bpmem.scissorOffset.x << 1;
+          const int y_off = bpmem.scissorOffset.y << 1;
+          const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
+          constants.vr_pane_remap = VR::CalculateVRPaneRemap(xfmem.viewport, x_off, y_off, frame);
+          constants.vr_pane_clip =
+              VR::CalculateVRPaneRect(xfmem.viewport, bpmem.scissorTL.x, bpmem.scissorTL.y,
+                                      bpmem.scissorBR.x, bpmem.scissorBR.y, x_off, y_off, frame);
+        }
+
         if (vr_rows)
         {
           // Only the normal immersive-perspective route represents the game camera.  Virtual
@@ -788,6 +804,48 @@ const std::array<std::array<float, 4>, 4>* GeometryShaderManager::GetVRCullProje
   return rows.cull_valid ? &rows.cull_projection : nullptr;
 #else
   return nullptr;
+#endif
+}
+
+std::optional<std::array<float, 4>>
+GeometryShaderManager::GetVRScreenRectInEyes(const std::array<float, 4>& rect)
+{
+#ifdef ENABLE_VR
+  if (!VR::g_openxr || !VR::g_openxr->IsSessionRunning())
+    return std::nullopt;
+
+  // The virtual screen as SetConstants places it for orthographic draws.
+  const float upm = std::max(VR::g_openxr->GetEffectiveUnitsPerMeter(), 0.0001f);
+  const VREyeRows& rows = GetVREyeRows(upm);
+  const float dist = upm * g_ActiveConfig.vr_screen_distance;
+  const float half_h = upm * g_ActiveConfig.vr_screen_size * 0.5f;
+  const float half_w = half_h * (16.0f / 9.0f);
+
+  constexpr float inf = std::numeric_limits<float>::infinity();
+  std::array<float, 4> box{inf, -inf, inf, -inf};
+  const auto dot = [](const std::array<float, 4>& row, const std::array<float, 4>& p) {
+    return row[0] * p[0] + row[1] * p[1] + row[2] * p[2] + row[3] * p[3];
+  };
+  for (size_t eye = 0; eye < 2; ++eye)
+  {
+    for (const float x : {rect[0], rect[1]})
+    {
+      for (const float y : {rect[2], rect[3]})
+      {
+        const std::array<float, 4> p{x * half_w, y * half_h, -dist, 1.0f};
+        const float w = -dot(rows.tracked_eye_z_row[eye], p);
+        if (w < 1.0e-5f)
+          return std::nullopt;
+        const float ndc_x = dot(rows.tracked_eye_projection[eye * 2], p) / w;
+        const float ndc_y = dot(rows.tracked_eye_projection[eye * 2 + 1], p) / w;
+        box = {std::min(box[0], ndc_x), std::max(box[1], ndc_x), std::min(box[2], ndc_y),
+               std::max(box[3], ndc_y)};
+      }
+    }
+  }
+  return box;
+#else
+  return std::nullopt;
 #endif
 }
 

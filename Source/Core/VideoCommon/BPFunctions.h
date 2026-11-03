@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <array>
 #include <utility>
 #include <vector>
 
@@ -167,6 +168,11 @@ void SetScissorAndViewport(FramebufferManager* frame_buffer_manager, ScissorPos 
 // Temporarily install the full displayed-frame raster state for a manually screen-routed
 // perspective pane. Returns false when no XFB frame region is available yet.
 bool SetVRPaneScreenViewport(FramebufferManager* frame_buffer_manager);
+// Temporarily install the full displayed-frame viewport with a scissor around a box of the eye
+// images (NDC {left, right, bottom, top}): an orthographic pane drawn on the virtual screen,
+// clipped where the screen shows its pane. Returns false when no XFB frame region is available.
+bool SetVRScreenRectViewport(FramebufferManager* frame_buffer_manager,
+                             const std::array<float, 4>& eye_rect);
 // Temporarily install the raster state the legacy cinematic-bar removal gives the scene for a
 // full-view 2D draw in a letterboxed full-width band: the full active area. Returns false when
 // the scene keeps its band (or the draw's viewport is not such a band).

@@ -41,6 +41,10 @@ namespace BPFunctions
 // scan out (Mario Galaxy), so the clear height wrongly triggers expansion during normal gameplay.
 static int s_vr_frame_active_height = 0;
 
+// Set while SetVRScreenRectViewport installs its scissor, which the orthographic scissor
+// expansion below must leave as it is.
+static bool s_vr_exact_scissor = false;
+
 void FlushPipeline()
 {
   g_vertex_manager->Flush();
@@ -329,7 +333,7 @@ void SetScissorAndViewport(FramebufferManager* frame_buffer_manager, ScissorPos 
   // coordinates and will incorrectly clip the VR-reprojected content. Expand both X and Y
   // to the full active area so all VR virtual-screen content is visible.
   else if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
-           g_ActiveConfig.vr_ortho_scissor_fix &&
+           g_ActiveConfig.vr_ortho_scissor_fix && !s_vr_exact_scissor &&
            xfmem.projection.type == ProjectionType::Orthographic)
   {
     const int x_off = scissor_offset.x << 1;
@@ -493,6 +497,50 @@ bool SetVRPaneScreenViewport(FramebufferManager* frame_buffer_manager)
   viewport.ht = -frame.height * 0.5f;
   SetScissorAndViewport(frame_buffer_manager, scissor_top_left, scissor_bottom_right,
                         bpmem.scissorOffset, viewport);
+  return true;
+}
+
+bool SetVRScreenRectViewport(FramebufferManager* frame_buffer_manager,
+                             const std::array<float, 4>& eye_rect)
+{
+  const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
+  if (!frame.valid || frame.width <= 0 || frame.height <= 0)
+    return false;
+
+  // The eye images show the displayed frame: NDC x right, y up, over its rectangle.
+  const float half_width = frame.width * 0.5f;
+  const float half_height = frame.height * 0.5f;
+  const auto to_x = [&](float ndc) {
+    return std::clamp(static_cast<int>(std::lround(half_width + ndc * half_width)), 0, frame.width);
+  };
+  const auto to_y = [&](float ndc) {
+    return std::clamp(static_cast<int>(std::lround(half_height - ndc * half_height)), 0,
+                      frame.height);
+  };
+  // A pixel of margin: the box is rounded to whole EFB pixels.
+  const int left = std::max(to_x(eye_rect[0]) - 1, 0);
+  const int right = std::max(std::min(to_x(eye_rect[1]) + 1, frame.width), left + 1);
+  const int top = std::max(to_y(eye_rect[3]) - 1, 0);
+  const int bottom = std::max(std::min(to_y(eye_rect[2]) + 1, frame.height), top + 1);
+
+  const int x_off = bpmem.scissorOffset.x << 1;
+  const int y_off = bpmem.scissorOffset.y << 1;
+  ScissorPos scissor_top_left = bpmem.scissorTL;
+  ScissorPos scissor_bottom_right = bpmem.scissorBR;
+  scissor_top_left.x = static_cast<u32>(x_off + frame.left + left);
+  scissor_top_left.y = static_cast<u32>(y_off + frame.top + top);
+  scissor_bottom_right.x = static_cast<u32>(x_off + frame.left + right - 1);
+  scissor_bottom_right.y = static_cast<u32>(y_off + frame.top + bottom - 1);
+
+  Viewport viewport = xfmem.viewport;
+  viewport.xOrig = static_cast<float>(x_off + frame.left) + half_width;
+  viewport.yOrig = static_cast<float>(y_off + frame.top) + half_height;
+  viewport.wd = half_width;
+  viewport.ht = -half_height;
+  s_vr_exact_scissor = true;
+  SetScissorAndViewport(frame_buffer_manager, scissor_top_left, scissor_bottom_right,
+                        bpmem.scissorOffset, viewport);
+  s_vr_exact_scissor = false;
   return true;
 }
 
