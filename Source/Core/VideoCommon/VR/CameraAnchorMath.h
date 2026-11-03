@@ -16,6 +16,7 @@
 
 #include <array>
 #include <optional>
+#include <span>
 #include <string_view>
 
 #include "Common/CommonTypes.h"
@@ -142,6 +143,9 @@ struct Anchor
   Vec3 position{};
   // Columns = the camera rig's axes in view space.
   Mat33 rotation{};
+  // The rig is anchored in the world (Level, Fixed, Yaw, Full): moved onto another frame's camera
+  // (RebaseAnchor) it keeps its world rotation. Camera: it follows the game camera and stays so.
+  bool rotation_in_world = false;
   // The anchor's own world scale; <= 0 keeps the profile's.
   float units_per_meter = 0.0f;
   // The head bone in game view space, as the game's draw matrices place it (not smoothed, without
@@ -198,6 +202,54 @@ Vec3 Column(const Mtx34& m, Axis axis);
 std::optional<Mat33> LevelBasis(const Vec3& forward, const Vec3& up, float yaw_deg);
 // Gram-Schmidt on the columns, Y kept (up stays up). False when a column is degenerate.
 bool Orthonormalize(Mat33* m);
+
+// Frame pairs. A VI field's hooks read the game between two of its frames at best: a game whose
+// loop runs free of the video interrupt is sometimes caught between its physics step and its
+// camera update, and an anchor composed then mixes two frames (the view jumps by a frame of
+// motion; a weapon held in the hand jitters). A patch's code cave, hooked where the game writes
+// its camera matrix, records the camera (world -> view) and the heading bone the frame is drawn
+// with, and the command FIFO's write pointer then, in a ring in the patch's scratch memory
+// (vr.set_camera_anchor_frames). The field composes its anchor from the newest pair, and the
+// engine moves it onto the pair recorded before the frame it draws (RebaseAnchor): every frame is
+// drawn from its own camera, whatever the CPU and GPU threads' lag.
+// An entry: + 0 a sequence number (from 1; 0 = unset), + 4 the FIFO write pointer (the physical
+// address PI_FIFO_WPTR holds), + 8 the view (a GameCube Mtx: 3 rows of 4), + 0x38 the bone, + 0x68
+// the sequence number again (an entry whose two differ is being written), + 0x6C unused.
+constexpr u32 FRAME_PAIR_SIZE = 0x70;
+constexpr u32 FRAME_PAIR_WORDS = FRAME_PAIR_SIZE / 4;
+constexpr u32 FRAME_PAIR_VIEW = 0x08;
+constexpr u32 FRAME_PAIR_ROOT = 0x38;
+constexpr u32 FRAME_PAIR_SEQ_END = 0x68;
+constexpr u32 MAX_FRAME_PAIRS = 16;
+struct FramePair
+{
+  u32 seq = 0;
+  u32 fifo_write = 0;
+  Mtx34 view{};
+  Mtx34 root{};
+};
+// The ring, and the pair an anchor was composed from: published with the anchor.
+struct FramePairs
+{
+  u32 ring_address = 0;
+  u32 entries = 0;
+  Mtx34 view{};
+  Mtx34 root{};
+};
+// An entry's words, host order. nullopt when unset, being written or not two transforms.
+std::optional<FramePair> DecodeFramePair(std::span<const u32, FRAME_PAIR_WORDS> words);
+// The pair of the frame being decoded: the newest one (by sequence number) recorded before the
+// command the GPU decodes, which is `decode_offset` bytes from the FIFO's base, with `unread`
+// bytes (at most fifo_size) written after it and not decoded yet. When none was, the oldest one.
+// nullopt when there are none.
+std::optional<size_t> PickFramePair(std::span<const FramePair> pairs, u32 fifo_base, u32 fifo_size,
+                                    u32 decode_offset, u32 unread);
+// The anchor composed from one pair, moved onto another: the rig keeps its place relative to the
+// bone and, when rotation_in_world, its world rotation; the hide region moves with it. nullopt
+// when a matrix cannot be inverted or is not a transform.
+std::optional<Anchor> RebaseAnchor(const Anchor& anchor, const Mtx34& from_view,
+                                   const Mtx34& from_root, const Mtx34& to_view,
+                                   const Mtx34& to_root);
 
 // The anchor of a head bone (world transform), the bone giving the heading (world transform;
 // null: the head's) and the game camera's world->view transform. `upm` converts the meter offsets

@@ -383,6 +383,7 @@ void CommandProcessorManager::GatherPipeBursted()
   if (m_fifo.bFF_HiWatermark.load(std::memory_order_relaxed) != 0)
     m_system.GetCoreTiming().ForceExceptionCheck(0);
 
+  m_fifo_bytes_written.fetch_add(GPFifo::GATHER_PIPE_SIZE, std::memory_order_release);
   m_fifo.CPReadWriteDistance.fetch_add(GPFifo::GATHER_PIPE_SIZE, std::memory_order_seq_cst);
 
   m_system.GetFifo().RunGpu();

@@ -44,6 +44,7 @@
 #include "Core/VRPatch/PatchScript.h"
 #include "Core/VRPatch/StickTurn.h"
 #include "Core/VRPatch/VRSettingsTable.h"
+#include "VideoCommon/CommandProcessor.h"
 #include "VideoCommon/VR/CameraAnchorSource.h"
 #include "VideoCommon/VR/CameraPitch.h"
 #include "VideoCommon/VR/OpenXRManager.h"
@@ -474,6 +475,7 @@ VRInputFrame CaptureInput()
   copy_pose(snapshot.head_pose, &input.head);
   copy_pose(snapshot.head_view_pose, &input.head_view);
   input.view_units_per_meter = snapshot.view_units_per_meter;
+  copy_pose(snapshot.head_rig_pose, &input.head_rig);
   for (size_t i = 0; i < input.hands.size(); ++i)
   {
     const Common::VR::OpenXRControllerState& from = snapshot.controllers[i];
@@ -498,6 +500,7 @@ VRInputFrame CaptureInput()
     copy_pose(from.pointer_pose, &to.pointer);
     copy_pose(from.view_pose, &to.view);
     copy_pose(from.level_view_pose, &to.level_view);
+    copy_pose(from.rig_pose, &to.rig);
     to.linear_velocity_valid = from.grip_velocity.linear_valid;
     to.angular_velocity_valid = from.grip_velocity.angular_valid;
     to.linear_velocity = from.grip_velocity.linear;
@@ -687,14 +690,18 @@ void UpdateCameraAnchorSource(const VRInputFrame* input = nullptr)
   constexpr int ANCHOR_RECENT_FIELDS = 300;
   Manager& m = GetManager();
   std::optional<VR::CameraAnchorMath::Anchor> published;
+  std::optional<VR::CameraAnchorMath::FramePairs> pairs;
   for (const auto& patch : m.patches)
   {
     if (!patch->script || patch->state != PatchState::Running)
       continue;
-    const std::optional<VR::CameraAnchorMath::Anchor> anchor = patch->script->TakeCameraAnchor();
+    std::optional<VR::CameraAnchorMath::FramePairs> anchor_pairs;
+    const std::optional<VR::CameraAnchorMath::Anchor> anchor =
+        patch->script->TakeCameraAnchor(&anchor_pairs);
     if (anchor && !published)
     {
       published = anchor;
+      pairs = anchor_pairs;
       patch->anchor_fields = ANCHOR_RECENT_FIELDS;
     }
     else if (patch->anchor_fields > 0)
@@ -702,7 +709,8 @@ void UpdateCameraAnchorSource(const VRInputFrame* input = nullptr)
       --patch->anchor_fields;
     }
   }
-  VR::CameraAnchorSource::Set(published);
+  VR::CameraAnchorSource::Set(
+      published, Core::System::GetInstance().GetCommandProcessor().GetFifoBytesWritten(), pairs);
 
   // The stick turns while the anchor holds the camera, as the video thread reports.
   std::optional<StickTurn::Turn> stick;

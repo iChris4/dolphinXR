@@ -329,6 +329,7 @@ std::optional<Anchor> Compose(const Mtx34& head, const Mtx34* heading, const Mtx
                        -options.offset_m[2] * scale};
 
   Anchor anchor;
+  anchor.rotation_in_world = options.rotation != Rotation::Camera;
   if (options.rotation == Rotation::Camera || options.rotation == Rotation::Yaw)
   {
     // In the game camera's view: its turns move the rig with it.
@@ -544,5 +545,72 @@ std::optional<CameraKind> ParseCameraKind(std::string_view name)
   if (name == "world")
     return CameraKind::World;
   return std::nullopt;
+}
+
+std::optional<FramePair> DecodeFramePair(std::span<const u32, FRAME_PAIR_WORDS> words)
+{
+  FramePair pair;
+  pair.seq = words[0];
+  pair.fifo_write = words[1];
+  if (pair.seq == 0 || words[FRAME_PAIR_SEQ_END / 4] != pair.seq)
+    return std::nullopt;
+  for (size_t i = 0; i < 12; ++i)
+  {
+    pair.view[i] = std::bit_cast<float>(words[FRAME_PAIR_VIEW / 4 + i]);
+    pair.root[i] = std::bit_cast<float>(words[FRAME_PAIR_ROOT / 4 + i]);
+  }
+  if (!IsPlausibleTransform(pair.view) || !IsPlausibleTransform(pair.root))
+    return std::nullopt;
+  return pair;
+}
+
+std::optional<size_t> PickFramePair(std::span<const FramePair> pairs, u32 fifo_base, u32 fifo_size,
+                                    u32 decode_offset, u32 unread)
+{
+  if (pairs.empty() || fifo_size == 0)
+    return std::nullopt;
+  const auto newer = [](u32 a, u32 b) { return static_cast<s32>(a - b) > 0; };
+  std::optional<size_t> drawn, oldest;
+  for (size_t i = 0; i < pairs.size(); ++i)
+  {
+    // A pair recorded before the command being decoded lies behind it on the ring; one recorded
+    // after it lies within the bytes written since, up to the write pointer itself (the CPU is at
+    // most a FIFO ahead). A pair recorded at the command's own address was recorded before it.
+    const u32 at = (pairs[i].fifo_write - fifo_base) % fifo_size;
+    const u32 ahead = (at + fifo_size - decode_offset % fifo_size) % fifo_size;
+    const bool before = ahead == 0 || ahead > unread;
+    if (before && (!drawn || newer(pairs[i].seq, pairs[*drawn].seq)))
+      drawn = i;
+    if (!oldest || newer(pairs[*oldest].seq, pairs[i].seq))
+      oldest = i;
+  }
+  return drawn ? drawn : oldest;
+}
+
+std::optional<Anchor> RebaseAnchor(const Anchor& anchor, const Mtx34& from_view,
+                                   const Mtx34& from_root, const Mtx34& to_view,
+                                   const Mtx34& to_root)
+{
+  const std::optional<Mtx34> to_world = Invert(from_view);
+  const std::optional<Mtx34> to_bone = Invert(from_root);
+  if (!to_world || !to_bone || !IsPlausibleTransform(to_view) || !IsPlausibleTransform(to_root))
+    return std::nullopt;
+  // The old view -> the world -> the bone -> the world as the new frame has it -> its view.
+  const Mtx34 move = Multiply(Multiply(to_view, to_root), Multiply(*to_bone, *to_world));
+  const Mat33 turn = Multiply33(Basis(to_view), Basis(*to_world));
+  Anchor out = anchor;
+  out.position = TransformPoint(move, anchor.position);
+  out.hide_center = TransformPoint(move, anchor.hide_center);
+  if (anchor.rotation_in_world)
+    out.rotation = Multiply33(turn, anchor.rotation);
+  Vec3 up = Rotate(turn, anchor.hide_up);
+  if (Normalize(&up))
+    out.hide_up = up;
+  const auto finite = [](const Vec3& v) {
+    return std::ranges::all_of(v, [](float x) { return std::isfinite(x); });
+  };
+  if (!IsFiniteMat(out.rotation) || !finite(out.position) || !finite(out.hide_center))
+    return std::nullopt;
+  return out;
 }
 }  // namespace VR::CameraAnchorMath

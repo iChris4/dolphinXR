@@ -104,7 +104,11 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
                                              removes (vr.set_camera_pitch_source).
   vr.hand_in_head_space(hand [, kind]) -> pose relative to the head
   vr.raw_pose(hand | "head" [, kind]) -> valid, px, py, pz, qx, qy, qz, qw   -- the same as plain
-                                             numbers (valid false when there is none): no tables
+                                             numbers (valid false when there is none): no tables.
+                                             Also kind "rig" (hands and head): the pose relative
+                                             to the camera rig before the Camera Anchor (meters,
+                                             rig axes, from the eyes' home position), for
+                                             vr.camera_anchor()
   vr.button(hand, name) -> bool   -- primary (A/X), secondary (B/Y), button_3, button_4, menu,
                                      shoulder, trigger, squeeze (grip), thumbstick (click)
   vr.axis(hand, name) -> number   -- trigger, squeeze, squeeze_force, thumbstick_x, thumbstick_y
@@ -195,8 +199,8 @@ Camera Anchor (first-person view: the VR camera in a character's head, from the 
       bend the character's path by as much: hold up, swing the game camera, and compare the
       character's heading before and after (Workflow 7).
   vr.set_camera_anchor_matrices(head, camera [, kind [, heading]]) -> bool   -- this field's
-      anchor from the head bone's world transform (a GameCube Mtx address) and the game camera's
-      matrix: kind "view" (default: world -> view, what the game multiplies its models by) or
+      anchor from the head bone's world transform (a GameCube Mtx address, or a table of its 12
+      numbers, rows first, when the patch computed it) and the game camera's matrix: kind "view" (default: world -> view, what the game multiplies its models by) or
       "world" (the camera's transform: its translation is its position). heading: another bone's
       transform for the heading (a body root turns more smoothly than a head). False (one warning
       per load) when a matrix is not readable or not a transform. Call it every field while the
@@ -209,8 +213,32 @@ Camera Anchor (first-person view: the VR camera in a character's head, from the 
       until the next call (default true). Call it every field with false while the game reads the
       stick for something else than moving its character: a menu, a dialog's choices, a
       cutscene. Find the game's state byte with cheat_search or a logging patch (Workflow 7).
+  vr.set_camera_anchor_frames(ring, entries)   -- the ring of frame pairs a code cave of the
+      patch records, kept until the next call (entries 0 or nil: none). A field's hooks read the
+      game between two of its frames at best: a game whose loop runs free of the video interrupt
+      is sometimes caught between its physics step and its camera update, and an anchor composed
+      then mixes two frames (the view jumps by a frame of motion; a weapon in the hand jitters).
+      Hook the call that writes the game's camera matrix: the cave stores, at ring + (n %
+      entries) * 0x70 in the patch's scratch memory, + 0 a sequence number (from 1), + 4 the
+      command FIFO's write pointer ([CC003014], read with lis r8, -0x3400; lwz r8, 0x3014(r8)),
+      + 8 the camera's world -> view matrix (a GameCube Mtx) as the game is about to write it,
+      + 0x38 the heading bone's world transform (the `heading` of set_camera_anchor_matrices, or
+      its `head`) as the frame will draw it, + 0x68 the sequence number again (an entry whose two
+      differ is being written: skipped). Each field, compose the anchor from the newest entry
+      (pass its matrices' addresses); the engine moves it onto the entry recorded before the
+      frame it draws (the rig keeps its world rotation and its place relative to the bone), so
+      every frame is drawn from its own camera whatever the CPU and GPU threads' lag. The Shadow
+      first-person patch (GUP) is the model: 3 entries, with the pair's root for the weapon's
+      hand too.
   vr.camera_anchor_active() -> bool   -- the Camera Anchor setting is on and a VR session runs in
       stereo: only then does an anchor move the view (and hide the manifest's `hide` draws).
+  vr.camera_anchor() -> r00, r01, r02, tx, r10, ..., tz or nil   -- the anchor this patch composed
+      in this field (after vr.set_camera_anchor*), in game view space (columns = the rig's axes,
+      translation = its position, game units). Times a "rig" pose (raw_pose(hand, "rig"), meters
+      times the anchor's upm) it is the hand in the game view of the game state this field reads.
+      The "view" poses use the anchor of the frame on screen, which is a frame older or newer when
+      the game's frame pacing hiccups: an object a first-person patch puts in the hand from them
+      jitters by the character's motion per frame. Use the rig pose and this instead.
   Do not combine "level"/"fixed"/"full" with vr.set_camera_pitch_source: they already remove the
   game camera's pitch.
 

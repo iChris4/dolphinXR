@@ -920,8 +920,13 @@ bool PatchScript::KeepsPointerOnScreen() const
   return m_context->keep_pointer_on_screen;
 }
 
-std::optional<VR::CameraAnchorMath::Anchor> PatchScript::TakeCameraAnchor()
+std::optional<VR::CameraAnchorMath::Anchor>
+PatchScript::TakeCameraAnchor(std::optional<VR::CameraAnchorMath::FramePairs>* pairs)
 {
+  const std::optional<VR::CameraAnchorMath::FramePairs> taken =
+      std::exchange(m_context->camera_anchor_pairs, std::nullopt);
+  if (pairs)
+    *pairs = taken;
   return std::exchange(m_context->camera_anchor, std::nullopt);
 }
 

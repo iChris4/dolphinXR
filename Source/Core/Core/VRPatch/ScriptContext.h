@@ -98,6 +98,11 @@ struct ScriptContext
   // vr.set_camera_anchor_stick: false while the game reads the stick for something else than
   // moving its character (a menu, a dialog).
   bool camera_anchor_stick = true;
+  // vr.set_camera_anchor_frames: the ring of frame pairs the patch's cave records (none while
+  // entries is 0), and the pair this field's anchor was composed from, taken with it.
+  u32 camera_anchor_ring = 0;
+  u32 camera_anchor_ring_entries = 0;
+  std::optional<VR::CameraAnchorMath::FramePairs> camera_anchor_pairs;
 };
 
 ScriptContext* GetContext(lua_State* L);

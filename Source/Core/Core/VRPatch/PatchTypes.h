@@ -126,6 +126,10 @@ struct HandInput
   // The aim pose relative to the game camera (meters, +X right, +Y up, -Z forward of the camera).
   PoseInput view;
   PoseInput level_view;
+  // The aim pose relative to the camera rig, before the Camera Anchor (meters, rig axes, from the
+  // eyes' home position): with the anchor a patch composed (vr.camera_anchor), the hand in the
+  // game view of the game state it reads.
+  PoseInput rig;
   bool linear_velocity_valid = false;
   bool angular_velocity_valid = false;
   std::array<float, 3> linear_velocity{};
@@ -151,6 +155,8 @@ struct VRInputFrame
   // The game units per meter of the view poses (the Camera Anchor's own scale while it holds the
   // camera); 0 when unknown.
   float view_units_per_meter = 0.0f;
+  // The center of the eyes relative to the camera rig (HandInput::rig).
+  PoseInput head_rig;
   std::array<HandInput, 2> hands{};
 };
 

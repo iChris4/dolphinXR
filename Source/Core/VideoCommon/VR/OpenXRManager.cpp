@@ -60,6 +60,8 @@
 #include "VideoCommon/VR/CameraAnchorSource.h"
 #include "VideoCommon/VR/CameraPitch.h"
 #include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/CommandProcessor.h"
+#include "VideoCommon/Fifo.h"
 
 namespace VR
 {
@@ -2820,6 +2822,7 @@ void OpenXRManager::UpdateInputActions()
     // For VR game patches: the display-time aim seen from the game camera, like the Controller
     // Anchor (a patch writes game memory that is rendered at about that time).
     ComputeViewPose(controller.aim_pose, &controller.view_pose);
+    ComputeRigPose(controller.aim_pose, &controller.rig_pose);
     controller.screen_pitch = m_game_camera_pitch.load(std::memory_order_relaxed);
     if (controller.screen_pitch != 0.0f)
       ComputeViewPose(controller.aim_pose, &controller.level_view_pose, false);
@@ -2884,6 +2887,7 @@ void OpenXRManager::UpdateInputActions()
   }
   Common::VR::OpenXRPoseState head_pose;
   Common::VR::OpenXRPoseState head_view_pose;
+  Common::VR::OpenXRPoseState head_rig_pose;
   if (eye_pose.orientation.w != 0.0f || eye_pose.orientation.x != 0.0f ||
       eye_pose.orientation.y != 0.0f || eye_pose.orientation.z != 0.0f)
   {
@@ -2899,6 +2903,7 @@ void OpenXRManager::UpdateInputActions()
     if (g_ActiveConfig.vr_tracking_mode == OpenXRTrackingMode::None)
       center.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
     ComputeViewPose(center, &head_view_pose);
+    ComputeRigPose(center, &head_rig_pose);
   }
 
   std::array<std::string, 2> profile_strings;
@@ -2907,10 +2912,9 @@ void OpenXRManager::UpdateInputActions()
 
   UpdateMenuGate(controllers);
 
-  Common::VR::OpenXRInputState::SetControllers(controllers, true, head_pose, head_view_pose,
-                                               profile_strings, m_session_focused,
-                                               input_time, m_menu_gate.input,
-                                               GetEffectiveUnitsPerMeter());
+  Common::VR::OpenXRInputState::SetControllers(
+      controllers, true, head_pose, head_view_pose, profile_strings, m_session_focused, input_time,
+      m_menu_gate.input, GetEffectiveUnitsPerMeter(), head_rig_pose);
 
   UpdateHaptics();
 }
@@ -4097,9 +4101,83 @@ void OpenXRManager::CommitCameraAnchorFrame()
     ++m_pose_generation;
 }
 
+// The frame pair recorded before the command being decoded (CameraAnchorMath::FramePairs), read
+// from the ring in the game's memory. Video thread.
+static std::optional<CameraAnchorMath::FramePair>
+FramePairOfThisFrame(const CameraAnchorMath::FramePairs& pairs)
+{
+  auto& system = Core::System::GetInstance();
+  const u32 entries = std::min(pairs.entries, CameraAnchorMath::MAX_FRAME_PAIRS);
+  const u8* ring = system.GetMemory().GetPointerForRange(
+      pairs.ring_address, entries * CameraAnchorMath::FRAME_PAIR_SIZE);
+  if (!ring || entries == 0)
+    return std::nullopt;
+  std::array<CameraAnchorMath::FramePair, CameraAnchorMath::MAX_FRAME_PAIRS> decoded;
+  size_t count = 0;
+  for (u32 e = 0; e < entries; ++e)
+  {
+    std::array<u32, CameraAnchorMath::FRAME_PAIR_WORDS> words;
+    for (u32 w = 0; w < words.size(); ++w)
+      words[w] = Common::swap32(ring + e * CameraAnchorMath::FRAME_PAIR_SIZE + w * 4);
+    if (const auto pair = CameraAnchorMath::DecodeFramePair(words))
+      decoded[count++] = *pair;
+  }
+  const auto& fifo = system.GetCommandProcessor().GetFifo();
+  const u32 base = fifo.CPBase.load(std::memory_order_acquire);
+  const u32 end = fifo.CPEnd.load(std::memory_order_acquire);
+  if (end <= base)
+    return std::nullopt;
+  const u32 size = end - base + 32;
+  // The GPU thread copies the FIFO ahead of decoding it.
+  const u32 pending =
+      static_cast<u32>(std::min<size_t>(system.GetFifo().GetVideoBufferPendingBytes(), size));
+  const u32 copied = (fifo.CPReadPointer.load(std::memory_order_acquire) - base) % size;
+  const u32 decode = (copied + size - pending) % size;
+  const u32 unread =
+      std::min(fifo.CPReadWriteDistance.load(std::memory_order_acquire), size - pending) + pending;
+  const std::optional<size_t> pick =
+      CameraAnchorMath::PickFramePair(std::span(decoded.data(), count), base, size, decode, unread);
+  if (!pick)
+    return std::nullopt;
+  return decoded[*pick];
+}
+
 void OpenXRManager::LatchCameraAnchorSource()
 {
-  const std::optional<CameraAnchorMath::Anchor> anchor = CameraAnchorSource::Get();
+  // The anchor published before this frame's commands, not the newest: with dual core the CPU
+  // thread may already have published the next field's.
+  int newer = 0;
+  std::optional<CameraAnchorMath::FramePairs> pairs;
+  std::optional<CameraAnchorMath::Anchor> anchor = CameraAnchorSource::GetAt(
+      Core::System::GetInstance().GetCommandProcessor().GetFifoBytesRead(), &newer, &pairs);
+  // Then onto the camera this frame is drawn with, when the patch records the frames' pairs.
+  if (anchor && pairs)
+  {
+    const std::optional<CameraAnchorMath::FramePair> pair = FramePairOfThisFrame(*pairs);
+    if (pair && (pair->view != pairs->view || pair->root != pairs->root))
+    {
+      if (const auto rebased = CameraAnchorMath::RebaseAnchor(*anchor, pairs->view, pairs->root,
+                                                              pair->view, pair->root))
+      {
+        anchor = rebased;
+        ++m_camera_anchor_latches_rebased;
+      }
+    }
+  }
+  ++m_camera_anchor_latches;
+  if (newer > 0)
+    ++m_camera_anchor_latches_behind;
+  if (m_camera_anchor_latches >= 600)
+  {
+    DEBUG_LOG_FMT(OPENXR,
+                  "CameraAnchor: {} of {} frames drawn after the next field's anchor, {} moved "
+                  "onto their own frame's camera",
+                  m_camera_anchor_latches_behind, m_camera_anchor_latches,
+                  m_camera_anchor_latches_rebased);
+    m_camera_anchor_latches = 0;
+    m_camera_anchor_latches_behind = 0;
+    m_camera_anchor_latches_rebased = 0;
+  }
   // The same gate as an anchor draw's capture: without it the camera glides home.
   if (!anchor || !g_ActiveConfig.vr_enable_camera_anchor || g_ActiveConfig.vr_flat_screen)
     return;
@@ -4174,14 +4252,9 @@ bool OpenXRManager::GetControllerAnchorViewPose(int hand, float units_per_meter,
   return true;
 }
 
-bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
-                                         float units_per_meter, std::array<float, 3>* out_position,
-                                         std::array<float, 9>* out_rotation,
-                                         bool remove_camera_pitch) const
+std::array<float, 3>
+OpenXRManager::RigAimPosition(const Common::VR::OpenXRPoseState& aim) const
 {
-  if (!aim.valid || !out_position)
-    return false;
-
   // Tracking-mode adjustment via the eye-center delta: adjusted_center + (raw − raw_center)
   // reproduces GetTrackingAdjustedEyeViews() for every tracking mode without duplicating
   // its switch (exact identity in Full6DoF) and keeps the hand attached to a pinned head
@@ -4193,22 +4266,44 @@ bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
   const float adj_cx = 0.5f * (adjusted[0].pose.position.x + adjusted[1].pose.position.x);
   const float adj_cy = 0.5f * (adjusted[0].pose.position.y + adjusted[1].pose.position.y);
   const float adj_cz = 0.5f * (adjusted[0].pose.position.z + adjusted[1].pose.position.z);
-  const float cx = adj_cx + (aim.position[0] - raw_cx);
-  const float cy = adj_cy + (aim.position[1] - raw_cy);
-  const float cz = adj_cz + (aim.position[2] - raw_cz);
+  std::array<float, 3> rig = {adj_cx + (aim.position[0] - raw_cx) - m_home_position.x,
+                              adj_cy + (aim.position[1] - raw_cy) - m_home_position.y,
+                              adj_cz + (aim.position[2] - raw_cz) - m_home_position.z};
+  if (g_ActiveConfig.vr_enable_camera_height)
+    rig[1] += g_ActiveConfig.vr_camera_height;
+  if (g_ActiveConfig.vr_enable_camera_forward)
+    rig[2] -= g_ActiveConfig.vr_camera_forward;
+  return rig;
+}
+
+void OpenXRManager::ComputeRigPose(const Common::VR::OpenXRPoseState& aim,
+                                   Common::VR::OpenXRPoseState* out_pose) const
+{
+  *out_pose = {};
+  if (!aim.valid || g_ActiveConfig.vr_flat_screen)
+    return;
+  out_pose->valid = true;
+  out_pose->position = RigAimPosition(aim);
+  out_pose->orientation = aim.orientation;
+}
+
+bool OpenXRManager::MapAimPoseToGameView(const Common::VR::OpenXRPoseState& aim,
+                                         float units_per_meter, std::array<float, 3>* out_position,
+                                         std::array<float, 9>* out_rotation,
+                                         bool remove_camera_pitch) const
+{
+  if (!aim.valid || !out_position)
+    return false;
 
   // Replay of the GetEyeProjectionRows eye-position chain (home offset, camera
   // height/forward, anchor rotation, anchor position) with the controller substituted
   // for the eye. Any divergence between the two shows up as the element swimming
   // against the hand under head motion — keep them in lockstep.
   const float s = std::max(units_per_meter, 0.0001f);
-  float px = (cx - m_home_position.x) * s;
-  float py = (cy - m_home_position.y) * s;
-  float pz = (cz - m_home_position.z) * s;
-  if (g_ActiveConfig.vr_enable_camera_height)
-    py += g_ActiveConfig.vr_camera_height * s;
-  if (g_ActiveConfig.vr_enable_camera_forward)
-    pz += -g_ActiveConfig.vr_camera_forward * s;
+  const std::array<float, 3> rig = RigAimPosition(aim);
+  float px = rig[0] * s;
+  float py = rig[1] * s;
+  float pz = rig[2] * s;
   if (m_camera_anchor_rotation_active)
   {
     const std::array<float, 9>& A = m_camera_anchor_rotation;

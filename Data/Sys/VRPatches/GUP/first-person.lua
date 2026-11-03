@@ -21,6 +21,13 @@
 -- itself: the cave hands it the controller's pose where it asks where his left hand is, so the
 -- game places it, and its shots, there.
 --
+-- The game's loop runs free of the video interrupt: a field's hooks are sometimes caught between
+-- Shadow's step and the camera's update, and an anchor composed then mixed two frames (the view
+-- jumped by a frame of his motion: the weapon jittered while he ran). So the cave, hooked into the
+-- camera update too, records each frame's camera and root with the FIFO's write pointer in a ring
+-- (vr.set_camera_anchor_frames): the field composes from the newest pair, which the weapon's hand
+-- uses too, and the engine moves the anchor onto the pair of the frame it draws.
+--
 -- Memory (Reloaded 1.2, found with the agent server's Workflows 6 and 7):
 -- - [[807D71A0]] (also [[805EF324] + 0x60]): Shadow's player object, his name at + 0x3C.
 -- - [player + 0xA0]: his animation (0x2EA standing, 0xEA running, 0x4C jumping: upright, then a
@@ -51,7 +58,8 @@
 --   ctr and f0 to f5.
 -- - 8056EE14: the camera manager: a count at + 0x8, 8-byte entries from [+ 0xC], each pointing to a
 --   camera, active while its first byte is not 0, its world -> view matrix at + 0x3C (written by
---   the camera update at 80270618).
+--   the camera update at 80270618, after his step of the frame: its call to 8040C148 at 80270848
+--   copies the matrix there from the stack, r3 = camera + 0x3C, r4 = the matrix; hooked).
 -- - 8057D768: not 0 while the game holds the controls (pause menu, events); 8057D724: the pause
 --   menu is open.
 -- - The game moves Shadow with a camera two updates newer than the one a patch reads: holding the
@@ -69,12 +77,12 @@
 patch = {
   title = "First-person view",
   author = "DolphinXR",
-  version = "1.3",
+  version = "1.4",
   description = "With Camera Anchor on, the VR camera is at Shadow's eyes: level, turning with "
     .. "him whatever the game's camera does, his head hidden, his gun in your hand, and up on "
     .. "the stick runs where he faces. For Shadow the Hedgehog NTSC-U and Reloaded.",
   games = {"GUPE8P", "GUPR8P"},
-  scratch = 0x3D0,
+  scratch = 0x610,
   settings = {
     {name = "follow", label = "Follow", type = "choice",
      options = {"His body (steady)", "His head"}, default = 0,
@@ -157,23 +165,26 @@ local CAMERAS = 0x8056EE14
 local VIEW_IN_CAMERA = 0x3C
 local CONTROLS_HELD = 0x8057D768
 local PAUSE_MENU = 0x8057D724
--- The cave's entries: the function the hooked call goes to, and how the entry makes the bone's
--- key in r7 (the pieces attached to a bone get the bone's address + 1, a hand's record the motion
--- controller's address).
+-- The cave's entries: the function the hooked call goes to, how the entry makes the key in r7
+-- (a bone's address; the pieces attached to a bone get the bone's address + 1, a hand's record
+-- the motion controller's address, the camera's view matrix its address), and the cave code the
+-- entry goes to (the bones' lookup unless named).
 local ENTRIES = {{0x80016390, "mr r7, r4"},     -- glxCopyMatrix(RwMatrix, bone)
                  {0x800591F0, "mr r7, r4"},     -- 800591F0(RwMatrix, bone)
                  {0x8040C148, "ori r7, r4, 1"}, -- 8040C148(Mtx copy, bone)
-                 {0x800AA760, "mr r7, r3"}}     -- 800AA760(motion controller, record)
--- The calls that hand a bone's matrix to RenderWare: {address, original word, entry}.
+                 {0x800AA760, "mr r7, r3"},     -- 800AA760(motion controller, record)
+                 {0x8040C148, "mr r7, r3", "frames"}}  -- 8040C148(camera + 0x3C, view matrix)
+-- The calls that hand a bone's matrix to RenderWare, and the camera update's copy of its view
+-- matrix: {address, original word, entry}.
 local HOOKS = {{0x80015774, 0x48000C1D, 1},   -- the frame sync
                {0x802A5590, 0x4BD70E01, 1},   -- things held at a node
                {0x802A5804, 0x4BD70B8D, 1},
                {0x800B60CC, 0x4BFA3125, 2},   -- frames attached to a bone: his eyes
                {0x800B0EEC, 0x4835B25D, 3},   -- pieces attached to a bone: his left hand
-               {0x8023AA48, 0x4BE6FD19, 4}}   -- the weapon he holds asks for his left hand
--- The camera update's copy of the view matrix and the code around the hooks: this game's
--- executable.
-local SIGNATURE = {{0x80270840, 0x387F003C}, {0x80270848, 0x4819B901},
+               {0x8023AA48, 0x4BE6FD19, 4},   -- the weapon he holds asks for his left hand
+               {0x80270848, 0x4819B901, 5}}   -- the camera update writes its view matrix
+-- The code around the hooks: this game's executable.
+local SIGNATURE = {{0x80270840, 0x387F003C}, {0x8027084C, 0x386100D0},
                    {0x80015768, 0x80860004}, {0x80015778, 0x4800001C},
                    {0x802A558C, 0x38650010}, {0x802A5800, 0x38650010},
                    {0x800B60C8, 0x80840000}, {0x800B60D0, 0x80810008},
@@ -210,7 +221,24 @@ local RECORD = S + 0x50      -- the hand's record the cave hands to the weapon (
 local TABLE = S + 0x78       -- the moved bones: the key, then their matrix relative to the root
 local ENTRY_SIZE = 0x34
 local TABLE_SIZE = 2
-local CAVE = TABLE + TABLE_SIZE * ENTRY_SIZE  -- one entry per hooked function, then their code
+-- The frame pairs the cave records at the camera update (vr.set_camera_anchor_frames): a sequence
+-- number, the ring index of the last entry, the active camera's view matrix address (the cave
+-- records that camera's update), then the entries: the sequence number, the FIFO write pointer,
+-- the view, his root, the sequence number again.
+local FRAMES = TABLE + TABLE_SIZE * ENTRY_SIZE
+local FRAME_SEQ = FRAMES
+local FRAME_INDEX = FRAMES + 4
+local VIEW_POINTER = FRAMES + 8
+local FRAME_RING = FRAMES + 0x10
+local FRAME_ENTRIES = 3
+local FRAME_PAIR_SIZE = 0x70
+local FRAME_VIEW = 8
+local FRAME_ROOT = 0x38
+local FRAME_SEQ_END = 0x68
+-- A pair whose root is farther than this from his is stale (the camera update stopped while he
+-- moves): more than his motion in a frame.
+local FRAME_STALE_UNITS = 10
+local CAVE = FRAME_RING + FRAME_ENTRIES * FRAME_PAIR_SIZE  -- the entries, then their code
 
 local function load_address(register, address)
   local hi = (address >> 16) & 0xFFFF
@@ -224,13 +252,16 @@ end
 -- glove's) a point at his first hidden bone; the cave builds it at TEMP and calls the function the
 -- entry names (r6) with r4 = TEMP. Any other bone goes to that function untouched. For the
 -- weapon's call (the key is r3, his motion controller) the moved matrix becomes a hand's record at
--- RECORD (its position, -Z and +Y axes), returned in r3 instead of calling the function.
+-- RECORD (its position, -Z and +Y axes), returned in r3 instead of calling the function. For the
+-- camera update's copy of the active camera's view matrix (the key is r3, VIEW_POINTER), the
+-- matrix it is about to write (r4) and his root are recorded in the next ring entry, with the
+-- FIFO's write pointer and the sequence number, before the function runs.
 local function cave_words()
   local o = function(address) return string.format("0x%X", address - S) end
   local text = ""
   for i, e in ipairs(ENTRIES) do
     text = text .. string.format("entry%d:\n", i) .. load_address("r6", e[1]) .. e[2] ..
-           "\nb lookup\n"
+           "\nb " .. (e[3] or "lookup") .. "\n"
   end
   text = text .. "lookup:\n" .. load_address("r5", S) ..
          "lwz r8, " .. o(MOVE_COUNT) .. "(r5)\n" ..
@@ -282,6 +313,27 @@ local function cave_words()
                          TEMP - S + row * 16 + 4, RECORD - S + 0x1C + row * 4)
   end
   text = text .. string.format("addi r3, r5, 0x%X\nblr\n", RECORD - S)
+  -- The frame pair: for the active camera (r7 = VIEW_POINTER) while his root is known.
+  text = text .. "frames:\n" .. load_address("r5", S) ..
+         "lwz r8, " .. o(VIEW_POINTER) .. "(r5)\ncmplw r7, r8\nbne call\n" ..
+         "lwz r10, " .. o(ROOT) .. "(r5)\ncmplwi r10, 0\nbeq call\n" ..
+         "lwz r9, " .. o(FRAME_INDEX) .. "(r5)\naddi r9, r9, 1\n" ..
+         string.format("cmplwi r9, %d\nblt index\nli r9, 0\nindex:\n", FRAME_ENTRIES) ..
+         "stw r9, " .. o(FRAME_INDEX) .. "(r5)\n" ..
+         string.format("mulli r9, r9, 0x%X\naddi r9, r9, 0x%X\nadd r9, r9, r5\n",
+                       FRAME_PAIR_SIZE, FRAME_RING - S) ..
+         -- The FIFO write pointer (PI_FIFO_WPTR, CC003014).
+         "lis r8, -0x3400\nlwz r8, 0x3014(r8)\nstw r8, 4(r9)\n" ..
+         "lwz r8, " .. o(FRAME_SEQ) .. "(r5)\naddi r8, r8, 1\nstw r8, 0(r9)\n"
+  for k = 0, 5 do
+    text = text .. string.format("lfd f0, 0x%X(r4)\nstfd f0, 0x%X(r9)\n", k * 8, FRAME_VIEW + k * 8)
+  end
+  for k = 0, 5 do
+    text = text .. string.format("lfd f0, 0x%X(r10)\nstfd f0, 0x%X(r9)\n", k * 8,
+                                 FRAME_ROOT + k * 8)
+  end
+  text = text .. string.format("stw r8, 0x%X(r9)\n", FRAME_SEQ_END) ..
+         "stw r8, " .. o(FRAME_SEQ) .. "(r5)\nb call\n"
   local words, err = asm.assemble(text, CAVE)
   if not words then error("assembling the cave: " .. err) end
   assert(CAVE + #words * 4 <= S + mem.scratch_size, "the cave does not fit in the scratch memory")
@@ -358,6 +410,14 @@ local function install()
     changed = mem.ensure_code(hook[1], asm.branch(hook[1], entry(hook[3]), true)) or changed
   end
   if changed then
+    -- The ring starts over: an earlier run's pairs are stale. (Not on the periodic check: the
+    -- newest pair would be missing for a field.)
+    mem.write_u32(FRAME_SEQ, 0)
+    mem.write_u32(FRAME_INDEX, 0)
+    for i = 0, FRAME_ENTRIES - 1 do
+      mem.write_u32(FRAME_RING + i * FRAME_PAIR_SIZE, 0)
+      mem.write_u32(FRAME_RING + i * FRAME_PAIR_SIZE + FRAME_SEQ_END, 0)
+    end
     log("hooks installed to hide and move his bones, cave at", mem.hex(CAVE))
   end
 end
@@ -374,6 +434,7 @@ end
 
 function on_load()
   apply_options()
+  vr.set_camera_anchor_frames(FRAME_RING, FRAME_ENTRIES)
   if is_this_game() then
     install()
   end
@@ -496,26 +557,31 @@ local function rotation(axis, degrees)
   return {c, -s, 0, 0, s, c, 0, 0, 0, 0, 1, 0}
 end
 
--- The controller's pose in the game's world (the game camera's view axes, then the view matrix
--- inverted), or nil.
+-- The controller's pose in the game's world, or nil: relative to the camera rig, placed by the
+-- anchor this field composed (in the game camera's view axes), then the view matrix inverted.
+-- Not the "view" pose: it uses the anchor of the frame on screen, a frame older or newer when the
+-- frame pacing hiccups, and the gun jittered by Shadow's motion per frame while he ran.
 local function controller_in_world(view, upm)
-  local valid, px, py, pz, qx, qy, qz, qw = vr.raw_pose(GUN_HANDS[settings.gun], "view")
-  if not valid then return nil end
+  local valid, px, py, pz, qx, qy, qz, qw = vr.raw_pose(GUN_HANDS[settings.gun], "rig")
+  local anchor = {vr.camera_anchor()}
+  if not valid or #anchor < 12 then return nil end
   local pose = {
     1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw), px * upm,
     2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw), py * upm,
     2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy), pz * upm,
   }
   local to_world = inverse(view)
-  return to_world and mul(to_world, pose)
+  return to_world and mul(to_world, mul(anchor, pose))
 end
 
 -- Fills the table so that his left hand, and the weapon it holds, are in the controller's:
 -- the hand's piece on bone 25, and the record the weapon asks for (keyed by his motion
--- controller). True, or false when it cannot (no controller).
-local function move_gun(player, bones, view)
+-- controller). `root` and `view`: the frame pair's matrices (his root and the camera of one
+-- frame: the hand is placed relative to the root, so it holds whichever frame the game draws).
+-- True, or false when it cannot (no controller).
+local function move_gun(player, bones, root_address, view)
   local motion = mem.u32(player + CONTROLLER_IN_PLAYER)
-  local root = {mem.f32s(bones, 12)}
+  local root = {mem.f32s(root_address, 12)}
   local upm = settings.upm > 0 and settings.upm or vr.units_per_meter()
   local controller = controller_in_world({mem.f32s(view, 12)}, upm)
   local to_root = inverse(root)
@@ -558,14 +624,45 @@ local function facing_away(bones, view)
   return wx * -r[3] + wz * -r[11] < 0
 end
 
-local function first_person(bones, view)
+-- The newest frame pair the cave recorded, as the addresses of its view and root matrices, or
+-- nil: none yet (the hook not installed, no Shadow), being written (its sequence numbers differ),
+-- or stale (its root farther from his than he moves in a frame: the camera update stopped, as
+-- in an event, while he moves).
+local function frame_pair(bones)
+  local index = mem.u32(FRAME_INDEX)
+  if not index or index >= FRAME_ENTRIES then return nil end
+  local entry = FRAME_RING + index * FRAME_PAIR_SIZE
+  local seq = mem.u32(entry)
+  if not seq or seq == 0 or mem.u32(entry + FRAME_SEQ_END) ~= seq then return nil end
+  local root = entry + FRAME_ROOT
+  local dx = mem.f32(root + 12) - mem.f32(bones + 12)
+  local dy = mem.f32(root + 28) - mem.f32(bones + 28)
+  local dz = mem.f32(root + 44) - mem.f32(bones + 44)
+  if dx * dx + dy * dy + dz * dz > FRAME_STALE_UNITS * FRAME_STALE_UNITS then return nil end
+  return entry + FRAME_VIEW, root
+end
+
+-- The view of this field: in Shadow's head (true), or the game's camera (false). `view` and
+-- `root`: the camera's view matrix and his root, from the frame pair when there is one.
+local function first_person(bones, view, root)
   local held = mem.u8(CONTROLS_HELD) ~= 0
   vr.set_camera_anchor_stick(view ~= nil and not held)
   if not view or (held and mem.u8(PAUSE_MENU) == 0 and settings.events == 0) then
     return false
   end
-  local anchor = settings.follow == 0 and bones or bones + HEAD * BONE_SIZE
-  return vr.set_camera_anchor_matrices(anchor, view, "view", bones)
+  local anchor = root
+  if settings.follow == 1 then
+    anchor = bones + HEAD * BONE_SIZE
+    if root ~= bones then
+      -- His head joint as the pair's root carries it: that root times his root's inverse times
+      -- the joint (the joint and his root are of one frame).
+      local to_root = inverse({mem.f32s(bones, 12)})
+      if to_root then
+        anchor = mul({mem.f32s(root, 12)}, mul(to_root, {mem.f32s(anchor, 12)}))
+      end
+    end
+  end
+  return vr.set_camera_anchor_matrices(anchor, view, "view", root)
 end
 
 function on_frame()
@@ -582,17 +679,27 @@ function on_frame()
   end
   local player, bones = shadow()
   local view = bones and camera_view()
+  -- The cave records the active camera's updates while his root is known.
+  mem.write_u32(VIEW_POINTER, view or 0)
+  mem.write_u32(ROOT, bones or 0)
   if (view and bones) ~= anchored then
     log(view and ("Shadow's bones at " .. mem.hex(bones) .. ", view matrix at " .. mem.hex(view))
         or "no Shadow model or no active camera: the game's camera")
     anchored = view and bones
   end
-  if not first_person(bones, view) or not vr.camera_anchor_active() then
+  -- The newest frame's camera and root, or this field's as they are.
+  local pair_view, pair_root = nil, nil
+  if view then
+    pair_view, pair_root = frame_pair(bones)
+  end
+  local root = pair_root or bones
+  view = pair_view or view
+  if not first_person(bones, view, root) or not vr.camera_anchor_active() then
     hide_bones(0, 0)
     mem.write_u32(MOVE_COUNT, 0)
     return
   end
-  local gun = settings.gun > 0 and move_gun(player, bones, view)
+  local gun = settings.gun > 0 and move_gun(player, bones, root, view)
   if gun ~= holding then
     log(gun and "his left hand and weapon follow the controller" or
         "his weapon stays in his hand")

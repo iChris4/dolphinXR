@@ -729,6 +729,20 @@ private:
   void ComputeViewPose(const Common::VR::OpenXRPoseState& aim,
                        Common::VR::OpenXRPoseState* out_pose,
                        bool remove_camera_pitch = true) const;
+  // MapAimPoseToGameView's first step: the aim position relative to the camera rig, in meters
+  // (from the eyes' home position, with the tracking mode, camera height and forward), before the
+  // Camera Anchor's rotation and position.
+  std::array<float, 3> RigAimPosition(const Common::VR::OpenXRPoseState& aim) const;
+  // LatchCameraAnchorSource: the frames latched, those the CPU thread had already published a
+  // newer field's anchor for (the GPU thread's lag), and those moved onto their own frame's camera
+  // (a patch's frame pairs), logged every 600 frames.
+  int m_camera_anchor_latches = 0;
+  int m_camera_anchor_latches_behind = 0;
+  int m_camera_anchor_latches_rebased = 0;
+  // OpenXRControllerState::rig_pose: RigAimPosition and the aim's orientation (rig axes).
+  // Invalid in flat-screen mode.
+  void ComputeRigPose(const Common::VR::OpenXRPoseState& aim,
+                      Common::VR::OpenXRPoseState* out_pose) const;
   // XrTime of "now" via the platform time-conversion extension, 0 when unavailable.
   XrTime GetNowTime();
   // Input wants measured poses — locating at the predicted display time extrapolates fast

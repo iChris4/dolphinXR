@@ -635,17 +635,25 @@ constexpr u32 SH_PAUSE_MENU = 0x8057D724;
 constexpr u32 SH_HOOK = 0x80015774;
 constexpr u32 SH_HOOK_ORIGINAL = 0x48000C1D;  // bl glxCopyMatrix
 // The other hooked calls: {address, original word, cave entry}.
-constexpr std::array<std::array<u32, 3>, 5> SH_OTHER_HOOKS = {{{0x802A5590, 0x4BD70E01, 0},
+constexpr std::array<std::array<u32, 3>, 6> SH_OTHER_HOOKS = {{{0x802A5590, 0x4BD70E01, 0},
                                                                {0x802A5804, 0x4BD70B8D, 0},
                                                                {0x800B60CC, 0x4BFA3125, 1},
                                                                {0x800B0EEC, 0x4835B25D, 2},
-                                                               {0x8023AA48, 0x4BE6FD19, 3}}};
-constexpr u32 SH_SCRATCH = 0x80002C20;
-constexpr u32 SH_SCRATCH_SIZE = 0x3D0;
+                                                               {0x8023AA48, 0x4BE6FD19, 3},
+                                                               {0x80270848, 0x4819B901, 4}}};
+constexpr u32 SH_SCRATCH = 0x800029F0;
+constexpr u32 SH_SCRATCH_SIZE = 0x610;
 constexpr u32 SH_ROOT_POINTER = SH_SCRATCH + 0x18;
 constexpr u32 SH_MOVE_COUNT = SH_SCRATCH + 0x1C;
 constexpr u32 SH_TABLE = SH_SCRATCH + 0x78;
-constexpr u32 SH_CAVE = SH_TABLE + 2 * 0x34;
+// The frame pairs: the sequence number, the index of the last entry, the camera's view matrix
+// address, then 3 entries of 0x70 bytes.
+constexpr u32 SH_FRAMES = SH_TABLE + 2 * 0x34;
+constexpr u32 SH_FRAME_INDEX = SH_FRAMES + 4;
+constexpr u32 SH_VIEW_POINTER = SH_FRAMES + 8;
+constexpr u32 SH_FRAME_RING = SH_FRAMES + 0x10;
+constexpr u32 SH_FRAME_PAIR_SIZE = 0x70;
+constexpr u32 SH_CAVE = SH_FRAME_RING + 3 * SH_FRAME_PAIR_SIZE;
 constexpr u32 SH_STATUS = SH_PLAYER + 0xAC;
 // The right glove: a 7-bone skeleton, one of its bones in the motion controller's records.
 constexpr u32 SH_RIGHT_GLOVE = 0x812F24E0;
@@ -662,7 +670,7 @@ struct Shadow
   Shadow()
   {
     memory.Write32(0x80270840, 0x387F003C);
-    memory.Write32(0x80270848, 0x4819B901);
+    memory.Write32(0x8027084C, 0x386100D0);
     memory.Write32(0x80015768, 0x80860004);
     memory.Write32(SH_HOOK, SH_HOOK_ORIGINAL);
     memory.Write32(0x80015778, 0x4800001C);
@@ -750,7 +758,19 @@ struct Shadow
   {
     EXPECT_TRUE(script.Call(Hook::OnFrame, env)) << script.Error();
     ++env.field;
-    return script.TakeCameraAnchor();
+    return script.TakeCameraAnchor(&pairs);
+  }
+
+  // The cave recorded a frame pair in ring entry `index`: the camera's view and his root.
+  void RecordFramePair(u32 index, u32 seq, const Mtx34& view, const Mtx34& root)
+  {
+    const u32 entry = SH_FRAME_RING + index * SH_FRAME_PAIR_SIZE;
+    memory.Write32(SH_FRAME_INDEX, index);
+    memory.Write32(entry, seq);
+    memory.Write32(entry + 4, 0x0062EDC0);
+    memory.SetMtx(entry + 8, view);
+    memory.SetMtx(entry + 0x38, root);
+    memory.Write32(entry + 0x68, seq);
   }
 
   void SetSetting(const std::string& name, double value)
@@ -768,6 +788,17 @@ struct Shadow
   }
 
   // `up` units above `from` and `forward` units ahead of Shadow, in the camera's view.
+  static std::array<float, 3> EyesFrom(const std::array<float, 3>& from, float up, float forward,
+                                       const Mtx34& view)
+  {
+    const Mat33 facing = RotY(40);
+    const std::array<float, 3> offset = {facing[1] * up - facing[2] * forward,
+                                         facing[4] * up - facing[5] * forward,
+                                         facing[7] * up - facing[8] * forward};
+    return VR::CameraAnchorMath::TransformPoint(
+        view, {from[0] + offset[0], from[1] + offset[1], from[2] + offset[2]});
+  }
+  // The same in VIEW.
   static std::array<float, 3> Eyes(const std::array<float, 3>& from, float up, float forward)
   {
     const Mat33 facing = RotY(40);
@@ -783,6 +814,8 @@ struct Shadow
   VRInputFrame input;
   ScriptEnvironment env;
   PatchScript script{"first-person"};
+  // The frame pairs the last Frame()'s anchor came with.
+  std::optional<VR::CameraAnchorMath::FramePairs> pairs;
 };
 
 void ExpectNearPosition(const std::array<float, 3>& actual, const std::array<float, 3>& expected)
@@ -794,6 +827,66 @@ void ExpectNearPosition(const std::array<float, 3>& actual, const std::array<flo
   }
 }
 }  // namespace
+
+// The cave records each frame's camera and his root at the game's camera update, in the ring the
+// patch declares to the engine: the field composes from the newest pair (his head joint carried by
+// its root), and the weapon's hand is relative to its root, not to the matrices as the field finds
+// them (the field may fall between his step and the camera's update). Without a pair, or with one
+// being written or stale, the field's matrices.
+TEST(ShadowFirstPersonPatch, ComposesFromTheFramePair)
+{
+  Shadow game;
+  ASSERT_TRUE(game.Load());
+  std::optional<VR::CameraAnchorMath::Anchor> anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNearPosition(anchor->position, Shadow::Eyes(SH_ROOT, 6.7f, 2.2f));
+  ASSERT_TRUE(game.pairs);
+  EXPECT_EQ(game.pairs->ring_address, SH_FRAME_RING);
+  EXPECT_EQ(game.pairs->entries, 3u);
+  EXPECT_EQ(game.memory.Read32(SH_VIEW_POINTER).value_or(0), SH_CAMERA + 0x3C);
+  EXPECT_EQ(game.memory.Read32(SH_ROOT_POINTER).value_or(0), SH_BONES);
+
+  // A pair: his root a unit further along X, the camera turned a little.
+  const std::array<float, 3> moved = {SH_ROOT[0] + 1, SH_ROOT[1], SH_ROOT[2]};
+  const Mtx34 view = Make(VR::CameraAnchorMath::Multiply33(RotX(20), RotY(-25)), {10, -300, -900});
+  game.RecordFramePair(1, 7, view, Make(RotY(40), moved));
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNearPosition(anchor->position, Shadow::EyesFrom(moved, 6.7f, 2.2f, view));
+  ASSERT_TRUE(game.pairs);
+  ExpectNear(game.pairs->view, view);
+  ExpectNear(game.pairs->root, Make(RotY(40), moved));
+  // The weapon's hand (the controller a meter ahead of the rig): relative to the pair's root, so
+  // the same matrix as from the field's own matrices, whose root and camera are elsewhere.
+  PoseInput& pose = game.input.hands[1].rig;
+  pose.valid = true;
+  pose.position = {0, 0, -1};
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  EXPECT_EQ(game.memory.Read32(SH_MOVE_COUNT).value_or(0), 2u);
+  const Mtx34 hand = game.TableMatrix(0);
+  EXPECT_NEAR(hand[11], -12.2f, 2.0f);
+
+  // Following his head: the joint carried by the pair's root.
+  game.SetSetting("follow", 1);
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNearPosition(anchor->position,
+                     Shadow::EyesFrom({SH_HEAD[0] + 1, SH_HEAD[1], SH_HEAD[2]}, 0.9f, 1.6f, view));
+  game.SetSetting("follow", 0);
+
+  // Being written: the sequence numbers differ.
+  game.memory.Write32(SH_FRAME_RING + 1 * SH_FRAME_PAIR_SIZE + 0x68, 6);
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNearPosition(anchor->position, Shadow::Eyes(SH_ROOT, 6.7f, 2.2f));
+  ExpectNear(game.TableMatrix(0), hand);
+  // Stale: far from him.
+  game.RecordFramePair(2, 8, view, Make(RotY(40), {SH_ROOT[0] + 50, SH_ROOT[1], SH_ROOT[2]}));
+  anchor = game.Frame();
+  ASSERT_TRUE(anchor);
+  ExpectNearPosition(anchor->position, Shadow::Eyes(SH_ROOT, 6.7f, 2.2f));
+}
 
 // At his eyes above his feet, level and turned with him, true to scale, from the active camera.
 TEST(ShadowFirstPersonPatch, LevelAtTheEyesAboveHisFeet)
@@ -921,31 +1014,36 @@ TEST(ShadowFirstPersonPatch, GunInYourHand)
 {
   Shadow game;
   ASSERT_TRUE(game.Load());
-  PoseInput& pose = game.input.hands[1].view;
+  // The controller relative to the camera rig: placed with the anchor the patch composes.
+  PoseInput& pose = game.input.hands[1].rig;
   pose.valid = true;
   pose.position = {0.2f, -0.3f, -0.5f};
   const std::pair<u32, u32> head_and_arm = {SH_BONES + 12 * 0x70, SH_BONES + 26 * 0x70};
   const std::pair<u32, u32> head = {SH_BONES + 12 * 0x70, SH_BONES + 22 * 0x70};
   const std::pair<u32, u32> off = {0, 0};
-  game.Frame();
+  const auto anchor = game.Frame();
+  ASSERT_TRUE(anchor);
   ASSERT_EQ(game.memory.Read32(SH_MOVE_COUNT).value_or(0), 2u);
   EXPECT_EQ(game.memory.Read32(SH_ROOT_POINTER).value_or(0), SH_BONES);
   EXPECT_EQ(game.memory.Read32(SH_TABLE).value_or(0), SH_LEFT_HAND + 1);
   EXPECT_EQ(game.memory.Read32(SH_TABLE + 0x34).value_or(0), SH_MOTION);
   EXPECT_EQ(game.HiddenHead(), head_and_arm);
 
-  // Drawn at the root times the table's matrix: the hand at the controller, 10 units per meter,
-  // turned by the grip; the weapon's record the same.
+  // Drawn at the root times the table's matrix: the hand at the controller (the anchor times the
+  // rig pose at 10 units per meter, out of the game camera's view), turned by the grip; the
+  // weapon's record the same.
   const Mtx34 root = Make(RotY(40), SH_ROOT);
   const Mtx34 to_world = *VR::CameraAnchorMath::Invert(VIEW);
-  const auto controller = VR::CameraAnchorMath::TransformPoint(to_world, {2.0f, -3.0f, -5.0f});
+  const Mtx34 rig =
+      VR::CameraAnchorMath::Multiply(to_world, Make(anchor->rotation, anchor->position));
+  const auto controller = VR::CameraAnchorMath::TransformPoint(rig, {2.0f, -3.0f, -5.0f});
   for (u32 entry = 0; entry < 2; ++entry)
   {
     SCOPED_TRACE(entry);
     const Mtx34 hand = VR::CameraAnchorMath::Multiply(root, game.TableMatrix(entry));
     ExpectNearPosition(VR::CameraAnchorMath::Translation(hand), controller);
     ExpectNear(VR::CameraAnchorMath::Basis(hand),
-               VR::CameraAnchorMath::Multiply33(VR::CameraAnchorMath::Basis(to_world),
+               VR::CameraAnchorMath::Multiply33(VR::CameraAnchorMath::Basis(rig),
                                                 {0.9934f, -0.0673f, -0.0984f, -0.0844f, -0.9817f,
                                                  -0.1775f, -0.0848f, 0.1850f, -0.9798f}));
   }

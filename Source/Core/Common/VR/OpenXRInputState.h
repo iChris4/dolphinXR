@@ -70,6 +70,11 @@ struct OpenXRControllerState
   // The same without the game camera's pitch that the VR view removes (a VR patch's camera pitch
   // source): relative to the camera's level frame. Equal to view_pose without a source.
   OpenXRPoseState level_view_pose;
+  // The aim pose relative to the camera rig, in meters, before the Camera Anchor (rig axes: +X
+  // right, +Y up, -Z forward, from the eyes' home position). view_pose is the latched anchor
+  // times this: a VR patch that composes its own anchor uses it with that anchor, the one of the
+  // game state it reads. Invalid in flat-screen mode.
+  OpenXRPoseState rig_pose;
   // That pitch (radians, + up), 0 without a source: the virtual screen and the pointer are turned
   // up by it about the reference space's X axis.
   float screen_pitch = 0.0f;
@@ -106,6 +111,8 @@ struct OpenXRInputSnapshot
   // The game units per meter the view poses were computed with (the Camera Anchor's own scale
   // while it holds the camera); 0 before any.
   float view_units_per_meter = 0.0f;
+  // The center of the eyes relative to the camera rig (OpenXRControllerState::rig_pose).
+  OpenXRPoseState head_rig_pose;
   bool runtime_active = false;
   uint64_t generation = 0;
   std::array<std::string, 2> interaction_profiles;  // Active profile path per hand
@@ -191,7 +198,8 @@ public:
                              bool focused,
                              int64_t sample_time_ns = 0,
                              const OpenXRMenuInput& menu = {},
-                             float view_units_per_meter = 0.0f)
+                             float view_units_per_meter = 0.0f,
+                             const OpenXRPoseState& head_rig_pose = {})
   {
     std::lock_guard lk(s_state_mutex);
     // Freeze the last sample from before input was withheld: the sample that opened the
@@ -203,6 +211,7 @@ public:
     s_state.head_pose = head_pose;
     s_state.head_view_pose = head_view_pose;
     s_state.view_units_per_meter = view_units_per_meter;
+    s_state.head_rig_pose = head_rig_pose;
     s_state.runtime_active = runtime_active;
     s_state.interaction_profiles = profiles;
     s_state.session_focused = focused;

@@ -198,8 +198,18 @@ public:
   // It is only used by the Fifo and by the CommandProcessor.
   SCPFifoStruct& GetFifo() { return m_fifo; }
 
+  // The bytes the gather pipe has written into the FIFO since the emulation started (any thread),
+  // and those the GPU has read: a point in the command stream, e.g. to tie data the CPU thread
+  // computes at a VI field to the frame the GPU thread then draws.
+  u64 GetFifoBytesWritten() const { return m_fifo_bytes_written.load(std::memory_order_acquire); }
+  u64 GetFifoBytesRead() const
+  {
+    return GetFifoBytesWritten() - m_fifo.CPReadWriteDistance.load(std::memory_order_acquire);
+  }
+
 private:
   SCPFifoStruct m_fifo;
+  std::atomic<u64> m_fifo_bytes_written{0};
 
   CoreTiming::EventType* m_event_type_update_interrupts = nullptr;
 

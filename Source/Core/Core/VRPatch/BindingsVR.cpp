@@ -62,14 +62,16 @@ int PushPose(lua_State* L, const PoseInput& pose)
 }
 
 // vr.raw_pose(which, kind) -> valid, px, py, pz, qx, qy, qz, qw. which: "head" or a hand; kind:
-// "aim" (default), "grip", "pointer", "view" or "level_view"; the head has "view" (its eyes'
-// center) and otherwise its reference-space pose.
+// "aim" (default), "grip", "pointer", "view", "level_view" or "rig"; the head has "view" and "rig"
+// (its eyes' center) and otherwise its reference-space pose.
 int VRRawPose(lua_State* L)
 {
   const VRInputFrame& input = Input(L);
   if (lua_type(L, 1) == LUA_TSTRING && std::strcmp(lua_tostring(L, 1), "head") == 0)
   {
     const char* kind = luaL_optstring(L, 2, "aim");
+    if (std::strcmp(kind, "rig") == 0)
+      return PushPose(L, input.head_rig);
     return PushPose(L, std::strcmp(kind, "view") == 0 ? input.head_view : input.head);
   }
   const HandInput& hand = input.hands[CheckHand(L, 1)];
@@ -84,7 +86,10 @@ int VRRawPose(lua_State* L)
     return PushPose(L, hand.view);
   if (std::strcmp(kind, "level_view") == 0)
     return PushPose(L, hand.level_view);
-  return luaL_argerror(L, 2, "kind is \"aim\", \"grip\", \"pointer\", \"view\" or \"level_view\"");
+  if (std::strcmp(kind, "rig") == 0)
+    return PushPose(L, hand.rig);
+  return luaL_argerror(
+      L, 2, "kind is \"aim\", \"grip\", \"pointer\", \"view\", \"level_view\" or \"rig\"");
 }
 
 int VRButton(lua_State* L)
@@ -564,9 +569,11 @@ bool ReadMtx34(const MemoryAccess& memory, u32 address, CAM::Mtx34* out, const c
 }
 
 // Reads the matrices and composes this field's anchor. Warns once per load when it fails.
+// `head_given`: the head's matrix itself instead of reading it at head_address.
 bool ComposeCameraAnchor(ScriptContext* context, lua_Integer head_address,
                          lua_Integer camera_address, CAM::CameraKind kind,
-                         std::optional<lua_Integer> heading_address)
+                         std::optional<lua_Integer> heading_address,
+                         const CAM::Mtx34* head_given = nullptr)
 {
   const ScriptEnvironment* env = context->env;
   if (!env || !env->memory)
@@ -576,8 +583,21 @@ bool ComposeCameraAnchor(ScriptContext* context, lua_Integer head_address,
   };
   std::string reason;
   CAM::Mtx34 head, camera, heading;
-  bool ok = ReadMtx34(*env->memory, to_address(head_address), &head, "head", &reason) &&
-            ReadMtx34(*env->memory, to_address(camera_address), &camera, "camera", &reason);
+  bool ok = true;
+  if (head_given)
+  {
+    head = *head_given;
+    if (!CAM::IsPlausibleTransform(head))
+    {
+      ok = false;
+      reason = "the head matrix given is not a transform";
+    }
+  }
+  else
+  {
+    ok = ReadMtx34(*env->memory, to_address(head_address), &head, "head", &reason);
+  }
+  ok = ok && ReadMtx34(*env->memory, to_address(camera_address), &camera, "camera", &reason);
   if (ok && heading_address)
   {
     ok = ReadMtx34(*env->memory, to_address(*heading_address), &heading, "heading bone", &reason);
@@ -624,15 +644,68 @@ bool ComposeCameraAnchor(ScriptContext* context, lua_Integer head_address,
   anchor->units_per_meter = context->camera_anchor_units_per_meter;
   anchor->stick_turn = anchor->stick_turn && context->camera_anchor_stick;
   context->camera_anchor = *anchor;
+  context->camera_anchor_pairs.reset();
+  if (context->camera_anchor_ring_entries > 0)
+  {
+    context->camera_anchor_pairs =
+        CAM::FramePairs{context->camera_anchor_ring, context->camera_anchor_ring_entries, *view,
+                        heading_address ? heading : head};
+  }
   return true;
 }
 
+// vr.set_camera_anchor_frames(ring, entries): the ring of frame pairs a code cave of the patch
+// records in its scratch memory (CameraAnchorMath::FramePairs), kept until the next call; entries
+// 0 or nil: none. The engine moves each frame's anchor onto the pair recorded before the frame.
+int VRSetCameraAnchorFrames(lua_State* L)
+{
+  ScriptContext* context = GetContext(L);
+  const lua_Integer entries = luaL_optinteger(L, 2, 0);
+  if (entries <= 0)
+  {
+    context->camera_anchor_ring = 0;
+    context->camera_anchor_ring_entries = 0;
+    return 0;
+  }
+  if (entries > CAM::MAX_FRAME_PAIRS)
+    return luaL_argerror(L, 2, "1 to 16 entries");
+  const lua_Integer ring = luaL_checkinteger(L, 1);
+  const u64 size = static_cast<u64>(entries) * CAM::FRAME_PAIR_SIZE;
+  if (ring < 0 || (ring & 3) != 0 || ring < context->scratch_base ||
+      static_cast<u64>(ring) + size >
+          static_cast<u64>(context->scratch_base) + context->scratch_size)
+  {
+    return luaL_argerror(L, 1, "a word-aligned ring in the patch's scratch memory");
+  }
+  context->camera_anchor_ring = static_cast<u32>(ring);
+  context->camera_anchor_ring_entries = static_cast<u32>(entries);
+  return 0;
+}
+
 // vr.set_camera_anchor_matrices(head, camera, kind [, heading]) -> bool: this field's anchor from
-// the head bone's world transform and the game camera's matrix ("view": world -> view, "world":
-// the camera's transform), the heading from another bone's transform when given.
+// the head bone's world transform (its address, or a table of its 12 numbers) and the game
+// camera's matrix ("view": world -> view, "world": the camera's transform), the heading from
+// another bone's transform when given.
 int VRSetCameraAnchorMatrices(lua_State* L)
 {
-  const lua_Integer head = luaL_checkinteger(L, 1);
+  std::optional<CAM::Mtx34> head_given;
+  lua_Integer head = 0;
+  if (lua_istable(L, 1))
+  {
+    head_given.emplace();
+    for (int i = 0; i < 12; ++i)
+    {
+      lua_rawgeti(L, 1, i + 1);
+      if (!lua_isnumber(L, -1))
+        return luaL_argerror(L, 1, "a matrix address or a table of 12 numbers");
+      (*head_given)[i] = static_cast<float>(lua_tonumber(L, -1));
+      lua_pop(L, 1);
+    }
+  }
+  else
+  {
+    head = luaL_checkinteger(L, 1);
+  }
   const lua_Integer camera = luaL_checkinteger(L, 2);
   const std::optional<CAM::CameraKind> kind = CAM::ParseCameraKind(luaL_optstring(L, 3, "view"));
   if (!kind)
@@ -640,7 +713,8 @@ int VRSetCameraAnchorMatrices(lua_State* L)
   std::optional<lua_Integer> heading;
   if (!lua_isnoneornil(L, 4))
     heading = luaL_checkinteger(L, 4);
-  lua_pushboolean(L, ComposeCameraAnchor(GetContext(L), head, camera, *kind, heading));
+  lua_pushboolean(L, ComposeCameraAnchor(GetContext(L), head, camera, *kind, heading,
+                                         head_given ? &*head_given : nullptr));
   return 1;
 }
 
@@ -661,6 +735,27 @@ int VRCameraAnchorActive(lua_State* L)
   const ScriptContext* context = GetContext(L);
   lua_pushboolean(L, context->env && context->env->camera_anchor_active);
   return 1;
+}
+
+// vr.camera_anchor() -> r00, r01, r02, tx, r10, ..., tz, or nil: the anchor this patch composed in
+// this field (vr.set_camera_anchor*), in game view space: columns = the rig's axes, translation
+// its position (game units).
+int VRCameraAnchor(lua_State* L)
+{
+  const ScriptContext* context = GetContext(L);
+  if (!context->camera_anchor)
+  {
+    lua_pushnil(L);
+    return 1;
+  }
+  const CAM::Anchor& anchor = *context->camera_anchor;
+  for (int r = 0; r < 3; ++r)
+  {
+    for (int c = 0; c < 3; ++c)
+      lua_pushnumber(L, anchor.rotation[r * 3 + c]);
+    lua_pushnumber(L, anchor.position[r]);
+  }
+  return 12;
 }
 
 // vr.clear_flags(): lowers every flag of the patch.
@@ -705,6 +800,8 @@ void RegisterVRBindings(lua_State* L)
       {"set_camera_anchor_matrices", VRSetCameraAnchorMatrices},
       {"set_camera_anchor_stick", VRSetCameraAnchorStick},
       {"camera_anchor_active", VRCameraAnchorActive},
+      {"camera_anchor", VRCameraAnchor},
+      {"set_camera_anchor_frames", VRSetCameraAnchorFrames},
       {nullptr, nullptr},
   };
   luaL_newlib(L, FUNCTIONS);

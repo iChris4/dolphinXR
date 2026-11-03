@@ -7,11 +7,15 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <bit>
 #include <cmath>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include "VideoCommon/VR/CameraAnchorMath.h"
+#include "VideoCommon/VR/CameraAnchorSource.h"
 
 using namespace VR::CameraAnchorMath;
 
@@ -551,4 +555,141 @@ TEST(CameraAnchorMath, ParsesNames)
   EXPECT_EQ(ParseStick("view"), Stick::View);
   EXPECT_EQ(ParseStick("head"), Stick::Head);
   EXPECT_FALSE(ParseStick("body"));
+}
+
+// An anchor composed from one frame's pair, moved onto another frame's: the rig stays where it was
+// relative to the root (which moved on) and keeps its world rotation whatever the camera did, so
+// it is what composing from the new pair gives. A rig that follows the camera keeps following it.
+TEST(CameraAnchorMath, RebasesAnAnchorOntoAnotherFramesPair)
+{
+  Options options;
+  options.rotation = Rotation::Level;
+  options.offset_m = {0.0f, 0.1f, 0.2f};
+  options.hide_radius = 1.0f;
+  const Mtx34 root = Make(RotY(40), {1, 0, 3});
+  State state;
+  const std::optional<Anchor> anchor = Compose(HEAD, &root, TURNED_VIEW, options, 1.0f, &state);
+  ASSERT_TRUE(anchor);
+  EXPECT_TRUE(anchor->rotation_in_world);
+  // The next frame: he moved on, the camera followed him and turned.
+  const Mtx34 root_now = Make(RotY(40), {1.5f, 0.0f, 2.8f});
+  const Mtx34 head_now = Make(RotY(40), {1.5f, 2.0f, 2.8f});
+  const Mtx34 view_now = Multiply(Make(RotY(10), {0, 0, 0}),
+                                  Multiply(TURNED_VIEW, Make(RotY(0), {-0.5f, 0.0f, 0.2f})));
+  const std::optional<Anchor> rebased =
+      RebaseAnchor(*anchor, TURNED_VIEW, root, view_now, root_now);
+  ASSERT_TRUE(rebased);
+  State fresh;
+  const std::optional<Anchor> composed =
+      Compose(head_now, &root_now, view_now, options, 1.0f, &fresh);
+  ASSERT_TRUE(composed);
+  ExpectNear(rebased->position, composed->position);
+  ExpectNear(rebased->rotation, composed->rotation);
+  ExpectNear(rebased->hide_center, composed->hide_center);
+  ExpectNear(rebased->hide_up, composed->hide_up);
+  EXPECT_EQ(rebased->hide_radius, 1.0f);
+
+  options.rotation = Rotation::Camera;
+  State following_state;
+  const std::optional<Anchor> following =
+      Compose(HEAD, &root, TURNED_VIEW, options, 1.0f, &following_state);
+  ASSERT_TRUE(following);
+  EXPECT_FALSE(following->rotation_in_world);
+  const std::optional<Anchor> moved =
+      RebaseAnchor(*following, TURNED_VIEW, root, view_now, root_now);
+  ASSERT_TRUE(moved);
+  ExpectNear(moved->rotation, following->rotation);
+  // The head, a frame on, in the new view.
+  ExpectNear(moved->hide_center, TransformPoint(view_now, {1.5f, 2.0f, 2.8f}));
+
+  // A pair that is not a transform: nothing.
+  EXPECT_FALSE(RebaseAnchor(*anchor, TURNED_VIEW, root, Mtx34{}, root_now));
+}
+
+// The frame pairs a patch's cave records: an entry decodes when its two sequence numbers agree
+// and its matrices are transforms, and a frame takes the newest entry recorded before the
+// command the GPU decodes, by the FIFO write pointer on the ring, the oldest when all are ahead.
+TEST(CameraAnchorMath, PicksTheFramePairRecordedBeforeTheCommand)
+{
+  const auto words = [](u32 seq, u32 write, const Mtx34& view, const Mtx34& root, u32 seq_end) {
+    std::array<u32, FRAME_PAIR_WORDS> w{};
+    w[0] = seq;
+    w[1] = write;
+    for (size_t i = 0; i < 12; ++i)
+    {
+      w[FRAME_PAIR_VIEW / 4 + i] = std::bit_cast<u32>(view[i]);
+      w[FRAME_PAIR_ROOT / 4 + i] = std::bit_cast<u32>(root[i]);
+    }
+    w[FRAME_PAIR_SEQ_END / 4] = seq_end;
+    return w;
+  };
+  const std::optional<FramePair> pair = DecodeFramePair(words(5, 0x1234, TURNED_VIEW, HEAD, 5));
+  ASSERT_TRUE(pair);
+  EXPECT_EQ(pair->seq, 5u);
+  EXPECT_EQ(pair->fifo_write, 0x1234u);
+  ExpectNear(pair->view, TURNED_VIEW);
+  ExpectNear(pair->root, HEAD);
+  EXPECT_FALSE(DecodeFramePair(words(5, 0x1234, TURNED_VIEW, HEAD, 4)));
+  EXPECT_FALSE(DecodeFramePair(words(0, 0x1234, TURNED_VIEW, HEAD, 0)));
+  EXPECT_FALSE(DecodeFramePair(words(5, 0x1234, Mtx34{}, HEAD, 5)));
+
+  // A 256 KiB FIFO: pair 1 recorded near its end, 2 and 3 after the wrap, 4 ahead of the GPU.
+  constexpr u32 BASE = 0x0060D880, SIZE = 0x40000;
+  const auto at = [](u32 seq, u32 offset) {
+    FramePair p;
+    p.seq = seq;
+    p.fifo_write = BASE + offset;
+    return p;
+  };
+  const std::array<FramePair, 4> pairs = {at(1, 0x3F000), at(2, 0x200), at(3, 0x2000),
+                                          at(4, 0x4000)};
+  // Decoding at 0x3500 with 0x1000 bytes written after it: pair 3.
+  EXPECT_EQ(PickFramePair(pairs, BASE, SIZE, 0x3500, 0x1000), 2u);
+  // Decoding the command pair 1 was recorded at, pairs 2 to 4 ahead: pair 1.
+  EXPECT_EQ(PickFramePair(pairs, BASE, SIZE, 0x3F000, 0x5000), 0u);
+  // The GPU further behind, all of them ahead: the oldest.
+  EXPECT_EQ(PickFramePair(pairs, BASE, SIZE, 0x3E000, 0x6000), 0u);
+  EXPECT_FALSE(PickFramePair({}, BASE, SIZE, 0x3E000, 0x6000));
+}
+
+// A frame takes the last anchor published before its commands in the FIFO, not the newest: with
+// dual core the CPU thread may have published the next field's one before the GPU thread draws.
+TEST(CameraAnchorSource, FrameTakesTheAnchorBeforeItsCommands)
+{
+  const auto anchor_at = [](float x) {
+    Anchor anchor;
+    anchor.position = {x, 0, 0};
+    return anchor;
+  };
+  FramePairs pairs;
+  pairs.ring_address = 0x80002A00;
+  pairs.entries = 3;
+  VR::CameraAnchorSource::Set(anchor_at(1), 1000);
+  VR::CameraAnchorSource::Set(anchor_at(2), 2000, pairs);
+  VR::CameraAnchorSource::Set(anchor_at(3), 3000);
+  int newer = -1;
+  std::optional<FramePairs> taken;
+  std::optional<Anchor> anchor = VR::CameraAnchorSource::GetAt(2500, &newer, &taken);
+  ASSERT_TRUE(anchor);
+  EXPECT_EQ(anchor->position[0], 2.0f);
+  EXPECT_EQ(newer, 1);
+  // Its frame pairs come with it.
+  ASSERT_TRUE(taken);
+  EXPECT_EQ(taken->ring_address, 0x80002A00u);
+  EXPECT_EQ(taken->entries, 3u);
+  VR::CameraAnchorSource::GetAt(3000, &newer, &taken);
+  EXPECT_FALSE(taken);
+  anchor = VR::CameraAnchorSource::GetAt(3000, &newer);
+  ASSERT_TRUE(anchor);
+  EXPECT_EQ(anchor->position[0], 3.0f);
+  EXPECT_EQ(newer, 0);
+  EXPECT_EQ(VR::CameraAnchorSource::Get()->position[0], 3.0f);
+  // All newer than the frame (a FIFO reset): the newest.
+  anchor = VR::CameraAnchorSource::GetAt(500, &newer);
+  ASSERT_TRUE(anchor);
+  EXPECT_EQ(anchor->position[0], 3.0f);
+  // No anchor any more: none, whatever the frame.
+  VR::CameraAnchorSource::Set(std::nullopt, 4000);
+  EXPECT_FALSE(VR::CameraAnchorSource::GetAt(3500));
+  EXPECT_FALSE(VR::CameraAnchorSource::Get());
 }

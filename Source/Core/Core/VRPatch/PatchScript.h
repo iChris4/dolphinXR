@@ -159,8 +159,10 @@ public:
   std::optional<u32> GetCameraPitchSource() const;
   // The patch keeps the VR pointer on the screen (vr.keep_pointer_on_screen).
   bool KeepsPointerOnScreen() const;
-  // The Camera Anchor the patch gave since the last call (vr.set_camera_anchor*), then none.
-  std::optional<VR::CameraAnchorMath::Anchor> TakeCameraAnchor();
+  // The Camera Anchor the patch gave since the last call (vr.set_camera_anchor*), then none, and
+  // the frame pairs it was composed from (vr.set_camera_anchor_frames), if any.
+  std::optional<VR::CameraAnchorMath::Anchor>
+  TakeCameraAnchor(std::optional<VR::CameraAnchorMath::FramePairs>* pairs = nullptr);
 
   size_t GetMemoryUsed() const;
   // Microseconds the last call took.
