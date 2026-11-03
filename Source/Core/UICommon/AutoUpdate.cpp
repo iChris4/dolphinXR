@@ -149,7 +149,7 @@ std::string GenerateChangelog(std::span<const Release> releases)
   {
     if (!changelog.empty())
       changelog += "<hr>";
-    changelog += "<b>DolphinXR " + Common::GetEscapedHtml(release.name) + "</b>";
+    changelog += "<b>DolphinVR Redux " + Common::GetEscapedHtml(release.name) + "</b>";
     changelog += release.notes_html;
   }
   return changelog;
@@ -270,7 +270,7 @@ void AutoUpdateChecker::CheckForUpdate(std::string_view update_track,
     if (is_manual_check)
     {
       SuccessAlertFmtT("This build is not a release of this update track, so it cannot update "
-                       "itself. DolphinXR releases can be downloaded from {0}",
+                       "itself. DolphinVR Redux releases can be downloaded from {0}",
                        DOLPHINXR_RELEASES_URL);
     }
     INFO_LOG_FMT(COMMON, "Auto-update: this build is not a release of the track.");

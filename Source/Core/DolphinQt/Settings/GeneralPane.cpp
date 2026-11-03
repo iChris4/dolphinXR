@@ -205,7 +205,7 @@ void GeneralPane::CreateAutoUpdate()
   auto_update_group_layout->addRow(tr("&Auto Update:"), m_combobox_update_track);
 
   // i18n: Releases is a noun.
-  for (const QString& option : {tr("Don't Update"), tr("DolphinXR Releases")})
+  for (const QString& option : {tr("Don't Update"), tr("DolphinVR Redux Releases")})
     m_combobox_update_track->addItem(option);
 }
 
@@ -399,15 +399,15 @@ void GeneralPane::AddDescriptions()
                  "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
 #endif
   static constexpr char TR_UPDATE_TRACK_DESCRIPTION[] = QT_TR_NOOP(
-      "Selects whether DolphinXR checks for a new DolphinXR release at startup. If one is "
-      "available, DolphinXR will show the release notes since your current version and ask you if "
-      "you want to update."
+      "Selects whether DolphinVR Redux checks for a new DolphinVR Redux release at startup. If one "
+      "is available, DolphinVR Redux will show the release notes since your current version and "
+      "ask you if you want to update."
       "<br><br>Savestates are not guaranteed to load in another version. Before updating, make an "
       "in-game save (i.e. save your game in the same way you would on a physical GameCube or Wii), "
       "then load it after updating and before making any new savestates."
-      "<br><br>Selecting \"Don't Update\" will prevent DolphinXR from automatically checking for "
-      "updates. Help > Check for Updates still works."
-      "<br><br><dolphin_emphasis>If unsure, select DolphinXR Releases.</dolphin_emphasis>");
+      "<br><br>Selecting \"Don't Update\" will prevent DolphinVR Redux from automatically checking "
+      "for updates. Help > Check for Updates still works."
+      "<br><br><dolphin_emphasis>If unsure, select DolphinVR Redux Releases.</dolphin_emphasis>");
   static constexpr char TR_FALLBACK_REGION_DESCRIPTION[] =
       QT_TR_NOOP("Sets the region used for titles whose region cannot be determined automatically."
                  "<br><br>This setting cannot be changed while emulation is active.");
