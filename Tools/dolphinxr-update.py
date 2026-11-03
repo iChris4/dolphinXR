@@ -123,11 +123,21 @@ def c_array(key):
     return "const std::array<u8, 32> UPDATE_PUB_KEY = {\n    " + ",\n    ".join(rows) + "};"
 
 
-def git(*args):
-    result = subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True)
+def git(*args, repo=REPO_ROOT):
+    result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
     if result.returncode != 0:
         fail(f"git {args[0]} failed: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def source_checkout(binaries):
+    """The checkout a build comes from: its build directory is inside it."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=binaries, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        fail(f"{binaries} is not inside a DolphinXR checkout")
+    return Path(result.stdout.strip())
 
 
 def file_hash(data):
@@ -158,28 +168,30 @@ def collect_files(binaries):
     return files
 
 
-def check_build(binaries, build_hash):
+def check_build(source, binaries, build_hash):
     """Refuses a build that does not match a pushed commit, like the first DolphinXR release,
     which carried an upstream hash and was replaced by upstream's updater."""
-    if git("status", "--porcelain", "--untracked-files=no"):
-        fail("the working tree has uncommitted changes: commit them and build again")
-    if not git("branch", "-r", "--contains", build_hash):
+    if git("status", "--porcelain", "--untracked-files=no", repo=source):
+        fail(f"{source} has uncommitted changes: commit them and build again")
+    if not git("branch", "-r", "--contains", build_hash, repo=source):
         fail(f"{build_hash} is on no remote branch: push it first")
     exe = (binaries / "Dolphin.exe").read_bytes()
     if build_hash.encode() not in exe:
         fail(f"Dolphin.exe was not built from HEAD ({build_hash}): build again")
-    if b"-dirty\0" in exe:
+    # The version string, made by CMake/ScmRevGen.cmake from the same git describe.
+    version = re.sub(r"(-0)?-[^-]+$", "", git("describe", "--always", "--long", repo=source))
+    if f"{version}-dirty\0".encode() in exe:
         fail("Dolphin.exe was built with uncommitted changes: build again")
 
     # Without symbolic links the build copies Data/Sys once and never refreshes the copy.
-    source = collect_files(REPO_ROOT / "Data" / "Sys")
+    sys_files = collect_files(source / "Data" / "Sys")
     built = collect_files(binaries / "Sys")
     stale = sorted(
         name
-        for name in source.keys() | built.keys()
-        if name not in source
+        for name in sys_files.keys() | built.keys()
+        if name not in sys_files
         or name not in built
-        or source[name].read_bytes() != built[name].read_bytes()
+        or sys_files[name].read_bytes() != built[name].read_bytes()
     )
     if stale:
         fail(
@@ -352,8 +364,9 @@ def cmd_publish(args):
     if args.hash:
         build_hash = args.hash.lower()
     else:
-        build_hash = git("rev-parse", "HEAD")
-        check_build(binaries, build_hash)
+        source = source_checkout(binaries)
+        build_hash = git("rev-parse", "HEAD", repo=source)
+        check_build(source, binaries, build_hash)
 
     notes_path = Path(args.notes)
     notes = notes_path.read_text("utf-8")
