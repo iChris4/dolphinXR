@@ -2909,7 +2909,8 @@ void OpenXRManager::UpdateInputActions()
 
   Common::VR::OpenXRInputState::SetControllers(controllers, true, head_pose, head_view_pose,
                                                profile_strings, m_session_focused,
-                                               input_time, m_menu_gate.input);
+                                               input_time, m_menu_gate.input,
+                                               GetEffectiveUnitsPerMeter());
 
   UpdateHaptics();
 }

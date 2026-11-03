@@ -473,6 +473,7 @@ VRInputFrame CaptureInput()
   };
   copy_pose(snapshot.head_pose, &input.head);
   copy_pose(snapshot.head_view_pose, &input.head_view);
+  input.view_units_per_meter = snapshot.view_units_per_meter;
   for (size_t i = 0; i < input.hands.size(); ++i)
   {
     const Common::VR::OpenXRControllerState& from = snapshot.controllers[i];

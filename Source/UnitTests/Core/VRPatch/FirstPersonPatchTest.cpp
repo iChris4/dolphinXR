@@ -1062,3 +1062,185 @@ TEST(ShadowFirstPersonPatch, RefusesOtherCode)
   EXPECT_TRUE(game.Warned("not installed"));
   EXPECT_EQ(game.memory.Read32(SH_HOOK).value_or(0), SH_HOOK_ORIGINAL);
 }
+
+// ---- Shadow the Hedgehog: wide culling (Data/Sys/VRPatches/GUP/wide-culling.lua) ----
+
+namespace
+{
+constexpr u32 SC_HOOK = 0x804852B4;
+constexpr u32 SC_HOOK_ORIGINAL = 0x4BFFF015;  // bl 804842C8, the frustum builder
+constexpr u32 SC_SCRATCH = 0x80002A50;
+constexpr u32 SC_SCRATCH_SIZE = 0x1D0;
+constexpr u32 SC_ARMED = SC_SCRATCH;
+constexpr u32 SC_CAMERA_AT = SC_SCRATCH + 0x10;
+constexpr u32 SC_PLANES = SC_SCRATCH + 0x20;
+constexpr u32 SC_CORNERS = SC_SCRATCH + 0x98;
+
+// Shadow's level with the wide-culling patch: the camera manager and view of the first-person
+// fixture, and the code around the hook.
+struct ShadowCulling
+{
+  ShadowCulling()
+  {
+    constexpr std::array<std::array<u32, 2>, 8> code = {{{0x804852A4, 0x2C000001},
+                                                         {0x804852AC, 0x4BFFF801},
+                                                         {0x804852B0, 0x7FE3FB78},
+                                                         {0x804852B8, 0x48000010},
+                                                         {0x804852D4, 0x4BFFE1C9},
+                                                         {0x804842C8, 0x9421FF70},
+                                                         {0x8048431C, 0x80A30004},
+                                                         {0x80484578, 0x907E0094}}};
+    for (const auto& word : code)
+      game.memory.Write32(word[0], word[1]);
+    game.memory.Write32(SC_HOOK, SC_HOOK_ORIGINAL);
+    game.env.scratch_base = SC_SCRATCH;
+    game.env.scratch_size = SC_SCRATCH_SIZE;
+  }
+
+  ::testing::AssertionResult Load()
+  {
+    std::string source;
+    File::ReadFileToString(File::GetSysDirectory() + VRPATCHES_DIR "/GUP/wide-culling.lua", source);
+    if (!script.Load(source, game.env) || !script.Call(Hook::OnLoad, game.env))
+      return ::testing::AssertionFailure() << script.Error();
+    return ::testing::AssertionSuccess();
+  }
+
+  void Frame()
+  {
+    EXPECT_TRUE(script.Call(Hook::OnFrame, game.env)) << script.Error();
+    ++game.env.field;
+  }
+
+  void SetSetting(const std::string& name, double value)
+  {
+    ASSERT_TRUE(script.SetSettingValue(*script.GetManifest().FindSetting(name), value));
+  }
+
+  float F32(u32 address) const
+  {
+    return std::bit_cast<float>(game.memory.Read32(address).value_or(0));
+  }
+
+  std::array<float, 3> Point(u32 address) const
+  {
+    return {F32(address), F32(address + 4), F32(address + 8)};
+  }
+
+  // A plane of the patch's frustum: its normal and distance.
+  std::array<float, 3> Normal(u32 index) const { return Point(SC_PLANES + index * 20); }
+  float Distance(u32 index) const { return F32(SC_PLANES + index * 20 + 12); }
+
+  Shadow game;
+  PatchScript script{"wide-culling"};
+};
+
+std::array<float, 3> Along(const std::array<float, 3>& from, const std::array<float, 3>& axis,
+                           float k)
+{
+  return {from[0] + axis[0] * k, from[1] + axis[1] * k, from[2] + axis[2] * k};
+}
+
+float Dot3(const std::array<float, 3>& a, const std::array<float, 3>& b)
+{
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+}  // namespace
+
+// The builder's call goes to the patch's routine in the scratch memory, and comes back when the
+// patch stops.
+TEST(ShadowWideCullingPatch, HooksTheFrustumAndRestores)
+{
+  ShadowCulling cull;
+  ASSERT_TRUE(cull.Load());
+  EXPECT_EQ(cull.script.GetManifest().games, (std::vector<std::string>{"GUPE8P", "GUPR8P"}));
+  const u32 word = cull.game.memory.Read32(SC_HOOK).value_or(0);
+  EXPECT_EQ(word & 0xFC000003, 0x48000001u);
+  const u32 routine = SC_HOOK + ((word & 0x03FFFFFC) | 0xFC000000);
+  EXPECT_GE(routine, SC_SCRATCH);
+  EXPECT_LT(routine, SC_SCRATCH + SC_SCRATCH_SIZE);
+  ASSERT_TRUE(cull.script.Call(Hook::OnUnload, cull.game.env)) << cull.script.Error();
+  EXPECT_EQ(cull.game.memory.Read32(SC_HOOK).value_or(0), SC_HOOK_ORIGINAL);
+  EXPECT_EQ(cull.game.memory.Read32(SC_ARMED).value_or(1), 0u);
+}
+
+// The frustum is at the headset's eyes (the "view" pose at the anchor's scale, turned to the world
+// by the game camera's view), its apex 30 units behind them: the far plane looks where the eyes
+// look, the sides open 65 degrees. Not following the head, the game camera's.
+TEST(ShadowWideCullingPatch, FrustumAtTheEyes)
+{
+  ShadowCulling cull;
+  ASSERT_TRUE(cull.Load());
+  const Mtx34 to_world = *VR::CameraAnchorMath::Invert(VIEW);
+  const auto column = [&](u32 c) {
+    return std::array<float, 3>{to_world[c], to_world[4 + c], to_world[8 + c]};
+  };
+  // The head turned 90 degrees to the right, 0.2 m right and 0.5 m ahead of the camera, at 10
+  // units per meter.
+  const float s = std::sqrt(0.5f);
+  cull.game.input.head_view = {true, {0.2f, 0.0f, -0.5f}, {0.0f, -s, 0.0f, s}};
+  cull.game.input.view_units_per_meter = 10.0f;
+  cull.Frame();
+  EXPECT_EQ(cull.game.memory.Read32(SC_ARMED).value_or(0), 1u);
+  ExpectNear(cull.Point(SC_CAMERA_AT), column(3));
+  // Turned right: the eyes look along the camera's right (+X), their right is its back (+Z).
+  const std::array<float, 3> forward = column(0);
+  const std::array<float, 3> back = Along({0, 0, 0}, forward, -1);
+  const std::array<float, 3> right = column(2);
+  const std::array<float, 3> apex =
+      Along(VR::CameraAnchorMath::TransformPoint(to_world, {2.0f, 0.0f, -5.0f}), back, 30);
+  ExpectNear(cull.Normal(0), forward);
+  EXPECT_NEAR(cull.Distance(0), Dot3(forward, apex) + 30000, 0.5f);
+  ExpectNear(cull.Normal(1), back);
+  EXPECT_NEAR(cull.Distance(1), Dot3(back, apex), 0.05f);
+  const float c = std::cos(65 * DEG), sn = std::sin(65 * DEG);
+  const std::array<float, 3> right_normal = {
+      c * right[0] + sn * back[0], c * right[1] + sn * back[1], c * right[2] + sn * back[2]};
+  ExpectNear(cull.Normal(2), right_normal);
+  EXPECT_NEAR(cull.Distance(2), Dot3(right_normal, apex), 0.05f);
+  // closestX/Y/Z: 1 where the normal's component is not negative (those far from 0 checked).
+  const u32 closest = cull.game.memory.Read32(SC_PLANES + 2 * 20 + 16).value_or(0);
+  for (u32 i = 0; i < 3; ++i)
+  {
+    if (std::abs(right_normal[i]) > 1e-3f)
+      EXPECT_EQ((closest >> (24 - 8 * i)) & 0xFF, right_normal[i] >= 0 ? 1u : 0u) << i;
+  }
+  // The corners: four at the apex, four on the far plane.
+  ExpectNear(cull.Point(SC_CORNERS), apex);
+  EXPECT_NEAR(Dot3(forward, cull.Point(SC_CORNERS + 4 * 12)), cull.Distance(0), 0.5f);
+
+  // Not following the head: the game camera.
+  cull.SetSetting("follow_head", 0);
+  cull.Frame();
+  ExpectNear(cull.Normal(1), column(2));
+  EXPECT_NEAR(cull.Distance(1), Dot3(column(2), Along(column(3), column(2), 30)), 0.05f);
+  // No culling: nothing is ever outside a plane.
+  cull.SetSetting("mode", 1);
+  cull.Frame();
+  for (u32 i = 0; i < 6; ++i)
+    EXPECT_GT(cull.Distance(i), 1e29f) << i;
+
+  // A stage loading (no active camera), or no camera in the list: the game's own frustum.
+  cull.game.memory.Write8(SH_CAMERA, 0);
+  cull.Frame();
+  EXPECT_EQ(cull.game.memory.Read32(SC_ARMED).value_or(1), 0u);
+  cull.game.memory.Write8(SH_CAMERA, 1);
+  cull.Frame();
+  EXPECT_EQ(cull.game.memory.Read32(SC_ARMED).value_or(0), 1u);
+  cull.game.memory.Write32(SH_CAMERAS + 8, 0);
+  cull.Frame();
+  EXPECT_EQ(cull.game.memory.Read32(SC_ARMED).value_or(1), 0u);
+}
+
+TEST(ShadowWideCullingPatch, RefusesOtherCode)
+{
+  ShadowCulling cull;
+  cull.game.memory.Write32(0x804842C8, 0x60000000);
+  ASSERT_TRUE(cull.Load());
+  cull.Frame();
+  EXPECT_EQ(cull.game.memory.Read32(SC_HOOK).value_or(0), SC_HOOK_ORIGINAL);
+  bool warned = false;
+  for (const LogLine& line : cull.script.TakeLog())
+    warned |= line.level == 1 && line.text.find("not installed") != std::string::npos;
+  EXPECT_TRUE(warned);
+}

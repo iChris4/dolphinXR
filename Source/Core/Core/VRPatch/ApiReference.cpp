@@ -113,6 +113,9 @@ vr (OpenXR reference space: meters, right-handed, +Y up, -Z forward; hand = "lef
   vr.velocity(hand) -> linear, angular (vec3 or nil; m/s and rad/s)
   vr.screen_hit(hand) -> u, v, distance or nil (aim ray on the virtual screen, -1..1)
   vr.units_per_meter()   -- the profile's world scale (game units per meter)
+  vr.view_units_per_meter()   -- the scale of the "view" poses: the Camera Anchor's own while it
+      holds the camera (a first-person patch's upm), else the profile's. Multiply a view pose's
+      meters by it to get game units.
   vr.refresh_rate()      -- the headset's refresh rate in Hz as the session reported it when it
                             started (e.g. 72, 90, 120), or nil without a VR session or before the
                             runtime reports it (the first frames). To run a game at the headset's

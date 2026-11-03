@@ -208,6 +208,19 @@ int VRUnitsPerMeter(lua_State* L)
   return 1;
 }
 
+// vr.view_units_per_meter() -> the game units per meter of the "view" poses: the Camera Anchor's
+// own scale while it holds the camera, else the profile's.
+int VRViewUnitsPerMeter(lua_State* L)
+{
+  const float upm = Input(L).view_units_per_meter;
+  if (upm > 0.0f)
+  {
+    lua_pushnumber(L, upm);
+    return 1;
+  }
+  return VRUnitsPerMeter(L);
+}
+
 // vr.refresh_rate() -> the headset's refresh rate in Hz, or nil without a VR session or before
 // the runtime reports it.
 int VRRefreshRate(lua_State* L)
@@ -676,6 +689,7 @@ void RegisterVRBindings(lua_State* L)
       {"focused", VRFocused},
       {"menu_open", VRMenuOpen},
       {"units_per_meter", VRUnitsPerMeter},
+      {"view_units_per_meter", VRViewUnitsPerMeter},
       {"refresh_rate", VRRefreshRate},
       {"haptic", VRHaptic},
       {"setting", VRSettingGet},

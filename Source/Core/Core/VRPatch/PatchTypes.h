@@ -148,6 +148,9 @@ struct VRInputFrame
   PoseInput head;
   // The center of the eyes relative to the game camera (meters, the axes of HandInput::view).
   PoseInput head_view;
+  // The game units per meter of the view poses (the Camera Anchor's own scale while it holds the
+  // camera); 0 when unknown.
+  float view_units_per_meter = 0.0f;
   std::array<HandInput, 2> hands{};
 };
 

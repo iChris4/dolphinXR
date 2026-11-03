@@ -103,6 +103,9 @@ struct OpenXRInputSnapshot
   // The center of the eyes relative to the game camera, in meters, by the chain of
   // OpenXRControllerState::view_pose: where the eyes render from. Invalid in flat-screen mode.
   OpenXRPoseState head_view_pose;
+  // The game units per meter the view poses were computed with (the Camera Anchor's own scale
+  // while it holds the camera); 0 before any.
+  float view_units_per_meter = 0.0f;
   bool runtime_active = false;
   uint64_t generation = 0;
   std::array<std::string, 2> interaction_profiles;  // Active profile path per hand
@@ -187,7 +190,8 @@ public:
                              const std::array<std::string, 2>& profiles,
                              bool focused,
                              int64_t sample_time_ns = 0,
-                             const OpenXRMenuInput& menu = {})
+                             const OpenXRMenuInput& menu = {},
+                             float view_units_per_meter = 0.0f)
   {
     std::lock_guard lk(s_state_mutex);
     // Freeze the last sample from before input was withheld: the sample that opened the
@@ -198,6 +202,7 @@ public:
     s_state.controllers = controllers;
     s_state.head_pose = head_pose;
     s_state.head_view_pose = head_view_pose;
+    s_state.view_units_per_meter = view_units_per_meter;
     s_state.runtime_active = runtime_active;
     s_state.interaction_profiles = profiles;
     s_state.session_focused = focused;
