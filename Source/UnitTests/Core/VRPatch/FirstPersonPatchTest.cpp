@@ -1047,6 +1047,9 @@ TEST(ShadowFirstPersonPatch, OnlyShadowsSkeleton)
 
   game.memory.Write8(SH_CAMERA, 0);
   EXPECT_FALSE(game.Frame());
+  game.memory.Write8(SH_CAMERA, 1);
+  game.memory.Write32(SH_CAMERAS + 8, 0);
+  EXPECT_FALSE(game.Frame());
   EXPECT_FALSE(game.Warned(""));
 }
 

@@ -445,7 +445,7 @@ end
 local function camera_view()
   local count = mem.u32(CAMERAS + 8)
   local list = mem.u32(CAMERAS + 0xC)
-  if not count or count > 8 or not list or not mem.valid(list, count * 8) then
+  if not count or count < 1 or count > 8 or not list or not mem.valid(list, count * 8) then
     return nil
   end
   for i = 0, count - 1 do
