@@ -5,22 +5,49 @@ DolphinXR changes to DolRecomp fa0cf619e8d7eb8cba7eaf55267a12caaebb46aa for Wii 
   as the SDK's OSLink does; they were written 2 bytes further, over the next instruction.
 - --rel-bss <addr>: the BSS address a game gives a single REL (allocated apart from it).
 - An executable section off the REL's alignment is a warning: the OS aligns the module only.
+- --direct-calls: cross-chunk calls run directly once the runtime says the target chunk is ready
+  (int dolrecomp_chunk_ready(u32 chunk_start)); --extern-chunks <generated.h> lets a REL call
+  main.dol's chunks the same way.
 - Beside a REL's code: rel_layout.txt (header fields, section addresses) and rel_image.dol (the
   relocated code as a DOL at its address), which Tools/StaticRecomp/module-template consumes.
 
 diff --git a/src/app/cli.c b/src/app/cli.c
-index 33d3c23..0af2ad1 100644
+index 33d3c23..130c34f 100644
 --- a/src/app/cli.c
 +++ b/src/app/cli.c
-@@ -18,6 +18,7 @@ void print_usage(const char* argv0) {
+@@ -18,6 +18,9 @@ void print_usage(const char* argv0) {
      fprintf(stderr, "  --backend c|llvm               Select generated-code backend (default: c)\n");
      fprintf(stderr, "  --gamecube                     GameCube mode (no title ID required)\n");
      fprintf(stderr, "  --rel-base <addr>              Override first virtual load address for REL codegen\n");
 +    fprintf(stderr, "  --rel-bss <addr>               BSS address of a single REL (the game allocates it apart)\n");
++    fprintf(stderr, "  --direct-calls                 Cross-chunk calls run directly when dolrecomp_chunk_ready() allows\n");
++    fprintf(stderr, "  --extern-chunks <generated.h>  With --direct-calls: another tree's chunks, callable too\n");
      fprintf(stderr, "  --map <path>                   Load optional function names from a linker MAP\n");
      fprintf(stderr, "  --setup                        Download titles database and optionally install wit\n");
      fprintf(stderr, "\n");
-@@ -263,6 +264,25 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
+@@ -153,6 +156,21 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
+             continue;
+         }
+ 
++        /* DolphinXR: guarded direct cross-chunk calls, and another tree's chunks to call. */
++        if (strcmp(arg, "--direct-calls") == 0) {
++            opts->direct_calls = 1;
++            continue;
++        }
++
++        if (strcmp(arg, "--extern-chunks") == 0) {
++            if (i + 1 >= argc) {
++                fprintf(stderr, "error: --extern-chunks needs a generated.h path\n");
++                return 0;
++            }
++            opts->extern_chunks_path = argv[++i];
++            continue;
++        }
++
+         if (strcmp(arg, "--backend") == 0) {
+             if (i + 1 >= argc) {
+                 fprintf(stderr, "error: --backend needs c or llvm\n");
+@@ -263,6 +281,25 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
              continue;
          }
  
@@ -47,14 +74,16 @@ index 33d3c23..0af2ad1 100644
              if (i + 1 >= argc) {
                  fprintf(stderr, "error: --map needs a path\n");
 diff --git a/src/app/cli.h b/src/app/cli.h
-index 73706f2..d63b378 100644
+index 73706f2..c21d61b 100644
 --- a/src/app/cli.h
 +++ b/src/app/cli.h
-@@ -19,9 +19,11 @@ typedef struct {
+@@ -19,9 +19,13 @@ typedef struct {
      DolRecompBackend backend;
      u32 jobs;
      u32 rel_base;
 +    u32 rel_bss;
++    const char* extern_chunks_path;
++    int direct_calls;
      int gamecube_mode;
      int cpu_explicit;
      int rel_base_set;
@@ -63,7 +92,7 @@ index 73706f2..d63b378 100644
      int show_help;
  } CliOptions;
 diff --git a/src/app/main.c b/src/app/main.c
-index c148031..6916ae9 100644
+index c148031..27731df 100644
 --- a/src/app/main.c
 +++ b/src/app/main.c
 @@ -15,6 +15,72 @@
@@ -139,7 +168,17 @@ index c148031..6916ae9 100644
  int main(int argc, char** argv) {
      if (argc > 1 && strcmp(argv[1], "extract") == 0)
          return disc_extract_main(argc - 1, argv + 1);
-@@ -158,6 +224,8 @@ int main(int argc, char** argv) {
+@@ -26,6 +92,9 @@ int main(int argc, char** argv) {
+         return 0;
+     if (opts.setup_mode)
+         return run_setup() ? 0 : 1;
++    if ((opts.direct_calls || opts.extern_chunks_path) &&
++        !pipeline_set_direct_calls(opts.extern_chunks_path))
++        return 1;
+ 
+     const char* input_path  = opts.input_path;
+     const char* title_id_arg = opts.title_id_arg;
+@@ -158,6 +227,8 @@ int main(int argc, char** argv) {
  
      if (rel_mode) {
          RELFile rel;
@@ -148,7 +187,7 @@ index c148031..6916ae9 100644
          if (!rel_load(&rel, input_path, rel_start_base))
              return 1;
  
-@@ -195,6 +263,10 @@ int main(int argc, char** argv) {
+@@ -195,6 +266,10 @@ int main(int argc, char** argv) {
              rel_free(&rel);
              return 1;
          }
@@ -159,6 +198,155 @@ index c148031..6916ae9 100644
  
          rel_free(&rel);
          return 0;
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index a154731..2ae83ff 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -24,6 +24,52 @@
+ #include <string.h>
+ #include <errno.h>
+ #include <time.h>
++
++/* DolphinXR: --direct-calls, and the chunk entries of another tree (--extern-chunks). */
++static int g_direct_calls = 0;
++static u32* g_extern_chunk_starts = NULL;
++static u32 g_extern_chunk_count = 0;
++
++static int compare_u32(const void* left, const void* right) {
++    const u32 a = *(const u32*)left;
++    const u32 b = *(const u32*)right;
++    return a < b ? -1 : a > b ? 1 : 0;
++}
++
++int pipeline_set_direct_calls(const char* extern_header) {
++    g_direct_calls = 1;
++    if (!extern_header)
++        return 1;
++    FILE* header = fopen(extern_header, "r");
++    if (!header) {
++        fprintf(stderr, "error: cannot read %s\n", extern_header);
++        return 0;
++    }
++    /* Each chunk is declared "void func_XXXXXXXX(CPUState* ctx);" in its tree's generated.h. */
++    char line[256];
++    u32 capacity = 0;
++    while (fgets(line, sizeof(line), header)) {
++        unsigned address = 0;
++        if (sscanf(line, "void func_%8X(CPUState* ctx);", &address) != 1)
++            continue;
++        if (g_extern_chunk_count == capacity) {
++            capacity = capacity ? capacity * 2u : 256u;
++            u32* grown = (u32*)realloc(g_extern_chunk_starts, capacity * sizeof(u32));
++            if (!grown) {
++                fclose(header);
++                return 0;
++            }
++            g_extern_chunk_starts = grown;
++        }
++        g_extern_chunk_starts[g_extern_chunk_count++] = address;
++    }
++    fclose(header);
++    if (g_extern_chunk_count == 0) {
++        fprintf(stderr, "error: no chunks declared in %s\n", extern_header);
++        return 0;
++    }
++    return 1;
++}
+ #ifndef _WIN32
+ #include <sys/wait.h>
+ #include <unistd.h>
+@@ -1087,14 +1133,26 @@ int emit_code_sections_split(const LoadedCodeSection* sections,
+         // funcs accumulates across sections; targets in a later section still
+         // fall back to the dispatcher because their symbols are not known yet.
+         const char* direct = getenv("DOLRECOMP_UNSAFE_DIRECT_CALLS");
++        const int unsafe_direct = direct && strcmp(direct, "1") == 0;
+         u32* chunk_starts = NULL;
+-        if (direct && strcmp(direct, "1") == 0) {
+-            printf("  unsafe cross-chunk direct calls enabled\n");
+-            chunk_starts = (u32*)malloc((size_t)funcs.count * sizeof(u32));
++        if (unsafe_direct || g_direct_calls) {
++            /* DolphinXR: --direct-calls guards each call (dolrecomp_chunk_ready), and may also
++             * call another tree's chunks (--extern-chunks). */
++            if (unsafe_direct)
++                printf("  unsafe cross-chunk direct calls enabled\n");
++            else
++                printf("  guarded cross-chunk direct calls (%u external chunks)\n",
++                       g_extern_chunk_count);
++            emit_set_direct_call_guard(!unsafe_direct);
++            const u32 total = funcs.count + (unsafe_direct ? 0u : g_extern_chunk_count);
++            chunk_starts = (u32*)malloc((size_t)total * sizeof(u32));
+             if (chunk_starts) {
+                 for (u32 i = 0; i < funcs.count; ++i)
+                     chunk_starts[i] = funcs.ranges[i].start;
+-                emit_set_chunk_table(chunk_starts, funcs.count);
++                for (u32 i = funcs.count; i < total; ++i)
++                    chunk_starts[i] = g_extern_chunk_starts[i - funcs.count];
++                qsort(chunk_starts, total, sizeof(u32), compare_u32);
++                emit_set_chunk_table(chunk_starts, total);
+             }
+         }
+ 
+diff --git a/src/app/pipeline.h b/src/app/pipeline.h
+index 65ecd3d..cd40fe0 100644
+--- a/src/app/pipeline.h
++++ b/src/app/pipeline.h
+@@ -26,4 +26,10 @@ int emit_rel_directory(const char* input_dir, const char* output_root,
+                        DolRecompCPU cpu, u32 jobs, u32 start_base,
+                        DolRecompBackend backend);
+ 
++/* DolphinXR: direct cross-chunk calls a runtime can still guard (--direct-calls): each call asks
++ * int dolrecomp_chunk_ready(u32 chunk_start), which the runtime provides, whether the target chunk
++ * may run, and returns to it otherwise. extern_header: another tree of the same module whose
++ * chunks may be called too (main.dol's generated.h, for a REL). Returns 0 on a bad header. */
++int pipeline_set_direct_calls(const char* extern_header);
++
+ #endif
+diff --git a/src/backend/emitter.c b/src/backend/emitter.c
+index 1cae76f..fb74a75 100644
+--- a/src/backend/emitter.c
++++ b/src/backend/emitter.c
+@@ -317,6 +317,11 @@ static bool branch_target_is_local(u32 func_start, u32 func_end, u32 target) {
+ // branch takes the safe return-to-chassis path.
+ static const u32* g_chunk_starts = NULL;
+ static u32 g_chunk_count = 0;
++static int g_direct_call_guard = 0;
++
++void emit_set_direct_call_guard(int enabled) {
++    g_direct_call_guard = enabled;
++}
+ 
+ void emit_set_chunk_table(const u32* starts, u32 count) {
+     g_chunk_starts = count ? starts : NULL;
+@@ -364,7 +369,14 @@ static bool emit_cross_chunk_call(FILE* out, const PPCInst* inst,
+         return false;
+ 
+     fprintf(out, "            ctx->pc = 0x%08Xu;\n", inst->branch_target);
+-    fprintf(out, "            if (dolrecomp_call_enter()) {\n");
++    if (g_direct_call_guard) {
++        // DolphinXR: only into a chunk the runtime has checked; otherwise it runs the call.
++        fprintf(out, "            int dolrecomp_chunk_ready(u32 chunk_start);\n");
++        fprintf(out, "            if (dolrecomp_chunk_ready(0x%08Xu) && dolrecomp_call_enter()) {\n",
++                target_chunk);
++    } else {
++        fprintf(out, "            if (dolrecomp_call_enter()) {\n");
++    }
+     fprintf(out, "                void func_%08X(CPUState* ctx);\n", target_chunk);
+     fprintf(out, "                func_%08X(ctx);\n", target_chunk);
+     fprintf(out, "                dolrecomp_call_leave();\n");
+diff --git a/src/backend/emitter.h b/src/backend/emitter.h
+index 740f940..efa96cb 100644
+--- a/src/backend/emitter.h
++++ b/src/backend/emitter.h
+@@ -22,6 +22,9 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu);
+ // runtime that validates mutable guest code there. Call before worker emission;
+ // passing count == 0 restores the safe return-to-chassis form.
+ void emit_set_chunk_table(const u32* starts, u32 count);
++// DolphinXR: direct calls ask the runtime first (int dolrecomp_chunk_ready(u32 chunk_start)), so a
++// runtime that validates guest code still checks every chunk before native code runs it.
++void emit_set_direct_call_guard(int enabled);
+ 
+ // emit a single recompiled function as C code
+ bool emit_function(FILE* out, const PPCInst* insts, u32 count, u32 func_addr);
 diff --git a/src/frontend/container/rel.c b/src/frontend/container/rel.c
 index b894a36..d83c52e 100644
 --- a/src/frontend/container/rel.c

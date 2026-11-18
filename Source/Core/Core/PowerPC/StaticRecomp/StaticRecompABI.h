@@ -95,6 +95,14 @@ typedef struct StaticRecompModuleDesc
 typedef const StaticRecompModuleDesc* (*StaticRecompGetModuleFn)(void);
 #define STATICRECOMP_GET_MODULE_SYMBOL "staticrecomp_get_module"
 
+// DolphinXR, optional export: the chassis hands the module its per-chunk states (parallel to
+// chunk_ranges), or NULL. A module built with DolRecomp --direct-calls calls another chunk
+// directly only while its state is STATICRECOMP_CHUNK_VERIFIED (guest RAM holds the code it was
+// compiled from); otherwise it returns, and the chassis verifies and dispatches as usual.
+typedef void (*StaticRecompSetChunkStatesFn)(const u8* states, u32 count);
+#define STATICRECOMP_SET_CHUNK_STATES_SYMBOL "staticrecomp_set_chunk_states"
+#define STATICRECOMP_CHUNK_VERIFIED 1u
+
 #endif  // MODERNGEKKO_MODULE_ABI_H
 
 #ifdef __cplusplus

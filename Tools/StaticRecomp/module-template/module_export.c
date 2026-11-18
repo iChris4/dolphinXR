@@ -30,6 +30,28 @@ static void chassis_on_state_loaded(CPUState* ctx)
     ppc_fpscr_updated(ctx);
 }
 
+// Guarded direct cross-chunk calls (DolRecomp --direct-calls): the chassis's per-chunk states,
+// and the check every such call makes before running another chunk natively.
+static const u8* s_chunk_states;
+static u32 s_chunk_state_count;
+
+int dolrecomp_chunk_ready(u32 chunk_start)
+{
+    if (!s_chunk_states)
+        return 0;
+    u32 lo = 0, hi = MODULE_CHUNK_RANGE_COUNT;
+    while (lo < hi)
+    {
+        const u32 mid = lo + (hi - lo) / 2u;
+        if (s_chunk_ranges[mid].start < chunk_start)
+            lo = mid + 1u;
+        else
+            hi = mid;
+    }
+    return lo < s_chunk_state_count && s_chunk_ranges[lo].start == chunk_start &&
+           s_chunk_states[lo] == STATICRECOMP_CHUNK_VERIFIED;
+}
+
 static const StaticRecompModuleDesc s_desc = {
     STATICRECOMP_ABI_VERSION,
     GXRUNTIME_CPU_ABI_VERSION,
@@ -60,4 +82,10 @@ static const StaticRecompModuleDesc s_desc = {
 RECOMP_MODULE_EXPORT const StaticRecompModuleDesc* staticrecomp_get_module(void)
 {
     return &s_desc;
+}
+
+RECOMP_MODULE_EXPORT void staticrecomp_set_chunk_states(const u8* states, u32 count)
+{
+    s_chunk_states = states;
+    s_chunk_state_count = count;
 }

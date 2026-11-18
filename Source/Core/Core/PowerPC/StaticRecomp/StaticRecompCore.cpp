@@ -190,6 +190,24 @@ void StaticRecompCore::Init()
   m_lockstep_verifier = std::make_unique<StaticRecompLockstep::StaticRecompLockstepVerifier>(*this);
   m_lockstep_verifier->Init();
 
+  // DolphinXR: a module built with DolRecomp --direct-calls calls other chunks directly, but only
+  // chunks whose state (m_chunk_state, which never reallocates after LoadModule) says verified.
+  // Not with lockstep, forced fallback ranges or host calls: they need every chunk entry here.
+  if (m_module && m_library.IsOpen())
+  {
+    const auto set_chunk_states = reinterpret_cast<StaticRecompSetChunkStatesFn>(
+        m_library.GetSymbolAddress(STATICRECOMP_SET_CHUNK_STATES_SYMBOL));
+    if (set_chunk_states)
+    {
+      const bool direct_calls = !m_lockstep_verifier->IsEnabled() &&
+                                m_forced_fallback_ranges.empty() && !m_guest.host_call;
+      set_chunk_states(direct_calls ? m_chunk_state.data() : nullptr,
+                       direct_calls ? static_cast<u32>(m_chunk_state.size()) : 0u);
+      NOTICE_LOG_FMT(POWERPC, "StaticRecomp: direct calls between chunks {}",
+                     direct_calls ? "on" : "off (lockstep, forced fallback or host calls)");
+    }
+  }
+
   // DolphinXR: no fallback JIT on any platform. visionOS forbids runtime code generation, and
   // running the same module + interpreter contract on desktop keeps Mac testing representative of
   // the headset. (The upstream fallback JIT also needs yield hooks in the JIT dispatchers, which
@@ -262,7 +280,15 @@ void StaticRecompCore::Shutdown()
   m_block_cache.Shutdown();
   m_module = nullptr;
   if (m_library.IsOpen())
+  {
+    // dlclose need not unload the module: don't leave it pointing at m_chunk_state.
+    if (const auto set_chunk_states = reinterpret_cast<StaticRecompSetChunkStatesFn>(
+            m_library.GetSymbolAddress(STATICRECOMP_SET_CHUNK_STATES_SYMBOL)))
+    {
+      set_chunk_states(nullptr, 0u);
+    }
     m_library.Close();
+  }
 
   if (m_fallback_jit)
   {

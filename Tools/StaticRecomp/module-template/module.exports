@@ -1,6 +1,8 @@
 {
   global:
     staticrecomp_get_module;
+    /* DolphinXR: the chassis's per-chunk states for guarded direct calls. */
+    staticrecomp_set_chunk_states;
     /* The lockstep verifier dlsym's this to install the module's RAM write
        journal. Without it StaticRecompLockstepVerifier::Init() prints
        "module lacks ppc_set_mem_write_journal export" and silently disables

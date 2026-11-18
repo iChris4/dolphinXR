@@ -73,7 +73,9 @@ if [ ! -f "$generated/generated.h" ]; then
   rm -rf "$out/dolrecomp"
   mkdir -p "$out/dolrecomp"
   # --gamecube only skips DolRecomp's title database; --cpu picks GameCube or Wii code.
-  "$dolrecomp" --gamecube --cpu "$cpu" "-j$jobs" "$dol" "$out/dolrecomp"
+  # --direct-calls: calls between chunks run directly while the core has verified the target
+  # chunk (patches/dolrecomp-wii-rel.patch), instead of a round trip through the core each time.
+  "$dolrecomp" --gamecube --cpu "$cpu" "-j$jobs" --direct-calls "$dol" "$out/dolrecomp"
 fi
 # module-template hashes the original text sections to verify each chunk at runtime.
 cp "$dol" "$generated/main.dol"
@@ -87,8 +89,9 @@ if [ -n "$rel" ]; then
     mkdir -p "$out/dolrecomp-rel"
     bss_args=()
     if [ -n "$rel_bss" ]; then bss_args=(--rel-bss "$rel_bss"); fi
+    # The REL's calls into main.dol run directly too (--extern-chunks: main.dol's chunks).
     "$dolrecomp" --gamecube --cpu "$cpu" "-j$jobs" --rel-base "$rel_base" ${bss_args[@]+"${bss_args[@]}"} \
-      "$rel" "$out/dolrecomp-rel"
+      --direct-calls --extern-chunks "$generated/generated.h" "$rel" "$out/dolrecomp-rel"
   fi
   rel_args=(-DREL_GENERATED_DIR="$rel_generated")
 fi
