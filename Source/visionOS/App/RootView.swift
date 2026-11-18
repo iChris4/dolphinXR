@@ -51,7 +51,18 @@ struct LibraryView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(emulator.games) { game in
-                        Button(game.name) { emulator.select(game) }
+                        Button { emulator.select(game) } label: {
+                            HStack {
+                                Text(game.name)
+                                Spacer()
+                                // Full speed: the app carries this game's recompiled CPU module.
+                                if game.hasRecompModule {
+                                    Label("Recompiled", systemImage: "bolt.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
                 }
                 if let error = emulator.errorMessage {

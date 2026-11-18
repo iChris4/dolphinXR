@@ -36,9 +36,10 @@ Source/visionOS/Build-VisionOS.sh --team <TEAM ID> --install \
     --module <work dir>/module-xros/gGMSE01_recomp.dylib
 ```
 
-Then choose "Recompiled module" as the CPU in the library. Code outside the module (and any
-self-modified code) runs on the interpreter. A module contains recompiled game code: build it
-from your own disc and do not distribute an app that carries one.
+With the CPU on Automatic (the default) a game the app carries a module for runs on it, and the
+library marks it "Recompiled"; other games run on the Cached Interpreter. Code outside the module
+(and any self-modified code) runs on the interpreter. A module contains recompiled game code:
+build it from your own disc and do not distribute an app that carries one.
 
 ## Controls
 
@@ -49,11 +50,12 @@ and Load State buttons for slot 1.
 
 ## Testing
 
-Launch arguments: `-autoboot <file name prefix>` starts a library game, `-cpu cached|recomp`
+Launch arguments: `-autoboot <file name prefix>` starts a library game, `-cpu auto|recomp|cached`
 picks the CPU, `-vr on|off` plays in VR or in the window, `-resolution <1-8>` sets the internal
-resolution, `-loadstate <slot>` loads a save state once the game runs, e.g.
+resolution, `-loadstate <slot>` loads a save state once the game runs (the CPU and resolution
+apply to that run only), e.g.
 `xcrun devicectl device process launch --device <udid> --terminate-existing -- <bundle id>
--autoboot Super -cpu recomp -vr on -loadstate 1` (`xcrun simctl launch booted …` in the simulator).
+-autoboot Super -vr on -loadstate 1` (`xcrun simctl launch booted …` in the simulator).
 
 The Agent Server (DolphinXR's MCP endpoint for AI agents) runs on the headset when its GFX.ini has
 `[VR] AgentServer = True` and an `AgentServerToken`; the app then relays port 7312 to it. On the

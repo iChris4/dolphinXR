@@ -28,6 +28,10 @@ bool dvx_initialize(const char* user_dir);
 // CPU core for the next boot (DVX_CPU_*).
 void dvx_set_cpu_core(int core);
 
+// True if the disc image at `path` has a StaticRecomp module (g<GameID>_recomp.dylib in the app's
+// Frameworks, or in <user dir>/StaticRecompModules): the module the core loads for that game.
+bool dvx_has_recomp_module(const char* path);
+
 // Boots a disc image or executable on the host thread. metal_layer: the CAMetalLayer the game is
 // drawn into (its bounds and contentsScale give the render size). Returns false if emulation is
 // already running or the file cannot be booted (see dvx_last_error).

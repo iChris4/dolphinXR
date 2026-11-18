@@ -45,3 +45,9 @@ struct StaticRecompModuleSource
   HostCallRangeContains host_call_range_contains = nullptr;
   void* host_call_user = nullptr;
 };
+
+// The module the StaticRecomp core loads for a game when no source is set explicitly: the
+// STATICRECOMP_MODULE environment variable, then g<GameID>_recomp in the app bundle's Frameworks
+// (Apple embedded platforms), then in <User>/StaticRecompModules. Empty when there is none, so a
+// front end can tell before booting whether a game has one.
+std::string FindStaticRecompModule(const std::string& game_id);

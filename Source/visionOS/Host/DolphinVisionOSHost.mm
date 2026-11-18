@@ -42,7 +42,9 @@
 #include "Core/HW/GCPad.h"
 #include "Core/Host.h"
 #include "Core/PowerPC/PowerPC.h"
+#include "Core/PowerPC/StaticRecomp/StaticRecompModuleSource.h"
 #include "Core/State.h"
+#include "DiscIO/Volume.h"
 #include "Core/System.h"
 #include "InputCommon/ControllerEmu/ControllerEmu.h"
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
@@ -528,6 +530,16 @@ void dvx_set_cpu_core(int core)
     s_cpu_core = PowerPC::CPUCore::CachedInterpreter;
     break;
   }
+}
+
+bool dvx_has_recomp_module(const char* path)
+{
+  if (!path || !*path)
+    return false;
+  const std::unique_ptr<DiscIO::Volume> volume = DiscIO::CreateVolume(std::string(path));
+  if (!volume)
+    return false;
+  return !FindStaticRecompModule(volume->GetGameID(volume->GetGamePartition())).empty();
 }
 
 bool dvx_boot(const char* path, void* metal_layer)

@@ -228,8 +228,8 @@ void StaticRecompCore::Shutdown()
 // STATICRECOMP_MODULE environment variable names a module file; otherwise
 // <UserDir>/StaticRecompModules/g<GAMEID>_recomp.<dylib|so|dll>. On Apple embedded platforms
 // (visionOS) apps may only load code signed inside their bundle, so the app's Frameworks folder
-// comes first.
-static std::string FindDefaultModulePath(const std::string& game_id)
+// comes first. Declared in StaticRecompModuleSource.h for front ends.
+std::string FindStaticRecompModule(const std::string& game_id)
 {
   if (const char* env = std::getenv("STATICRECOMP_MODULE"); env && *env)
     return env;
@@ -257,7 +257,7 @@ void StaticRecompCore::LoadModule()
   const std::string game_id = SConfig::GetInstance().GetGameID();
   if (m_module_source.kind == StaticRecompModuleSource::Kind::None)
   {
-    const std::string default_path = FindDefaultModulePath(game_id);
+    const std::string default_path = FindStaticRecompModule(game_id);
     if (default_path.empty())
     {
       NOTICE_LOG_FMT(POWERPC, "StaticRecomp: no module for '{}'; interpreter-only.", game_id);

@@ -10,21 +10,37 @@ import SwiftUI
 /// A disc image or executable in the library folder.
 struct GameFile: Identifiable, Hashable {
     let url: URL
+    /// The app carries a recompiled module for this game (g<GameID>_recomp.dylib).
+    let hasRecompModule: Bool
     var id: URL { url }
     var name: String { url.deletingPathExtension().lastPathComponent }
+
+    init(url: URL) {
+        self.url = url
+        hasRecompModule = url.path.withCString { dvx_has_recomp_module($0) }
+    }
 }
 
 /// The CPU core a game runs on. visionOS allows no JIT.
 enum CPUCoreChoice: Int32, CaseIterable, Identifiable {
-    case cachedInterpreter = 5
+    /// The recompiled module when the app has one for the game, else the Cached Interpreter.
+    case automatic = -1
     case staticRecomp = 6
+    case cachedInterpreter = 5
 
     var id: Int32 { rawValue }
     var label: String {
         switch self {
-        case .cachedInterpreter: "Cached Interpreter"
+        case .automatic: "Automatic"
         case .staticRecomp: "Recompiled module"
+        case .cachedInterpreter: "Cached Interpreter"
         }
+    }
+
+    /// The core the game boots on.
+    func resolved(for game: GameFile) -> CPUCoreChoice {
+        guard self == .automatic else { return self }
+        return game.hasRecompModule ? .staticRecomp : .cachedInterpreter
     }
 }
 
@@ -37,7 +53,19 @@ final class EmulatorModel {
 
     private(set) var games: [GameFile] = []
     private(set) var runningGame: GameFile?
-    var cpuCore: CPUCoreChoice = .cachedInterpreter
+    /// Kept between launches; Automatic until the player picks another.
+    var cpuCore: CPUCoreChoice = EmulatorModel.storedCPUCore {
+        didSet { UserDefaults.standard.set(Int(cpuCore.rawValue), forKey: Self.cpuCoreKey) }
+    }
+    private static let cpuCoreKey = "CPUCore"
+    private static var storedCPUCore: CPUCoreChoice {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: cpuCoreKey) != nil else { return .automatic }
+        return CPUCoreChoice(rawValue: Int32(defaults.integer(forKey: cpuCoreKey))) ?? .automatic
+    }
+    /// Launch arguments (tests) choose for this run only, without changing the saved settings.
+    private var cpuCoreOverride: CPUCoreChoice?
+    private var resolutionOverride: Int32?
     var errorMessage: String?
 
     /// Play in VR (stereo in the immersive space) rather than in the window only.
@@ -86,9 +114,9 @@ final class EmulatorModel {
     }
 
     /// Development and test hooks: `-autoboot <name>` starts the library game whose file name
-    /// starts with <name>; `-cpu cached|recomp` picks the CPU core; `-vr on|off` plays in VR or
-    /// in the window; `-resolution <1-8>` sets the internal resolution; `-loadstate <slot>` loads
-    /// that save state once the game runs.
+    /// starts with <name>; `-cpu auto|recomp|cached` picks the CPU core; `-vr on|off` plays in VR
+    /// or in the window; `-resolution <1-8>` sets the internal resolution; `-loadstate <slot>`
+    /// loads that save state once the game runs. The CPU and resolution apply to this run only.
     private func applyLaunchArguments() {
         let arguments = ProcessInfo.processInfo.arguments
         func value(after flag: String) -> String? {
@@ -97,14 +125,17 @@ final class EmulatorModel {
             }
             return arguments[index + 1]
         }
-        if let cpu = value(after: "-cpu") {
-            cpuCore = cpu == "recomp" ? .staticRecomp : .cachedInterpreter
+        switch value(after: "-cpu") {
+        case "auto": cpuCoreOverride = .automatic
+        case "recomp": cpuCoreOverride = .staticRecomp
+        case "cached": cpuCoreOverride = .cachedInterpreter
+        default: break
         }
         if let vr = value(after: "-vr") {
             vrEnabled = vrAvailable && vr != "off"
         }
         if let scale = value(after: "-resolution").flatMap({ Int32($0) }), (1...8).contains(scale) {
-            resolution = scale
+            resolutionOverride = scale
         }
         if let slot = value(after: "-loadstate").flatMap({ Int32($0) }) {
             dvx_load_state_after_boot(slot)
@@ -161,9 +192,9 @@ final class EmulatorModel {
     private func bootIfReady() {
         guard let game = runningGame, let layer = gameLayer, !dvx_is_running() else { return }
         if vrEnabled && !immersiveReady { return }
-        dvx_set_cpu_core(cpuCore.rawValue)
+        dvx_set_cpu_core((cpuCoreOverride ?? cpuCore).resolved(for: game).rawValue)
         dvx_set_vr_enabled(vrEnabled)
-        dvx_set_internal_resolution(resolution)
+        dvx_set_internal_resolution(resolutionOverride ?? resolution)
         let layerPointer = Unmanaged.passUnretained(layer).toOpaque()
         let booted = game.url.path.withCString { dvx_boot($0, layerPointer) }
         if !booted {
