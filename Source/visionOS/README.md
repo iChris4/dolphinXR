@@ -41,6 +41,15 @@ library marks it "Recompiled"; other games run on the Cached Interpreter. Code o
 (and any self-modified code) runs on the interpreter. A module contains recompiled game code:
 build it from your own disc and do not distribute an app that carries one.
 
+The recompiled CPU skips the game's busy-wait loops to the next hardware event, as Dolphin's JIT
+does. Should a game misbehave with it, turn it off for that game: in the Files app, create
+DolphinXR › Dolphin › GameSettings › `<GameID>.ini` (e.g. `GMSE01.ini`) containing
+
+```ini
+[Core]
+StaticRecompIdleSkip = False
+```
+
 ## Controls
 
 A gamepad (paired in Settings › Bluetooth) is mapped to GameCube pad 1 by button position when it

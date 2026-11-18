@@ -104,7 +104,8 @@ private:
   bool IsBusyWaitLoop(u32 address);
   std::unordered_map<u32, bool> m_busy_wait_loops;
   PPCAnalyst::CodeBuffer m_busy_wait_code_buffer;
-  bool m_busy_wait_skipping = true;  // STATICRECOMP_NO_IDLE_SKIP=1 turns it off.
+  // [Core] StaticRecompIdleSkip (a game's settings can turn it off), STATICRECOMP_NO_IDLE_SKIP=1.
+  bool m_busy_wait_skipping = true;
 
   // D4 SMC guard, verify-on-entry model. Every chunk starts Unverified; the
   // first native dispatch into it hashes its guest RAM against the module's

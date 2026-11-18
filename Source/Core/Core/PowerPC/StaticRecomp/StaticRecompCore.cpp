@@ -179,11 +179,14 @@ void StaticRecompCore::Init()
     m_fallback_stats = true;
     m_stats_init_time = std::chrono::steady_clock::now();
   }
-  if (const char* no_idle = std::getenv("STATICRECOMP_NO_IDLE_SKIP"); no_idle && *no_idle == '1')
-    m_busy_wait_skipping = false;
-
   LoadModule();
   m_idle_pc = Config::Get(Config::MAIN_STATICRECOMP_IDLE_PC);
+  // On unless a game's settings turn it off, or STATICRECOMP_NO_IDLE_SKIP=1 (comparisons).
+  m_busy_wait_skipping = Config::Get(Config::MAIN_STATICRECOMP_IDLE_SKIP);
+  if (const char* no_idle = std::getenv("STATICRECOMP_NO_IDLE_SKIP"); no_idle && *no_idle == '1')
+    m_busy_wait_skipping = false;
+  if (!m_busy_wait_skipping)
+    NOTICE_LOG_FMT(POWERPC, "StaticRecomp: busy-wait loop skipping is off");
   m_lockstep_verifier = std::make_unique<StaticRecompLockstep::StaticRecompLockstepVerifier>(*this);
   m_lockstep_verifier->Init();
 
