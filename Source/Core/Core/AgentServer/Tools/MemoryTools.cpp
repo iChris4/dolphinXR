@@ -110,7 +110,7 @@ ToolResult ListSymbols(const ToolArgs& args)
   RequireGame();
   const std::string note = EnsureSymbols();
   const std::string pattern = args.GetString("name_regex");
-  const std::optional<std::regex> regex = MakeToolRegex(pattern);
+  const std::optional<ToolRegex> regex = MakeToolRegex(pattern);
   const u32 address_min = args.GetAddress("address_min").value_or(0);
   const u32 address_max = args.GetAddress("address_max").value_or(0xFFFFFFFFu);
   const u32 size_min = static_cast<u32>(std::max<s64>(0, args.GetInt("size_min", 0)));

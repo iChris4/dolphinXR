@@ -676,6 +676,15 @@ void dvx_set_layer_renderer(void* layer_renderer)
 #endif
 }
 
+bool dvx_immersive_space_closed(void)
+{
+#ifdef ENABLE_VR
+  return xr_visionos_layer_invalidated();
+#else
+  return true;
+#endif
+}
+
 void dvx_spatial_event(unsigned long long event_id, int phase, int chirality, bool has_ray,
                        float origin_x, float origin_y, float origin_z, float direction_x,
                        float direction_y, float direction_z, bool has_pose, float pose_x,

@@ -56,6 +56,13 @@ final class EmulatorModel {
     var vrAvailable: Bool { dvx_vr_available() }
     /// The immersive space's layer renderer reached the provider: a VR boot can start.
     private(set) var immersiveReady = false
+    /// The immersive space is open and the game shows in it: the window steps aside (GameScreen)
+    /// until the space closes (the Digital Crown).
+    private(set) var immersiveOpen = false
+    /// The running game was started for VR: its OpenXR session outlives the space, so Enter
+    /// Immersive can open it again.
+    private(set) var bootedInVR = false
+    private var spaceWatch: Timer?
     private var gameLayer: CAMetalLayer?
 
     /// Documents/Games: visible in the Files app, where disc images are dropped.
@@ -133,6 +140,11 @@ final class EmulatorModel {
         }
     }
 
+    /// An error to show (nil clears it): in the library, or below the game window.
+    func reportError(_ message: String?) {
+        errorMessage = message
+    }
+
     func select(_ game: GameFile) {
         errorMessage = nil
         runningGame = game
@@ -157,7 +169,9 @@ final class EmulatorModel {
         if !booted {
             errorMessage = String(cString: dvx_last_error())
             runningGame = nil
+            return
         }
+        bootedInVR = vrEnabled
     }
 
     /// The immersive space could not open: play in the window.
@@ -177,7 +191,25 @@ final class EmulatorModel {
                 for event in events { Self.forward(event) }
             }
             self.immersiveReady = true
+            self.immersiveOpen = true
+            self.watchSpace()
             self.bootIfReady()
+        }
+    }
+
+    /// Notices the space closing (the Digital Crown): its layer renderer is invalidated, the
+    /// provider's session stops, and the game carries on in the window.
+    private func watchSpace() {
+        spaceWatch?.invalidate()
+        spaceWatch = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { return timer.invalidate() }
+                if dvx_immersive_space_closed() {
+                    self.immersiveOpen = false
+                    timer.invalidate()
+                    self.spaceWatch = nil
+                }
+            }
         }
     }
 
@@ -209,6 +241,10 @@ final class EmulatorModel {
         runningGame = nil
         gameLayer = nil
         immersiveReady = false
+        immersiveOpen = false
+        bootedInVR = false
+        spaceWatch?.invalidate()
+        spaceWatch = nil
     }
 
     func setPaused(_ paused: Bool) {

@@ -258,6 +258,8 @@ void Compositor::SetLayerRenderer(cp_layer_renderer_t renderer) {
     }
     m_renderer = renderer;
     m_viewsSeen = false;
+    Log("layer renderer %p (generation %llu)", renderer,
+        static_cast<unsigned long long>(m_rendererGeneration));
 }
 
 cp_layer_renderer_t Compositor::LayerRenderer() const noexcept {
@@ -619,7 +621,13 @@ void Compositor::ReadViewGeometry(cp_drawable_t drawable) {
 std::array<ViewGeometry, kViewCount> Compositor::ViewGeometries() {
     {
         std::lock_guard lock(m_mutex);
-        if (m_viewsSeen) {
+        // DolphinXR: a frame is taken here only before any view was ever read (at session
+        // start, before the frame loop runs). A space opened again keeps the views of the
+        // last one until its first BeginFrame reads them anew, and a frame the frame loop has
+        // open is never touched: DolphinXR locates views on its video thread, and taking a
+        // frame there while the pacing thread was inside BeginFrame ended that frame's update
+        // a second time, a CompositorServices assertion (BUG IN CLIENT) that aborted the app.
+        if (m_viewsSeen || m_views[0].valid || m_frame != nullptr) {
             return m_views;
         }
     }
@@ -716,12 +724,59 @@ bool Compositor::BeginFrame() {
     return true;
 }
 
-void Compositor::PresentEmpty(cp_frame_t frame, cp_drawable_t drawable, bool alphaBlend) {
+// DolphinXR: every read value xrEndFrame hands out must be signaled, drawn or not. The writer's next
+// copy into that image waits for it; a frame presented empty (no device pose yet, as in the first
+// frames of a space opened again) or dropped (the space closing) used to signal nothing, and when
+// no drawn frame followed with a higher value, the writer's copy and this queue's wait for its
+// write fence waited on each other forever: Enter Immersive showed nothing. MTLSharedEvent waits
+// are "at least", so signaling a value releases every earlier one too.
+void Compositor::EncodeReadSignals(id<MTLCommandBuffer> commandBuffer, const std::vector<ComposedLayer>& layers) {
+    for (const ComposedLayer& layer : layers) {
+        for (const ComposedLayer::Image& image : layer.images) {
+            if (image.readEvent != nil && image.readValue != 0) {
+                [commandBuffer encodeSignalEvent:image.readEvent value:image.readValue];
+            }
+        }
+    }
+}
+
+void Compositor::SignalReads(const std::vector<ComposedLayer>& layers) {
+    bool any = false;
+    for (const ComposedLayer& layer : layers) {
+        for (const ComposedLayer::Image& image : layer.images) {
+            any = any || (image.readEvent != nil && image.readValue != 0);
+        }
+    }
+    if (!any) {
+        return;
+    }
+    if (EnsureMetal()) {
+        // On this queue, after the frames already submitted: their reads finish first.
+        id<MTLCommandBuffer> commandBuffer = [m_queue commandBuffer];
+        commandBuffer.label = @"Read fences of a frame not drawn";
+        EncodeReadSignals(commandBuffer, layers);
+        [commandBuffer commit];
+        return;
+    }
+    for (const ComposedLayer& layer : layers) {
+        for (const ComposedLayer::Image& image : layer.images) {
+            if (image.readEvent != nil && image.readEvent.signaledValue < image.readValue) {
+                image.readEvent.signaledValue = image.readValue;
+            }
+        }
+    }
+}
+
+void Compositor::PresentEmpty(cp_frame_t frame, cp_drawable_t drawable, bool alphaBlend,
+                              const std::vector<ComposedLayer>& layers) {
     if (!EnsureMetal()) {
+        SignalReads(layers);
         cp_frame_end_submission(frame);
         return;
     }
     id<MTLCommandBuffer> commandBuffer = [m_queue commandBuffer];
+    // Nothing reads the layers' images here: their read fences are signaled with this frame.
+    EncodeReadSignals(commandBuffer, layers);
     const size_t textures = cp_drawable_get_texture_count(drawable);
     // Both eyes share their near and far planes; the first view's projection serves.
     const double clearDepth =
@@ -770,6 +825,7 @@ void Compositor::EndFrame(const std::vector<ComposedLayer>& layers, bool alphaBl
     }
     (void)frameRenderer;
     if (frame == nullptr) {
+        SignalReads(layers);
         return;
     }
     if (drawable == nullptr) {
@@ -781,6 +837,7 @@ void Compositor::EndFrame(const std::vector<ComposedLayer>& layers, bool alphaBl
         if (drawable == nullptr) {
             // No drawable: the layer went away (the space closed). Such a frame is
             // already over; ending its submission is a CompositorServices assertion.
+            SignalReads(layers);
             return;
         }
         timing = cp_drawable_get_frame_timing(drawable);
@@ -799,17 +856,18 @@ void Compositor::EndFrame(const std::vector<ComposedLayer>& layers, bool alphaBl
         }
     }
     if (layers.empty() || !posed) {
-        PresentEmpty(frame, drawable, alphaBlend);
+        PresentEmpty(frame, drawable, alphaBlend, layers);
         return;
     }
     if (!EnsureMetal()) {
+        SignalReads(layers);
         cp_frame_end_submission(frame);
         return;
     }
     id<MTLTexture> firstColor = cp_drawable_get_color_texture(drawable, 0);
     id<MTLTexture> firstDepth = cp_drawable_get_depth_texture(drawable, 0);
     if (!EnsurePipelines(firstColor.pixelFormat, firstDepth != nil ? firstDepth.pixelFormat : MTLPixelFormatInvalid)) {
-        PresentEmpty(frame, drawable, alphaBlend);
+        PresentEmpty(frame, drawable, alphaBlend, layers);
         return;
     }
     id<MTLCommandBuffer> commandBuffer = [m_queue commandBuffer];
@@ -941,13 +999,7 @@ void Compositor::DrawLayers(cp_drawable_t drawable, id<MTLCommandBuffer> command
 
     // The reads are done once this command buffer has run: signal each image's
     // read event so the writer's next copy into it waits for us.
-    for (const ComposedLayer& layer : layers) {
-        for (const ComposedLayer::Image& image : layer.images) {
-            if (image.readEvent != nil && image.readValue != 0) {
-                [commandBuffer encodeSignalEvent:image.readEvent value:image.readValue];
-            }
-        }
-    }
+    EncodeReadSignals(commandBuffer, layers);
 }
 
 } // namespace mkw::vr::visionos

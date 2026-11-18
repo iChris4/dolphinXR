@@ -198,7 +198,11 @@ private:
     void ReadViewGeometry(cp_drawable_t drawable);
     void DrawLayers(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffer, const std::vector<ComposedLayer>& layers,
                     bool alphaBlend, const simd_float4x4& worldFromDevice);
-    void PresentEmpty(cp_frame_t frame, cp_drawable_t drawable, bool alphaBlend);
+    void PresentEmpty(cp_frame_t frame, cp_drawable_t drawable, bool alphaBlend,
+                      const std::vector<ComposedLayer>& layers);
+    // DolphinXR: the read fences of a frame that draws nothing (see SignalReads).
+    static void EncodeReadSignals(id<MTLCommandBuffer> commandBuffer, const std::vector<ComposedLayer>& layers);
+    void SignalReads(const std::vector<ComposedLayer>& layers);
 
     mutable std::mutex m_mutex;
     cp_layer_renderer_t m_renderer = nullptr;

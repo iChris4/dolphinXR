@@ -1,6 +1,7 @@
 // Copyright 2026 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+import GameController
 import QuartzCore
 import SwiftUI
 import UIKit
@@ -20,6 +21,12 @@ final class MetalLayerView: UIView {
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
         backgroundColor = .black
+        // visionOS turns a game controller's buttons into taps on what the player looks at (the
+        // buttons below the window, say). The game's view keeps them: they reach the game only,
+        // through the Game Controller framework that SDL reads.
+        let controllers = GCEventInteraction()
+        controllers.handledEventTypes = .gamepad
+        addInteraction(controllers)
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }

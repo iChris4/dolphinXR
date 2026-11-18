@@ -1393,6 +1393,16 @@ void Presenter::Present(PresentInfo* present_info)
   const bool android_window_hidden = openxr_direct_configured;
   if (VR::g_openxr)
     VR::g_openxr->SetDirectPresentActive(openxr_direct_to_hmd);
+#elif defined(IPHONEOS)
+  // visionOS: while the immersive space is open (the session runs) the app empties its window,
+  // so the frame goes to the headset only; a window layer nothing shows would also keep its
+  // drawables. With the space closed (the Digital Crown) the game is back in the window.
+  const bool openxr_direct_to_hmd = g_ActiveConfig.VRSessionActive() && VR::g_openxr &&
+                                    VR::g_openxr->IsSessionRunning() &&
+                                    VR::g_openxr->GetSwapchain() != nullptr;
+  constexpr bool android_window_hidden = false;
+  if (VR::g_openxr)
+    VR::g_openxr->SetDirectPresentActive(openxr_direct_to_hmd);
 #else
   constexpr bool openxr_direct_to_hmd = false;
   constexpr bool android_window_hidden = false;

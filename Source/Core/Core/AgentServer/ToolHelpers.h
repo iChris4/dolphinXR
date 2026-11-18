@@ -48,9 +48,18 @@ bool WaitUntil(const std::function<bool()>& predicate, std::chrono::milliseconds
 bool WaitForEmulation(const std::function<bool()>& predicate, std::chrono::milliseconds timeout,
                       std::chrono::milliseconds poll = 2ms);
 
+// The tools' regexes. A traits type of their own keeps std::basic_regex's template code in agent
+// code only, which is built with exceptions (Core/CMakeLists.txt). With std::regex the linker may
+// keep the copy instantiated by Dolphin code built with -fno-exceptions, where a bad pattern aborts
+// the whole process instead of throwing (seen on visionOS: a read_log regex closed the app).
+struct ToolRegexTraits : std::regex_traits<char>
+{
+};
+using ToolRegex = std::basic_regex<char, ToolRegexTraits>;
+
 // A case-insensitive ECMAScript regex from a tool argument; nullopt when the pattern is empty. A
 // leading "(?i)", which ECMAScript lacks, is accepted. Throws ToolError for a bad pattern.
-std::optional<std::regex> MakeToolRegex(std::string_view pattern);
+std::optional<ToolRegex> MakeToolRegex(std::string_view pattern);
 
 bool IsPaused();
 void PauseEmulation();

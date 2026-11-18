@@ -73,8 +73,13 @@ bool dvx_vr_available(void);
 void dvx_set_vr_enabled(bool enabled);
 
 // The cp_layer_renderer_t of the immersive space's CompositorLayer. Must be set before booting with
-// VR enabled: the OpenXR session is created at boot and runs on this renderer.
+// VR enabled: the OpenXR session is created at boot and runs on this renderer. A space opened
+// again later (Enter Immersive) hands its new renderer here too.
 void dvx_set_layer_renderer(void* layer_renderer);
+
+// True once the immersive space given to dvx_set_layer_renderer has closed (the Digital Crown):
+// the OpenXR session waits for the next space, and the game shows in the window meanwhile.
+bool dvx_immersive_space_closed(void);
 
 // visionOS's look-and-pinch selection in the immersive space, for the game's pointer.
 // phase: 0 active, 1 ended, 2 cancelled. chirality: 0 unknown, 1 left, 2 right. Positions in the

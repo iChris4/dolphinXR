@@ -172,7 +172,7 @@ bool IsPaused()
   }
 }
 
-std::optional<std::regex> MakeToolRegex(std::string_view pattern)
+std::optional<ToolRegex> MakeToolRegex(std::string_view pattern)
 {
   if (pattern.starts_with("(?i)"))
     pattern.remove_prefix(4);
@@ -180,7 +180,7 @@ std::optional<std::regex> MakeToolRegex(std::string_view pattern)
     return std::nullopt;
   try
   {
-    return std::regex(pattern.begin(), pattern.end(), std::regex::ECMAScript | std::regex::icase);
+    return ToolRegex(pattern.begin(), pattern.end(), ToolRegex::ECMAScript | ToolRegex::icase);
   }
   catch (const std::regex_error& e)
   {

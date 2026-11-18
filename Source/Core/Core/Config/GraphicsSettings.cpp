@@ -240,7 +240,14 @@ const Info<bool> GFX_VR_NONBLOCKING_PERF_QUERIES{{System::GFX, "VR", "NonBlockin
                                                  false};
 const Info<bool> GFX_VR_EFB_COPY_DIAGNOSTICS{{System::GFX, "VR", "EFBCopyDiagnostics"}, false};
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},
+#ifdef IPHONEOS
+                                                // visionOS: the window shows the game only
+                                                // while the immersive space is closed, as a
+                                                // plain picture.
+                                                OpenXRMirrorView::LeftEye};
+#else
                                                 OpenXRMirrorView::BothEyes};
+#endif
 const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{
     {System::GFX, "VR", "ReferenceSpaceMode"}, OpenXRReferenceSpaceMode::Local};
 const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE{{System::GFX, "VR", "TrackingMode"},

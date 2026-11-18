@@ -11,7 +11,10 @@ struct RootView: View {
         if emulator.runningGame != nil {
             GameScreen()
         } else {
+            // The window itself is plain (the game's must be able to vanish); the library has
+            // the usual glass.
             LibraryView()
+                .glassBackgroundEffect()
         }
     }
 }
@@ -71,31 +74,26 @@ struct LibraryView: View {
     }
 }
 
-/// The running game in the window (in VR, its mirror), with a way back to the library.
+/// The running game in the window, with its controls below. While the immersive space is open
+/// the game is around the player and the window steps aside: it stays, because visionOS ends an
+/// app left with no scene, but it shows nothing and takes no input. When the space closes (the
+/// Digital Crown) the game is back in it, and Enter Immersive opens the space again.
 struct GameScreen: View {
     @Environment(EmulatorModel.self) private var emulator
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @State private var openingSpace = false
 
     var body: some View {
+        let immersive = emulator.immersiveOpen
         GameLayerView()
             .aspectRatio(4.0 / 3.0, contentMode: .fit)
-            .background(.black)
-            .ornament(attachmentAnchor: .scene(.bottom)) {
-                HStack {
-                    Text(emulator.runningGame?.name ?? "")
-                    Button("Save State", systemImage: "square.and.arrow.down") { emulator.saveState() }
-                    Button("Load State", systemImage: "square.and.arrow.up") { emulator.loadState() }
-                    Button("Stop", systemImage: "stop.fill") {
-                        let wasVR = emulator.vrEnabled
-                        emulator.stop()
-                        if wasVR {
-                            Task { await dismissImmersiveSpace() }
-                        }
-                    }
-                }
-                .padding()
-                .glassBackgroundEffect()
+            .opacity(immersive ? 0 : 1)
+            .allowsHitTesting(!immersive)
+            .background(immersive ? Color.clear : Color.black)
+            .persistentSystemOverlays(immersive ? .hidden : .automatic)
+            .ornament(visibility: immersive ? .hidden : .visible, attachmentAnchor: .scene(.bottom)) {
+                controls
             }
             .task {
                 // VR boots once the space's layer renderer reaches the provider (attach).
@@ -105,5 +103,43 @@ struct GameScreen: View {
                 default: emulator.immersiveSpaceUnavailable()
                 }
             }
+    }
+
+    private var controls: some View {
+        HStack {
+            Text(emulator.runningGame?.name ?? "")
+            if let error = emulator.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+            if emulator.bootedInVR {
+                Button("Enter Immersive", systemImage: "visionpro") { enterImmersive() }
+                    .disabled(openingSpace)
+            }
+            Button("Save State", systemImage: "square.and.arrow.down") { emulator.saveState() }
+            Button("Load State", systemImage: "square.and.arrow.up") { emulator.loadState() }
+            Button("Stop", systemImage: "stop.fill") {
+                let wasVR = emulator.bootedInVR
+                emulator.stop()
+                if wasVR {
+                    Task { await dismissImmersiveSpace() }
+                }
+            }
+        }
+        .padding()
+        .glassBackgroundEffect()
+    }
+
+    /// The game's space again, after the player left it with the Digital Crown: its new layer
+    /// renderer reaches the provider (attach), and the OpenXR session starts again on it.
+    private func enterImmersive() {
+        openingSpace = true
+        emulator.reportError(nil)
+        Task {
+            switch await openImmersiveSpace(id: ImmersiveGame.spaceID) {
+            case .opened: break
+            default: emulator.reportError("The immersive space could not open.")
+            }
+            openingSpace = false
+        }
     }
 }
