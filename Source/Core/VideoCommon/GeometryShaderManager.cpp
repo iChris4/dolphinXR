@@ -460,10 +460,15 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
 
         }
 
-        // Per-draw VR stereo override (screen/fullscreen handling from shader overrides)
+        // Per-draw VR stereo override (screen/fullscreen handling from shader overrides). Its
+        // routes place the draw with the session's eye rows and virtual screen, which only a
+        // running session sets. Without one (the window while the headset shows nothing: the
+        // visionOS window after the immersive space closed) they are zero, and a routed HUD or
+        // menu collapsed to nothing; the draw keeps the game's own projection instead.
         if (!std::isnan(vr_stereo_override))
         {
-          constants.stereoparams[3] = vr_stereo_override;
+          if (vr_rows)
+            constants.stereoparams[3] = vr_stereo_override;
           vr_stereo_override = std::numeric_limits<float>::quiet_NaN();
         }
 

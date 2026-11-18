@@ -1431,6 +1431,13 @@ void VertexManagerBase::Flush()
       bool shader_hunter_force_pink = false;
       bool manual_screen_pane = false;
       bool full_view_draw = false;
+      // The VR routes of the overrides below (and their viewport changes) need a running session;
+      // without one GeometryShaderManager keeps the game's projection, and the viewport must stay.
+#ifdef ENABLE_VR
+      const bool vr_session_running = VR::g_openxr && VR::g_openxr->IsSessionRunning();
+#else
+      constexpr bool vr_session_running = false;
+#endif
       auto screen_pane_depth = ElementsGroupManager::ScreenPaneDepthMode::Game;
       u64 screen_pane_group = 0;
       float screen_pane_reference_depth = -1.0f;
@@ -1958,7 +1965,7 @@ void VertexManagerBase::Flush()
             {
               const VR::VRFrameRegion frame = VR::GetVRFrameRegion();
               manual_screen_pane =
-                  g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+                  g_ActiveConfig.stereo_mode == StereoMode::OpenXR && vr_session_running &&
                   frame.valid && xfmem.projection.type == ProjectionType::Perspective;
               if (manual_screen_pane)
               {
@@ -2447,7 +2454,7 @@ void VertexManagerBase::Flush()
           // A full-view 2D effect in a letterboxed band whose scene VR shows over the whole frame
           // (Metroid Prime's morph ball under water): over the whole frame too.
           const bool band_raster_overridden =
-              !pane_raster_overridden && full_view_draw &&
+              !pane_raster_overridden && full_view_draw && vr_session_running &&
               xfmem.projection.type == ProjectionType::Orthographic &&
               BPFunctions::SetVRFullViewBandViewport(g_framebuffer_manager.get());
 #ifdef ENABLE_VR
