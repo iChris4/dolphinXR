@@ -12,11 +12,14 @@
 #include "Common/Config/Config.h"
 #include "Common/DynamicLibrary.h"
 #include "Common/FileUtil.h"
+#include "Common/GekkoDisassembler.h"
 #include "Common/Logging/Log.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/StaticRecompSettings.h"
 #include "Core/ConfigManager.h"
 #include "Core/PowerPC/StaticRecomp/StaticRecompLockstep.h"
+#include "Core/CoreTiming.h"
+#include "Core/HW/SystemTimers.h"
 #include "Core/System.h"
 
 StaticRecompCore* g_static_recomp_core = nullptr;
@@ -171,6 +174,13 @@ void StaticRecompCore::Init()
   m_guest.external_user_data = this;
 
   std::fprintf(stderr, "[staticrecomp] core init\n");
+  if (const char* stats = std::getenv("STATICRECOMP_FALLBACK_STATS"); stats && *stats == '1')
+  {
+    m_fallback_stats = true;
+    m_stats_init_time = std::chrono::steady_clock::now();
+  }
+  if (const char* no_idle = std::getenv("STATICRECOMP_NO_IDLE_SKIP"); no_idle && *no_idle == '1')
+    m_busy_wait_skipping = false;
 
   LoadModule();
   m_idle_pc = Config::Get(Config::MAIN_STATICRECOMP_IDLE_PC);
@@ -203,6 +213,40 @@ void StaticRecompCore::Shutdown()
     std::fprintf(stderr, "[staticrecomp] dispatch-site pc=%08x samples=%llu\n",
                  dispatch_samples[i].first,
                  static_cast<unsigned long long>(dispatch_samples[i].second));
+  }
+  if (m_fallback_stats && m_stats_ref_taken)
+  {
+    const double wall =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - m_stats_ref_time).count();
+    const double emulated =
+        static_cast<double>(m_system.GetCoreTiming().GetTicks() - m_stats_ref_ticks) /
+        static_cast<double>(m_system.GetSystemTimers().GetTicksPerSecond());
+    std::fprintf(stderr, "[staticrecomp] speed: %.1f s emulated in %.1f s = %.0f%%\n", emulated,
+                 wall, wall > 0 ? 100.0 * emulated / wall : 0.0);
+  }
+  if (m_fallback_stats)
+  {
+    std::vector<std::pair<u32, u64>> by_opcode(m_fallback_by_opcode.begin(),
+                                               m_fallback_by_opcode.end());
+    std::sort(by_opcode.begin(), by_opcode.end(),
+              [](const auto& left, const auto& right) { return left.second > right.second; });
+    for (std::size_t i = 0; i < std::min<std::size_t>(by_opcode.size(), 24); ++i)
+    {
+      std::fprintf(stderr, "[staticrecomp] fallback opcode %u/%u: %llu\n", by_opcode[i].first >> 16,
+                   by_opcode[i].first & 0xFFFFu, static_cast<unsigned long long>(by_opcode[i].second));
+    }
+    std::vector<std::pair<u32, std::pair<u32, u64>>> by_address(m_fallback_by_address.begin(),
+                                                                m_fallback_by_address.end());
+    std::sort(by_address.begin(), by_address.end(), [](const auto& left, const auto& right) {
+      return left.second.second > right.second.second;
+    });
+    for (std::size_t i = 0; i < std::min<std::size_t>(by_address.size(), 40); ++i)
+    {
+      const auto& [address, site] = by_address[i];
+      std::fprintf(stderr, "[staticrecomp] fallback at %08x (%08x %s): %llu\n", address, site.first,
+                   Common::GekkoDisassembler::Disassemble(site.first, address).c_str(),
+                   static_cast<unsigned long long>(site.second));
+    }
   }
   NOTICE_LOG_FMT(POWERPC,
                  "StaticRecomp: shutdown. native_dispatches={} fallback_steps={} "
@@ -367,10 +411,40 @@ void StaticRecompCore::LoadModule()
                  desc->num_smc_ranges);
 }
 
+bool StaticRecompCore::IsBusyWaitLoop(u32 address)
+{
+  if (!m_busy_wait_skipping)
+    return false;
+  if (const auto it = m_busy_wait_loops.find(address); it != m_busy_wait_loops.end())
+    return it->second;
+
+  // Busy-wait loops are a few instructions; a short block reaches the branch back.
+  constexpr std::size_t MAX_LOOP_INSTRUCTIONS = 32;
+  if (m_busy_wait_code_buffer.size() < MAX_LOOP_INSTRUCTIONS)
+    m_busy_wait_code_buffer.resize(MAX_LOOP_INSTRUCTIONS);
+  // The analyzer fills these as it goes, as for a JIT block.
+  PPCAnalyst::BlockStats stats{};
+  PPCAnalyst::BlockRegStats gpa{};
+  PPCAnalyst::BlockRegStats fpa{};
+  PPCAnalyst::CodeBlock block;
+  block.m_stats = &stats;
+  block.m_gpa = &gpa;
+  block.m_fpa = &fpa;
+  analyzer.Analyze(address, &block, &m_busy_wait_code_buffer, MAX_LOOP_INSTRUCTIONS);
+  bool busy_wait = false;
+  for (u32 i = 0; i < block.m_num_instructions; ++i)
+    busy_wait = busy_wait || m_busy_wait_code_buffer[i].branchIsIdleLoop;
+  m_busy_wait_loops.emplace(address, busy_wait);
+  if (busy_wait)
+    NOTICE_LOG_FMT(POWERPC, "StaticRecomp: busy-wait loop at {:08x}: idle skipping", address);
+  return busy_wait;
+}
+
 void StaticRecompCore::ClearCache()
 {
   if (m_fallback_jit)
     m_fallback_jit->ClearCache();
+  m_busy_wait_loops.clear();
 
   if (!m_module)
     return;

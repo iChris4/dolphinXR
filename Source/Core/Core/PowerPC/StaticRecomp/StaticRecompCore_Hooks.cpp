@@ -378,6 +378,20 @@ void StaticRecompCore::HookInstructionFallback(CPUState* cpu, u32 raw, u32 cia)
   auto* core = static_cast<StaticRecompCore*>(cpu->external_user_data);
   cia = core->TranslateRelAddress(cia);
   ++core->m_hook_fallback_instructions;
+  if (core->m_fallback_stats) [[unlikely]]
+  {
+    const u32 primary = raw >> 26;
+    // Extended opcodes: 10 bits for 31/63/4/19, 5 bits (A-form) for 59 and 63's arithmetic.
+    u32 extended = 0;
+    if (primary == 31 || primary == 19 || primary == 4 || primary == 63)
+      extended = (raw >> 1) & 0x3FFu;
+    else if (primary == 59)
+      extended = (raw >> 1) & 0x1Fu;
+    ++core->m_fallback_by_opcode[(primary << 16) | extended];
+    auto& site = core->m_fallback_by_address[cia];
+    site.first = raw;
+    ++site.second;
+  }
 
   // Lockstep: a block that fell back to the interpreter for an unmodeled
   // instruction (DMA mtspr, cache op, ...) performed side effects not captured

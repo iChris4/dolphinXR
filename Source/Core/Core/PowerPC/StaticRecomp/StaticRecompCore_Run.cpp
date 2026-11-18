@@ -100,6 +100,13 @@ void StaticRecompCore::Run()
   while (*state_ptr == CPU::State::Running)
   {
     core_timing.Advance();
+    if (m_fallback_stats && !m_stats_ref_taken &&
+        std::chrono::steady_clock::now() - m_stats_init_time > std::chrono::seconds(5))
+    {
+      m_stats_ref_taken = true;
+      m_stats_ref_time = std::chrono::steady_clock::now();
+      m_stats_ref_ticks = core_timing.GetTicks();
+    }
     const std::string current_game_id = SConfig::GetInstance().GetGameID();
     m_module_active = m_module && (current_game_id.empty() || current_game_id == m_module->game_id);
 
@@ -161,8 +168,12 @@ void StaticRecompCore::Run()
           m_guest.timebase += total_cycles / SystemTimers::TIMER_RATIO;
           m_timebase_cycle_remainder = total_cycles % SystemTimers::TIMER_RATIO;
 
-          // Idle loop skipping for configured target loops (e.g. Wii Menu OSIdleThread)
-          if (m_guest.pc == m_idle_pc && m_idle_pc != 0)
+          // Idle loop skipping: a configured target loop (e.g. Wii Menu OSIdleThread), or a
+          // busy-wait loop the module came back to its head of (a loop runs a cycle budget per
+          // dispatch, then returns at its head with the loop still waiting), found as the JITs
+          // and the CachedInterpreter find them. Time skips to the next event, as there.
+          if ((m_guest.pc == m_idle_pc && m_idle_pc != 0) ||
+              (m_guest.pc == runtime_dispatch_address && IsBusyWaitLoop(m_guest.pc)))
           {
             m_system.GetCoreTiming().Idle();
           }

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -97,6 +98,14 @@ private:
 
   void LoadModule();
 
+  // DolphinXR: whether the guest code at `address` is a busy-wait loop (PPCAnalyst's test, the one
+  // the JITs and the CachedInterpreter skip with CoreTiming::Idle), cached per address until
+  // ClearCache. Asked only for a loop the module came back to the head of.
+  bool IsBusyWaitLoop(u32 address);
+  std::unordered_map<u32, bool> m_busy_wait_loops;
+  PPCAnalyst::CodeBuffer m_busy_wait_code_buffer;
+  bool m_busy_wait_skipping = true;  // STATICRECOMP_NO_IDLE_SKIP=1 turns it off.
+
   // D4 SMC guard, verify-on-entry model. Every chunk starts Unverified; the
   // first native dispatch into it hashes its guest RAM against the module's
   // recorded hash of the original text. An icache invalidation touching a
@@ -162,6 +171,18 @@ private:
   u64 m_fallback_steps = 0;
   u64 m_native_exceptions = 0;
   u64 m_hook_fallback_instructions = 0;
+  // STATICRECOMP_FALLBACK_STATS=1: the instructions the module hands to the interpreter, counted
+  // by opcode (primary << 16 | extended) and by address (with the instruction word), printed at
+  // shutdown. A diagnostic for making modules faster.
+  bool m_fallback_stats = false;
+  // With the stats: emulated time over wall time from 5 s after Init (past boot and a state
+  // load), printed at shutdown as the average speed. CoreTiming ticks count idle-skipped time.
+  std::chrono::steady_clock::time_point m_stats_init_time{};
+  std::chrono::steady_clock::time_point m_stats_ref_time{};
+  u64 m_stats_ref_ticks = 0;
+  bool m_stats_ref_taken = false;
+  std::unordered_map<u32, u64> m_fallback_by_opcode;
+  std::unordered_map<u32, std::pair<u32, u64>> m_fallback_by_address;
   u64 m_timebase_cycle_remainder = 0;
   std::unordered_map<u32, u64> m_dispatch_samples;
   u64 m_bursts = 0;          // SyncIn..SyncOut native runs (diagnostic)
