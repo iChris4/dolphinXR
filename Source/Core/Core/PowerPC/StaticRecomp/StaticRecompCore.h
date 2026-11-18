@@ -212,6 +212,18 @@ private:
   std::vector<int> m_chunk_rel_sections;
   std::vector<u64> m_effective_chunk_hashes;
   u64 m_rel_mapping_generation = 0;
+  // DolphinXR: RefreshRelSections reads the OS module list, again only once its head or tail
+  // changed, and scans RAM (games without the list) at most every couple of seconds.
+  bool MatchRelHeader(const StaticRecompRelModule& module, u32 header_offset,
+                      std::vector<ActiveRelSection>* sections) const;
+  bool m_rel_list_seen = false;
+  u32 m_rel_list_head = 0;
+  u32 m_rel_list_tail = 0;
+  // A found REL section runs away from where it was recompiled: addresses need translating.
+  // While none does (the REL recompiled at its load address, as build-module.sh --rel-base
+  // does), REL chunks are looked up and hooked like main.dol's, at no cost per dispatch.
+  bool m_rel_translation = false;
+  std::chrono::steady_clock::time_point m_rel_last_ram_scan{};
   u32 m_failed_chunks = 0;    // chunks currently failing verification (real SMC)
   u64 m_verifications = 0;    // chunk hash checks performed
   u64 m_reverify_events = 0;  // invalidations that reset a chunk to Unverified

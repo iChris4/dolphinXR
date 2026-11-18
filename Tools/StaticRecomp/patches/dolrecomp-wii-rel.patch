@@ -1,0 +1,264 @@
+DolphinXR changes to DolRecomp fa0cf619e8d7eb8cba7eaf55267a12caaebb46aa for Wii REL modules
+(Mario Kart Wii's StaticR.rel), applied with: git -C <DolRecomp> apply <this file>
+
+- 16-bit REL relocations (ADDR16, _LO, _HI, _HA) patch the halfword at the relocation's offset,
+  as the SDK's OSLink does; they were written 2 bytes further, over the next instruction.
+- --rel-bss <addr>: the BSS address a game gives a single REL (allocated apart from it).
+- An executable section off the REL's alignment is a warning: the OS aligns the module only.
+- Beside a REL's code: rel_layout.txt (header fields, section addresses) and rel_image.dol (the
+  relocated code as a DOL at its address), which Tools/StaticRecomp/module-template consumes.
+
+diff --git a/src/app/cli.c b/src/app/cli.c
+index 33d3c23..0af2ad1 100644
+--- a/src/app/cli.c
++++ b/src/app/cli.c
+@@ -18,6 +18,7 @@ void print_usage(const char* argv0) {
+     fprintf(stderr, "  --backend c|llvm               Select generated-code backend (default: c)\n");
+     fprintf(stderr, "  --gamecube                     GameCube mode (no title ID required)\n");
+     fprintf(stderr, "  --rel-base <addr>              Override first virtual load address for REL codegen\n");
++    fprintf(stderr, "  --rel-bss <addr>               BSS address of a single REL (the game allocates it apart)\n");
+     fprintf(stderr, "  --map <path>                   Load optional function names from a linker MAP\n");
+     fprintf(stderr, "  --setup                        Download titles database and optionally install wit\n");
+     fprintf(stderr, "\n");
+@@ -263,6 +264,25 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
+             continue;
+         }
+ 
++        /* DolphinXR: the BSS address a game gives the REL (allocated apart from the module). */
++        if (strcmp(arg, "--rel-bss") == 0) {
++            if (i + 1 >= argc) {
++                fprintf(stderr, "error: --rel-bss needs an address\n");
++                return 0;
++            }
++            if (!parse_u32_arg(argv[++i], "--rel-bss", &opts->rel_bss))
++                return 0;
++            opts->rel_bss_set = 1;
++            continue;
++        }
++
++        if (strncmp(arg, "--rel-bss=", 10) == 0) {
++            if (!parse_u32_arg(arg + 10, "--rel-bss", &opts->rel_bss))
++                return 0;
++            opts->rel_bss_set = 1;
++            continue;
++        }
++
+         if (strcmp(arg, "--map") == 0) {
+             if (i + 1 >= argc) {
+                 fprintf(stderr, "error: --map needs a path\n");
+diff --git a/src/app/cli.h b/src/app/cli.h
+index 73706f2..d63b378 100644
+--- a/src/app/cli.h
++++ b/src/app/cli.h
+@@ -19,9 +19,11 @@ typedef struct {
+     DolRecompBackend backend;
+     u32 jobs;
+     u32 rel_base;
++    u32 rel_bss;
+     int gamecube_mode;
+     int cpu_explicit;
+     int rel_base_set;
++    int rel_bss_set;
+     int setup_mode;
+     int show_help;
+ } CliOptions;
+diff --git a/src/app/main.c b/src/app/main.c
+index c148031..6916ae9 100644
+--- a/src/app/main.c
++++ b/src/app/main.c
+@@ -15,6 +15,72 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++/* DolphinXR: beside a REL's generated code, what a module needs to find the REL in the game's
++ * RAM and to verify its code there. rel_layout.txt: the header fields Dolphin's StaticRecomp core
++ * matches and each section's linked address. rel_image.dol: the relocated executable sections as
++ * a DOL at their linked addresses (the bytes the game has in RAM once it linked the REL there),
++ * which the module template hashes as it hashes main.dol. */
++static int write_rel_layout(const RELFile* rel, const char* generated_c_path) {
++    char dir[1200];
++    snprintf(dir, sizeof(dir), "%s", generated_c_path);
++    char* slash = strrchr(dir, '/');
++    if (slash)
++        *slash = '\0';
++    else
++        snprintf(dir, sizeof(dir), ".");
++
++    char path[1300];
++    snprintf(path, sizeof(path), "%s/rel_layout.txt", dir);
++    FILE* layout = fopen(path, "w");
++    if (!layout) {
++        fprintf(stderr, "error: cannot write %s\n", path);
++        return 0;
++    }
++    fprintf(layout, "module_id %u\nversion %u\nsection_count %u\nsection_info_offset 0x%X\n"
++                    "file_size 0x%X\n",
++            rel->module_id, rel->version, rel->section_count, read_be32(rel->file_data + 0x10),
++            rel->file_size);
++    for (u32 i = 0; i < rel->section_count; ++i) {
++        const RELSection* section = &rel->sections[i];
++        if (section->size == 0)
++            continue;
++        fprintf(layout, "section %u 0x%08X 0x%X %s\n", section->index, section->address,
++                section->size, section->bss ? "bss" : section->executable ? "exec" : "data");
++    }
++    fclose(layout);
++
++    /* DOL layout: 7 text section slots (file offset, address, size), then 11 data slots. */
++    u8 header[0x100];
++    memset(header, 0, sizeof(header));
++    u32 text_slot = 0;
++    u32 file_offset = sizeof(header);
++    for (u32 i = 0; i < rel->section_count && text_slot < 7; ++i) {
++        const RELSection* section = &rel->sections[i];
++        if (!section->executable || section->size == 0 || !section->data)
++            continue;
++        write_be32(header + 0x00 + text_slot * 4, file_offset);
++        write_be32(header + 0x48 + text_slot * 4, section->address);
++        write_be32(header + 0x90 + text_slot * 4, section->size);
++        file_offset += section->size;
++        ++text_slot;
++    }
++    snprintf(path, sizeof(path), "%s/rel_image.dol", dir);
++    FILE* image = fopen(path, "wb");
++    if (!image) {
++        fprintf(stderr, "error: cannot write %s\n", path);
++        return 0;
++    }
++    fwrite(header, 1, sizeof(header), image);
++    for (u32 i = 0; i < rel->section_count; ++i) {
++        const RELSection* section = &rel->sections[i];
++        if (section->executable && section->size != 0 && section->data)
++            fwrite(section->data, 1, section->size, image);
++    }
++    fclose(image);
++    printf("  rel layout: %s/rel_layout.txt, %s/rel_image.dol\n", dir, dir);
++    return 1;
++}
++
+ int main(int argc, char** argv) {
+     if (argc > 1 && strcmp(argv[1], "extract") == 0)
+         return disc_extract_main(argc - 1, argv + 1);
+@@ -158,6 +224,8 @@ int main(int argc, char** argv) {
+ 
+     if (rel_mode) {
+         RELFile rel;
++        if (opts.rel_bss_set)
++            rel_set_bss_address(opts.rel_bss);
+         if (!rel_load(&rel, input_path, rel_start_base))
+             return 1;
+ 
+@@ -195,6 +263,10 @@ int main(int argc, char** argv) {
+             rel_free(&rel);
+             return 1;
+         }
++        if (!write_rel_layout(&rel, output_path)) {
++            rel_free(&rel);
++            return 1;
++        }
+ 
+         rel_free(&rel);
+         return 0;
+diff --git a/src/frontend/container/rel.c b/src/frontend/container/rel.c
+index b894a36..d83c52e 100644
+--- a/src/frontend/container/rel.c
++++ b/src/frontend/container/rel.c
+@@ -181,9 +181,9 @@ static int relocation_target(const RELFile* rel, const RELModuleMap* modules,
+     return section_address_at(rel, section_index, symbol_offset, target);
+ }
+ 
+-static int require_patch_range(const RELSection* section, u32 offset) {
++static int require_patch_range(const RELSection* section, u32 offset, u32 size) {
+     if (!section_has_file_data(section) || offset > section->size ||
+-        section->size - offset < 4) {
++        section->size - offset < size) {
+         fprintf(stderr, "error: REL relocation patch is outside section %u\n",
+                 section->index);
+         return 0;
+@@ -205,11 +205,15 @@ static int apply_relocation(RELSection* section, u32 offset, u32 patch_address,
+     if (type == R_PPC_NONE)
+         return 1;
+ 
+-    if (!require_patch_range(section, offset))
++    /* DolphinXR: a 16-bit relocation's offset is the halfword's own (the instruction's + 2), as
++     * the SDK's OSLink patches it; this wrote 2 bytes further, over the next instruction. */
++    const int halfword = type == R_PPC_ADDR16 || type == R_PPC_ADDR16_LO ||
++                         type == R_PPC_ADDR16_HI || type == R_PPC_ADDR16_HA;
++    if (!require_patch_range(section, offset, halfword ? 2u : 4u))
+         return 0;
+ 
+     u8* patch = section->owned_data + offset;
+-    u32 word = read_be32(patch);
++    u32 word = halfword ? 0u : read_be32(patch);
+ 
+     switch (type) {
+     case R_PPC_ADDR32:
+@@ -224,13 +228,13 @@ static int apply_relocation(RELSection* section, u32 offset, u32 patch_address,
+         return 1;
+     case R_PPC_ADDR16:
+     case R_PPC_ADDR16_LO:
+-        write_be16(patch + 2, (u16)target);
++        write_be16(patch, (u16)target);
+         return 1;
+     case R_PPC_ADDR16_HI:
+-        write_be16(patch + 2, (u16)(target >> 16));
++        write_be16(patch, (u16)(target >> 16));
+         return 1;
+     case R_PPC_ADDR16_HA:
+-        write_be16(patch + 2, (u16)((target + 0x8000u) >> 16));
++        write_be16(patch, (u16)((target + 0x8000u) >> 16));
+         return 1;
+     case R_PPC_ADDR14:
+     case R_PPC_ADDR14_BRTAKEN:
+@@ -360,6 +364,12 @@ bool rel_apply_relocations(RELFile* rel, const RELModuleMap* modules) {
+     return true;
+ }
+ 
++static u32 g_rel_bss_address = 0;
++
++void rel_set_bss_address(u32 address) {
++    g_rel_bss_address = address;
++}
++
+ bool rel_load_image(RELFile* rel, const char* path, u32 base_address) {
+     memset(rel, 0, sizeof(*rel));
+ 
+@@ -421,6 +431,8 @@ bool rel_load_image(RELFile* rel, const char* path, u32 base_address) {
+         rel_free(rel);
+         return false;
+     }
++    if (g_rel_bss_address != 0)
++        bss_cursor = g_rel_bss_address;
+ 
+     u32 executable_count = 0;
+     for (u32 i = 0; i < rel->section_count; i++) {
+@@ -477,11 +489,12 @@ bool rel_load_image(RELFile* rel, const char* path, u32 base_address) {
+             rel_free(rel);
+             return false;
+         }
++        /* DolphinXR: the OS aligns the module's load address, not each section, so a section
++         * at an unaligned file offset (Mario Kart Wii's StaticR.rel: .text at 0xD4) is valid. */
+         if (section_alignment > 1 && executable &&
+             (section->address % section_alignment) != 0) {
+-            fprintf(stderr, "error: REL executable section %u is not aligned\n", i);
+-            rel_free(rel);
+-            return false;
++            fprintf(stderr, "warning: REL executable section %u is not %u-byte aligned\n", i,
++                    section_alignment);
+         }
+ 
+         section->owned_data = (u8*)malloc(size);
+diff --git a/src/frontend/container/rel.h b/src/frontend/container/rel.h
+index 123aafd..c95c94b 100644
+--- a/src/frontend/container/rel.h
++++ b/src/frontend/container/rel.h
+@@ -48,6 +48,9 @@ typedef struct {
+ } RELModuleMap;
+ 
+ bool rel_load(RELFile* rel, const char* path, u32 base_address);
++/* DolphinXR: place the next REL's BSS here instead of after its file image (games allocate it
++ * apart from the module). 0 restores the default. */
++void rel_set_bss_address(u32 address);
+ bool rel_load_image(RELFile* rel, const char* path, u32 base_address);
+ bool rel_apply_relocations(RELFile* rel, const RELModuleMap* modules);
+ void rel_free(RELFile* rel);

@@ -448,6 +448,7 @@ void StaticRecompCore::ClearCache()
   if (m_fallback_jit)
     m_fallback_jit->ClearCache();
   m_busy_wait_loops.clear();
+  m_rel_list_seen = false;  // RAM may hold other modules now (a state load): read the list again.
 
   if (!m_module)
     return;

@@ -37,18 +37,49 @@ set(CHASSIS_ABI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../Source/Core/Core/Power
 
 set(MODULE_NAME "g${GAME_ID}_recomp")
 
+# Wii games keep most of their code in a REL module (Mario Kart Wii: StaticR.rel). DolRecomp
+# recompiles it at the address the game links it to (--rel-base/--rel-bss, with
+# Tools/StaticRecomp/patches/dolrecomp-wii-rel.patch), into a tree of its own.
+set(REL_GENERATED_DIR "" CACHE PATH
+    "Optional DolRecomp output of a REL (generated.h, rel_layout.txt, rel_image.dol, chunks/)")
+if(REL_GENERATED_DIR)
+  foreach(REQUIRED_REL_FILE generated.h rel_layout.txt rel_image.dol)
+    if(NOT EXISTS "${REL_GENERATED_DIR}/${REQUIRED_REL_FILE}")
+      message(FATAL_ERROR
+        "REL output is incomplete: ${REL_GENERATED_DIR}/${REQUIRED_REL_FILE} is missing "
+        "(DolRecomp needs Tools/StaticRecomp/patches/dolrecomp-wii-rel.patch)")
+    endif()
+  endforeach()
+endif()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(MODULE_TABLES "${CMAKE_CURRENT_BINARY_DIR}/module_tables.inc")
-add_custom_command(
-  OUTPUT "${MODULE_TABLES}"
-  COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/gen_module_tables.py"
-          "${GENERATED_DIR}/generated.h" "${GENERATED_DIR}/generated_smc.txt"
-          "${GENERATED_DIR}/main.dol" "${MODULE_TABLES}"
-  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gen_module_tables.py"
-          "${GENERATED_DIR}/generated.h" "${GENERATED_DIR}/generated_smc.txt"
-          "${GENERATED_DIR}/main.dol"
-  COMMENT "Generating module_tables.inc")
+if(REL_GENERATED_DIR)
+  add_custom_command(
+    OUTPUT "${MODULE_TABLES}"
+    COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/gen_module_tables.py"
+            --out "${MODULE_TABLES}"
+            --tree "${GENERATED_DIR}/generated.h" "${GENERATED_DIR}/generated_smc.txt"
+                   "${GENERATED_DIR}/main.dol"
+            --tree "${REL_GENERATED_DIR}/generated.h" - "${REL_GENERATED_DIR}/rel_image.dol"
+            --rel-layout "${REL_GENERATED_DIR}/rel_layout.txt"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gen_module_tables.py"
+            "${GENERATED_DIR}/generated.h" "${GENERATED_DIR}/generated_smc.txt"
+            "${GENERATED_DIR}/main.dol" "${REL_GENERATED_DIR}/generated.h"
+            "${REL_GENERATED_DIR}/rel_layout.txt" "${REL_GENERATED_DIR}/rel_image.dol"
+    COMMENT "Generating module_tables.inc (with the REL)")
+else()
+  add_custom_command(
+    OUTPUT "${MODULE_TABLES}"
+    COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/gen_module_tables.py"
+            "${GENERATED_DIR}/generated.h" "${GENERATED_DIR}/generated_smc.txt"
+            "${GENERATED_DIR}/main.dol" "${MODULE_TABLES}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gen_module_tables.py"
+            "${GENERATED_DIR}/generated.h" "${GENERATED_DIR}/generated_smc.txt"
+            "${GENERATED_DIR}/main.dol"
+    COMMENT "Generating module_tables.inc")
+endif()
 
 file(READ "${GENERATED_DIR}/generated.h" GENERATED_HEADER_TEXT)
 if(GENERATED_HEADER_TEXT MATCHES "DOLRECOMP_BACKEND_LLVM")
@@ -110,6 +141,29 @@ target_include_directories(${MODULE_NAME} PRIVATE
   "${CHASSIS_ABI_DIR}"
   "${CMAKE_CURRENT_BINARY_DIR}")
 
+# The REL's chunks and dispatcher, built against the REL tree's own generated.h (each tree's
+# dispatch tables live in its header), then linked into the same module.
+set(MODULE_TARGETS ${MODULE_NAME})
+if(REL_GENERATED_DIR)
+  file(GLOB REL_CHUNK_INPUTS CONFIGURE_DEPENDS "${REL_GENERATED_DIR}/chunks/*.c")
+  if(NOT REL_CHUNK_INPUTS)
+    message(FATAL_ERROR "REL output has no generated chunks in ${REL_GENERATED_DIR}/chunks")
+  endif()
+  add_library(${MODULE_NAME}_rel OBJECT
+    "${CMAKE_CURRENT_SOURCE_DIR}/module_rel_dispatch.c"
+    ${REL_CHUNK_INPUTS})
+  set_target_properties(${MODULE_NAME}_rel PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    UNITY_BUILD OFF
+    C_VISIBILITY_PRESET hidden)
+  target_include_directories(${MODULE_NAME}_rel PRIVATE
+    "${REL_GENERATED_DIR}"
+    "${GXRUNTIME_DIR}/include")
+  target_sources(${MODULE_NAME} PRIVATE $<TARGET_OBJECTS:${MODULE_NAME}_rel>)
+  target_compile_definitions(${MODULE_NAME} PRIVATE MODULE_HAS_REL=1)
+  list(APPEND MODULE_TARGETS ${MODULE_NAME}_rel)
+endif()
+
 if(NOT WIN32)
   target_link_libraries(${MODULE_NAME} PRIVATE m)
 endif()
@@ -147,22 +201,24 @@ if(RECOMPCORE_MODULE_ENABLE_IPO AND CMAKE_C_COMPILER_ID MATCHES "Clang")
     set(ENV{CMAKE_NINJA_FORCE_RESPONSE_FILE} "${_module_forced_rsp}")
   endif()
   if(RECOMPCORE_MODULE_IPO_SUPPORTED)
-    set_property(TARGET ${MODULE_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET ${MODULE_TARGETS} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   else()
     message(STATUS "Module IPO disabled: ${RECOMPCORE_MODULE_IPO_ERROR}")
   endif()
 endif()
 
-if(MSVC)
-  if(RECOMPCORE_MODULE_OPT_LEVEL STREQUAL "0")
-    target_compile_options(${MODULE_NAME} PRIVATE /Od /fp:strict)
-  else()
-    target_compile_options(${MODULE_NAME} PRIVATE /O2 /fp:strict)
+foreach(MODULE_TARGET IN LISTS MODULE_TARGETS)
+  if(MSVC)
+    if(RECOMPCORE_MODULE_OPT_LEVEL STREQUAL "0")
+      target_compile_options(${MODULE_TARGET} PRIVATE /Od /fp:strict)
+    else()
+      target_compile_options(${MODULE_TARGET} PRIVATE /O2 /fp:strict)
+    endif()
+  elseif(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    target_compile_options(${MODULE_TARGET} PRIVATE
+      -O${RECOMPCORE_MODULE_OPT_LEVEL} -ffp-contract=off -fno-fast-math)
+  elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(${MODULE_TARGET} PRIVATE
+      -O${RECOMPCORE_MODULE_OPT_LEVEL} -ffp-contract=off -fno-fast-math)
   endif()
-elseif(CMAKE_C_COMPILER_ID MATCHES "Clang")
-  target_compile_options(${MODULE_NAME} PRIVATE
-    -O${RECOMPCORE_MODULE_OPT_LEVEL} -ffp-contract=off -fno-fast-math)
-elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-  target_compile_options(${MODULE_NAME} PRIVATE
-    -O${RECOMPCORE_MODULE_OPT_LEVEL} -ffp-contract=off -fno-fast-math)
-endif()
+endforeach()

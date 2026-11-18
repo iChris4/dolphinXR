@@ -7,6 +7,7 @@
 #include "Core/PowerPC/JitInterface.h"
 #include "Common/Logging/Log.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 
 namespace
@@ -16,63 +17,116 @@ u32 ReadGuestBE32(const u8* bytes)
   return (static_cast<u32>(bytes[0]) << 24) | (static_cast<u32>(bytes[1]) << 16) |
          (static_cast<u32>(bytes[2]) << 8) | bytes[3];
 }
+
+// The SDK's OSLink keeps the loaded modules in a linked list (each header's +4 is the next one)
+// whose head and tail it stores in low memory.
+constexpr u32 OS_MODULE_LIST_HEAD = 0x30C8;  // physical; the tail follows
+constexpr u32 MAX_LISTED_MODULES = 64;
+// Games that link modules without the list: a scan of RAM, at most this often.
+constexpr auto REL_RAM_SCAN_INTERVAL = std::chrono::seconds(2);
+}  // namespace
+
+// Whether the REL header at physical `header_offset` is `module`; if so, where its sections run.
+// Once OSLink has linked a module, its section-table field and section entries hold absolute
+// addresses (Mario Kart Wii's StaticR.rel); the file holds offsets. Both are accepted.
+bool StaticRecompCore::MatchRelHeader(const StaticRecompRelModule& module, u32 header_offset,
+                                      std::vector<ActiveRelSection>* sections) const
+{
+  const u64 table_end = static_cast<u64>(header_offset) + module.section_info_offset +
+                        static_cast<u64>(module.section_count) * 8;
+  if (table_end > m_guest.ram_size)
+    return false;
+  const u8* header = m_guest.ram + header_offset;
+  const u32 section_info = ReadGuestBE32(header + 0x10);
+  if (ReadGuestBE32(header) != module.module_id ||
+      ReadGuestBE32(header + 0x0c) != module.section_count ||
+      ReadGuestBE32(header + 0x1c) != module.version ||
+      (section_info != module.section_info_offset &&
+       section_info != 0x80000000u + header_offset + module.section_info_offset))
+  {
+    return false;
+  }
+
+  std::vector<ActiveRelSection> found;
+  for (u32 section_index = 0; section_index < module.num_sections; ++section_index)
+  {
+    const StaticRecompRelSection& section = module.sections[section_index];
+    const u8* entry = header + module.section_info_offset + section.section_index * 8;
+    u32 runtime_start = ReadGuestBE32(entry) & ~1u;
+    const u32 runtime_size = ReadGuestBE32(entry + 4);
+    if (runtime_size != section.size || runtime_start == 0)
+      return false;
+    if (runtime_start < module.file_size)
+      runtime_start += 0x80000000u + header_offset;
+    else if (runtime_start < m_guest.ram_size)
+      runtime_start |= 0x80000000u;
+    const u64 physical_start = static_cast<u64>(runtime_start - 0x80000000u);
+    if (runtime_start < 0x80000000u || physical_start + section.size > m_guest.ram_size)
+      return false;
+    found.push_back({module.module_id, section.section_index, section.linked_start, runtime_start,
+                     section.size});
+  }
+  sections->insert(sections->end(), found.begin(), found.end());
+  return true;
 }
 
 void StaticRecompCore::RefreshRelSections()
 {
-  if (!m_module || m_module->num_rel_modules == 0 || !m_guest.ram || m_guest.ram_size < 0x40)
+  if (!m_module || m_module->num_rel_modules == 0 || !m_guest.ram ||
+      m_guest.ram_size < OS_MODULE_LIST_HEAD + 8)
+    return;
+
+  // DolphinXR: this runs for every address no chunk covers, so it must be cheap. The modules are
+  // read off the OS module list, and only when its head or tail changed: a module was linked or
+  // unlinked. Code that changed in place is the chunk hashes' to catch.
+  const u32 list_head = ReadGuestBE32(m_guest.ram + OS_MODULE_LIST_HEAD);
+  const u32 list_tail = ReadGuestBE32(m_guest.ram + OS_MODULE_LIST_HEAD + 4);
+  if (m_rel_list_seen && list_head == m_rel_list_head && list_tail == m_rel_list_tail)
     return;
 
   std::vector<ActiveRelSection> discovered;
-  for (u32 module_index = 0; module_index < m_module->num_rel_modules; ++module_index)
+  std::vector<bool> module_found(m_module->num_rel_modules, false);
+  u32 link = list_head;
+  for (u32 listed = 0; link != 0 && listed < MAX_LISTED_MODULES; ++listed)
   {
-    const StaticRecompRelModule& module = m_module->rel_modules[module_index];
-    const u64 table_end = static_cast<u64>(module.section_info_offset) +
-                          static_cast<u64>(module.section_count) * 8;
-    if (table_end > m_guest.ram_size)
-      continue;
-    for (u32 candidate = 0; static_cast<u64>(candidate) + table_end <= m_guest.ram_size;
-         candidate += 4)
+    if (link < 0x80000000u || link - 0x80000000u + 0x40u > m_guest.ram_size)
+      break;
+    const u32 header_offset = link - 0x80000000u;
+    for (u32 module_index = 0; module_index < m_module->num_rel_modules; ++module_index)
     {
-      const u8* header = m_guest.ram + candidate;
-      if (ReadGuestBE32(header) != module.module_id ||
-          ReadGuestBE32(header + 0x0c) != module.section_count ||
-          ReadGuestBE32(header + 0x10) != module.section_info_offset ||
-          ReadGuestBE32(header + 0x1c) != module.version)
-        continue;
-
-      std::vector<ActiveRelSection> candidate_sections;
-      bool valid = true;
-      for (u32 section_index = 0; section_index < module.num_sections; ++section_index)
+      if (!module_found[module_index] &&
+          MatchRelHeader(m_module->rel_modules[module_index], header_offset, &discovered))
       {
-        const StaticRecompRelSection& section = module.sections[section_index];
-        const u8* entry = header + module.section_info_offset + section.section_index * 8;
-        u32 runtime_start = ReadGuestBE32(entry) & ~1u;
-        const u32 runtime_size = ReadGuestBE32(entry + 4);
-        if (runtime_size != section.size || runtime_start == 0)
-        {
-          valid = false;
-          break;
-        }
-        if (runtime_start < module.file_size)
-          runtime_start += 0x80000000u + candidate;
-        else if (runtime_start < m_guest.ram_size)
-          runtime_start |= 0x80000000u;
-        const u64 physical_start = static_cast<u64>(runtime_start - 0x80000000u);
-        if (runtime_start < 0x80000000u || physical_start + section.size > m_guest.ram_size)
-        {
-          valid = false;
-          break;
-        }
-        candidate_sections.push_back({module.module_id, section.section_index,
-                                      section.linked_start, runtime_start, section.size});
-      }
-      if (valid)
-      {
-        discovered.insert(discovered.end(), candidate_sections.begin(), candidate_sections.end());
-        break;
+        module_found[module_index] = true;
       }
     }
+    link = ReadGuestBE32(m_guest.ram + header_offset + 4);
+  }
+
+  if (discovered.empty())
+  {
+    // No listed module of ours (or no list): scan RAM for the headers, rarely, and look again at
+    // the next miss rather than trusting this list.
+    const auto now = std::chrono::steady_clock::now();
+    if (now - m_rel_last_ram_scan < REL_RAM_SCAN_INTERVAL)
+      return;
+    m_rel_last_ram_scan = now;
+    for (u32 module_index = 0; module_index < m_module->num_rel_modules; ++module_index)
+    {
+      const StaticRecompRelModule& module = m_module->rel_modules[module_index];
+      for (u32 candidate = 0; static_cast<u64>(candidate) + 0x40u <= m_guest.ram_size;
+           candidate += 4)
+      {
+        if (MatchRelHeader(module, candidate, &discovered))
+          break;
+      }
+    }
+  }
+  else
+  {
+    m_rel_list_seen = true;
+    m_rel_list_head = list_head;
+    m_rel_list_tail = list_tail;
   }
 
   const bool changed = discovered.size() != m_active_rel_sections.size() ||
@@ -89,6 +143,16 @@ void StaticRecompCore::RefreshRelSections()
     return;
   m_active_rel_sections = std::move(discovered);
   ++m_rel_mapping_generation;
+  m_rel_translation = std::any_of(
+      m_active_rel_sections.begin(), m_active_rel_sections.end(),
+      [](const ActiveRelSection& section) { return section.runtime_start != section.linked_start; });
+  for (const ActiveRelSection& section : m_active_rel_sections)
+  {
+    NOTICE_LOG_FMT(POWERPC,
+                   "StaticRecomp: REL {} section {} runs at {:08x} (recompiled at {:08x}), {:#x} bytes",
+                   section.module_id, section.section_index, section.runtime_start,
+                   section.linked_start, section.size);
+  }
   for (u32 i = 0; i < m_chunk_rel_sections.size(); ++i)
   {
     if (m_chunk_rel_sections[i] < 0)
@@ -153,6 +217,8 @@ bool StaticRecompCore::ResolveRuntimeAddress(u32 linked_address, u32* runtime_ad
 
 u32 StaticRecompCore::TranslateRelAddress(u32 linked_address)
 {
+  if (!m_rel_translation)
+    return linked_address;
   u32 runtime_address = linked_address;
   ResolveRuntimeAddress(linked_address, &runtime_address);
   return runtime_address;
@@ -209,7 +275,7 @@ int StaticRecompCore::ChunkIndexOf(u32 address)
   // A DOL-only module has no runtime-to-linked REL translation to perform.
   // Avoid the resolver on this per-block hot path while retaining the exact
   // existing path for modules that declare relocatable sections.
-  if (m_module->num_rel_modules != 0 &&
+  if (m_module->num_rel_modules != 0 && m_rel_translation &&
       !ResolveNativeAddress(address, &linked_address, nullptr))
     return -1;
   int idx = GetAddressLookupIndex(linked_address);
@@ -343,9 +409,12 @@ void StaticRecompCore::OnICacheInvalidate(u32 address, u32 length)
 
   if (!m_module_active || length == 0)
     return;
-  u32 linked_address = address;
-  ResolveNativeAddress(address, &linked_address, nullptr);
-  address = linked_address;
+  if (m_rel_translation)
+  {
+    u32 linked_address = address;
+    ResolveNativeAddress(address, &linked_address, nullptr);
+    address = linked_address;
+  }
   const u32 last = address + (length - 1u);
 
   // Binary search to find the first chunk index that could possibly overlap (chunk.end > address)

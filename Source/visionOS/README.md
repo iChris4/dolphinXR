@@ -36,6 +36,19 @@ Source/visionOS/Build-VisionOS.sh --team <TEAM ID> --install \
     --module <work dir>/module-xros/gGMSE01_recomp.dylib
 ```
 
+Wii games keep most of their code in a REL module, which goes into the module too. It is
+recompiled at the address the game loads it at, which the Agent Server's `list_modules` tool shows
+for a running game (the REL header, and the BSS when the game allocates it apart). DolRecomp needs
+`Tools/StaticRecomp/patches/dolrecomp-wii-rel.patch`. Mario Kart Wii (USA):
+
+```sh
+Tools/StaticRecomp/build-module.sh --dol <dir>/DATA/sys/main.dol --game-id RMCE01 --cpu broadway \
+    --rel <dir>/DATA/files/rel/StaticR.rel --rel-base 0x8050BF60 --rel-bss 0x809B8F20 \
+    --platform xros --out <work dir> --dolrecomp <path to DolRecomp>
+```
+
+`--module` can be given once per game to Build-VisionOS.sh.
+
 With the CPU on Automatic (the default) a game the app carries a module for runs on it, and the
 library marks it "Recompiled"; other games run on the Cached Interpreter. Code outside the module
 (and any self-modified code) runs on the interpreter. A module contains recompiled game code:

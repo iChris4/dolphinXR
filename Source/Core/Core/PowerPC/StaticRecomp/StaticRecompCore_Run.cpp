@@ -68,7 +68,9 @@ void StaticRecompCore::Run()
   InitLookupTable(m_guest.ram_size, m_guest.exram_size);
   const bool lockstep_enabled = m_lockstep_verifier->IsEnabled();
   const auto fast_dispatchable_at = [this](u32 address) {
-    if (m_has_rel_modules || !m_forced_fallback_ranges.empty())
+    // A REL running where it was recompiled needs no translation: its chunks are looked up as
+    // main.dol's are (the chunk hashes still decide whether its code is there).
+    if ((m_has_rel_modules && m_rel_translation) || !m_forced_fallback_ranges.empty())
       return FastDispatchableAt(address);
     if (!m_module_active || m_chunk_lookup_table.empty())
       return false;
@@ -100,6 +102,9 @@ void StaticRecompCore::Run()
   while (*state_ptr == CPU::State::Running)
   {
     core_timing.Advance();
+    // Once per slice, the OS module list: two reads while nothing was linked or unlinked.
+    if (m_has_rel_modules)
+      RefreshRelSections();
     if (m_fallback_stats && !m_stats_ref_taken &&
         std::chrono::steady_clock::now() - m_stats_init_time > std::chrono::seconds(5))
     {
@@ -139,11 +144,11 @@ void StaticRecompCore::Run()
             ++m_dispatch_samples[m_guest.pc];
           const u32 runtime_dispatch_address = m_guest.pc;
           u32 linked_dispatch_address = runtime_dispatch_address;
-          if (m_has_rel_modules)
+          if (m_has_rel_modules && m_rel_translation)
             ResolveNativeAddress(runtime_dispatch_address, &linked_dispatch_address, nullptr);
           m_guest.pc = linked_dispatch_address;
           m_module->dispatch(&m_guest, linked_dispatch_address);
-          if (m_has_rel_modules)
+          if (m_has_rel_modules && m_rel_translation)
             m_guest.pc = TranslateRelAddress(m_guest.pc);
           ++m_native_dispatches;
 

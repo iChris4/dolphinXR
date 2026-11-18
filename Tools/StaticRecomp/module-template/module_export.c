@@ -8,8 +8,19 @@
 
 #include "StaticRecompABI.h"
 
+#include "module_tables.inc"
+
+#if MODULE_HAS_REL
+// The REL tree's dispatcher (module_rel_dispatch.c, built against the REL's generated.h).
+int module_rel_dispatch(CPUState* ctx, u32 address);
+#endif
+
 static int chassis_dispatch(CPUState* ctx, u32 address)
 {
+#if MODULE_HAS_REL
+    if (address >= MODULE_REL_CODE_START && address < MODULE_REL_CODE_END)
+        return module_rel_dispatch(ctx, address);
+#endif
     return dolrecomp_call(ctx, address);
 }
 
@@ -18,8 +29,6 @@ static void chassis_on_state_loaded(CPUState* ctx)
     // Re-arm host FP rounding/flush state from the freshly loaded guest FPSCR.
     ppc_fpscr_updated(ctx);
 }
-
-#include "module_tables.inc"
 
 static const StaticRecompModuleDesc s_desc = {
     STATICRECOMP_ABI_VERSION,
@@ -36,6 +45,8 @@ static const StaticRecompModuleDesc s_desc = {
     s_chunk_ranges,
     MODULE_CHUNK_RANGE_COUNT,
     s_chunk_hashes,
+    MODULE_REL_MODULES,
+    MODULE_REL_MODULE_COUNT,
 };
 
 #if defined(_WIN32)
