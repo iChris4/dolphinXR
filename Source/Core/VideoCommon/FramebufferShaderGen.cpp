@@ -177,9 +177,11 @@ void EmitPixelMainDeclaration(ShaderCode& code, u32 num_tex_inputs, u32 num_colo
 }
 }  // Anonymous namespace
 
-std::string GenerateScreenQuadVertexShader()
+std::string GenerateScreenQuadVertexShader(bool multiview)
 {
   ShaderCode code;
+  if (multiview)
+    code.Write("#extension GL_EXT_multiview : require\n");
   EmitVertexMainDeclaration(code, 0, 0, false, 1, 0,
 
                             "#define id gl_VertexID\n");
@@ -187,6 +189,8 @@ std::string GenerateScreenQuadVertexShader()
       "{{\n"
       "  v_tex0 = float3(float((id << 1) & 2), float(id & 2), 0.0f);\n"
       "  opos = float4(v_tex0.xy * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 0.0f, 1.0f);\n");
+  if (multiview)
+    code.Write("  v_tex0.z = float(gl_ViewIndex);\n");
 
   // NDC space is flipped in Vulkan. We also flip in GL so that (0,0) is in the lower-left.
   if (GetAPIType() == APIType::Vulkan || GetAPIType() == APIType::OpenGL)
@@ -293,9 +297,11 @@ std::string GeneratePassthroughGeometryShader(u32 num_tex, u32 num_colors)
   return code.GetBuffer();
 }
 
-std::string GenerateTextureCopyVertexShader()
+std::string GenerateTextureCopyVertexShader(bool multiview)
 {
   ShaderCode code;
+  if (multiview)
+    code.Write("#extension GL_EXT_multiview : require\n");
   EmitUniformBufferDeclaration(code);
   code.Write("{{"
              "  float2 src_offset;\n"
@@ -309,6 +315,8 @@ std::string GenerateTextureCopyVertexShader()
              "  v_tex0 = float3(float((id << 1) & 2), float(id & 2), 0.0f);\n"
              "  opos = float4(v_tex0.xy * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 0.0f, 1.0f);\n"
              "  v_tex0 = float3(src_offset + (src_size * v_tex0.xy), 0.0f);\n");
+  if (multiview)
+    code.Write("  v_tex0.z = float(gl_ViewIndex);\n");
 
   // NDC space is flipped in Vulkan. We also flip in GL so that (0,0) is in the lower-left.
   if (GetAPIType() == APIType::Vulkan || GetAPIType() == APIType::OpenGL)
@@ -680,7 +688,7 @@ std::string GenerateEFBRestorePixelShader()
 std::string GenerateEFBCoverageRestorePixelShader(bool multiview)
 {
   ShaderCode code;
-  if (multiview && GetAPIType() == APIType::Vulkan)
+  if (multiview && (GetAPIType() == APIType::Vulkan || GetAPIType() == APIType::Metal))
     code.Write("#extension GL_EXT_multiview : require\n");
   EmitSamplerDeclarations(code, 0, 1, false);
   EmitPixelMainDeclaration(code, 1, 0);

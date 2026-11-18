@@ -146,6 +146,14 @@ void JitBase::RefreshConfig()
   jo.fp_exceptions = m_enable_float_exceptions;
   jo.div_by_zero_exceptions = m_enable_div_by_zero_exceptions;
 
+  // StaticRecomp reaches memory through its own module hooks; no fastmem.
+  if (Config::Get(Config::MAIN_CPU_CORE) == PowerPC::CPUCore::StaticRecomp)
+  {
+    m_fastmem_enabled = false;
+    m_page_table_fastmem_enabled = false;
+    jo.fastmem = false;
+  }
+
   if (wanted_page_table_mappings != WantsPageTableMappings())
   {
     // Mustn't call this if we're still initializing - it'll cause a crash

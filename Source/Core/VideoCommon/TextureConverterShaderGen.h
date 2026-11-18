@@ -34,7 +34,9 @@ struct UidData
 
 using TCShaderUid = ShaderUid<UidData>;
 
-ShaderCode GenerateVertexShader(APIType api_type);
+// multiview: the source layer in v_tex0.z is the view index (gl_ViewIndex), for stereo copies on
+// backends without a layer-expanding passthrough geometry shader.
+ShaderCode GenerateVertexShader(APIType api_type, bool multiview = false);
 ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data);
 
 TCShaderUid GetShaderUid(EFBCopyFormat dst_format, bool is_depth_copy, bool is_intensity,

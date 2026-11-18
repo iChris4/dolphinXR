@@ -30,7 +30,7 @@ public:
   explicit Pipeline(const AbstractPipelineConfig& config,
                     MRCOwned<id<MTLRenderPipelineState>> pipeline,
                     const PipelineReflection& reflection, MTLPrimitiveType prim, MTLCullMode cull,
-                    DepthState depth, AbstractPipelineUsage usage);
+                    DepthState depth, AbstractPipelineUsage usage, bool layered = false);
 
   id<MTLRenderPipelineState> Get() const { return m_pipeline; }
   MTLPrimitiveType Prim() const { return m_prim; }
@@ -43,6 +43,8 @@ public:
   u32 GetFragmentBuffers() const { return m_reflection.fragment_buffers; }
   bool UsesVertexBuffer(u32 index) const { return m_reflection.vertex_buffers & (1 << index); }
   bool UsesFragmentBuffer(u32 index) const { return m_reflection.fragment_buffers & (1 << index); }
+  // Draws one instance per layer of a layered framebuffer (multiview stand-in).
+  bool IsLayered() const { return m_layered; }
 
 private:
   MRCOwned<id<MTLRenderPipelineState>> m_pipeline;
@@ -51,6 +53,7 @@ private:
   DepthStencilSelector m_depth_stencil;
   AbstractPipelineUsage m_usage;
   PipelineReflection m_reflection;
+  bool m_layered;
 };
 
 class ComputePipeline : public Shader

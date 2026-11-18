@@ -1,7 +1,6 @@
 add_library(inputcommon
   DynamicInputTextureManager.cpp
   DynamicInputTextureManager.h
-  GCAdapter.cpp
   GCAdapter.h
   ImageOperations.cpp
   ImageOperations.h
@@ -108,7 +107,7 @@ if(WIN32)
     ControllerInterface/ForceFeedback/ForceFeedbackDevice.cpp
     ControllerInterface/ForceFeedback/ForceFeedbackDevice.h
   )
-elseif(APPLE)
+elseif(APPLE AND NOT VISIONOS)
   target_sources(inputcommon PRIVATE
     ControllerInterface/Quartz/Quartz.h
     ControllerInterface/Quartz/Quartz.mm
@@ -151,7 +150,14 @@ if(ENABLE_VR)
   )
 endif()
 
-if(NOT ANDROID)
+if(VISIONOS)
+  # The GameCube adapter is a USB host device; visionOS has no USB host access.
+  target_sources(inputcommon PRIVATE GCAdapter_iOS.cpp)
+else()
+  target_sources(inputcommon PRIVATE GCAdapter.cpp)
+endif()
+
+if(TARGET LibUSB::LibUSB)
   target_link_libraries(inputcommon PUBLIC LibUSB::LibUSB)
 endif()
 

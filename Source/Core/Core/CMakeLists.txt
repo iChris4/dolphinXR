@@ -37,6 +37,8 @@ add_library(core
   Config/NetplaySettings.h
   Config/SessionSettings.cpp
   Config/SessionSettings.h
+  Config/StaticRecompSettings.cpp
+  Config/StaticRecompSettings.h
   Config/SYSCONFSettings.cpp
   Config/SYSCONFSettings.h
   Config/UISettings.cpp
@@ -557,6 +559,18 @@ add_library(core
   PowerPC/MMU.h
   PowerPC/PowerPC.cpp
   PowerPC/PowerPC.h
+  PowerPC/StaticRecomp/StaticRecompABI.h
+  PowerPC/StaticRecomp/StaticRecompCore.cpp
+  PowerPC/StaticRecomp/StaticRecompCore.h
+  PowerPC/StaticRecomp/StaticRecompCore_Hooks.cpp
+  PowerPC/StaticRecomp/StaticRecompCore_Run.cpp
+  PowerPC/StaticRecomp/StaticRecompCore_SMC.cpp
+  PowerPC/StaticRecomp/StaticRecompCore_Sync.cpp
+  PowerPC/StaticRecomp/StaticRecompLockstep.cpp
+  PowerPC/StaticRecomp/StaticRecompLockstep.h
+  PowerPC/StaticRecomp/StaticRecompLockstep_Check.cpp
+  PowerPC/StaticRecomp/StaticRecompLockstep_Trampolines.cpp
+  PowerPC/StaticRecomp/StaticRecompModuleSource.h
   PowerPC/PPCAnalyst.cpp
   PowerPC/PPCAnalyst.h
   PowerPC/PPCCache.cpp
@@ -769,6 +783,12 @@ if(ENABLE_VR)
   endif()
 endif()
 
+# The guest CPU state shared with StaticRecomp modules (GXRuntime's core/cpu.h). Public: the
+# StaticRecomp headers reach JitInterface.h. The core's module hooks raise guest program
+# exceptions through GXRuntime's exception helper, so that one file is compiled in too.
+target_include_directories(core PUBLIC ${CMAKE_SOURCE_DIR}/Externals/GXRuntime/include)
+target_sources(core PRIVATE ${CMAKE_SOURCE_DIR}/Externals/GXRuntime/src/core/cpu_exception.c)
+
 target_link_libraries(core
 PUBLIC
   audiocommon
@@ -781,8 +801,6 @@ PUBLIC
   pugixml
   sfml-network
   videonull
-  videoogl
-  videosoftware
 
 PRIVATE
   FatFs
@@ -791,6 +809,11 @@ PRIVATE
   LZ4::LZ4
   ZLIB::ZLIB
 )
+
+# OpenGL and the Software renderer (which presents through OpenGL); not on visionOS.
+if(NOT VISIONOS)
+  target_link_libraries(core PUBLIC videoogl videosoftware)
+endif()
 
 if(LIBUDEV_FOUND)
   target_include_directories(core PRIVATE ${LIBUDEV_INCLUDE_DIR})

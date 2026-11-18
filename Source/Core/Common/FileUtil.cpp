@@ -76,8 +76,10 @@ using DolSecTranslocateIsTranslocatedURL = Boolean (*)(CFURLRef path, bool* isTr
 using DolSecTranslocateCreateOriginalPathForURL = CFURLRef
 __nullable (*)(CFURLRef translocatedPath, CFErrorRef* __nullable error);
 
+#ifndef IPHONEOS
 static DolSecTranslocateIsTranslocatedURL s_is_translocated_url;
 static DolSecTranslocateCreateOriginalPathForURL s_create_orig_path;
+#endif
 #endif
 
 FileInfo::FileInfo(const std::string& path) : FileInfo(path.c_str())
@@ -691,6 +693,8 @@ std::string GetBundleDirectory()
   //
   // The headers can be found under "Security" on opensource.apple.com:
   // Security/OSX/libsecurity_translocate/lib/SecTranslocate.h
+  // (App translocation is macOS-only; Apple embedded platforms have no such API.)
+#ifndef IPHONEOS
   if (!s_security_framework.IsOpen())
   {
     s_security_framework.Open("/System/Library/Frameworks/Security.framework/Security");
@@ -699,14 +703,16 @@ std::string GetBundleDirectory()
   }
 
   bool is_translocated = false;
-  s_is_translocated_url(bundle_ref, &is_translocated, nullptr);
+  if (s_is_translocated_url)
+    s_is_translocated_url(bundle_ref, &is_translocated, nullptr);
 
-  if (is_translocated)
+  if (is_translocated && s_create_orig_path)
   {
     CFURLRef untranslocated_ref = s_create_orig_path(bundle_ref, nullptr);
     CFRelease(bundle_ref);
     bundle_ref = untranslocated_ref;
   }
+#endif
 
   char app_bundle_path[MAXPATHLEN];
   CFStringRef bundle_path = CFURLCopyFileSystemPath(bundle_ref, kCFURLPOSIXPathStyle);
@@ -765,7 +771,10 @@ std::string GetExeDirectory()
 static std::string CreateSysDirectoryPath()
 {
 #define SYS_FOLDER_NAME "Sys"
-#if defined __APPLE__
+#if defined(__APPLE__) && defined(IPHONEOS)
+// iOS-family app bundles are flat: resources sit at the bundle root.
+#define SYSDATA_DIR SYS_FOLDER_NAME
+#elif defined __APPLE__
 #define SYSDATA_DIR "Contents/Resources/" SYS_FOLDER_NAME
 #else
 #define SYSDATA_DIR DATA_DIR SYS_FOLDER_NAME

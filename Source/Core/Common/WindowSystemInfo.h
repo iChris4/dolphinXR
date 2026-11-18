@@ -13,6 +13,8 @@ enum class WindowSystemType
   Wayland,
   FBDev,
   Haiku,
+  // Apple Vision Pro. render_surface is the CAMetalLayer the app created for the game window.
+  VisionOS,
 };
 
 struct WindowSystemInfo

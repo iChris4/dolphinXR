@@ -12,6 +12,7 @@
 #include "Core/PowerPC/Interpreter/Interpreter_FPUtils.h"
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PowerPC.h"
+#include "Core/PowerPC/StaticRecomp/StaticRecompLockstep.h"
 #include "Core/System.h"
 
 /*
@@ -253,8 +254,12 @@ void Interpreter::mfspr(Interpreter& interpreter, UGeckoInstruction inst)
 
   case SPR_TL:
   case SPR_TU:
+    // StaticRecomp lockstep pins the timebase to native's cached per-burst value so both engines
+    // see identical mftb inputs (see StaticRecompLockstep).
     interpreter.m_system.GetPowerPC().WriteFullTimeBaseValue(
-        interpreter.m_system.GetSystemTimers().GetFakeTimeBase());
+        StaticRecompLockstep::g_tb_override_active ?
+            StaticRecompLockstep::g_tb_override_value :
+            interpreter.m_system.GetSystemTimers().GetFakeTimeBase());
     break;
 
   case SPR_WPAR:

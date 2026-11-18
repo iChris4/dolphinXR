@@ -16,7 +16,10 @@
 #else
 #include <stdio.h>
 #include <sys/mman.h>
-#if defined(_M_ARM_64) && defined(__APPLE__)
+// Apple Silicon JIT: MAP_JIT pages toggled per thread between writable and executable. Not on
+// platforms without runtime code generation (visionOS), where those APIs are unavailable.
+#if defined(_M_ARM_64) && defined(__APPLE__) && !defined(DOLPHIN_NO_JIT)
+#define APPLE_ARM64_JIT_PAGES 1
 #include <pthread.h>
 #endif
 #if defined __APPLE__ || defined __FreeBSD__ || defined __OpenBSD__ || defined __NetBSD__
@@ -35,11 +38,16 @@ namespace Common
 
 void* AllocateExecutableMemory(size_t size)
 {
+#if defined(DOLPHIN_NO_JIT)
+  // Nothing may generate code at runtime on this platform; a caller here is a bug.
+  PanicAlertFmt("Executable memory is not available on this platform");
+  return nullptr;
+#endif
 #if defined(_WIN32)
   void* ptr = VirtualAlloc(nullptr, size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 #else
   int map_flags = MAP_ANON | MAP_PRIVATE;
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(DOLPHIN_NO_JIT)
   map_flags |= MAP_JIT;
 #endif
   void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC, map_flags, -1, 0);
@@ -93,7 +101,7 @@ static int& JITPageWriteNestCounter()
 // Allows a thread to write to executable memory, but not execute the data.
 void JITPageWriteEnableExecuteDisable()
 {
-#if defined(_M_ARM_64) && defined(__APPLE__)
+#if defined(APPLE_ARM64_JIT_PAGES)
   if (JITPageWriteNestCounter() == 0)
   {
     pthread_jit_write_protect_np(0);
@@ -112,7 +120,7 @@ void JITPageWriteDisableExecuteEnable()
   if (JITPageWriteNestCounter() < 0)
     PanicAlertFmt("JITPageWriteNestCounter() underflowed");
 
-#if defined(_M_ARM_64) && defined(__APPLE__)
+#if defined(APPLE_ARM64_JIT_PAGES)
   if (JITPageWriteNestCounter() == 0)
   {
     pthread_jit_write_protect_np(1);
@@ -214,7 +222,7 @@ bool WriteProtectMemory(void* ptr, size_t size, bool allowExecute)
     PanicAlertFmt("WriteProtectMemory failed!\nVirtualProtect: {}", GetLastErrorString());
     return false;
   }
-#elif !(defined(_M_ARM_64) && defined(__APPLE__))
+#elif !defined(APPLE_ARM64_JIT_PAGES)
   // MacOS 11.2 on ARM does not allow for changing the access permissions of pages
   // that were marked executable, instead it uses the protections offered by MAP_JIT
   // for write protection.
@@ -236,7 +244,7 @@ bool UnWriteProtectMemory(void* ptr, size_t size, bool allowExecute)
     PanicAlertFmt("UnWriteProtectMemory failed!\nVirtualProtect: {}", GetLastErrorString());
     return false;
   }
-#elif !(defined(_M_ARM_64) && defined(__APPLE__))
+#elif !defined(APPLE_ARM64_JIT_PAGES)
   // MacOS 11.2 on ARM does not allow for changing the access permissions of pages
   // that were marked executable, instead it uses the protections offered by MAP_JIT
   // for write protection.

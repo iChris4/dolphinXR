@@ -21,7 +21,9 @@
 Metal::Gfx::Gfx(MRCOwned<CAMetalLayer*> layer) : m_layer(std::move(layer))
 {
   UpdateActiveConfig();
+#if TARGET_OS_OSX
   [m_layer setDisplaySyncEnabled:g_ActiveConfig.bVSyncActive];
+#endif
 
   SetupSurface();
   g_state_tracker->FlushEncoders();
@@ -247,7 +249,10 @@ std::unique_ptr<AbstractShader> Metal::Gfx::CreateShaderFromMSL(ShaderStage stag
       return std::make_unique<ComputePipeline>(stage, reflection, std::move(msl), std::move(fn),
                                                std::move(pipeline));
     }
-    return std::make_unique<Shader>(stage, std::move(msl), std::move(fn));
+    // Vertex shaders keep their GLSL for a multiview variant (see Shader::GetMultiviewShader).
+    return std::make_unique<Shader>(stage, std::move(msl), std::move(fn),
+                                    stage == ShaderStage::Vertex ? std::string(glsl) :
+                                                                   std::string());
   }
 }
 
@@ -288,8 +293,10 @@ void Metal::Gfx::OnConfigChanged(u32 bits)
 {
   AbstractGfx::OnConfigChanged(bits);
 
+#if TARGET_OS_OSX
   if (bits & CONFIG_CHANGE_BIT_VSYNC)
     [m_layer setDisplaySyncEnabled:g_ActiveConfig.bVSyncActive];
+#endif
 
   if (bits & CONFIG_CHANGE_BIT_ANISOTROPY)
   {

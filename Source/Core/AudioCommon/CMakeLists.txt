@@ -23,6 +23,16 @@ if(ENABLE_CUBEB)
   target_link_libraries(audiocommon PRIVATE cubeb)
 endif()
 
+if(VISIONOS)
+  # RemoteIO audio unit output (cubeb has no visionOS backend).
+  find_library(AUDIOTOOLBOX_LIBRARY AudioToolbox)
+  target_sources(audiocommon PRIVATE
+    CoreAudioSoundStream.cpp
+    CoreAudioSoundStream.h
+  )
+  target_link_libraries(audiocommon PRIVATE ${AUDIOTOOLBOX_LIBRARY})
+endif()
+
 if(ANDROID)
   find_package(OpenSLES)
   if(OPENSLES_FOUND)

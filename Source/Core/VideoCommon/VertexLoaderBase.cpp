@@ -237,6 +237,11 @@ std::unique_ptr<VertexLoaderBase> VertexLoaderBase::CreateVertexLoader(const TVt
 {
   const VertexLoaderType loader_type = g_ActiveConfig.vertex_loader_type;
 
+#ifdef DOLPHIN_NO_JIT
+  // The native loaders generate machine code at runtime.
+  return std::make_unique<VertexLoader>(vtx_desc, vtx_attr);
+#endif
+
   if (loader_type == VertexLoaderType::Software)
   {
     return std::make_unique<VertexLoader>(vtx_desc, vtx_attr);

@@ -223,6 +223,10 @@ Metal::Framebuffer::Framebuffer(AbstractTexture* color, AbstractTexture* depth,
   }
   for (size_t i = 0; i < m_additional_color_textures.size(); i++)
     InitDesc(desc.colorAttachments[i + 1], m_additional_color_textures[i]);
+  // Layered (stereo) targets: lets a layered pipeline's vertex function pick the slice. A clear
+  // load action clears every slice.
+  if (layers > 1)
+    [desc setRenderTargetArrayLength:layers];
 }
 
 Metal::Framebuffer::~Framebuffer() = default;

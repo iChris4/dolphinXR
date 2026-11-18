@@ -12,6 +12,11 @@
 #endif
 
 #include <SDL3/SDL.h>
+#ifdef IPHONEOS
+// The app owns main(); SDL_MAIN_HANDLED keeps SDL_main.h from renaming it.
+#define SDL_MAIN_HANDLED
+#include <SDL3/SDL_main.h>
+#endif
 
 #include "Common/Event.h"
 #include "Common/Logging/Log.h"
@@ -198,9 +203,19 @@ InputBackend::InputBackend(ControllerInterface* controller_interface)
     {
       Common::ScopeGuard init_guard([this] { m_init_event.Set(); });
 
+#ifdef IPHONEOS
+      // On Apple's embedded platforms SDL_Init fails unless SDL's own main() ran, or this says
+      // the app has done the equivalent set-up.
+      SDL_SetMainReady();
+      // SDL_WaitEvent below pumps events every millisecond, and each pump would read every open
+      // gamepad through the GameController framework: most of a core. UpdateInput reads them at
+      // the emulated poll rate instead; connections still arrive as events.
+      SDL_SetHint(SDL_HINT_AUTO_UPDATE_JOYSTICKS, "0");
+      SDL_SetHint(SDL_HINT_AUTO_UPDATE_SENSORS, "0");
+#endif
       if (!SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_HAPTIC | SDL_INIT_GAMEPAD))
       {
-        ERROR_LOG_FMT(CONTROLLERINTERFACE, "SDL failed to initialize");
+        ERROR_LOG_FMT(CONTROLLERINTERFACE, "SDL failed to initialize: {}", SDL_GetError());
         return;
       }
 

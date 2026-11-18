@@ -480,7 +480,7 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
     // replaced positions, mirroring the specialized VS and the GS Vulkan VR path.
     // On Vulkan the first two distances carry the Screen Pane clip's left/right edges (1.0 for
     // other VR draws) and gl_ClipDistance[2..3] its bottom/top edges.
-    if (vr_multiview_vs && api_type == APIType::Vulkan)
+    if (vr_multiview_vs && (api_type == APIType::Vulkan || api_type == APIType::Metal))
     {
       out.Write("if (vr_pos_replaced) {{\n"
                 "  clipDist0 = vr_pane_clip_dist.x;\n"
@@ -608,7 +608,7 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
   {
     out.Write("gl_ClipDistance[0] = clipDist0;\n"
               "gl_ClipDistance[1] = clipDist1;\n");
-    if (vr_multiview_vs && api_type == APIType::Vulkan)
+    if (vr_multiview_vs && (api_type == APIType::Vulkan || api_type == APIType::Metal))
     {
       out.Write("gl_ClipDistance[2] = vr_pane_clip_dist.z;\n"
                 "gl_ClipDistance[3] = vr_pane_clip_dist.w;\n");

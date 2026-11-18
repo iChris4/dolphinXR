@@ -2065,6 +2065,7 @@ void VertexManagerBase::Flush()
               // NEXT frame render from it (never mid-frame). The draw itself renders
               // normally unless the override hides it. Gating capture (not application) on
               // the toggle means disabling glides the camera back to the default position.
+#ifdef ENABLE_VR
               if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !vr_flat_mode &&
                   g_ActiveConfig.vr_enable_camera_anchor && VR::g_openxr &&
                   VR::g_openxr->IsSessionRunning())
@@ -2130,6 +2131,7 @@ void VertexManagerBase::Flush()
                 if (anchor_params.hide)
                   elements_skip = true;
               }
+#endif  // ENABLE_VR
             }
             else if (handling == ShaderHunter::HandlingType::ControllerAnchor)
             {
@@ -2143,6 +2145,7 @@ void VertexManagerBase::Flush()
               // for exactly one draw. Draws with per-vertex position-matrix indices
               // (posmtx) ignore posnormalmatrix entirely — the log flags those so a
               // non-moving element is diagnosable immediately.
+#ifdef ENABLE_VR
               if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !vr_flat_mode &&
                   g_ActiveConfig.vr_enable_controller_anchor && VR::g_openxr &&
                   VR::g_openxr->IsSessionRunning())
@@ -2219,6 +2222,7 @@ void VertexManagerBase::Flush()
                                m_draw_counter, controller_anchor_params.hand == 0 ? "L" : "R");
                 }
               }
+#endif  // ENABLE_VR
             }
             else
             {
@@ -2897,11 +2901,13 @@ void VertexManagerBase::OnEndFrame()
 #endif
   ElementsGroupManager::GetInstance().OnFrameEnd();
   Core::System::GetInstance().GetGeometryShaderManager().OnEndFrame();
+#ifdef ENABLE_VR
   if (VR::g_openxr)
     VR::g_openxr->CommitCameraAnchorFrame();
   // A VR patch hides the character's head only while an anchor holds the camera.
   VR::CameraAnchorSource::SetEngaged(VR::g_openxr && VR::g_openxr->IsSessionRunning() &&
                                      VR::g_openxr->IsCameraAnchorEngaged());
+#endif
   TextureElementManager::GetInstance().OnFrameEnd();
   HideObjectEngine::Engine::GetInstance().OnFrameEnd();
   GetMetroidElementClassifier().ResetFrame();

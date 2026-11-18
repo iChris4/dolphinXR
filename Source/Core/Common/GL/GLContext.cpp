@@ -5,7 +5,7 @@
 
 #include "Common/GL/GLContext.h"
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(IPHONEOS)
 #include "Common/GL/GLInterface/AGL.h"
 #endif
 #if defined(_WIN32)
@@ -79,7 +79,7 @@ std::unique_ptr<GLContext> GLContext::Create(const WindowSystemInfo& wsi, bool s
                                              bool prefer_gles)
 {
   std::unique_ptr<GLContext> context;
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(IPHONEOS)
   if (wsi.type == WindowSystemType::MacOS || wsi.type == WindowSystemType::Headless)
     context = std::make_unique<GLContextAGL>();
 #endif

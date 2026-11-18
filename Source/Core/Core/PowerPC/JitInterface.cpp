@@ -17,13 +17,14 @@
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PPCSymbolDB.h"
 #include "Core/PowerPC/PowerPC.h"
+#include "Core/PowerPC/StaticRecomp/StaticRecompCore.h"
 #include "Core/System.h"
 
-#ifdef _M_X86_64
+#if defined(_M_X86_64) && !defined(DOLPHIN_NO_JIT)
 #include "Core/PowerPC/Jit64/Jit.h"
 #endif
 
-#ifdef _M_ARM_64
+#if defined(_M_ARM_64) && !defined(DOLPHIN_NO_JIT)
 #include "Core/PowerPC/JitArm64/Jit.h"
 #endif
 
@@ -38,6 +39,12 @@ void JitInterface::SetJit(std::unique_ptr<JitBase> jit)
   m_jit = std::move(jit);
 }
 
+void JitInterface::SetStaticRecompModuleSource(StaticRecompModuleSource source)
+{
+  ASSERT(!m_jit);
+  m_static_recomp_module_source = std::move(source);
+}
+
 void JitInterface::DoState(PointerWrap& p)
 {
   if (m_jit && p.IsReadMode())
@@ -48,18 +55,22 @@ CPUCoreBase* JitInterface::InitJitCore(PowerPC::CPUCore core)
 {
   switch (core)
   {
-#ifdef _M_X86_64
+#if defined(_M_X86_64) && !defined(DOLPHIN_NO_JIT)
   case PowerPC::CPUCore::JIT64:
     m_jit = std::make_unique<Jit64>(m_system);
     break;
 #endif
-#ifdef _M_ARM_64
+#if defined(_M_ARM_64) && !defined(DOLPHIN_NO_JIT)
   case PowerPC::CPUCore::JITARM64:
     m_jit = std::make_unique<JitArm64>(m_system);
     break;
 #endif
   case PowerPC::CPUCore::CachedInterpreter:
     m_jit = std::make_unique<CachedInterpreter>(m_system);
+    break;
+
+  case PowerPC::CPUCore::StaticRecomp:
+    m_jit = std::make_unique<StaticRecompCore>(m_system, m_static_recomp_module_source);
     break;
 
   default:

@@ -69,7 +69,6 @@ add_library(common
   FatFsUtil.h
   FileSearch.cpp
   FileSearch.h
-  FilesystemWatcher.cpp
   FilesystemWatcher.h
   FileUtil.cpp
   FileUtil.h
@@ -203,6 +202,13 @@ if ((DEFINED CMAKE_ANDROID_ARCH_ABI AND CMAKE_ANDROID_ARCH_ABI MATCHES "x86|x86_
   target_link_libraries(common PRIVATE bdisasm)
 endif()
 
+if(VISIONOS)
+  # The watcher library uses macOS-only FSEvents on Apple platforms; a linkable no-op instead.
+  target_sources(common PRIVATE FilesystemWatcher_iOS.cpp)
+else()
+  target_sources(common PRIVATE FilesystemWatcher.cpp)
+endif()
+
 if (APPLE)
   target_link_libraries(common
   PRIVATE
@@ -322,7 +328,7 @@ if(WIN32)
     WindowsDevice.h
     WindowsRegistry.cpp
   )
-elseif(APPLE)
+elseif(APPLE AND NOT VISIONOS)
   target_sources(common PRIVATE
     GL/GLInterface/AGL.h
     GL/GLInterface/AGL.mm

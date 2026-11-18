@@ -5,13 +5,24 @@ cmake_minimum_required(VERSION 3.25...4.2.1)
 
 cmake_policy(SET CMP0080 OLD) # allow using BundleUtilities at configure time
 
-# Minimum OS X version.
-# This is inserted into the Info.plist as well.
-set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0.0" CACHE STRING "")
+if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+  # Apple Vision Pro. Pass -DCMAKE_OSX_SYSROOT=xrsimulator for the simulator.
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "2.0" CACHE STRING "")
+  set(CMAKE_OSX_SYSROOT xros CACHE STRING "")
+  set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING "")
+  # CMake leaves the processor empty when cross-compiling to visionOS.
+  if(NOT CMAKE_SYSTEM_PROCESSOR)
+    set(CMAKE_SYSTEM_PROCESSOR arm64)
+  endif()
+else()
+  # Minimum OS X version.
+  # This is inserted into the Info.plist as well.
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0.0" CACHE STRING "")
 
-# When we don't set a sysroot, AppleClang will put /usr/local/include at a higher
-# priority than -isystem paths, which can cause weird include issues in Externals
-set(CMAKE_OSX_SYSROOT macosx CACHE STRING "")
+  # When we don't set a sysroot, AppleClang will put /usr/local/include at a higher
+  # priority than -isystem paths, which can cause weird include issues in Externals
+  set(CMAKE_OSX_SYSROOT macosx CACHE STRING "")
+endif()
 
 set(CMAKE_USER_MAKE_RULES_OVERRIDE "CMake/FlagsOverride.cmake")
 
@@ -158,6 +169,32 @@ if(APPLE)
   option(MACOS_CODE_SIGNING "Enable codesigning" ON)
   option(USE_BUNDLED_MOLTENVK "Build MoltenVK from Externals with Dolphin-specific patches" ON)
   set(MACOS_CODE_SIGNING_IDENTITY "-" CACHE STRING "The identity used for codesigning.")
+endif()
+
+# Apple Vision Pro: an embedded Apple platform. The app frontend lives in Source/visionOS; the core
+# is built as libraries. No runtime code generation (CPU: CachedInterpreter / StaticRecomp; vertex
+# loader: software), Metal only, no desktop USB, HID, audio or updater libraries. IPHONEOS marks the
+# Apple embedded (iOS-family) code paths, visionOS included.
+if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+  set(VISIONOS TRUE)
+  message(STATUS "Building for visionOS")
+  add_definitions(-DIPHONEOS -DDOLPHIN_NO_JIT)
+  set(ENABLE_QT 0)
+  set(ENABLE_NOGUI 0)
+  set(ENABLE_CLI_TOOL 0)
+  set(ENABLE_VULKAN 0)
+  set(ENABLE_CUBEB 0)
+  set(ENABLE_LLVM 0)
+  set(ENABLE_TESTS 0)
+  set(ENABLE_AUTOUPDATE 0)
+  set(ENABLE_ANALYTICS 0)
+  set(ENCODE_FRAMEDUMPS 0)
+  set(USE_UPNP 0)
+  set(USE_DISCORD_PRESENCE 0)
+  set(USE_MGBA 0)
+  set(USE_RETRO_ACHIEVEMENTS 0)
+  set(USE_BUNDLED_MOLTENVK 0)
+  set(MACOS_CODE_SIGNING 0)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -386,6 +423,14 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
   find_library(IOB_LIBRARY IOBluetooth)
   find_library(IOK_LIBRARY IOKit)
   find_library(OPENGL_LIBRARY OpenGL)
+endif()
+
+if(VISIONOS)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-dead_strip,-dead_strip_dylibs")
+  # As on macOS: -fno-exceptions, and fmt included from Objective-C++ must not throw.
+  add_definitions(-DFMT_EXCEPTIONS=0)
+  find_library(COREFOUNDATION_LIBRARY CoreFoundation)
+  find_library(FOUNDATION_LIBRARY Foundation)
 endif()
 
 if(ENABLE_LTO)
@@ -656,7 +701,7 @@ if(ENABLE_VULKAN)
 endif()
 
 set(DOLPHIN_OPENXR_SUPPORTED_PLATFORM OFF)
-if(WIN32 OR ANDROID OR (UNIX AND NOT APPLE AND NOT ANDROID))
+if(WIN32 OR ANDROID OR VISIONOS OR (UNIX AND NOT APPLE AND NOT ANDROID))
   set(DOLPHIN_OPENXR_SUPPORTED_PLATFORM ON)
 endif()
 
@@ -671,7 +716,12 @@ if(ENABLE_VR AND UNIX AND NOT APPLE AND NOT ANDROID AND NOT ENABLE_VULKAN)
   message(WARNING "Desktop Linux OpenXR VR requires ENABLE_VULKAN: the OpenGL backend cannot create an OpenXR session on Linux.")
 endif()
 
-if(ENABLE_VR)
+if(ENABLE_VR AND VISIONOS)
+  add_definitions(-DENABLE_VR)
+  # No OpenXR runtime on visionOS: the CompositorServices/ARKit provider stands in for the Khronos
+  # loader (target openxr_loader), with the Khronos headers.
+  add_subdirectory(Externals/xr_visionos)
+elseif(ENABLE_VR)
   add_definitions(-DENABLE_VR)
   # Build only the OpenXR loader from the Khronos SDK; skip tests, conformance, and samples.
   set(BUILD_API_LAYERS OFF CACHE BOOL "" FORCE)
@@ -682,8 +732,8 @@ if(ENABLE_VR)
   add_subdirectory(Externals/OpenXR "${CMAKE_BINARY_DIR}/Externals/OpenXR" EXCLUDE_FROM_ALL)
 endif()
 
-if(NOT (WIN32 AND _M_ARM_64))
-  # OpenGL is available on all platforms except windows-arm64
+if(NOT (WIN32 AND _M_ARM_64) AND NOT VISIONOS)
+  # OpenGL is available on all platforms except windows-arm64 and visionOS
   add_definitions(-DHAS_OPENGL)
 endif()
 
@@ -736,7 +786,8 @@ if(ENABLE_CUBEB)
   add_definitions(-DHAVE_CUBEB)
 endif()
 
-if(NOT ANDROID)
+# No USB host access on visionOS (no IOKit).
+if(NOT ANDROID AND NOT VISIONOS)
   dolphin_find_optional_system_library(LibUSB Externals/libusb)
   add_definitions(-D__LIBUSB__)
 endif()
@@ -757,7 +808,7 @@ dolphin_find_optional_system_library(MBEDTLS Externals/mbedtls 2.28)
 
 dolphin_find_optional_system_library(CURL Externals/curl)
 
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT VISIONOS)
   dolphin_find_optional_system_library(HIDAPI Externals/hidapi)
 endif()
 

@@ -9,6 +9,7 @@
 #include <TargetConditionals.h>
 #include <spirv_msl.hpp>
 
+#include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
 
 #include "VideoCommon/Constants.h"
@@ -78,8 +79,12 @@ void Metal::Util::PopulateBackendInfo(BackendInfo* backend_info)
   backend_info->bSupportsPartialMultisampleResolve = false;
   backend_info->bSupportsDynamicVertexLoader = true;
   backend_info->bSupportsVSLinePointExpand = true;
+#if TARGET_OS_OSX
   backend_info->bSupportsHDROutput =
       1.0 < [[NSScreen deepestScreen] maximumPotentialExtendedDynamicRangeColorComponentValue];
+#else
+  backend_info->bSupportsHDROutput = false;
+#endif
 }
 
 void Metal::Util::PopulateBackendInfoAdapters(BackendInfo* backend_info,
@@ -255,6 +260,18 @@ void Metal::Util::PopulateBackendInfoFeatures(const VideoConfig& config, Backend
     vendor = DriverDetails::VENDOR_APPLE;
   DriverDetails::Init(DriverDetails::API_METAL, vendor, DriverDetails::DRIVER_APPLE, 0.0,
                       DriverDetails::Family::UNKNOWN, std::move(name));
+
+  // Multiview (stereo without geometry shaders) is instanced layered rendering: a vertex function
+  // writing [[render_target_array_index]]. Every Mac GPU has it; Apple GPUs from the A12 on.
+#if TARGET_OS_OSX || TARGET_OS_SIMULATOR
+  // The simulator's GPU runs on the Mac's and reports no Apple family, but renders layers.
+  backend_info->bSupportsMultiview = true;
+#else
+  backend_info->bSupportsMultiview = [device supportsFamily:MTLGPUFamilyApple5];
+#endif
+  INFO_LOG_FMT(VIDEO, "Metal: {}: layered rendering (multiview stereo) {}",
+               [[device name] UTF8String],
+               backend_info->bSupportsMultiview ? "supported" : "unsupported");
 
 #if TARGET_OS_OSX
   backend_info->bSupportsDepthClamp = true;
@@ -493,8 +510,13 @@ MakeResourceBinding(spv::ExecutionModel stage, u32 set, u32 binding,  //
 
 std::optional<std::string>
 Metal::Util::TranslateShaderToMSL(ShaderStage stage, std::string_view source,
-                                  VideoCommon::ShaderIncluder* shader_includer)
+                                  VideoCommon::ShaderIncluder* shader_includer,
+                                  bool force_multiview)
 {
+  const bool multiview =
+      (stage == ShaderStage::Vertex && force_multiview) ||
+      (stage != ShaderStage::Compute && source.find("GL_EXT_multiview") != std::string_view::npos);
+
   std::string full_source;
 
   std::string_view header = stage == ShaderStage::Compute ? COMPUTE_SHADER_HEADER : SHADER_HEADER;
@@ -554,13 +576,15 @@ Metal::Util::TranslateShaderToMSL(ShaderStage stage, std::string_view source,
   spirv_cross::CompilerMSL::Options options;
 #if TARGET_OS_OSX
   options.platform = spirv_cross::CompilerMSL::Options::macOS;
-#elif TARGET_OS_IOS
+#else
+  // iOS, iPadOS and visionOS: Apple GPUs.
   options.platform = spirv_cross::CompilerMSL::Options::iOS;
   // Otherwise SPIRV-Cross will try to compile subgroup ops to quad ops instead
   // (And crash because there's no quad_min or quad_max)
   options.ios_use_simdgroup_functions = Metal::g_features.subgroup_ops;
-#else
-  #error What platform is this?
+  // Every GPU these platforms run on has base vertex/instance (A9 and later); multiview derives
+  // the view index from the instance index relative to the base instance.
+  options.ios_support_base_vertex_instance = true;
 #endif
   // clang-format on
 
@@ -568,6 +592,12 @@ Metal::Util::TranslateShaderToMSL(ShaderStage stage, std::string_view source,
 
   options.set_msl_version(2, 3);
   options.use_framebuffer_fetch_subpasses = true;
+  if (multiview)
+  {
+    options.multiview = true;
+    options.multiview_layered_rendering = true;
+    options.view_mask_buffer_index = VIEW_MASK_BUFFER_INDEX;
+  }
   compiler.set_msl_options(options);
 
   for (auto& binding : resource_bindings)

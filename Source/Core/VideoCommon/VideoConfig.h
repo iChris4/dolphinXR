@@ -495,13 +495,18 @@ struct VideoConfig final
   // The 2-layer stereo EFB is rendered through VK_KHR_multiview: both views in one render pass,
   // no geometry shader. Used by OpenXR stereo (the VS applies the per-eye HMD projection) and by
   // the VR flat screen with Dolphin's own stereoscopy (the VS applies the per-view stereo
-  // offset). Desktop stereoscopy keeps the stereo GS. Multiview needs single-sampled targets.
-  // The shader host config, the EFB framebuffer state, the Vulkan EFB framebuffer and
-  // UseVSForLinePointExpand all derive from this, so they always agree.
+  // offset). Desktop stereoscopy keeps the stereo GS where the backend has one; a backend
+  // without geometry shaders (Metal) renders every stereo mode through multiview. Multiview needs
+  // single-sampled targets. The shader host config, the EFB framebuffer state, the Vulkan EFB
+  // framebuffer and UseVSForLinePointExpand all derive from this, so they always agree.
   bool UseStereoMultiview() const
   {
+    if (!g_backend_info.bSupportsMultiview || iMultisamples != 1)
+      return false;
+    if (!g_backend_info.bSupportsGeometryShaders)
+      return stereo_mode != StereoMode::Off;
 #ifdef ENABLE_VR
-    if (!vr_use_vulkan_multiview || !g_backend_info.bSupportsMultiview || iMultisamples != 1)
+    if (!vr_use_vulkan_multiview)
       return false;
     return stereo_mode == StereoMode::OpenXR || (vr_flat_screen && stereo_mode != StereoMode::Off);
 #else

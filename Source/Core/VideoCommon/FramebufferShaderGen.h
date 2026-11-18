@@ -11,9 +11,11 @@ enum class TextureFormat;
 
 namespace FramebufferShaderGen
 {
-std::string GenerateScreenQuadVertexShader();
+// multiview: the layer in v_tex0.z is the view index (gl_ViewIndex), for layered copies on
+// backends without a layer-expanding passthrough geometry shader.
+std::string GenerateScreenQuadVertexShader(bool multiview = false);
 std::string GeneratePassthroughGeometryShader(u32 num_tex, u32 num_colors);
-std::string GenerateTextureCopyVertexShader();
+std::string GenerateTextureCopyVertexShader(bool multiview = false);
 std::string GenerateTextureCopyPixelShader();
 std::string GenerateResolveColorPixelShader(u32 samples);
 std::string GenerateResolveDepthPixelShader(u32 samples);

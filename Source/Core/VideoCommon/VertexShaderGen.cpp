@@ -364,7 +364,10 @@ static void WriteEmulatedVertexBodyHeader(APIType api_type, const ShaderHostConf
 
 bool UseMultiviewVS(APIType api_type, const ShaderHostConfig& host_config)
 {
-  return host_config.vk_multiview && (api_type == APIType::OpenGL || api_type == APIType::Vulkan);
+  // Metal compiles Vulkan-style GLSL through SPIR-V; SPIRV-Cross maps gl_ViewIndex to instanced
+  // layered rendering.
+  return host_config.vk_multiview && (api_type == APIType::OpenGL || api_type == APIType::Vulkan ||
+                                      api_type == APIType::Metal);
 }
 
 bool UseVRMultiviewVSProjection(APIType api_type, const ShaderHostConfig& host_config)
@@ -532,7 +535,7 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
   // the game's camera is clipped instead of folding back in front of the view.
   out.Write("\t\tfloat vr_game_w = (abs(o.pos.w) > 1.0e-5) ? o.pos.w : "
             "((o.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
-  if (api_type == APIType::Vulkan)
+  if (api_type == APIType::Vulkan || api_type == APIType::Metal)
   {
     // Vulkan only guards the divide (w ~ 0 gives NaN/Inf and vanishing geometry);
     // do NOT clamp x/y — that squashes elements extending past the screen bounds.
@@ -583,7 +586,7 @@ void GenerateVRMultiviewVSProjection(ShaderCode& out, APIType api_type,
   out.Write("\telse if (" I_STEREOPARAMS ".w < -0.5f)\n\t{{\n");
   out.Write("\t\tfloat vr_game_w = (abs(o.pos.w) > 1.0e-5) ? o.pos.w : "
             "((o.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
-  if (api_type == APIType::Vulkan)
+  if (api_type == APIType::Vulkan || api_type == APIType::Metal)
   {
     // Vulkan only guards the divide (w ~ 0 gives NaN/Inf and vanishing geometry);
     // do NOT clamp x/y — that squashes elements extending past the screen bounds.
@@ -1118,9 +1121,9 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
     // replaced o.pos. This is what the working GS path does on Vulkan.
     if (UseVRMultiviewVSProjection(api_type, host_config))
     {
-      // On Vulkan the first two distances carry the Screen Pane clip's left/right edges
-      // (1.0 for other VR draws) and gl_ClipDistance[2..3] its bottom/top edges.
-      if (api_type == APIType::Vulkan)
+      // On Vulkan (and Metal) the first two distances carry the Screen Pane clip's left/right
+      // edges (1.0 for other VR draws) and gl_ClipDistance[2..3] its bottom/top edges.
+      if (api_type == APIType::Vulkan || api_type == APIType::Metal)
       {
         out.Write("if (vr_pos_replaced) {{\n"
                   "  clipDist0 = vr_pane_clip_dist.x;\n"
@@ -1260,7 +1263,8 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
   {
     out.Write("gl_ClipDistance[0] = clipDist0;\n"
               "gl_ClipDistance[1] = clipDist1;\n");
-    if (api_type == APIType::Vulkan && UseVRMultiviewVSProjection(api_type, host_config))
+    if ((api_type == APIType::Vulkan || api_type == APIType::Metal) &&
+        UseVRMultiviewVSProjection(api_type, host_config))
     {
       out.Write("gl_ClipDistance[2] = vr_pane_clip_dist.z;\n"
                 "gl_ClipDistance[3] = vr_pane_clip_dist.w;\n");

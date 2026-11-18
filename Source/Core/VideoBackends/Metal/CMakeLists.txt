@@ -40,4 +40,13 @@ PRIVATE
   ${QUARTZCORE_LIBRARY}
 )
 
+# OpenXR presentation through the visionOS provider (Externals/xr_visionos, target openxr_loader).
+if(ENABLE_VR AND VISIONOS)
+  target_sources(videometal PRIVATE
+    MTLOpenXR.h
+    MTLOpenXR.mm
+  )
+  target_link_libraries(videometal PRIVATE openxr_loader)
+endif()
+
 target_compile_options(videometal PRIVATE -fno-objc-arc)

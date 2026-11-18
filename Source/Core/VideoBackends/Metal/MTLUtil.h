@@ -3,7 +3,11 @@
 
 #pragma once
 
+#include <TargetConditionals.h>
+
+#if TARGET_OS_OSX
 #include <AppKit/NSScreen.h>
+#endif
 #include <Metal/Metal.h>
 
 #include <vector>
@@ -54,8 +58,17 @@ static inline bool HasStencil(AbstractTextureFormat format)
   return format == AbstractTextureFormat::D24_S8 || format == AbstractTextureFormat::D32F_S8;
 }
 
+// Metal has no multiview. Instanced layered rendering stands in for it: a multiview shader draws
+// one instance per view, SPIRV-Cross derives gl_ViewIndex from the instance index and writes it to
+// [[render_target_array_index]]. It reads {first view, view count} from this buffer index, in the
+// vertex and (when the fragment shader uses gl_ViewIndex) fragment stages.
+constexpr u32 VIEW_MASK_BUFFER_INDEX = 24;
+
+// Shaders whose GLSL enables GL_EXT_multiview are translated as multiview shaders;
+// force_multiview does so for any vertex shader (a layered variant of a utility shader).
 std::optional<std::string> TranslateShaderToMSL(ShaderStage stage, std::string_view source,
-                                                VideoCommon::ShaderIncluder* shader_includer);
+                                                VideoCommon::ShaderIncluder* shader_includer,
+                                                bool force_multiview = false);
 
 }  // namespace Util
 }  // namespace Metal

@@ -68,9 +68,11 @@ static void WriteHeader(APIType api_type, ShaderCode& out)
             "}};\n");
 }
 
-ShaderCode GenerateVertexShader(APIType api_type)
+ShaderCode GenerateVertexShader(APIType api_type, bool multiview)
 {
   ShaderCode out;
+  if (multiview)
+    out.Write("#extension GL_EXT_multiview : require\n");
   WriteHeader(api_type, out);
 
   if (g_backend_info.bSupportsGeometryShaders)
@@ -90,6 +92,8 @@ ShaderCode GenerateVertexShader(APIType api_type)
   out.Write(
       "  opos = float4(v_tex0.xy * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 0.0f, 1.0f);\n");
   out.Write("  v_tex0 = float3(src_offset + (src_size * v_tex0.xy), 0.0f);\n");
+  if (multiview)
+    out.Write("  v_tex0.z = float(gl_ViewIndex);\n");
 
   // NDC space is flipped in Vulkan
   if (api_type == APIType::Vulkan)

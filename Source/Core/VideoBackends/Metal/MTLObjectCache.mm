@@ -306,6 +306,8 @@ public:
       framebuffer.samples = cfg.framebuffer_state.samples.Value();
       framebuffer.additional_color_attachment_count =
           cfg.framebuffer_state.additional_color_attachment_count.Value();
+      // A layered pipeline uses a different vertex function (its multiview variant).
+      framebuffer.multiview = cfg.framebuffer_state.multiview.Value();
       blend.color_update = cfg.blending_state.color_update.Value();
       blend.alpha_update = cfg.blending_state.alpha_update.Value();
       if (cfg.blending_state.blend_enable)
@@ -364,6 +366,19 @@ public:
     FramebufferState framebuffer;
   };
 
+  // Whether a pipeline draws both eye layers: it targets a multiview framebuffer and its vertex
+  // shader has a multiview variant. Without one it falls back to layer 0.
+  static bool IsLayered(const AbstractPipelineConfig& config)
+  {
+    if (!config.framebuffer_state.multiview)
+      return false;
+    if (static_cast<const Shader*>(config.vertex_shader)->GetMultiviewShader())
+      return true;
+    WARN_LOG_FMT(VIDEO, "Metal: multiview pipeline without a multiview vertex shader; only the "
+                        "left eye layer will be drawn");
+    return false;
+  }
+
   std::mutex m_mtx;
   std::condition_variable m_cv;
   std::map<PipelineID, StoredPipeline> m_pipelines;
@@ -376,7 +391,11 @@ public:
     {
       ASSERT(!config.geometry_shader);
       auto desc = MRCTransfer([MTLRenderPipelineDescriptor new]);
-      [desc setVertexFunction:static_cast<const Shader*>(config.vertex_shader)->GetShader()];
+      const Shader* vs = static_cast<const Shader*>(config.vertex_shader);
+      // A pipeline for a multiview framebuffer draws one instance per eye layer, so its vertex
+      // function must route each instance to its layer.
+      const bool layered = IsLayered(config);
+      [desc setVertexFunction:layered ? vs->GetMultiviewShader() : vs->GetShader()];
       [desc setFragmentFunction:static_cast<const Shader*>(config.pixel_shader)->GetShader()];
       if (config.usage == AbstractPipelineUsage::GXUber)
         [desc setLabel:[NSString stringWithFormat:@"GX Uber Pipeline %d", m_pipeline_counter[0]++]];
@@ -389,6 +408,8 @@ public:
       RasterizationState rs = config.rasterization_state;
       if (config.usage != AbstractPipelineUsage::GXUber)
         [desc setInputPrimitiveTopology:GetClass(rs.primitive)];
+      else if (layered)  // Layered rendering needs it; multiview expands points and lines in the VS.
+        [desc setInputPrimitiveTopology:MTLPrimitiveTopologyClassTriangle];
       MTLRenderPipelineColorAttachmentDescriptor* color0 =
           [[desc colorAttachments] objectAtIndexedSubscript:0];
       BlendingState bs = config.blending_state;
@@ -564,7 +585,7 @@ Metal::ObjectCache::CreatePipeline(const AbstractPipelineConfig& config)
   return std::make_unique<Pipeline>(config, std::move(pipeline.first), pipeline.second,
                                     Convert(config.rasterization_state.primitive),
                                     Convert(config.rasterization_state.cull_mode),
-                                    config.depth_state, config.usage);
+                                    config.depth_state, config.usage, Internal::IsLayered(config));
 }
 
 void Metal::ObjectCache::ShaderDestroyed(const Shader* shader)

@@ -38,6 +38,9 @@ enum class CPUCore
   JIT64 = 1,
   JITARM64 = 4,
   CachedInterpreter = 5,
+  // Statically recompiled per-game native module (DolRecomp output) with interpreter fallback
+  // for code the module does not cover. Without a module, it runs as the interpreter.
+  StaticRecomp = 6,
 };
 
 enum class CoreMode

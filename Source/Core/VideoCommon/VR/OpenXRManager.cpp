@@ -27,6 +27,13 @@
 #define XR_USE_PLATFORM_WIN32
 #endif
 #include <openxr/openxr_platform.h>
+#elif defined(__APPLE__)
+// visionOS provider: XR_KHR_convert_timespec_time from CLOCK_MONOTONIC, as on Android.
+#ifndef XR_USE_TIMESPEC
+#define XR_USE_TIMESPEC
+#endif
+#include <ctime>
+#include <openxr/openxr_platform.h>
 #endif
 
 #include <algorithm>
@@ -548,7 +555,7 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
 #if defined(_WIN32)
   if (runtime_has(XR_KHR_WIN32_CONVERT_PERFORMANCE_COUNTER_TIME_EXTENSION_NAME))
     enabled_extensions.push_back(XR_KHR_WIN32_CONVERT_PERFORMANCE_COUNTER_TIME_EXTENSION_NAME);
-#elif defined(ANDROID)
+#elif defined(ANDROID) || defined(__APPLE__)
   if (runtime_has(XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME))
     enabled_extensions.push_back(XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME);
 #endif
@@ -2625,7 +2632,7 @@ XrTime OpenXRManager::GetNowTime()
       return now_time;
     }
   }
-#elif defined(ANDROID)
+#elif defined(ANDROID) || defined(__APPLE__)
   if (!IsExtensionEnabled(XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME))
     return unavailable;
   if (!m_pfn_convert_now_to_time)

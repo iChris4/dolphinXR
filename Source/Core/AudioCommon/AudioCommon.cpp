@@ -14,6 +14,9 @@
 #include "AudioCommon/OpenSLESStream.h"
 #include "AudioCommon/PulseAudioStream.h"
 #include "AudioCommon/WASAPIStream.h"
+#ifdef IPHONEOS
+#include "AudioCommon/CoreAudioSoundStream.h"
+#endif
 #include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
 #include "Common/TimeUtil.h"
@@ -42,6 +45,10 @@ static std::unique_ptr<SoundStream> CreateSoundStreamForBackend(std::string_view
     return std::make_unique<OpenSLESStream>();
   else if (backend == BACKEND_WASAPI && WASAPIStream::IsValid())
     return std::make_unique<WASAPIStream>();
+#ifdef IPHONEOS
+  else if (backend == BACKEND_COREAUDIO && CoreAudioSound::IsValid())
+    return std::make_unique<CoreAudioSound>();
+#endif
   return {};
 }
 
@@ -96,6 +103,8 @@ std::string GetDefaultSoundBackend()
 {
 #if defined(ANDROID)
   return BACKEND_OPENSLES;
+#elif defined(IPHONEOS)
+  return BACKEND_COREAUDIO;
 #else
   if (CubebStream::IsValid())
     return BACKEND_CUBEB;
@@ -131,6 +140,10 @@ std::vector<std::string> GetSoundBackends()
     backends.emplace_back(BACKEND_OPENSLES);
   if (WASAPIStream::IsValid())
     backends.emplace_back(BACKEND_WASAPI);
+#ifdef IPHONEOS
+  if (CoreAudioSound::IsValid())
+    backends.emplace_back(BACKEND_COREAUDIO);
+#endif
 
   return backends;
 }

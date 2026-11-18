@@ -192,6 +192,10 @@ public:
 protected:
   virtual void DestroyBlock(JitBlock& block);
 
+  // Virtual so StaticRecomp's block cache can observe every icache invalidation (effective
+  // address + length) for its self-modifying-code guard. Overrides must call the base version.
+  virtual void InvalidateICacheInternal(u32 physical_address, u32 address, u32 length, bool forced);
+
   JitBase& m_jit;
 
 private:
@@ -201,7 +205,6 @@ private:
   void LinkBlockExits(JitBlock& block);
   void LinkBlock(JitBlock& block);
   void UnlinkBlock(const JitBlock& block);
-  void InvalidateICacheInternal(u32 physical_address, u32 address, u32 length, bool forced);
 
   JitBlock* MoveBlockIntoFastCache(u32 em_address, CPUEmuFeatureFlags feature_flags);
 

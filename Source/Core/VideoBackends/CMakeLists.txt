@@ -1,6 +1,9 @@
-add_subdirectory(OGL)
 add_subdirectory(Null)
-add_subdirectory(Software)
+# visionOS has no OpenGL; the Software renderer presents through OpenGL.
+if(NOT VISIONOS)
+  add_subdirectory(OGL)
+  add_subdirectory(Software)
+endif()
 
 if(WIN32)
   add_subdirectory(D3DCommon)

@@ -67,6 +67,11 @@ public:
                                                    MTLLoadAction load_action);
 
   void EndRenderPass();
+  // GPU-side ordering with another Metal client (the visionOS compositor): work encoded after
+  // EncodeWaitForEvent waits until `event` reaches `value`; EncodeSignalEvent sets `event` to
+  // `value` once the work encoded before it has completed. Both end the current pass.
+  void EncodeWaitForEvent(id<MTLEvent> event, u64 value);
+  void EncodeSignalEvent(id<MTLEvent> event, u64 value);
   void FlushEncoders();
   void WaitForFlushedEncoders();
   bool HasUnflushedData() { return static_cast<bool>(m_current_render_cmdbuf); }
@@ -240,6 +245,8 @@ private:
     std::array<id<MTLBuffer>, 3> fragment_buffers;
     u32 width;
     u32 height;
+    u32 layers;      // Layers of the render pass's framebuffer.
+    u32 view_count;  // Instances per draw: one per eye layer for a layered pipeline, else 1.
     MathUtil::Rectangle<int> scissor_rect;
     Util::Viewport viewport;
     MTLDepthClipMode depth_clip_mode;

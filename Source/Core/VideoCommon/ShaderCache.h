@@ -156,6 +156,10 @@ private:
 
   // Should we use geometry shaders for EFB copies?
   bool UseGeometryShaderForEFBCopies() const;
+  // Without geometry shaders (Metal), stereo copies write both eye layers through multiview: the
+  // copy vertex shader takes the layer from gl_ViewIndex and the pipeline targets a multiview
+  // framebuffer.
+  bool UseMultiviewForEFBCopies() const;
 
   // GX pipeline compiler methods
   AbstractPipelineConfig
@@ -213,6 +217,10 @@ private:
   std::unique_ptr<AbstractShader> m_screen_quad_vertex_shader;
   std::unique_ptr<AbstractShader> m_texture_copy_vertex_shader;
   std::unique_ptr<AbstractShader> m_efb_copy_vertex_shader;
+  // gl_ViewIndex variants, created when UseMultiviewForEFBCopies().
+  std::unique_ptr<AbstractShader> m_screen_quad_multiview_vertex_shader;
+  std::unique_ptr<AbstractShader> m_texture_copy_multiview_vertex_shader;
+  std::unique_ptr<AbstractShader> m_efb_copy_multiview_vertex_shader;
   std::unique_ptr<AbstractShader> m_texcoord_geometry_shader;
   std::unique_ptr<AbstractShader> m_color_geometry_shader;
   std::unique_ptr<AbstractShader> m_texture_copy_pixel_shader;

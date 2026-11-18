@@ -14,11 +14,15 @@
 #include <QuartzCore/QuartzCore.h>
 
 #include "Common/Common.h"
+#include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
 
 #include "VideoBackends/Metal/MTLBoundingBox.h"
 #include "VideoBackends/Metal/MTLGfx.h"
 #include "VideoBackends/Metal/MTLObjectCache.h"
+#ifdef ENABLE_VR
+#include "VideoBackends/Metal/MTLOpenXR.h"
+#endif
 #include "VideoBackends/Metal/MTLPerfQuery.h"
 #include "VideoBackends/Metal/MTLStateTracker.h"
 #include "VideoBackends/Metal/MTLUtil.h"
@@ -56,6 +60,7 @@ static bool WindowSystemTypeSupportsMetal(WindowSystemType type)
   switch (type)
   {
   case WindowSystemType::MacOS:
+  case WindowSystemType::VisionOS:
   case WindowSystemType::Headless:
     return true;
   default:
@@ -125,6 +130,21 @@ bool Metal::VideoBackend::Initialize(const WindowSystemInfo& wsi)
     ObjectCache::Initialize(std::move(adapter));
     g_state_tracker = std::make_unique<StateTracker>();
 
+#ifdef ENABLE_VR
+    INFO_LOG_FMT(VIDEO, "VR: stereo_mode={} (session_active={}, flat={})",
+                 static_cast<int>(g_ActiveConfig.stereo_mode),
+                 g_ActiveConfig.VRSessionActive() ? "YES" : "NO",
+                 g_ActiveConfig.vr_flat_screen ? "YES" : "NO");
+    if (g_ActiveConfig.VRSessionActive())
+    {
+      auto openxr = std::make_unique<MetalOpenXR>();
+      if (openxr->Initialize())
+        g_openxr_metal = std::move(openxr);
+      else
+        WARN_LOG_FMT(VIDEO, "OpenXR initialization failed; continuing without VR.");
+    }
+#endif
+
     return InitializeShared(
         std::make_unique<Metal::Gfx>(std::move(layer)), std::make_unique<Metal::VertexManager>(),
         std::make_unique<Metal::PerfQuery>(), std::make_unique<Metal::BoundingBox>());
@@ -133,6 +153,11 @@ bool Metal::VideoBackend::Initialize(const WindowSystemInfo& wsi)
 
 void Metal::VideoBackend::Shutdown()
 {
+#ifdef ENABLE_VR
+  // Swapchain wrappers first, then the session and instance (see DX11::VideoBackend::Shutdown).
+  g_openxr_metal.reset();
+  VR::g_openxr.reset();
+#endif
   ShutdownShared();
 
   g_state_tracker.reset();

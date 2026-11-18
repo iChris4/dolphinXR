@@ -336,6 +336,8 @@ void Metal::StateTracker::BeginRenderPass(MTLRenderPassDescriptor* descriptor)
   memset(&m_current, 0, sizeof(m_current));
   m_current.width = attachment->GetWidth();
   m_current.height = attachment->GetHeight();
+  m_current.layers = m_current_framebuffer->GetLayers();
+  m_current.view_count = 1;
   m_current.scissor_rect = MathUtil::Rectangle<int>(0, 0, m_current.width, m_current.height);
   m_current.viewport = {
       0.f, 0.f, static_cast<float>(m_current.width), static_cast<float>(m_current.height),
@@ -379,6 +381,18 @@ void Metal::StateTracker::EndRenderPass()
     [m_current_compute_encoder endEncoding];
     m_current_compute_encoder = nullptr;
   }
+}
+
+void Metal::StateTracker::EncodeWaitForEvent(id<MTLEvent> event, u64 value)
+{
+  EndRenderPass();
+  [GetRenderCmdBuf() encodeWaitForEvent:event value:value];
+}
+
+void Metal::StateTracker::EncodeSignalEvent(id<MTLEvent> event, u64 value)
+{
+  EndRenderPass();
+  [GetRenderCmdBuf() encodeSignalEvent:event value:value];
 }
 
 void Metal::StateTracker::FlushEncoders()
@@ -734,6 +748,24 @@ void Metal::StateTracker::PrepareRender()
       m_current.pipeline = pipe->Get();
       [enc setRenderPipelineState:pipe->Get()];
     }
+    // Multiview stand-in: a layered pipeline draws one instance per layer of the framebuffer (never
+    // more, so a single-layer target only gets layer 0). Multiview shaders read {first view, view
+    // count} to route each instance to its layer.
+    m_current.view_count = pipe->IsLayered() ? std::clamp(m_current.layers, 1u, 2u) : 1u;
+    const bool vs_view_mask = pipe->UsesVertexBuffer(Util::VIEW_MASK_BUFFER_INDEX);
+    const bool fs_view_mask = pipe->UsesFragmentBuffer(Util::VIEW_MASK_BUFFER_INDEX);
+    if (vs_view_mask || fs_view_mask)
+    {
+      const u32 view_mask[2] = {0, m_current.view_count};
+      if (vs_view_mask)
+        [enc setVertexBytes:view_mask length:sizeof(view_mask) atIndex:Util::VIEW_MASK_BUFFER_INDEX];
+      if (fs_view_mask)
+      {
+        [enc setFragmentBytes:view_mask
+                       length:sizeof(view_mask)
+                      atIndex:Util::VIEW_MASK_BUFFER_INDEX];
+      }
+    }
     if (pipe->Cull() != m_current.cull_mode)
     {
       m_current.cull_mode = pipe->Cull();
@@ -942,7 +974,8 @@ void Metal::StateTracker::Draw(u32 base_vertex, u32 num_vertices)
   PrepareRender();
   [m_current_render_encoder drawPrimitives:m_state.render_pipeline->Prim()
                                vertexStart:base_vertex
-                               vertexCount:num_vertices];
+                               vertexCount:num_vertices
+                             instanceCount:m_current.view_count];
 }
 
 void Metal::StateTracker::DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex)
@@ -955,7 +988,7 @@ void Metal::StateTracker::DrawIndexed(u32 base_index, u32 num_indices, u32 base_
                                         indexType:MTLIndexTypeUInt16
                                       indexBuffer:m_state.indices
                                 indexBufferOffset:base_index * sizeof(u16)
-                                    instanceCount:1
+                                    instanceCount:m_current.view_count
                                        baseVertex:base_vertex
                                      baseInstance:0];
 }

@@ -1,0 +1,13 @@
+{
+  global:
+    staticrecomp_get_module;
+    /* The lockstep verifier dlsym's this to install the module's RAM write
+       journal. Without it StaticRecompLockstepVerifier::Init() prints
+       "module lacks ppc_set_mem_write_journal export" and silently disables
+       itself -- a clean lockstep run then proves nothing. macOS exported it
+       already (GXRuntime marks it visibility("default")); only this version
+       script was hiding it on Linux. */
+    ppc_set_mem_write_journal;
+  local:
+    *;
+};

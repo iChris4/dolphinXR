@@ -9,6 +9,7 @@
 #include "Common/CPUDetect.h"
 #include "Common/CommonTypes.h"
 #include "Common/Contains.h"
+#include "Common/Logging/Log.h"
 
 #include "Core/CPUThreadConfigCallback.h"
 #include "Core/Config/GraphicsSettings.h"
@@ -348,11 +349,23 @@ void VideoConfig::VerifyValidity()
 
   if (stereo_mode != StereoMode::Off)
   {
-    if (!g_backend_info.bSupportsGeometryShaders)
+    // Without geometry shaders the two eye layers come from multiview (instanced layered
+    // rendering on Metal), which needs single-sampled targets.
+    if (!g_backend_info.bSupportsGeometryShaders && g_backend_info.bSupportsMultiview)
+    {
+      if (iMultisamples != 1)
+      {
+        OSD::AddMessage("Stereoscopic 3D on this backend disables anti-aliasing.", 10000);
+        iMultisamples = 1;
+      }
+    }
+    else if (!g_backend_info.bSupportsGeometryShaders)
     {
       OSD::AddMessage(
           "Stereoscopic 3D isn't supported by your GPU, support for OpenGL 3.2 is required.",
           10000);
+      WARN_LOG_FMT(VIDEO, "Stereoscopy disabled: the backend has neither geometry shaders nor "
+                          "multiview.");
       stereo_mode = StereoMode::Off;
     }
   }

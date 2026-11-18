@@ -246,7 +246,14 @@ const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{
 const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE{{System::GFX, "VR", "TrackingMode"},
                                                     OpenXRTrackingMode::Full6DoF};
 const Info<VRMenuToggleButton> GFX_VR_MENU_TOGGLE_BUTTON{{System::GFX, "VR", "MenuToggleButton"},
+#ifdef IPHONEOS
+                                                         // Vision Pro hands have no thumbstick;
+                                                         // the left little-finger pinch is the
+                                                         // menu button.
+                                                         VRMenuToggleButton::LeftMenu};
+#else
                                                          VRMenuToggleButton::LeftThumbstick};
+#endif
 const Info<bool> GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER{
     {System::GFX, "VR", "UseOpenXRPlaySpaceCenter"}, false};
 const Info<bool> GFX_VR_USE_XR_PACING_THREAD{{System::GFX, "VR", "UseXRPacingThread"}, true};
@@ -263,7 +270,13 @@ const Info<bool> GFX_VR_PIN_EMULATION_CORES{{System::GFX, "VR", "PinEmulationCor
                                             DEFAULT_VR_PIN_EMULATION_CORES};
 // Off on every platform: submissions follow the game's frame rate. On re-submits the last frame to
 // fill every display slot (see the pacing loop in OpenXRManager).
+#ifdef IPHONEOS
+// visionOS: the provider composites only inside xrEndFrame and CompositorServices wants a frame
+// every display refresh, so the pacing thread must fill every slot.
+const Info<bool> GFX_VR_EAGER_HEARTBEAT{{System::GFX, "VR", "EagerHeartbeat"}, true};
+#else
 const Info<bool> GFX_VR_EAGER_HEARTBEAT{{System::GFX, "VR", "EagerHeartbeat"}, false};
+#endif
 #if defined(__ANDROID__) && defined(ENABLE_VR)
 constexpr bool DEFAULT_VR_ANDROID_DIRECT_TO_HMD = true;
 constexpr bool DEFAULT_IMMEDIATE_XFB = true;

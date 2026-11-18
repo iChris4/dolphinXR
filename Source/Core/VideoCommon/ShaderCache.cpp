@@ -464,6 +464,9 @@ void ShaderCache::ClearCaches()
   m_screen_quad_vertex_shader.reset();
   m_texture_copy_vertex_shader.reset();
   m_efb_copy_vertex_shader.reset();
+  m_screen_quad_multiview_vertex_shader.reset();
+  m_texture_copy_multiview_vertex_shader.reset();
+  m_efb_copy_multiview_vertex_shader.reset();
   m_texcoord_geometry_shader.reset();
   m_color_geometry_shader.reset();
   m_texture_copy_pixel_shader.reset();
@@ -707,6 +710,12 @@ bool ShaderCache::UseGeometryShaderForEFBCopies() const
   // EFB/XFB copies target regular 2-layer textures even when the main EFB uses multiview.
   // Keep the passthrough GS so those copies write both eye layers through gl_Layer.
   return m_host_config.backend_geometry_shaders && m_host_config.stereo;
+}
+
+bool ShaderCache::UseMultiviewForEFBCopies() const
+{
+  return m_host_config.stereo && !m_host_config.backend_geometry_shaders &&
+         g_backend_info.bSupportsMultiview;
 }
 
 AbstractPipelineConfig ShaderCache::GetGXPipelineConfig(
@@ -1450,9 +1459,11 @@ ShaderCache::GetEFBCopyToVRAMPipeline(const TextureConversionShaderGen::TCShader
     return nullptr;
   }
 
+  const bool multiview_copy = UseMultiviewForEFBCopies();
   AbstractPipelineConfig config = {};
   config.vertex_format = nullptr;
-  config.vertex_shader = m_efb_copy_vertex_shader.get();
+  config.vertex_shader = multiview_copy ? m_efb_copy_multiview_vertex_shader.get() :
+                                          m_efb_copy_vertex_shader.get();
   config.geometry_shader =
       UseGeometryShaderForEFBCopies() ? m_texcoord_geometry_shader.get() : nullptr;
   config.pixel_shader = shader.get();
@@ -1460,6 +1471,7 @@ ShaderCache::GetEFBCopyToVRAMPipeline(const TextureConversionShaderGen::TCShader
   config.depth_state = RenderState::GetNoDepthTestingDepthState();
   config.blending_state = RenderState::GetNoBlendingBlendState();
   config.framebuffer_state = RenderState::GetRGBA8FramebufferState();
+  config.framebuffer_state.multiview = multiview_copy ? 1u : 0u;
   config.usage = AbstractPipelineUsage::Utility;
   auto iiter = m_efb_copy_to_vram_pipelines.emplace(uid, g_gfx->CreatePipeline(config));
   return iiter.first->second.get();
@@ -1519,6 +1531,24 @@ bool ShaderCache::CompileSharedPipelines()
     if (!m_texcoord_geometry_shader || !m_color_geometry_shader)
       return false;
   }
+  else if (UseMultiviewForEFBCopies())
+  {
+    m_screen_quad_multiview_vertex_shader = g_gfx->CreateShaderFromSource(
+        ShaderStage::Vertex, FramebufferShaderGen::GenerateScreenQuadVertexShader(true), nullptr,
+        "Screen quad multiview vertex shader");
+    m_texture_copy_multiview_vertex_shader = g_gfx->CreateShaderFromSource(
+        ShaderStage::Vertex, FramebufferShaderGen::GenerateTextureCopyVertexShader(true), nullptr,
+        "Texture copy multiview vertex shader");
+    m_efb_copy_multiview_vertex_shader = g_gfx->CreateShaderFromSource(
+        ShaderStage::Vertex,
+        TextureConversionShaderGen::GenerateVertexShader(m_api_type, true).GetBuffer(), nullptr,
+        "EFB copy multiview vertex shader");
+    if (!m_screen_quad_multiview_vertex_shader || !m_texture_copy_multiview_vertex_shader ||
+        !m_efb_copy_multiview_vertex_shader)
+    {
+      return false;
+    }
+  }
 
   m_texture_copy_pixel_shader = g_gfx->CreateShaderFromSource(
       ShaderStage::Pixel, FramebufferShaderGen::GenerateTextureCopyPixelShader(), nullptr,
@@ -1550,6 +1580,15 @@ bool ShaderCache::CompileSharedPipelines()
     if (!m_rgba8_stereo_copy_pipeline)
       return false;
   }
+  else if (UseMultiviewForEFBCopies())
+  {
+    config.vertex_shader = m_texture_copy_multiview_vertex_shader.get();
+    config.framebuffer_state.multiview = 1;
+    m_rgba8_stereo_copy_pipeline = g_gfx->CreatePipeline(config);
+    if (!m_rgba8_stereo_copy_pipeline)
+      return false;
+    config.framebuffer_state.multiview = 0;
+  }
 
   if (m_host_config.backend_palette_conversion)
   {
@@ -1578,6 +1617,16 @@ bool ShaderCache::CompileSharedPipelines()
         if (!m_layered_palette_conversion_pipelines[i])
           return false;
         config.geometry_shader = nullptr;
+      }
+      else if (UseMultiviewForEFBCopies())
+      {
+        config.vertex_shader = m_screen_quad_multiview_vertex_shader.get();
+        config.framebuffer_state.multiview = 1;
+        m_layered_palette_conversion_pipelines[i] = g_gfx->CreatePipeline(config);
+        if (!m_layered_palette_conversion_pipelines[i])
+          return false;
+        config.vertex_shader = m_screen_quad_vertex_shader.get();
+        config.framebuffer_state.multiview = 0;
       }
     }
   }

@@ -231,13 +231,16 @@ void PowerPCManager::InitializeCPUCore(CPUCore cpu_core)
 std::span<const CPUCore> AvailableCPUCores()
 {
   static constexpr auto cpu_cores = {
+#ifndef DOLPHIN_NO_JIT
 #ifdef _M_X86_64
       CPUCore::JIT64,
 #elif defined(_M_ARM_64)
       CPUCore::JITARM64,
 #endif
+#endif
       CPUCore::CachedInterpreter,
       CPUCore::Interpreter,
+      CPUCore::StaticRecomp,
   };
 
   return cpu_cores;
@@ -245,7 +248,10 @@ std::span<const CPUCore> AvailableCPUCores()
 
 CPUCore DefaultCPUCore()
 {
-#ifdef _M_X86_64
+#if defined(DOLPHIN_NO_JIT)
+  // No runtime code generation (visionOS). StaticRecomp is chosen per game when a module exists.
+  return CPUCore::CachedInterpreter;
+#elif defined(_M_X86_64)
   return CPUCore::JIT64;
 #elif defined(_M_ARM_64)
   return CPUCore::JITARM64;
