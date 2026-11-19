@@ -67,6 +67,9 @@ void StaticRecompCore::Run()
   m_guest.exram_size = memory.GetExRamSizeReal();
   InitLookupTable(m_guest.ram_size, m_guest.exram_size);
   const bool lockstep_enabled = m_lockstep_verifier->IsEnabled();
+  // The module's direct RAM path (CPU ABI v4). Lockstep journals RAM writes around its checks,
+  // which only the slow path does, so writes stay there while it is on.
+  gx_mem_segments_fill(&m_guest, !lockstep_enabled);
   const auto fast_dispatchable_at = [this](u32 address) {
     // A REL running where it was recompiled needs no translation: its chunks are looked up as
     // main.dol's are (the chunk hashes still decide whether its code is there).

@@ -136,9 +136,6 @@ void set_fp_exception(CPUState* cpu, u32 bit) {
     ppc_fpscr_updated(cpu);
 }
 
-void clear_fifr(CPUState* cpu) {
-    cpu->fpscr &= ~(FPSCR_FI_BIT | FPSCR_FR_BIT);
-}
 
 bool is_snan(f64 value) {
     u64 bits = f64_bits(value);
@@ -147,34 +144,8 @@ bool is_snan(f64 value) {
            fraction != 0 && (fraction & 0x0008000000000000ull) == 0;
 }
 
-u32 classify_f64(f64 value) {
-    u64 bits = f64_bits(value);
-    u64 sign = bits >> 63;
-    u64 exponent = bits & 0x7FF0000000000000ull;
-    u64 fraction = bits & 0x000FFFFFFFFFFFFFull;
-    if (exponent == 0x7FF0000000000000ull)
-        return fraction ? 0x11u : (sign ? 0x09u : 0x05u);
-    if (exponent == 0)
-        return fraction ? (sign ? 0x18u : 0x14u) : (sign ? 0x12u : 0x02u);
-    return sign ? 0x08u : 0x04u;
-}
 
-u32 classify_f32(f32 value) {
-    u32 bits;
-    memcpy(&bits, &value, sizeof(bits));
-    u32 sign = bits >> 31;
-    u32 exponent = bits & 0x7F800000u;
-    u32 fraction = bits & 0x007FFFFFu;
-    if (exponent == 0x7F800000u)
-        return fraction ? 0x11u : (sign ? 0x09u : 0x05u);
-    if (exponent == 0)
-        return fraction ? (sign ? 0x18u : 0x14u) : (sign ? 0x12u : 0x02u);
-    return sign ? 0x08u : 0x04u;
-}
 
-void set_fprf(CPUState* cpu, u32 value) {
-    cpu->fpscr = (cpu->fpscr & ~(0x1Fu << 12)) | ((value & 0x1Fu) << 12);
-}
 
 bool ppc_fres(CPUState* cpu, f64 value, f64* result) {
     if (value == 0.0) {
@@ -346,16 +317,6 @@ f64 make_quiet(f64 value) {
     return f64_value(f64_bits(value) | 0x0008000000000000ull);
 }
 
-f32 force_single(const CPUState* cpu, f64 value) {
-    if (cpu->fpscr & FPSCR_NI_BIT) {
-        u64 no_sign = f64_bits(value) & 0x7FFFFFFFFFFFFFFFull;
-        if (no_sign < 0x3810000000000000ull) {
-            u32 flushed = (u32)((f64_bits(value) & 0x8000000000000000ull) >> 32);
-            return f32_value(flushed);
-        }
-    }
-    return (f32)value;
-}
 
 f64 force_double(const CPUState* cpu, f64 d) {
     (void)cpu;
@@ -523,20 +484,8 @@ FPRes ni_madd_msub(CPUState* cpu, f64 a, f64 c, f64 b, bool sub, bool single) {
     return result;
 }
 
-bool fp_invalid_gated(const CPUState* cpu, const FPRes* res) {
-    return (cpu->fpscr & FPSCR_VE_BIT) != 0 && (res->exception & FPSCR_VX_ANY_MASK) != 0;
-}
 
-void fp_write_single(CPUState* cpu, u8 d, f32 rounded) {
-    cpu->fpr[d] = (f64)rounded;
-    cpu->ps1[d] = (f64)rounded;
-    set_fprf(cpu, classify_f32(rounded));
-}
 
-void fp_write_double(CPUState* cpu, u8 d, f64 value) {
-    cpu->fpr[d] = value;
-    set_fprf(cpu, classify_f64(value));
-}
 
 void ppc_fadds(CPUState* cpu, u8 d, u8 a, u8 b) {
     FPRes sum = ni_add(cpu, cpu->fpr[a], cpu->fpr[b]);

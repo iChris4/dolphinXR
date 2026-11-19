@@ -10,28 +10,41 @@ DolphinXR changes to DolRecomp fa0cf619e8d7eb8cba7eaf55267a12caaebb46aa for Wii 
   main.dol's chunks the same way.
 - Beside a REL's code: rel_layout.txt (header fields, section addresses) and rel_image.dol (the
   relocated code as a DOL at its address), which Tools/StaticRecomp/module-template consumes.
+- --inline-cache-ops: dcbst/dcbf/dcbi/icbi call ppc_cache_control in line (Dolphin's cycle
+  costs) instead of an interpreter fallback that ends the block; native code goes back to the
+  dispatcher only when the environment's hook moves ctx->pc off the instruction (it does when the
+  op invalidated a recompiled chunk) or the op raised an exception.
+- dolrecomp_f32_from_bits (lfs, psq_l): a normal single converts as the host converts it, in
+  line; zero, denormal, infinity and NaN take the bit-level conversion out of line. Identical
+  results for all 2^32 inputs.
 
 diff --git a/src/app/cli.c b/src/app/cli.c
-index 33d3c23..130c34f 100644
+index 33d3c23..32f9419 100644
 --- a/src/app/cli.c
 +++ b/src/app/cli.c
-@@ -18,6 +18,9 @@ void print_usage(const char* argv0) {
+@@ -18,6 +18,10 @@ void print_usage(const char* argv0) {
      fprintf(stderr, "  --backend c|llvm               Select generated-code backend (default: c)\n");
      fprintf(stderr, "  --gamecube                     GameCube mode (no title ID required)\n");
      fprintf(stderr, "  --rel-base <addr>              Override first virtual load address for REL codegen\n");
 +    fprintf(stderr, "  --rel-bss <addr>               BSS address of a single REL (the game allocates it apart)\n");
 +    fprintf(stderr, "  --direct-calls                 Cross-chunk calls run directly when dolrecomp_chunk_ready() allows\n");
 +    fprintf(stderr, "  --extern-chunks <generated.h>  With --direct-calls: another tree's chunks, callable too\n");
++    fprintf(stderr, "  --inline-cache-ops             dcbst/dcbf/dcbi/icbi call ppc_cache_control in line (C backend)\n");
      fprintf(stderr, "  --map <path>                   Load optional function names from a linker MAP\n");
      fprintf(stderr, "  --setup                        Download titles database and optionally install wit\n");
      fprintf(stderr, "\n");
-@@ -153,6 +156,21 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
+@@ -153,6 +157,26 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
              continue;
          }
  
 +        /* DolphinXR: guarded direct cross-chunk calls, and another tree's chunks to call. */
 +        if (strcmp(arg, "--direct-calls") == 0) {
 +            opts->direct_calls = 1;
++            continue;
++        }
++
++        if (strcmp(arg, "--inline-cache-ops") == 0) {
++            opts->inline_cache_ops = 1;
 +            continue;
 +        }
 +
@@ -47,7 +60,7 @@ index 33d3c23..130c34f 100644
          if (strcmp(arg, "--backend") == 0) {
              if (i + 1 >= argc) {
                  fprintf(stderr, "error: --backend needs c or llvm\n");
-@@ -263,6 +281,25 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
+@@ -263,6 +287,25 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
              continue;
          }
  
@@ -74,16 +87,17 @@ index 33d3c23..130c34f 100644
              if (i + 1 >= argc) {
                  fprintf(stderr, "error: --map needs a path\n");
 diff --git a/src/app/cli.h b/src/app/cli.h
-index 73706f2..c21d61b 100644
+index 73706f2..08c0559 100644
 --- a/src/app/cli.h
 +++ b/src/app/cli.h
-@@ -19,9 +19,13 @@ typedef struct {
+@@ -19,9 +19,14 @@ typedef struct {
      DolRecompBackend backend;
      u32 jobs;
      u32 rel_base;
 +    u32 rel_bss;
 +    const char* extern_chunks_path;
 +    int direct_calls;
++    int inline_cache_ops;
      int gamecube_mode;
      int cpu_explicit;
      int rel_base_set;
@@ -92,10 +106,16 @@ index 73706f2..c21d61b 100644
      int show_help;
  } CliOptions;
 diff --git a/src/app/main.c b/src/app/main.c
-index c148031..27731df 100644
+index c148031..897ad52 100644
 --- a/src/app/main.c
 +++ b/src/app/main.c
-@@ -15,6 +15,72 @@
+@@ -10,11 +10,78 @@
+ #include "frontend/container/rpx.h"
+ #include "frontend/container/disc_extract.h"
+ #include "backend/emitter.h"
++#include "backend/c_cfg.h"
+ #include "analysis/symbol_map.h"
+ #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
  
@@ -168,17 +188,18 @@ index c148031..27731df 100644
  int main(int argc, char** argv) {
      if (argc > 1 && strcmp(argv[1], "extract") == 0)
          return disc_extract_main(argc - 1, argv + 1);
-@@ -26,6 +92,9 @@ int main(int argc, char** argv) {
+@@ -26,6 +93,10 @@ int main(int argc, char** argv) {
          return 0;
      if (opts.setup_mode)
          return run_setup() ? 0 : 1;
 +    if ((opts.direct_calls || opts.extern_chunks_path) &&
 +        !pipeline_set_direct_calls(opts.extern_chunks_path))
 +        return 1;
++    c_cfg_set_inline_cache_ops(opts.inline_cache_ops != 0);
  
      const char* input_path  = opts.input_path;
      const char* title_id_arg = opts.title_id_arg;
-@@ -158,6 +227,8 @@ int main(int argc, char** argv) {
+@@ -158,6 +229,8 @@ int main(int argc, char** argv) {
  
      if (rel_mode) {
          RELFile rel;
@@ -187,7 +208,7 @@ index c148031..27731df 100644
          if (!rel_load(&rel, input_path, rel_start_base))
              return 1;
  
-@@ -195,6 +266,10 @@ int main(int argc, char** argv) {
+@@ -195,6 +268,10 @@ int main(int argc, char** argv) {
              rel_free(&rel);
              return 1;
          }
@@ -301,8 +322,67 @@ index 65ecd3d..cd40fe0 100644
 +int pipeline_set_direct_calls(const char* extern_header);
 +
  #endif
+diff --git a/src/backend/c_cfg.c b/src/backend/c_cfg.c
+index 3bd8850..9b6bd5d 100644
+--- a/src/backend/c_cfg.c
++++ b/src/backend/c_cfg.c
+@@ -5,12 +5,25 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++/* DolphinXR: --inline-cache-ops emits dcbst/dcbf/dcbi/icbi as an in-line ppc_cache_control
++ * call instead of an interpreter fallback that ends the block. */
++static bool g_inline_cache_ops = false;
++
++void c_cfg_set_inline_cache_ops(bool enabled) {
++    g_inline_cache_ops = enabled;
++}
++
++bool c_cfg_inline_cache_ops(void) {
++    return g_inline_cache_ops;
++}
++
+ static bool instruction_uses_fallback(const PPCInst* inst) {
+     switch (inst->op) {
+     case PPC_OP_DCBST:
+     case PPC_OP_DCBF:
+     case PPC_OP_DCBI:
+     case PPC_OP_ICBI:
++        return !g_inline_cache_ops;
+     case PPC_OP_UNKNOWN:
+         return true;
+     case PPC_OP_MFSPR:
+@@ -102,6 +115,14 @@ static u32 instruction_cycles(const PPCInst* inst) {
+         return 40;
+     case PPC_OP_DCBZ:
+         return 5;
++    /* Only reached with --inline-cache-ops (otherwise these are fallbacks, cost 0 here and
++     * charged by the chassis): Dolphin's PPCTables costs. */
++    case PPC_OP_DCBST:
++    case PPC_OP_DCBF:
++    case PPC_OP_DCBI:
++        return 5;
++    case PPC_OP_ICBI:
++        return 4;
+     case PPC_OP_DCBTST:
+     case PPC_OP_DCBT:
+         return 2;
+diff --git a/src/backend/c_cfg.h b/src/backend/c_cfg.h
+index 4f732f2..e4dca68 100644
+--- a/src/backend/c_cfg.h
++++ b/src/backend/c_cfg.h
+@@ -15,6 +15,9 @@ typedef struct {
+     u32* loop_ends;
+ } CFunctionCFG;
+ 
++void c_cfg_set_inline_cache_ops(bool enabled);
++bool c_cfg_inline_cache_ops(void);
++
+ bool c_function_cfg_build(CFunctionCFG* cfg, const PPCInst* insts, u32 count,
+                           u32 function_address);
+ void c_function_cfg_destroy(CFunctionCFG* cfg);
 diff --git a/src/backend/emitter.c b/src/backend/emitter.c
-index 1cae76f..fb74a75 100644
+index 1cae76f..391c758 100644
 --- a/src/backend/emitter.c
 +++ b/src/backend/emitter.c
 @@ -317,6 +317,11 @@ static bool branch_target_is_local(u32 func_start, u32 func_end, u32 target) {
@@ -333,6 +413,62 @@ index 1cae76f..fb74a75 100644
      fprintf(out, "                void func_%08X(CPUState* ctx);\n", target_chunk);
      fprintf(out, "                func_%08X(ctx);\n", target_chunk);
      fprintf(out, "                dolrecomp_call_leave();\n");
+@@ -526,7 +538,10 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         "}\n"
+         "\n"
+         // Preserve the PPC bit-level single conversion, including denormals.
+-        "static inline f64 dolrecomp_f32_from_bits(u32 bits) {\n"
++        // DolphinXR: out of line for the rare exponents (zero, denormal, inf,
++        // NaN); a normal single converts exactly as the host does it, in one
++        // instruction, so every lfs/psq site stays small.
++        "__attribute__((noinline, cold)) static f64 dolrecomp_f32_from_bits_slow(u32 bits) {\n"
+         "    u64 x = bits;\n"
+         "    u64 exp = (x >> 23) & 0xFFu;\n"
+         "    u64 frac = x & 0x007FFFFFu;\n"
+@@ -555,6 +570,15 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         "    return value;\n"
+         "}\n"
+         "\n"
++        "static inline f64 dolrecomp_f32_from_bits(u32 bits) {\n"
++        "    if (__builtin_expect(((bits >> 23) & 0xFFu) - 1u < 254u, 1)) {\n"
++        "        float single;\n"
++        "        memcpy(&single, &bits, sizeof(single));\n"
++        "        return (f64)single;\n"
++        "    }\n"
++        "    return dolrecomp_f32_from_bits_slow(bits);\n"
++        "}\n"
++        "\n"
+         "static inline u32 dolrecomp_f32_to_bits(f64 value) {\n"
+         "    u64 bits;\n"
+         "    memcpy(&bits, &value, sizeof(bits));\n"
+@@ -1611,6 +1635,27 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
+     case PPC_OP_DCBF:
+     case PPC_OP_DCBI:
+     case PPC_OP_ICBI:
++        if (c_cfg_inline_cache_ops()) {
++            /* DolphinXR: run the cache op in line. The chassis's cache_control hook moves
++             * ctx->pc off cia (to cia + 4) when native execution must stop, e.g. after it
++             * invalidated a recompiled chunk; an exception (dcbi in user mode) sets
++             * ctx->exception. Either way control returns to the dispatcher. */
++            const char* operation = inst->op == PPC_OP_DCBST ? "PPC_CACHE_DCBST" :
++                                    inst->op == PPC_OP_DCBF  ? "PPC_CACHE_DCBF" :
++                                    inst->op == PPC_OP_DCBI  ? "PPC_CACHE_DCBI" :
++                                                               "PPC_CACHE_ICBI";
++            fprintf(out, "    {\n");
++            fprintf(out, "        u32 ea = ");
++            emit_xform_ea(out, inst->rA, inst->rB, false);
++            fprintf(out, ";\n");
++            fprintf(out, "        ctx->pc = 0x%08Xu;\n", inst->address);
++            fprintf(out, "        ppc_cache_control(ctx, %s, ea, 0x%08Xu);\n", operation,
++                    inst->address);
++            fprintf(out, "        if (ctx->exception || ctx->pc != 0x%08Xu) return;\n",
++                    inst->address);
++            fprintf(out, "    }\n");
++            break;
++        }
+         fprintf(out, "    ppc_fallback_instruction(ctx, 0x%08Xu, 0x%08Xu);\n",
+                 inst->raw, inst->address);
+         fprintf(out, "    return;\n");
 diff --git a/src/backend/emitter.h b/src/backend/emitter.h
 index 740f940..efa96cb 100644
 --- a/src/backend/emitter.h

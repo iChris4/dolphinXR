@@ -4,6 +4,8 @@
 // StaticRecomp module ABI. All environment access goes through the CPUState
 // hook pointers the chassis installs; this dylib has no host dependencies.
 
+#include <stdlib.h>
+
 #include "generated.h"
 
 #include "StaticRecompABI.h"
@@ -35,10 +37,20 @@ static void chassis_on_state_loaded(CPUState* ctx)
 static const u8* s_chunk_states;
 static u32 s_chunk_state_count;
 
-int dolrecomp_chunk_ready(u32 chunk_start)
+// Every direct call asks first, so the lookup must not be a search: chunk starts by 4 KB page of
+// guest code (a page where two chunks start keeps the binary search), built with the states.
+#define CHUNK_PAGE_SHIFT 12u
+typedef struct ChunkPage
 {
-    if (!s_chunk_states)
-        return 0;
+    u32 start;  // the chunk starting in this page; 0 when none or more than one
+    u32 index;
+} ChunkPage;
+static ChunkPage* s_chunk_pages;
+static u32 s_chunk_page_base;
+static u32 s_chunk_page_count;
+
+static int chunk_ready_search(u32 chunk_start)
+{
     u32 lo = 0, hi = MODULE_CHUNK_RANGE_COUNT;
     while (lo < hi)
     {
@@ -50,6 +62,56 @@ int dolrecomp_chunk_ready(u32 chunk_start)
     }
     return lo < s_chunk_state_count && s_chunk_ranges[lo].start == chunk_start &&
            s_chunk_states[lo] == STATICRECOMP_CHUNK_VERIFIED;
+}
+
+int dolrecomp_chunk_ready(u32 chunk_start)
+{
+    const u32 page = (chunk_start - s_chunk_page_base) >> CHUNK_PAGE_SHIFT;
+    if (__builtin_expect(page < s_chunk_page_count, 1))
+    {
+        const ChunkPage entry = s_chunk_pages[page];
+        if (__builtin_expect(entry.start == chunk_start, 1))
+            return s_chunk_states[entry.index] == STATICRECOMP_CHUNK_VERIFIED;
+    }
+    return s_chunk_states ? chunk_ready_search(chunk_start) : 0;
+}
+
+static void build_chunk_pages(void)
+{
+    free(s_chunk_pages);
+    s_chunk_pages = NULL;
+    s_chunk_page_count = 0;
+    if (!s_chunk_states || MODULE_CHUNK_RANGE_COUNT == 0)
+        return;
+    const u32 base = s_chunk_ranges[0].start & ~((1u << CHUNK_PAGE_SHIFT) - 1u);
+    const u32 count =
+        ((s_chunk_ranges[MODULE_CHUNK_RANGE_COUNT - 1].start - base) >> CHUNK_PAGE_SHIFT) + 1u;
+    ChunkPage* pages = (ChunkPage*)calloc(count, sizeof(ChunkPage));
+    if (!pages)
+        return;
+    u8* taken = (u8*)calloc(count, 1);
+    if (!taken)
+    {
+        free(pages);
+        return;
+    }
+    for (u32 i = 0; i < MODULE_CHUNK_RANGE_COUNT && i < s_chunk_state_count; ++i)
+    {
+        const u32 page = (s_chunk_ranges[i].start - base) >> CHUNK_PAGE_SHIFT;
+        if (taken[page]++ == 0)
+        {
+            pages[page].start = s_chunk_ranges[i].start;
+            pages[page].index = i;
+        }
+        else
+        {
+            pages[page].start = 0;  // shared page: binary search
+        }
+    }
+    free(taken);
+    s_chunk_page_base = base;
+    s_chunk_pages = pages;
+    s_chunk_page_count = count;
 }
 
 static const StaticRecompModuleDesc s_desc = {
@@ -86,6 +148,9 @@ RECOMP_MODULE_EXPORT const StaticRecompModuleDesc* staticrecomp_get_module(void)
 
 RECOMP_MODULE_EXPORT void staticrecomp_set_chunk_states(const u8* states, u32 count)
 {
+    // Lookups stop first (no page table), then the states change, then the table is rebuilt.
+    s_chunk_page_count = 0;
     s_chunk_states = states;
     s_chunk_state_count = count;
+    build_chunk_pages();
 }

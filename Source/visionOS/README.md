@@ -28,6 +28,11 @@ Disc images go in the app's `Games` folder (Files app, or Finder file sharing), 
 
 ## Full speed: a recompiled module
 
+DolRecomp needs `Tools/StaticRecomp/patches/dolrecomp-wii-rel.patch` applied (direct calls between
+chunks, in-line cache instructions, Wii RELs). Modules carry the guest CPU state layout they were
+built for (GXRuntime's CPU ABI); the app rejects one built for another, so rebuild modules after
+updating the branch when it changes (ABI 4: guest RAM segment tables).
+
 ```sh
 dolphin-tool extract -i <your disc image> -o <dir>        # gives <dir>/sys/main.dol
 Tools/StaticRecomp/build-module.sh --dol <dir>/sys/main.dol --game-id GMSE01 \
@@ -38,8 +43,8 @@ Source/visionOS/Build-VisionOS.sh --team <TEAM ID> --install \
 
 Wii games keep most of their code in a REL module, which goes into the module too. It is
 recompiled at the address the game loads it at, which the Agent Server's `list_modules` tool shows
-for a running game (the REL header, and the BSS when the game allocates it apart). DolRecomp needs
-`Tools/StaticRecomp/patches/dolrecomp-wii-rel.patch`. Mario Kart Wii (USA):
+for a running game (the REL header, and the BSS when the game allocates it apart). Mario Kart Wii
+(USA):
 
 ```sh
 Tools/StaticRecomp/build-module.sh --dol <dir>/DATA/sys/main.dol --game-id RMCE01 --cpu broadway \

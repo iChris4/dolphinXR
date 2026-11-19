@@ -30,7 +30,9 @@ extern "C" {
 //   consumes and resets it (Dolphin chassis: per-dispatch flush into
 //   ppc_state.downcount). Hosts that do not meter guest time may ignore it
 //   (s64: it cannot wrap in any realistic session).
-#define GXRUNTIME_CPU_ABI_VERSION 3u
+// - ABI v4 (DolphinXR) adds the guest RAM segment tables at the tail
+//   (mem_read_seg / mem_write_seg, see gx_mem_segments_fill).
+#define GXRUNTIME_CPU_ABI_VERSION 4u
 #define GXRUNTIME_CPU_ABI_DOLRECOMP_PREFIX 1u
 #define GXRUNTIME_CPU_ABI_EXTERNAL_POINTER_EXTENSION 1u
 
@@ -88,6 +90,15 @@ extern "C" {
 #define PPC_SRR1_MACHINE_CHECK_DCBZL PPC_BIT(10)
 
 typedef struct CPUState CPUState;
+
+/* DolphinXR: one entry per top four bits of a guest address. An access whose offset in the
+ * segment (addr & 0x0FFFFFFF) is below `limit` reads or writes base + offset directly; anything
+ * else takes the out-of-line slow path (external hooks, reservation, write journal). */
+typedef struct GXMemSegment {
+    u8* base;
+    u32 limit;
+    u32 reserved;
+} GXMemSegment;
 
 typedef u64 (*PPCExternalRead)(CPUState* cpu, u32 ea, u8 size);
 typedef void (*PPCExternalWrite)(CPUState* cpu, u32 ea, u64 value, u8 size);
@@ -158,6 +169,9 @@ struct CPUState {
     PPCSPRRead spr_read;
     PPCSPRWrite spr_write;
     PPCCacheControl cache_control;
+    /* ABI v4: filled by gx_mem_segments_fill(); all-zero (every access slow) until then. */
+    GXMemSegment mem_read_seg[16];
+    GXMemSegment mem_write_seg[16];
 };
 
 #include <stdio.h>
@@ -195,101 +209,96 @@ static GXRUNTIME_ALWAYS_INLINE void clear_matching_reservation(CPUState* cpu, u3
         cpu->reserve_valid = false;
 }
 
-static GXRUNTIME_ALWAYS_INLINE u64 mem_read64(CPUState* cpu, u32 addr) {
-    u8* ptr = get_ram_ptr(cpu, addr, 8, NULL);
-    if (ptr == NULL) {
-        if (cpu->external_read)
-            return cpu->external_read(cpu, addr, 8);
-        return 0;
-    }
-    return read_be64(ptr);
+/* DolphinXR: guest RAM fast path. mem_readN / mem_writeN below index cpu->mem_read_seg /
+ * mem_write_seg by the top four address bits: one table load and one bounds check, then the
+ * access. Everything else (MMIO, other segments, the last 8 bytes of a segment, a store while a
+ * reservation is held, writes while a RAM write journal is installed) goes to gx_mem_*_slow, the
+ * former inline logic, kept out of line. That roughly halves the host code of each guest load or
+ * store; generated code is large enough that instruction fetch is what bounds it. */
+#if defined(__GNUC__) || defined(__clang__)
+#define GXRUNTIME_COLD __attribute__((cold, noinline))
+#define GXRUNTIME_LIKELY(x) __builtin_expect(!!(x), 1)
+#else
+#define GXRUNTIME_COLD
+#define GXRUNTIME_LIKELY(x) (x)
+#endif
+
+/* Fills the tables from cpu->ram/ram_size and cpu->exram/exram_size: 0x8/0xC -> MEM1,
+ * 0x9/0xD -> MEM2 (the uncached mirrors alias the cached segments, as get_ram_ptr does). Writes
+ * stay on the slow path unless `writes_fast` (false while a RAM write journal is installed). The
+ * environment calls it whenever it sets those fields. */
+static inline void gx_mem_segment_set(GXMemSegment* segment, u8* base, u32 limit) {
+    segment->base = base;
+    segment->limit = limit;
+    segment->reserved = 0;
 }
 
-static GXRUNTIME_ALWAYS_INLINE void mem_write64(CPUState* cpu, u32 addr, u64 value) {
-    u32 offset;
-    u8* ptr = get_ram_ptr(cpu, addr, 8, &offset);
-    if (ptr == NULL) {
-        if (cpu->external_write) {
-            cpu->external_write(cpu, addr, value, 8);
+static inline void gx_mem_segments_fill(CPUState* cpu, bool writes_fast) {
+    for (u32 i = 0; i < 16; ++i) {
+        gx_mem_segment_set(&cpu->mem_read_seg[i], NULL, 0);
+        gx_mem_segment_set(&cpu->mem_write_seg[i], NULL, 0);
+    }
+    /* limit = size - 8: one bound for every access size; the tail goes to the slow path. */
+    if (cpu->ram && cpu->ram_size > 8) {
+        const u32 limit = cpu->ram_size - 8u;
+        gx_mem_segment_set(&cpu->mem_read_seg[0x8], cpu->ram, limit);
+        gx_mem_segment_set(&cpu->mem_read_seg[0xC], cpu->ram, limit);
+        if (writes_fast) {
+            gx_mem_segment_set(&cpu->mem_write_seg[0x8], cpu->ram, limit);
+            gx_mem_segment_set(&cpu->mem_write_seg[0xC], cpu->ram, limit);
         }
-        return;
     }
-    clear_matching_reservation(cpu, addr);
-    if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 8, g_mem_write_journal_user);
-    write_be64(ptr, value);
-}
-
-static GXRUNTIME_ALWAYS_INLINE u32 mem_read32(CPUState* cpu, u32 addr) {
-    u8* ptr = get_ram_ptr(cpu, addr, 4, NULL);
-    if (ptr == NULL) {
-        if (cpu->external_read)
-            return (u32)cpu->external_read(cpu, addr, 4);
-        return 0;
-    }
-    return read_be32(ptr);
-}
-
-static GXRUNTIME_ALWAYS_INLINE void mem_write32(CPUState* cpu, u32 addr, u32 value) {
-    u32 offset;
-    u8* ptr = get_ram_ptr(cpu, addr, 4, &offset);
-    if (ptr == NULL) {
-        if (cpu->external_write) {
-            cpu->external_write(cpu, addr, value, 4);
+    if (cpu->exram && cpu->exram_size > 8) {
+        const u32 limit = cpu->exram_size - 8u;
+        gx_mem_segment_set(&cpu->mem_read_seg[0x9], cpu->exram, limit);
+        gx_mem_segment_set(&cpu->mem_read_seg[0xD], cpu->exram, limit);
+        if (writes_fast) {
+            gx_mem_segment_set(&cpu->mem_write_seg[0x9], cpu->exram, limit);
+            gx_mem_segment_set(&cpu->mem_write_seg[0xD], cpu->exram, limit);
         }
-        return;
     }
-    clear_matching_reservation(cpu, addr);
-    if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 4, g_mem_write_journal_user);
-    write_be32(ptr, value);
 }
 
-static GXRUNTIME_ALWAYS_INLINE u16 mem_read16(CPUState* cpu, u32 addr) {
-    u8* ptr = get_ram_ptr(cpu, addr, 2, NULL);
-    if (ptr == NULL) {
-        if (cpu->external_read)
-            return (u16)cpu->external_read(cpu, addr, 2);
-        return 0;
-    }
-    return read_be16(ptr);
-}
+GXRUNTIME_COLD u64 gx_mem_read64_slow(CPUState* cpu, u32 addr);
+GXRUNTIME_COLD u32 gx_mem_read32_slow(CPUState* cpu, u32 addr);
+GXRUNTIME_COLD u16 gx_mem_read16_slow(CPUState* cpu, u32 addr);
+GXRUNTIME_COLD u8 gx_mem_read8_slow(CPUState* cpu, u32 addr);
+GXRUNTIME_COLD void gx_mem_write64_slow(CPUState* cpu, u32 addr, u64 value);
+GXRUNTIME_COLD void gx_mem_write32_slow(CPUState* cpu, u32 addr, u32 value);
+GXRUNTIME_COLD void gx_mem_write16_slow(CPUState* cpu, u32 addr, u16 value);
+GXRUNTIME_COLD void gx_mem_write8_slow(CPUState* cpu, u32 addr, u8 value);
 
-static GXRUNTIME_ALWAYS_INLINE void mem_write16(CPUState* cpu, u32 addr, u16 value) {
-    u32 offset;
-    u8* ptr = get_ram_ptr(cpu, addr, 2, &offset);
-    if (ptr == NULL) {
-        if (cpu->external_write) {
-            cpu->external_write(cpu, addr, value, 2);
-        }
-        return;
-    }
-    clear_matching_reservation(cpu, addr);
-    if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 2, g_mem_write_journal_user);
-    write_be16(ptr, value);
-}
+static GXRUNTIME_ALWAYS_INLINE u8 gx_read_u8(const u8* p) { return *p; }
+static GXRUNTIME_ALWAYS_INLINE void gx_write_u8(u8* p, u8 v) { *p = v; }
 
-static GXRUNTIME_ALWAYS_INLINE u8 mem_read8(CPUState* cpu, u32 addr) {
-    u8* ptr = get_ram_ptr(cpu, addr, 1, NULL);
-    if (ptr == NULL) {
-        if (cpu->external_read)
-            return (u8)cpu->external_read(cpu, addr, 1);
-        return 0;
+#define GX_MEM_READ(bits, type, load)                                                     \
+    static GXRUNTIME_ALWAYS_INLINE type mem_read##bits(CPUState* cpu, u32 addr) {        \
+        const GXMemSegment* segment = &cpu->mem_read_seg[addr >> 28];                     \
+        u32 offset = addr & 0x0FFFFFFFu;                                                  \
+        if (GXRUNTIME_LIKELY(offset < segment->limit))                                    \
+            return load(segment->base + offset);                                          \
+        return gx_mem_read##bits##_slow(cpu, addr);                                       \
     }
-    return *ptr;
-}
-
-static GXRUNTIME_ALWAYS_INLINE void mem_write8(CPUState* cpu, u32 addr, u8 value) {
-    u32 offset;
-    u8* ptr = get_ram_ptr(cpu, addr, 1, &offset);
-    if (ptr == NULL) {
-        if (cpu->external_write) {
-            cpu->external_write(cpu, addr, value, 1);
-        }
-        return;
+#define GX_MEM_WRITE(bits, type, store)                                                   \
+    static GXRUNTIME_ALWAYS_INLINE void mem_write##bits(CPUState* cpu, u32 addr, type value) { \
+        const GXMemSegment* segment = &cpu->mem_write_seg[addr >> 28];                    \
+        u32 offset = addr & 0x0FFFFFFFu;                                                  \
+        if (GXRUNTIME_LIKELY(offset < segment->limit && !cpu->reserve_valid)) {           \
+            store(segment->base + offset, value);                                         \
+            return;                                                                       \
+        }                                                                                 \
+        gx_mem_write##bits##_slow(cpu, addr, value);                                      \
     }
-    clear_matching_reservation(cpu, addr);
-    if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 1, g_mem_write_journal_user);
-    *ptr = value;
-}
+GX_MEM_READ(64, u64, read_be64)
+GX_MEM_READ(32, u32, read_be32)
+GX_MEM_READ(16, u16, read_be16)
+GX_MEM_READ(8, u8, gx_read_u8)
+GX_MEM_WRITE(64, u64, write_be64)
+GX_MEM_WRITE(32, u32, write_be32)
+GX_MEM_WRITE(16, u16, write_be16)
+GX_MEM_WRITE(8, u8, gx_write_u8)
+#undef GX_MEM_READ
+#undef GX_MEM_WRITE
 
 #undef GXRUNTIME_ALWAYS_INLINE
 
@@ -393,7 +402,9 @@ extern bool g_ppc_lazy_fp_enabled;
 bool ppc_fp_raise_unavailable(CPUState* cpu, u32 cia);
 
 static inline bool ppc_fp_available_inline(CPUState* cpu, u32 cia) {
-    if (!g_ppc_lazy_fp_enabled || (cpu->msr & PPC_MSR_FP))
+    /* DolphinXR: MSR[FP] first. It is set nearly always, so the hot path is one load and one
+     * test, and the global (a GOT load from a module) is only read when it is clear. */
+    if (GXRUNTIME_LIKELY(cpu->msr & PPC_MSR_FP) || !g_ppc_lazy_fp_enabled)
         return true;
     return ppc_fp_raise_unavailable(cpu, cia);
 }

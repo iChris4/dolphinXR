@@ -344,33 +344,44 @@ void StaticRecompCore::HookCacheControl(CPUState* cpu, u8 operation, u32 ea, u32
   auto& ppc = core->m_system.GetPPCState();
   auto& mmu = core->m_system.GetMMU();
 
+  // As for an interpreter fallback: the op's side effects are not in the RAM journal.
+  if (core->m_lockstep_verifier->m_ls_journaling)
+    core->m_lockstep_verifier->m_ls_fallback_seen = true;
+  // DolphinXR: DolRecomp --inline-cache-ops code keeps running natively after this hook unless
+  // it moves cpu->pc off cia. Do that when the op reset a verified chunk (self-modifying code):
+  // the chunk running, or one below it on the native call stack, may be the one, so control goes
+  // back to the dispatcher, which verifies the chunk again before running it.
+  const u64 reverify_events = core->m_reverify_events;
+
   if (operation == PPC_CACHE_ICBI)
   {
     ppc.iCache.Invalidate(core->m_system.GetMemory(), core->m_system.GetJitInterface(), ea);
-    return;
   }
-
-  if (!ppc.m_enable_dcache)
+  else if (!ppc.m_enable_dcache)
   {
     core->m_system.GetJitInterface().InvalidateICacheLine(ea);
-    return;
+  }
+  else
+  {
+    switch (operation)
+    {
+    case PPC_CACHE_DCBST:
+      mmu.StoreDCacheLine(ea);
+      break;
+    case PPC_CACHE_DCBF:
+      mmu.FlushDCacheLine(ea);
+      break;
+    case PPC_CACHE_DCBI:
+      mmu.InvalidateDCacheLine(ea);
+      break;
+    default:
+      ppc_program_exception(cpu, PPC_PROGRAM_ILLEGAL, cia);
+      return;
+    }
   }
 
-  switch (operation)
-  {
-  case PPC_CACHE_DCBST:
-    mmu.StoreDCacheLine(ea);
-    break;
-  case PPC_CACHE_DCBF:
-    mmu.FlushDCacheLine(ea);
-    break;
-  case PPC_CACHE_DCBI:
-    mmu.InvalidateDCacheLine(ea);
-    break;
-  default:
-    ppc_program_exception(cpu, PPC_PROGRAM_ILLEGAL, cia);
-    break;
-  }
+  if (core->m_reverify_events != reverify_events)
+    cpu->pc = cia + 4u;
 }
 
 void StaticRecompCore::HookInstructionFallback(CPUState* cpu, u32 raw, u32 cia)

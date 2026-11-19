@@ -15,7 +15,7 @@
 #   --out        work directory: DolRecomp output and the module build go here
 #   --dolrecomp  the DolRecomp executable (default: dolrecomp on PATH). Build it from the
 #                DolRecomp commit RecompCore pins (fa0cf619e8d7eb8cba7eaf55267a12caaebb46aa),
-#                with patches/dolrecomp-wii-rel.patch applied for a REL.
+#                with patches/dolrecomp-wii-rel.patch applied (every game: the flags used below).
 #   --cpu        gekko (GameCube, default) or broadway (Wii)
 #   --rel        a REL module to recompile into the module too (Wii games keep most of their
 #                code there: Mario Kart Wii's files/rel/StaticR.rel)
@@ -75,7 +75,7 @@ if [ ! -f "$generated/generated.h" ]; then
   # --gamecube only skips DolRecomp's title database; --cpu picks GameCube or Wii code.
   # --direct-calls: calls between chunks run directly while the core has verified the target
   # chunk (patches/dolrecomp-wii-rel.patch), instead of a round trip through the core each time.
-  "$dolrecomp" --gamecube --cpu "$cpu" "-j$jobs" --direct-calls "$dol" "$out/dolrecomp"
+  "$dolrecomp" --gamecube --cpu "$cpu" "-j$jobs" --direct-calls --inline-cache-ops "$dol" "$out/dolrecomp"
 fi
 # module-template hashes the original text sections to verify each chunk at runtime.
 cp "$dol" "$generated/main.dol"
@@ -91,7 +91,7 @@ if [ -n "$rel" ]; then
     if [ -n "$rel_bss" ]; then bss_args=(--rel-bss "$rel_bss"); fi
     # The REL's calls into main.dol run directly too (--extern-chunks: main.dol's chunks).
     "$dolrecomp" --gamecube --cpu "$cpu" "-j$jobs" --rel-base "$rel_base" ${bss_args[@]+"${bss_args[@]}"} \
-      --direct-calls --extern-chunks "$generated/generated.h" "$rel" "$out/dolrecomp-rel"
+      --direct-calls --inline-cache-ops --extern-chunks "$generated/generated.h" "$rel" "$out/dolrecomp-rel"
   fi
   rel_args=(-DREL_GENERATED_DIR="$rel_generated")
 fi

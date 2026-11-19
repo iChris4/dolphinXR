@@ -67,12 +67,7 @@ f64 ppc_approx_reciprocal(f64 value);
 void ppc_fpscr_updated(CPUState* cpu);
 void ppc_fpscr_control_updated(CPUState* cpu);
 void set_fp_exception(CPUState* cpu, u32 bit);
-void clear_fifr(CPUState* cpu);
 bool is_snan(f64 value);
-u32 classify_f64(f64 value);
-u32 classify_f32(f32 value);
-void set_fprf(CPUState* cpu, u32 value);
-f32 force_single(const CPUState* cpu, f64 value);
 f64 force_double(const CPUState* cpu, f64 d);
 f64 force_25bit_c(f64 d);
 f64 make_quiet(f64 value);
@@ -83,9 +78,67 @@ FPRes ni_sub(CPUState* cpu, f64 a, f64 b);
 FPRes ni_mul(CPUState* cpu, f64 a, f64 b);
 FPRes ni_div(CPUState* cpu, f64 a, f64 b);
 FPRes ni_madd_msub(CPUState* cpu, f64 a, f64 c, f64 b, bool sub, bool single);
-bool fp_invalid_gated(const CPUState* cpu, const FPRes* res);
-void fp_write_single(CPUState* cpu, u8 d, f32 rounded);
-void fp_write_double(CPUState* cpu, u8 d, f64 value);
 void ps_write_both(CPUState* cpu, u8 d, f32 ps0, f32 ps1);
+
+/* DolphinXR: per-instruction FPSCR bookkeeping, inline in every FP helper (it was a call each:
+ * classify_f32 alone was ~4% of the Mario Kart CPU thread). Normal results are tested first. */
+static inline void clear_fifr(CPUState* cpu) {
+    cpu->fpscr &= ~(FPSCR_FI_BIT | FPSCR_FR_BIT);
+}
+
+static inline u32 classify_f64(f64 value) {
+    u64 bits = f64_bits(value);
+    u64 sign = bits >> 63;
+    u64 exponent = bits & 0x7FF0000000000000ull;
+    u64 fraction = bits & 0x000FFFFFFFFFFFFFull;
+    if (__builtin_expect(exponent != 0 && exponent != 0x7FF0000000000000ull, 1))
+        return sign ? 0x08u : 0x04u;
+    if (exponent == 0x7FF0000000000000ull)
+        return fraction ? 0x11u : (sign ? 0x09u : 0x05u);
+    return fraction ? (sign ? 0x18u : 0x14u) : (sign ? 0x12u : 0x02u);
+}
+
+static inline u32 classify_f32(f32 value) {
+    u32 bits;
+    memcpy(&bits, &value, sizeof(bits));
+    u32 sign = bits >> 31;
+    u32 exponent = bits & 0x7F800000u;
+    u32 fraction = bits & 0x007FFFFFu;
+    if (__builtin_expect(exponent != 0 && exponent != 0x7F800000u, 1))
+        return sign ? 0x08u : 0x04u;
+    if (exponent == 0x7F800000u)
+        return fraction ? 0x11u : (sign ? 0x09u : 0x05u);
+    return fraction ? (sign ? 0x18u : 0x14u) : (sign ? 0x12u : 0x02u);
+}
+
+static inline void set_fprf(CPUState* cpu, u32 value) {
+    cpu->fpscr = (cpu->fpscr & ~(0x1Fu << 12)) | ((value & 0x1Fu) << 12);
+}
+
+static inline f32 force_single(const CPUState* cpu, f64 value) {
+    if (cpu->fpscr & FPSCR_NI_BIT) {
+        u64 no_sign = f64_bits(value) & 0x7FFFFFFFFFFFFFFFull;
+        if (no_sign < 0x3810000000000000ull) {
+            u32 flushed = (u32)((f64_bits(value) & 0x8000000000000000ull) >> 32);
+            return f32_value(flushed);
+        }
+    }
+    return (f32)value;
+}
+
+static inline bool fp_invalid_gated(const CPUState* cpu, const FPRes* res) {
+    return (cpu->fpscr & FPSCR_VE_BIT) != 0 && (res->exception & FPSCR_VX_ANY_MASK) != 0;
+}
+
+static inline void fp_write_single(CPUState* cpu, u8 d, f32 rounded) {
+    cpu->fpr[d] = (f64)rounded;
+    cpu->ps1[d] = (f64)rounded;
+    set_fprf(cpu, classify_f32(rounded));
+}
+
+static inline void fp_write_double(CPUState* cpu, u8 d, f64 value) {
+    cpu->fpr[d] = value;
+    set_fprf(cpu, classify_f64(value));
+}
 
 #endif /* GXRUNTIME_CPU_INTERPRETER_PRIVATE_H */

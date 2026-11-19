@@ -33,6 +33,105 @@ __attribute__((visibility("default"))) void ppc_set_mem_write_journal(PPCMemWrit
     g_mem_write_journal_user = user;
 }
 
+/* DolphinXR: the slow half of cpu.h's mem_readN / mem_writeN: the full former logic (MEM2 then
+ * MEM1 lookup, external hooks, reservation, RAM write journal), out of line. */
+u64 gx_mem_read64_slow(CPUState* cpu, u32 addr) {
+    u8* ptr = get_ram_ptr(cpu, addr, 8, NULL);
+    if (ptr == NULL) {
+        if (cpu->external_read)
+            return cpu->external_read(cpu, addr, 8);
+        return 0;
+    }
+    return read_be64(ptr);
+}
+
+void gx_mem_write64_slow(CPUState* cpu, u32 addr, u64 value) {
+    u32 offset;
+    u8* ptr = get_ram_ptr(cpu, addr, 8, &offset);
+    if (ptr == NULL) {
+        if (cpu->external_write) {
+            cpu->external_write(cpu, addr, value, 8);
+        }
+        return;
+    }
+    clear_matching_reservation(cpu, addr);
+    if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 8, g_mem_write_journal_user);
+    write_be64(ptr, value);
+}
+
+u32 gx_mem_read32_slow(CPUState* cpu, u32 addr) {
+    u8* ptr = get_ram_ptr(cpu, addr, 4, NULL);
+    if (ptr == NULL) {
+        if (cpu->external_read)
+            return (u32)cpu->external_read(cpu, addr, 4);
+        return 0;
+    }
+    return read_be32(ptr);
+}
+
+void gx_mem_write32_slow(CPUState* cpu, u32 addr, u32 value) {
+    u32 offset;
+    u8* ptr = get_ram_ptr(cpu, addr, 4, &offset);
+    if (ptr == NULL) {
+        if (cpu->external_write) {
+            cpu->external_write(cpu, addr, value, 4);
+        }
+        return;
+    }
+    clear_matching_reservation(cpu, addr);
+    if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 4, g_mem_write_journal_user);
+    write_be32(ptr, value);
+}
+
+u16 gx_mem_read16_slow(CPUState* cpu, u32 addr) {
+    u8* ptr = get_ram_ptr(cpu, addr, 2, NULL);
+    if (ptr == NULL) {
+        if (cpu->external_read)
+            return (u16)cpu->external_read(cpu, addr, 2);
+        return 0;
+    }
+    return read_be16(ptr);
+}
+
+void gx_mem_write16_slow(CPUState* cpu, u32 addr, u16 value) {
+    u32 offset;
+    u8* ptr = get_ram_ptr(cpu, addr, 2, &offset);
+    if (ptr == NULL) {
+        if (cpu->external_write) {
+            cpu->external_write(cpu, addr, value, 2);
+        }
+        return;
+    }
+    clear_matching_reservation(cpu, addr);
+    if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 2, g_mem_write_journal_user);
+    write_be16(ptr, value);
+}
+
+u8 gx_mem_read8_slow(CPUState* cpu, u32 addr) {
+    u8* ptr = get_ram_ptr(cpu, addr, 1, NULL);
+    if (ptr == NULL) {
+        if (cpu->external_read)
+            return (u8)cpu->external_read(cpu, addr, 1);
+        return 0;
+    }
+    return *ptr;
+}
+
+void gx_mem_write8_slow(CPUState* cpu, u32 addr, u8 value) {
+    u32 offset;
+    u8* ptr = get_ram_ptr(cpu, addr, 1, &offset);
+    if (ptr == NULL) {
+        if (cpu->external_write) {
+            cpu->external_write(cpu, addr, value, 1);
+        }
+        return;
+    }
+    clear_matching_reservation(cpu, addr);
+    if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 1, g_mem_write_journal_user);
+    *ptr = value;
+}
+
+
 bool cpu_init(CPUState* cpu) {
     memset(cpu, 0, sizeof(*cpu));
 
