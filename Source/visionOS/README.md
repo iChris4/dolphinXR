@@ -28,8 +28,9 @@ Disc images go in the app's `Games` folder (Files app, or Finder file sharing), 
 
 ## Full speed: a recompiled module
 
-DolRecomp needs `Tools/StaticRecomp/patches/dolrecomp-wii-rel.patch` applied (direct calls between
-chunks, in-line cache instructions, Wii RELs). Modules carry the guest CPU state layout they were
+DolRecomp needs `Tools/StaticRecomp/patches/dolrecomp-wii-rel.patch` applied (one C function per
+guest function with direct calls between them, in-line cache instructions, Wii RELs). A module
+builds in minutes (Mario Kart Wii: ~3 on an M1 Max). Modules carry the guest CPU state layout they were
 built for (GXRuntime's CPU ABI); the app rejects one built for another, so rebuild modules after
 updating the branch when it changes (ABI 4: guest RAM segment tables).
 

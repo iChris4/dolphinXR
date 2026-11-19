@@ -17,12 +17,21 @@ DolphinXR changes to DolRecomp fa0cf619e8d7eb8cba7eaf55267a12caaebb46aa for Wii 
 - dolrecomp_f32_from_bits (lfs, psq_l): a normal single converts as the host converts it, in
   line; zero, denormal, infinity and NaN take the bit-level conversion out of line. Identical
   results for all 2^32 inputs.
+- --function-chunks (C backend): a chunk -- one C function -- per guest function, from the
+  direct call targets (bl, bcl), several per C file. With --direct-calls, guest calls and returns
+  become host calls and returns: call sites name the target chunk by its index in the module
+  (int dolrecomp_chunk_ready_at(u32 index, u32 chunk_start)), branches into another chunk run it
+  directly, indirect calls go through int dolrecomp_call_indirect(CPUState*, u32 target), a bctr
+  into its own function goes back through the function's entry switch, and the call guard is a
+  stack floor (char* dolrecomp_stack_floor) instead of a depth count. The dispatch lookup is the
+  indexed one with 256-byte pages, and generated.h lists the covered code as
+  // DOLRECOMP_CODE_RANGE lines.
 
 diff --git a/src/app/cli.c b/src/app/cli.c
-index 33d3c23..32f9419 100644
+index 33d3c23..60a67d1 100644
 --- a/src/app/cli.c
 +++ b/src/app/cli.c
-@@ -18,6 +18,10 @@ void print_usage(const char* argv0) {
+@@ -18,6 +18,11 @@ void print_usage(const char* argv0) {
      fprintf(stderr, "  --backend c|llvm               Select generated-code backend (default: c)\n");
      fprintf(stderr, "  --gamecube                     GameCube mode (no title ID required)\n");
      fprintf(stderr, "  --rel-base <addr>              Override first virtual load address for REL codegen\n");
@@ -30,10 +39,11 @@ index 33d3c23..32f9419 100644
 +    fprintf(stderr, "  --direct-calls                 Cross-chunk calls run directly when dolrecomp_chunk_ready() allows\n");
 +    fprintf(stderr, "  --extern-chunks <generated.h>  With --direct-calls: another tree's chunks, callable too\n");
 +    fprintf(stderr, "  --inline-cache-ops             dcbst/dcbf/dcbi/icbi call ppc_cache_control in line (C backend)\n");
++    fprintf(stderr, "  --function-chunks              One chunk (C function) per guest function found from call targets\n");
      fprintf(stderr, "  --map <path>                   Load optional function names from a linker MAP\n");
      fprintf(stderr, "  --setup                        Download titles database and optionally install wit\n");
      fprintf(stderr, "\n");
-@@ -153,6 +157,26 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
+@@ -153,6 +158,31 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
              continue;
          }
  
@@ -45,6 +55,11 @@ index 33d3c23..32f9419 100644
 +
 +        if (strcmp(arg, "--inline-cache-ops") == 0) {
 +            opts->inline_cache_ops = 1;
++            continue;
++        }
++
++        if (strcmp(arg, "--function-chunks") == 0) {
++            opts->function_chunks = 1;
 +            continue;
 +        }
 +
@@ -60,7 +75,7 @@ index 33d3c23..32f9419 100644
          if (strcmp(arg, "--backend") == 0) {
              if (i + 1 >= argc) {
                  fprintf(stderr, "error: --backend needs c or llvm\n");
-@@ -263,6 +287,25 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
+@@ -263,6 +293,25 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
              continue;
          }
  
@@ -87,10 +102,10 @@ index 33d3c23..32f9419 100644
              if (i + 1 >= argc) {
                  fprintf(stderr, "error: --map needs a path\n");
 diff --git a/src/app/cli.h b/src/app/cli.h
-index 73706f2..08c0559 100644
+index 73706f2..53b6a97 100644
 --- a/src/app/cli.h
 +++ b/src/app/cli.h
-@@ -19,9 +19,14 @@ typedef struct {
+@@ -19,9 +19,15 @@ typedef struct {
      DolRecompBackend backend;
      u32 jobs;
      u32 rel_base;
@@ -98,6 +113,7 @@ index 73706f2..08c0559 100644
 +    const char* extern_chunks_path;
 +    int direct_calls;
 +    int inline_cache_ops;
++    int function_chunks;
      int gamecube_mode;
      int cpu_explicit;
      int rel_base_set;
@@ -106,7 +122,7 @@ index 73706f2..08c0559 100644
      int show_help;
  } CliOptions;
 diff --git a/src/app/main.c b/src/app/main.c
-index c148031..897ad52 100644
+index c148031..65990a1 100644
 --- a/src/app/main.c
 +++ b/src/app/main.c
 @@ -10,11 +10,78 @@
@@ -188,7 +204,7 @@ index c148031..897ad52 100644
  int main(int argc, char** argv) {
      if (argc > 1 && strcmp(argv[1], "extract") == 0)
          return disc_extract_main(argc - 1, argv + 1);
-@@ -26,6 +93,10 @@ int main(int argc, char** argv) {
+@@ -26,6 +93,12 @@ int main(int argc, char** argv) {
          return 0;
      if (opts.setup_mode)
          return run_setup() ? 0 : 1;
@@ -196,10 +212,12 @@ index c148031..897ad52 100644
 +        !pipeline_set_direct_calls(opts.extern_chunks_path))
 +        return 1;
 +    c_cfg_set_inline_cache_ops(opts.inline_cache_ops != 0);
++    if (opts.function_chunks)
++        pipeline_set_function_chunks();
  
      const char* input_path  = opts.input_path;
      const char* title_id_arg = opts.title_id_arg;
-@@ -158,6 +229,8 @@ int main(int argc, char** argv) {
+@@ -158,6 +231,8 @@ int main(int argc, char** argv) {
  
      if (rel_mode) {
          RELFile rel;
@@ -208,7 +226,7 @@ index c148031..897ad52 100644
          if (!rel_load(&rel, input_path, rel_start_base))
              return 1;
  
-@@ -195,6 +268,10 @@ int main(int argc, char** argv) {
+@@ -195,6 +270,10 @@ int main(int argc, char** argv) {
              rel_free(&rel);
              return 1;
          }
@@ -220,10 +238,10 @@ index c148031..897ad52 100644
          rel_free(&rel);
          return 0;
 diff --git a/src/app/pipeline.c b/src/app/pipeline.c
-index a154731..2ae83ff 100644
+index a154731..5fe5e9b 100644
 --- a/src/app/pipeline.c
 +++ b/src/app/pipeline.c
-@@ -24,6 +24,52 @@
+@@ -24,6 +24,273 @@
  #include <string.h>
  #include <errno.h>
  #include <time.h>
@@ -273,10 +291,251 @@ index a154731..2ae83ff 100644
 +    }
 +    return 1;
 +}
++
++static int g_function_chunks = 0;
++
++void pipeline_set_function_chunks(void) {
++    g_function_chunks = 1;
++    emit_set_function_chunks(1);
++    dispatch_set_function_chunks(1);
++}
++
++static int push_u32(u32** items, u32* count, u32* capacity, u32 value) {
++    if (*count == *capacity) {
++        u32 grown_capacity = *capacity ? *capacity * 2u : 1024u;
++        u32* grown = (u32*)realloc(*items, (size_t)grown_capacity * sizeof(u32));
++        if (!grown)
++            return 0;
++        *items = grown;
++        *capacity = grown_capacity;
++    }
++    (*items)[(*count)++] = value;
++    return 1;
++}
++
++/* DolphinXR --function-chunks: decode every section, take each direct call target (bl, bcl)
++ * inside them as the start of a guest function, and make each function -- from its start to
++ * the next one, at most max_chunk instructions -- a chunk of its own: a C function, a guard
++ * granule, a direct-call target. Consecutive chunks of a section share a C file up to
++ * max_chunk instructions. A function only ever reached through a pointer stays in the chunk
++ * before it, which is correct, only coarser. */
++static int emit_function_chunk_sections(const LoadedCodeSection* sections, u32 section_count,
++                                        FILE* header, FILE* manifest, const char* chunks_dir,
++                                        const char* chunks_label, const char* include_name,
++                                        u32 jobs, u32 max_chunk, FunctionList* funcs,
++                                        SMCAnalysis* smc, u32* file_count) {
++    PPCInst** insts = (PPCInst**)calloc(section_count ? section_count : 1u, sizeof(PPCInst*));
++    u32* entries = NULL;
++    u32 entry_count = 0, entry_capacity = 0;
++    ChunkSpan* spans = NULL;
++    u32 span_count = 0, span_capacity = 0;
++    u32* span_section = NULL;
++    ChunkJob* file_jobs = NULL;
++    u32 file_job_count = 0;
++    u32* chunk_starts = NULL;
++    int ok = 0;
++    if (!insts)
++        goto out;
++
++    for (u32 s = 0; s < section_count; s++) {
++        const LoadedCodeSection* section = &sections[s];
++        if (section->size == 0 || !section->data)
++            continue;
++        const u32 num_insts = section->size / 4u;
++        insts[s] = (PPCInst*)malloc((size_t)num_insts * sizeof(PPCInst));
++        if (!insts[s])
++            goto out;
++        u32 embedded = 0, unknown = 0;
++        for (u32 i = 0; i < num_insts; i++) {
++            const u32 raw = read_be32(section->data + i * 4u);
++            insts[s][i] = ppc_decode(raw, section->address + i * 4u);
++            if (insts[s][i].op == PPC_OP_UNKNOWN &&
++                embedded_data_word(section->embedded_data_mode, raw))
++                insts[s][i].embedded_data = true;
++            if (insts[s][i].embedded_data)
++                embedded++;
++            else if (insts[s][i].op == PPC_OP_UNKNOWN)
++                unknown++;
++        }
++        printf("decoding %s[%u]: %u instructions at 0x%08X (%u embedded data, %u unknown)\n",
++               section->label, section->index, num_insts, section->address, embedded, unknown);
++        if (section->embedded_data_mode == EMBEDDED_DATA_DOL) {
++            analyze_smc_section(sections, section_count, insts[s], num_insts, smc);
++            if (smc->allocation_failed)
++                goto out;
++        }
++    }
++
++    /* Function starts: every direct call target inside these sections. */
++    for (u32 s = 0; s < section_count; s++) {
++        if (!insts[s])
++            continue;
++        const u32 num_insts = sections[s].size / 4u;
++        for (u32 i = 0; i < num_insts; i++) {
++            const PPCInst* inst = &insts[s][i];
++            if (inst->embedded_data || !inst->lk ||
++                (inst->op != PPC_OP_B && inst->op != PPC_OP_BC))
++                continue;
++            const u32 target = inst->branch_target;
++            for (u32 t = 0; t < section_count; t++) {
++                if (insts[t] && (target & 3u) == 0 && target >= sections[t].address &&
++                    target - sections[t].address < sections[t].size) {
++                    if (!push_u32(&entries, &entry_count, &entry_capacity, target))
++                        goto out;
++                    break;
++                }
++            }
++        }
++    }
++    qsort(entries, entry_count, sizeof(u32), compare_u32);
++    {
++        u32 unique = 0;
++        for (u32 i = 0; i < entry_count; i++)
++            if (unique == 0 || entries[unique - 1u] != entries[i])
++                entries[unique++] = entries[i];
++        entry_count = unique;
++    }
++
++    /* Chunks: section start and each function start, at most max_chunk instructions. */
++    {
++        u32 e = 0;
++        for (u32 s = 0; s < section_count; s++) {
++            if (!insts[s])
++                continue;
++            const u32 base = sections[s].address;
++            const u32 num_insts = sections[s].size / 4u;
++            e = 0;  /* sections need not come in address order */
++            while (e < entry_count && entries[e] < base)
++                e++;
++            u32 start = 0;
++            while (start < num_insts) {
++                while (e < entry_count && entries[e] <= base + start * 4u)
++                    e++;
++                u32 end = num_insts;
++                if (e < entry_count && entries[e] < base + num_insts * 4u)
++                    end = (entries[e] - base) / 4u;
++                if (end - start > max_chunk)
++                    end = start + max_chunk;
++                if (span_count == span_capacity) {
++                    span_capacity = span_capacity ? span_capacity * 2u : 1024u;
++                    ChunkSpan* grown = (ChunkSpan*)realloc(spans, span_capacity * sizeof(ChunkSpan));
++                    u32* grown_section = (u32*)realloc(span_section, span_capacity * sizeof(u32));
++                    if (grown)
++                        spans = grown;
++                    if (grown_section)
++                        span_section = grown_section;
++                    if (!grown || !grown_section)
++                        goto out;
++                }
++                spans[span_count].insts = insts[s] + start;
++                spans[span_count].count = end - start;
++                spans[span_count].func_addr = base + start * 4u;
++                span_section[span_count] = s;
++                span_count++;
++                start = end;
++            }
++        }
++    }
++    printf("  %u function chunks from %u call targets\n", span_count, entry_count);
++
++    for (u32 i = 0; i < span_count; i++) {
++        emit_chunk_prototype(header, spans[i].func_addr);
++        if (!function_list_add(funcs, spans[i].func_addr,
++                               spans[i].func_addr + spans[i].count * 4u))
++            goto out;
++    }
++
++    if (g_direct_calls) {
++        const u32 total = funcs->count + g_extern_chunk_count;
++        chunk_starts = (u32*)malloc((size_t)(total ? total : 1u) * sizeof(u32));
++        if (!chunk_starts)
++            goto out;
++        for (u32 i = 0; i < funcs->count; ++i)
++            chunk_starts[i] = funcs->ranges[i].start;
++        for (u32 i = funcs->count; i < total; ++i)
++            chunk_starts[i] = g_extern_chunk_starts[i - funcs->count];
++        qsort(chunk_starts, total, sizeof(u32), compare_u32);
++        emit_set_direct_call_guard(1);
++        emit_set_chunk_table(chunk_starts, total);
++        printf("  guarded direct calls (%u external chunks)\n", g_extern_chunk_count);
++    }
++
++    /* Files: consecutive chunks of one section, up to max_chunk instructions each. */
++    file_jobs = (ChunkJob*)calloc(span_count ? span_count : 1u, sizeof(ChunkJob));
++    if (!file_jobs)
++        goto out;
++    for (u32 first = 0; first < span_count;) {
++        u32 last = first + 1u, instructions = spans[first].count;
++        while (last < span_count && span_section[last] == span_section[first] &&
++               instructions + spans[last].count <= max_chunk) {
++            instructions += spans[last].count;
++            last++;
++        }
++        const LoadedCodeSection* section = &sections[span_section[first]];
++        ChunkJob* job = &file_jobs[file_job_count++];
++        char chunk_name[128];
++        snprintf(chunk_name, sizeof(chunk_name), "chunk_%04u_%s%u_%08X.c", *file_count,
++                 section->label, section->index, spans[first].func_addr);
++        if (!join_path(job->path, sizeof(job->path), chunks_dir, chunk_name) ||
++            snprintf(job->include_name, sizeof(job->include_name), "%s", include_name) >=
++                (int)sizeof(job->include_name)) {
++            fprintf(stderr, "error: chunk path is too long\n");
++            goto out;
++        }
++        job->spans = &spans[first];
++        job->span_count = last - first;
++        job->func_addr = spans[first].func_addr;
++        fprintf(manifest, "// %s/%s\n", chunks_label, chunk_name);
++        (*file_count)++;
++        first = last;
++    }
++    {
++        u32 active_jobs = effective_chunk_jobs(file_job_count, jobs);
++        printf("  writing %u files with %u job%s\n", file_job_count, active_jobs,
++               active_jobs == 1 ? "" : "s");
++    }
++    ok = run_chunk_jobs(file_jobs, file_job_count, jobs);
++
++out:
++    if (!ok)
++        fprintf(stderr, "error: function chunk output failed\n");
++    emit_set_chunk_table(NULL, 0);
++    free(chunk_starts);
++    free(file_jobs);
++    free(span_section);
++    free(spans);
++    free(entries);
++    if (insts) {
++        for (u32 s = 0; s < section_count; s++)
++            free(insts[s]);
++        free(insts);
++    }
++    return ok;
++}
  #ifndef _WIN32
  #include <sys/wait.h>
  #include <unistd.h>
-@@ -1087,14 +1133,26 @@ int emit_code_sections_split(const LoadedCodeSection* sections,
+@@ -937,7 +1204,18 @@ int emit_code_sections_split(const LoadedCodeSection* sections,
+     FunctionList funcs = {0};
+     SMCAnalysis smc = {0};
+ 
+-    for (u32 s = 0; s < section_count; s++) {
++    if (g_function_chunks &&
++        !emit_function_chunk_sections(sections, section_count, header, manifest, chunks_dir,
++                                      chunks_label, include_name, jobs, chunk_instructions,
++                                      &funcs, &smc, &file_count)) {
++        smc_analysis_free(&smc);
++        function_list_free(&funcs);
++        fclose(header);
++        fclose(manifest);
++        return 0;
++    }
++
++    for (u32 s = 0; s < section_count && !g_function_chunks; s++) {
+         const LoadedCodeSection* section = &sections[s];
+         if (section->size == 0 || !section->data) continue;
+ 
+@@ -1087,14 +1365,26 @@ int emit_code_sections_split(const LoadedCodeSection* sections,
          // funcs accumulates across sections; targets in a later section still
          // fall back to the dispatcher because their symbols are not known yet.
          const char* direct = getenv("DOLRECOMP_UNSAFE_DIRECT_CALLS");
@@ -308,10 +567,10 @@ index a154731..2ae83ff 100644
          }
  
 diff --git a/src/app/pipeline.h b/src/app/pipeline.h
-index 65ecd3d..cd40fe0 100644
+index 65ecd3d..36e8c25 100644
 --- a/src/app/pipeline.h
 +++ b/src/app/pipeline.h
-@@ -26,4 +26,10 @@ int emit_rel_directory(const char* input_dir, const char* output_root,
+@@ -26,4 +26,15 @@ int emit_rel_directory(const char* input_dir, const char* output_root,
                         DolRecompCPU cpu, u32 jobs, u32 start_base,
                         DolRecompBackend backend);
  
@@ -320,6 +579,11 @@ index 65ecd3d..cd40fe0 100644
 + * may run, and returns to it otherwise. extern_header: another tree of the same module whose
 + * chunks may be called too (main.dol's generated.h, for a REL). Returns 0 on a bad header. */
 +int pipeline_set_direct_calls(const char* extern_header);
++
++/* DolphinXR: --function-chunks (C backend). A chunk -- one C function -- per guest function
++ * found from call targets, instead of fixed 4096-instruction windows; several per C file. With
++ * direct calls, guest calls and returns become host calls and returns. */
++void pipeline_set_function_chunks(void);
 +
  #endif
 diff --git a/src/backend/c_cfg.c b/src/backend/c_cfg.c
@@ -381,39 +645,294 @@ index 4f732f2..e4dca68 100644
  bool c_function_cfg_build(CFunctionCFG* cfg, const PPCInst* insts, u32 count,
                            u32 function_address);
  void c_function_cfg_destroy(CFunctionCFG* cfg);
+diff --git a/src/backend/codegen.c b/src/backend/codegen.c
+index 39ed6a2..4c69384 100644
+--- a/src/backend/codegen.c
++++ b/src/backend/codegen.c
+@@ -34,7 +34,16 @@ int emit_chunk_file(const ChunkJob* job) {
+ 
+     fprintf(chunk, "// DolRecomp output\n");
+     fprintf(chunk, "#include \"../%s\"\n\n", job->include_name);
+-    if (!emit_function(chunk, job->insts, job->count, job->func_addr)) {
++    if (job->span_count) {
++        for (u32 i = 0; i < job->span_count; ++i) {
++            const ChunkSpan* span = &job->spans[i];
++            if (!emit_function(chunk, span->insts, span->count, span->func_addr)) {
++                fclose(chunk);
++                remove(job->path);
++                return 0;
++            }
++        }
++    } else if (!emit_function(chunk, job->insts, job->count, job->func_addr)) {
+         fclose(chunk);
+         remove(job->path);
+         return 0;
+diff --git a/src/backend/codegen.h b/src/backend/codegen.h
+index 8cacd0a..2e3038f 100644
+--- a/src/backend/codegen.h
++++ b/src/backend/codegen.h
+@@ -9,12 +9,21 @@
+ 
+ #define EMIT_CHUNK_INSTRUCTIONS 4096u
+ 
++/* DolphinXR --function-chunks: one C function per span, several spans per file. */
++typedef struct {
++    const PPCInst* insts;
++    u32 count;
++    u32 func_addr;
++} ChunkSpan;
++
+ typedef struct {
+     const PPCInst* insts;
+     u32 count;
+     u32 func_addr;
+     char path[1200];
+     char include_name[512];
++    const ChunkSpan* spans;  /* when span_count != 0, these instead of insts/count/func_addr */
++    u32 span_count;
+ } ChunkJob;
+ 
+ typedef int (*ParallelJobFunction)(const void* job, void* user);
+diff --git a/src/backend/dispatch.c b/src/backend/dispatch.c
+index 41dca99..3e3e880 100644
+--- a/src/backend/dispatch.c
++++ b/src/backend/dispatch.c
+@@ -29,7 +29,15 @@ typedef enum {
+ // A 4 KiB page is small enough that a page holds only a handful of runs even
+ // under the most irregular plan measured here (E008a's mean chunk was 87
+ // instructions, so ~11 per page), and the whole index is one u32 per page.
+-#define DISPATCH_PAGE_SHIFT 12u
++// DolphinXR --function-chunks: a chunk per guest function, so 256-byte pages (a few chunks each).
++static u32 g_dispatch_page_shift = 12u;
++#define DISPATCH_PAGE_SHIFT g_dispatch_page_shift
++static int g_dispatch_function_chunks = 0;
++
++void dispatch_set_function_chunks(int enabled) {
++    g_dispatch_function_chunks = enabled;
++    g_dispatch_page_shift = enabled ? 8u : 12u;
++}
+ 
+ // Refuse the page index if the code sections are scattered far enough apart
+ // that the table would dwarf the thing it indexes. 256 MiB of guest address
+@@ -38,6 +46,8 @@ typedef enum {
+ #define DISPATCH_MAX_INDEX_PAGES 65536u
+ 
+ static DispatchLookupMode dispatch_lookup_mode(void) {
++    if (g_dispatch_function_chunks)
++        return DISPATCH_LOOKUP_INDEXED;  /* thousands of chunks: no linear chain */
+     const char* configured = getenv("DOLRECOMP_DISPATCH_LOOKUP");
+     if (!configured || !configured[0])
+         return DISPATCH_LOOKUP_LINEAR;
+@@ -366,6 +376,14 @@ static void emit_lookup_linear(FILE* out, const FunctionList* funcs) {
+ 
+ void emit_dispatch_helpers(FILE* out, const FunctionList* funcs, u32 entry_point) {
+     fprintf(out, "\n#define DOLRECOMP_ENTRY_POINT 0x%08Xu\n", entry_point);
++    // DolphinXR: the code the chunks cover, as plain lines (a table generator reads these; the
++    // indexed lookup below has no per-range conditions to parse).
++    for (u32 i = 0; i < funcs->count;) {
++        u32 start = funcs->ranges[i].start, end = funcs->ranges[i].end;
++        for (i++; i < funcs->count && funcs->ranges[i].start == end; i++)
++            end = funcs->ranges[i].end;
++        fprintf(out, "// DOLRECOMP_CODE_RANGE 0x%08X 0x%08X\n", start, end);
++    }
+     fprintf(out, "\ntypedef void (*DolRecompFunction)(CPUState* ctx);\n");
+     fprintf(out, "\n#if defined(__GNUC__) || defined(__clang__)\n");
+     fprintf(out, "#define DOLRECOMP_UNUSED __attribute__((unused))\n");
+diff --git a/src/backend/dispatch.h b/src/backend/dispatch.h
+index 55122bd..f05dad6 100644
+--- a/src/backend/dispatch.h
++++ b/src/backend/dispatch.h
+@@ -19,5 +19,7 @@ void emit_chunk_prototype(FILE* out, u32 func_addr);
+ void function_list_free(FunctionList* list);
+ int function_list_add(FunctionList* list, u32 start, u32 end);
+ void emit_dispatch_helpers(FILE* out, const FunctionList* funcs, u32 entry_point);
++/* DolphinXR --function-chunks: indexed lookup with 256-byte pages. */
++void dispatch_set_function_chunks(int enabled);
+ 
+ #endif
 diff --git a/src/backend/emitter.c b/src/backend/emitter.c
-index 1cae76f..391c758 100644
+index 1cae76f..822e0df 100644
 --- a/src/backend/emitter.c
 +++ b/src/backend/emitter.c
-@@ -317,6 +317,11 @@ static bool branch_target_is_local(u32 func_start, u32 func_end, u32 target) {
+@@ -317,6 +317,18 @@ static bool branch_target_is_local(u32 func_start, u32 func_end, u32 target) {
  // branch takes the safe return-to-chassis path.
  static const u32* g_chunk_starts = NULL;
  static u32 g_chunk_count = 0;
 +static int g_direct_call_guard = 0;
++/* DolphinXR --function-chunks: chunks are guest functions; calls name their target chunk by
++ * index (dolrecomp_chunk_ready_at), tail branches and indirect calls run directly too. */
++static int g_function_chunks_emit = 0;
 +
 +void emit_set_direct_call_guard(int enabled) {
 +    g_direct_call_guard = enabled;
 +}
++
++void emit_set_function_chunks(int enabled) {
++    g_function_chunks_emit = enabled;
++}
  
  void emit_set_chunk_table(const u32* starts, u32 count) {
      g_chunk_starts = count ? starts : NULL;
-@@ -364,7 +369,14 @@ static bool emit_cross_chunk_call(FILE* out, const PPCInst* inst,
+@@ -340,6 +352,53 @@ static u32 chunk_start_for(u32 addr) {
+     return lo ? g_chunk_starts[lo - 1u] : 0;
+ }
+ 
++// Index of the chunk starting at `chunk_start` in the sorted chunk table: with --function-chunks
++// it is the chunk's index in the module's merged table too (the runtime checks that it is).
++static u32 chunk_index_of(u32 chunk_start) {
++    u32 lo = 0, hi = g_chunk_count;
++    while (lo < hi) {
++        u32 mid = lo + (hi - lo) / 2u;
++        if (g_chunk_starts[mid] < chunk_start)
++            lo = mid + 1u;
++        else
++            hi = mid;
++    }
++    return lo;
++}
++
++static void emit_chunk_ready_condition(FILE* out, u32 target_chunk) {
++    if (g_function_chunks_emit) {
++        fprintf(out, "dolrecomp_chunk_ready_at(%uu, 0x%08Xu) && dolrecomp_call_enter()",
++                chunk_index_of(target_chunk), target_chunk);
++    } else if (g_direct_call_guard) {
++        fprintf(out, "dolrecomp_chunk_ready(0x%08Xu) && dolrecomp_call_enter()", target_chunk);
++    } else {
++        fprintf(out, "dolrecomp_call_enter()");
++    }
++}
++
++// --function-chunks: a branch without link into another chunk (a tail call, or a jump into
++// code another function shares) runs that chunk directly, then returns: when it finishes, ctx->pc
++// is where this function's caller resumes. The budget check keeps chains of such jumps from
++// running past the dispatcher's timing.
++static bool emit_cross_chunk_jump(FILE* out, const PPCInst* inst) {
++    if (!g_function_chunks_emit || !g_direct_call_guard)
++        return false;
++    u32 target_chunk = chunk_start_for(inst->branch_target);
++    if (!target_chunk)
++        return false;
++    fprintf(out, "            ctx->pc = 0x%08Xu;\n", inst->branch_target);
++    fprintf(out, "            if (ctx->downcount > -(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET && ");
++    emit_chunk_ready_condition(out, target_chunk);
++    fprintf(out, ") {\n");
++    fprintf(out, "                void func_%08X(CPUState* ctx);\n", target_chunk);
++    fprintf(out, "                func_%08X(ctx);\n", target_chunk);
++    fprintf(out, "                dolrecomp_call_leave();\n");
++    fprintf(out, "            }\n");
++    fprintf(out, "            return;\n");
++    return true;
++}
++
+ 
+ // A cross-chunk `bl` whose target chunk is known: call it directly instead of
+ // returning to the chassis. The chassis round trip costs two rel-section scans,
+@@ -364,7 +423,13 @@ static bool emit_cross_chunk_call(FILE* out, const PPCInst* inst,
          return false;
  
      fprintf(out, "            ctx->pc = 0x%08Xu;\n", inst->branch_target);
 -    fprintf(out, "            if (dolrecomp_call_enter()) {\n");
-+    if (g_direct_call_guard) {
-+        // DolphinXR: only into a chunk the runtime has checked; otherwise it runs the call.
++    // DolphinXR: with the guard, only into a chunk the runtime has checked; otherwise it runs
++    // the call.
++    if (g_direct_call_guard && !g_function_chunks_emit)
 +        fprintf(out, "            int dolrecomp_chunk_ready(u32 chunk_start);\n");
-+        fprintf(out, "            if (dolrecomp_chunk_ready(0x%08Xu) && dolrecomp_call_enter()) {\n",
-+                target_chunk);
-+    } else {
-+        fprintf(out, "            if (dolrecomp_call_enter()) {\n");
-+    }
++    fprintf(out, "            if (");
++    emit_chunk_ready_condition(out, target_chunk);
++    fprintf(out, ") {\n");
      fprintf(out, "                void func_%08X(CPUState* ctx);\n", target_chunk);
      fprintf(out, "                func_%08X(ctx);\n", target_chunk);
      fprintf(out, "                dolrecomp_call_leave();\n");
-@@ -526,7 +538,10 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+@@ -409,7 +474,7 @@ static void emit_direct_branch(FILE* out, const PPCInst* inst,
+         }
+     } else if (local_target) {
+         fprintf(out, "            goto label_%08X;\n", inst->branch_target);
+-    } else {
++    } else if (!emit_cross_chunk_jump(out, inst)) {
+         fprintf(out, "            ctx->pc = 0x%08Xu;\n", inst->branch_target);
+         fprintf(out, "            return;\n");
+     }
+@@ -418,19 +483,41 @@ static void emit_direct_branch(FILE* out, const PPCInst* inst,
+ static void emit_dynamic_branch(FILE* out, const PPCInst* inst,
+                                 const char* target_expr,
+                                 bool route_local_returns,
+-                                u32 function_address) {
++                                u32 function_address, u32 function_end) {
++    const bool function_mode = g_function_chunks_emit && g_direct_call_guard;
++    const u32 continuation = inst->address + 4u;
+     fprintf(out, "    {\n");
+     fprintf(out, "        u32 target = %s;\n", target_expr);
+     emit_branch_condition(out, inst->bo, inst->bi);
+     fprintf(out, "        if (ctr_ok && cr_ok) {\n");
+     if (inst->lk) {
+-        fprintf(out, "            ctx->lr = 0x%08Xu;\n", inst->address + 4);
++        fprintf(out, "            ctx->lr = 0x%08Xu;\n", continuation);
+     }
+     fprintf(out, "            ctx->pc = target;\n");
+-    if (route_local_returns)
++    if (function_mode && inst->lk) {
++        // DolphinXR --function-chunks: an indirect call (virtual call, function pointer) runs
++        // its target directly when the runtime finds a ready chunk there.
++        if (branch_target_is_local(function_address, function_end, continuation)) {
++            fprintf(out, "            if (dolrecomp_call_indirect(ctx, target) && "
++                         "ctx->pc == 0x%08Xu) goto label_%08X;\n",
++                    continuation, continuation);
++        } else {
++            fprintf(out, "            dolrecomp_call_indirect(ctx, target);\n");
++        }
++        fprintf(out, "            return;\n");
++    } else if (function_mode && inst->op == PPC_OP_BCCTR) {
++        // A jump through ctr: into this function (a switch's jump table) through its own entry
++        // switch, elsewhere as an indirect tail call.
++        fprintf(out, "            if (ctx->downcount <= -(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET) return;\n");
++        fprintf(out, "            if (target - 0x%08Xu < 0x%08Xu) goto entry_dispatch;\n",
++                function_address, function_end - function_address);
++        fprintf(out, "            dolrecomp_call_indirect(ctx, target);\n");
++        fprintf(out, "            return;\n");
++    } else if (route_local_returns) {
+         fprintf(out, "            goto return_dispatch_%08X;\n", function_address);
+-    else
++    } else {
+         fprintf(out, "            return;\n");
++    }
+     fprintf(out, "        }\n");
+     fprintf(out, "    }\n");
+ }
+@@ -485,6 +572,7 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         "\n"
+         "#define DOLRECOMP_CPU_%s 1\n"
+         "#define DOLRECOMP_CPU_NAME \"%s\"\n"
++        "%s"
+         "\n"
+         "#include <string.h>\n"
+         "#include <math.h>\n"
+@@ -508,6 +596,18 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         "#ifndef DOLRECOMP_C_MAX_CALL_DEPTH\n"
+         "#define DOLRECOMP_C_MAX_CALL_DEPTH 24\n"
+         "#endif\n"
++        "#ifdef DOLRECOMP_FUNCTION_CHUNKS\n"
++        "/* DolphinXR --function-chunks: every guest call is a host call, so the ceiling is on\n"
++        "   stack bytes: the runtime sets the floor when it enters the module. The runtime also\n"
++        "   says whether a chunk may run (by its index in the module) and runs indirect calls. */\n"
++        "extern char* dolrecomp_stack_floor;\n"
++        "int dolrecomp_chunk_ready_at(u32 index, u32 chunk_start);\n"
++        "int dolrecomp_call_indirect(CPUState* ctx, u32 target);\n"
++        "static inline int dolrecomp_call_enter(void) {\n"
++        "    return (char*)__builtin_frame_address(0) > dolrecomp_stack_floor;\n"
++        "}\n"
++        "static inline void dolrecomp_call_leave(void) {}\n"
++        "#else\n"
+         "extern unsigned dolrecomp_call_depth;\n"
+         "static inline int dolrecomp_call_enter(void) {\n"
+         "    if (dolrecomp_call_depth >= (unsigned)DOLRECOMP_C_MAX_CALL_DEPTH)\n"
+@@ -519,6 +619,7 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         "    if (dolrecomp_call_depth)\n"
+         "        dolrecomp_call_depth--;\n"
+         "}\n"
++        "#endif\n"
+         "\n"
+         "static inline u32 dolrecomp_rotl32(u32 value, u32 sh) {\n"
+         "    sh &= 31u;\n"
+@@ -526,7 +627,10 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
          "}\n"
          "\n"
          // Preserve the PPC bit-level single conversion, including denormals.
@@ -425,7 +944,7 @@ index 1cae76f..391c758 100644
          "    u64 x = bits;\n"
          "    u64 exp = (x >> 23) & 0xFFu;\n"
          "    u64 frac = x & 0x007FFFFFu;\n"
-@@ -555,6 +570,15 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+@@ -555,6 +659,15 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
          "    return value;\n"
          "}\n"
          "\n"
@@ -441,7 +960,17 @@ index 1cae76f..391c758 100644
          "static inline u32 dolrecomp_f32_to_bits(f64 value) {\n"
          "    u64 bits;\n"
          "    memcpy(&bits, &value, sizeof(bits));\n"
-@@ -1611,6 +1635,27 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
+@@ -597,7 +710,8 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         ,
+         emit_cpu_label(cpu),
+         emit_cpu_macro(cpu),
+-        emit_cpu_label(cpu));
++        emit_cpu_label(cpu),
++        g_function_chunks_emit ? "#define DOLRECOMP_FUNCTION_CHUNKS 1\n" : "");
+ }
+ 
+ void emit_header(FILE* out) {
+@@ -1611,6 +1725,27 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
      case PPC_OP_DCBF:
      case PPC_OP_DCBI:
      case PPC_OP_ICBI:
@@ -469,17 +998,43 @@ index 1cae76f..391c758 100644
          fprintf(out, "    ppc_fallback_instruction(ctx, 0x%08Xu, 0x%08Xu);\n",
                  inst->raw, inst->address);
          fprintf(out, "    return;\n");
+@@ -1662,11 +1797,11 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
+ 
+     case PPC_OP_BCLR:
+         emit_dynamic_branch(out, inst, "ctx->lr & ~3u",
+-                            route_local_returns, func_start);
++                            route_local_returns, func_start, func_end);
+         break;
+ 
+     case PPC_OP_BCCTR:
+-        emit_dynamic_branch(out, inst, "ctx->ctr & ~3u", false, func_start);
++        emit_dynamic_branch(out, inst, "ctx->ctr & ~3u", false, func_start, func_end);
+         break;
+ 
+     case PPC_OP_TWI:
+@@ -1921,6 +2056,8 @@ bool emit_function(FILE* out, const PPCInst* insts, u32 count, u32 func_addr) {
+     }
+ 
+     fprintf(out, "void func_%08X(CPUState* ctx) {\n", func_addr);
++    if (g_function_chunks_emit)
++        fprintf(out, "entry_dispatch: __attribute__((unused));\n");
+     fprintf(out, "    switch (ctx->pc) {\n");
+     for (u32 i = 0; i < count; i++) {
+         fprintf(out, "    case 0x%08Xu: goto label_%08X;\n",
 diff --git a/src/backend/emitter.h b/src/backend/emitter.h
-index 740f940..efa96cb 100644
+index 740f940..aac32c0 100644
 --- a/src/backend/emitter.h
 +++ b/src/backend/emitter.h
-@@ -22,6 +22,9 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu);
+@@ -22,6 +22,12 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu);
  // runtime that validates mutable guest code there. Call before worker emission;
  // passing count == 0 restores the safe return-to-chassis form.
  void emit_set_chunk_table(const u32* starts, u32 count);
 +// DolphinXR: direct calls ask the runtime first (int dolrecomp_chunk_ready(u32 chunk_start)), so a
 +// runtime that validates guest code still checks every chunk before native code runs it.
 +void emit_set_direct_call_guard(int enabled);
++// DolphinXR --function-chunks: index-based readiness (dolrecomp_chunk_ready_at), direct tail
++// branches, indirect calls through dolrecomp_call_indirect, and a stack-floor call guard.
++void emit_set_function_chunks(int enabled);
  
  // emit a single recompiled function as C code
  bool emit_function(FILE* out, const PPCInst* insts, u32 count, u32 func_addr);

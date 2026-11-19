@@ -154,6 +154,7 @@ private:
   // Keep Dolphin's MSR-derived state (translation mode, feature flags) in step
   // with the guest MSR before any MMU access or exception delivery.
   void PropagateGuestMSR();
+  void UpdateModuleDirectCalls();
 
   std::unique_ptr<StaticRecompLockstep::StaticRecompLockstepVerifier> m_lockstep_verifier;
 

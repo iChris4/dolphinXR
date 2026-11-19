@@ -59,6 +59,17 @@ def load_dol_text(dol_path: Path):
     return read_range
 
 
+def merge_ranges(ranges):
+    """Overlapping or touching ranges as one (the plain list and the conditions overlap)."""
+    merged = []
+    for a, b in sorted(ranges):
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return merged
+
+
 def parse_tree(generated_h: Path, smc_txt, image: Path):
     """One DolRecomp output: its code ranges, chunks with hashes, and SMC ranges."""
     header = generated_h.read_text()
@@ -75,6 +86,11 @@ def parse_tree(generated_h: Path, smc_txt, image: Path):
     ):
         start = int(base, 16)
         code_ranges.add((start, start + int(span, 16)))
+    # DolphinXR: DolRecomp also lists the covered code plainly (needed with --function-chunks,
+    # whose indexed lookup has no per-range conditions).
+    for a, b in re.findall(r"// DOLRECOMP_CODE_RANGE (0x[0-9A-Fa-f]+) (0x[0-9A-Fa-f]+)", header):
+        code_ranges.add((int(a, 16), int(b, 16)))
+    code_ranges = merge_ranges(code_ranges)
     if not code_ranges:
         raise ValueError(f"no coverage ranges found in {generated_h}")
     code_ranges = sorted(code_ranges)
@@ -197,6 +213,13 @@ def main() -> int:
         f.write("static const u64 s_chunk_hashes[] = {\n")
         for _, h in chunk_ranges:
             f.write(f"    0x{h:016X}u,\n")
+        f.write("};\n")
+        # DolphinXR: each chunk's function, in the same order (indirect calls, chunk_ready_at).
+        for (a, _), _ in chunk_ranges:
+            f.write(f"void func_{a:08X}(CPUState* ctx);\n")
+        f.write("static void (*const s_chunk_funcs[])(CPUState*) = {\n")
+        for (a, _), _ in chunk_ranges:
+            f.write(f"    func_{a:08X},\n")
         f.write("};\n")
 
         # REL modules: where each was recompiled, and the header fields that identify it in RAM.

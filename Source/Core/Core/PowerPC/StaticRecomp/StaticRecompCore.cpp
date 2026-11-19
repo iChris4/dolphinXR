@@ -190,28 +190,35 @@ void StaticRecompCore::Init()
   m_lockstep_verifier = std::make_unique<StaticRecompLockstep::StaticRecompLockstepVerifier>(*this);
   m_lockstep_verifier->Init();
 
-  // DolphinXR: a module built with DolRecomp --direct-calls calls other chunks directly, but only
-  // chunks whose state (m_chunk_state, which never reallocates after LoadModule) says verified.
-  // Not with lockstep, forced fallback ranges or host calls: they need every chunk entry here.
-  if (m_module && m_library.IsOpen())
-  {
-    const auto set_chunk_states = reinterpret_cast<StaticRecompSetChunkStatesFn>(
-        m_library.GetSymbolAddress(STATICRECOMP_SET_CHUNK_STATES_SYMBOL));
-    if (set_chunk_states)
-    {
-      const bool direct_calls = !m_lockstep_verifier->IsEnabled() &&
-                                m_forced_fallback_ranges.empty() && !m_guest.host_call;
-      set_chunk_states(direct_calls ? m_chunk_state.data() : nullptr,
-                       direct_calls ? static_cast<u32>(m_chunk_state.size()) : 0u);
-      NOTICE_LOG_FMT(POWERPC, "StaticRecomp: direct calls between chunks {}",
-                     direct_calls ? "on" : "off (lockstep, forced fallback or host calls)");
-    }
-  }
+  UpdateModuleDirectCalls();
 
   // DolphinXR: no fallback JIT on any platform. visionOS forbids runtime code generation, and
   // running the same module + interpreter contract on desktop keeps Mac testing representative of
   // the headset. (The upstream fallback JIT also needs yield hooks in the JIT dispatchers, which
   // are not ported.) m_fallback_jit stays null; every use of it is null-checked.
+}
+
+// DolphinXR: a module built with DolRecomp --direct-calls calls other chunks directly, but only
+// chunks whose state (m_chunk_state, which never reallocates after LoadModule) says verified.
+// Not with lockstep, forced fallback ranges or host calls: they need every chunk entry here. Nor
+// while a REL runs away from where it was recompiled: generated code calls chunks by their linked
+// addresses, and only the dispatcher translates.
+void StaticRecompCore::UpdateModuleDirectCalls()
+{
+  if (!m_module || !m_library.IsOpen())
+    return;
+  const auto set_chunk_states = reinterpret_cast<StaticRecompSetChunkStatesFn>(
+      m_library.GetSymbolAddress(STATICRECOMP_SET_CHUNK_STATES_SYMBOL));
+  if (!set_chunk_states)
+    return;
+  const bool direct_calls = !m_lockstep_verifier->IsEnabled() &&
+                            m_forced_fallback_ranges.empty() && !m_guest.host_call &&
+                            !m_rel_translation;
+  set_chunk_states(direct_calls ? m_chunk_state.data() : nullptr,
+                   direct_calls ? static_cast<u32>(m_chunk_state.size()) : 0u);
+  NOTICE_LOG_FMT(POWERPC, "StaticRecomp: direct calls between chunks {}",
+                 direct_calls ? "on" :
+                                "off (lockstep, forced fallback, host calls or a moved REL)");
 }
 
 void StaticRecompCore::Shutdown()

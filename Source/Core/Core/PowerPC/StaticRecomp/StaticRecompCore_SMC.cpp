@@ -143,9 +143,12 @@ void StaticRecompCore::RefreshRelSections()
     return;
   m_active_rel_sections = std::move(discovered);
   ++m_rel_mapping_generation;
+  const bool was_translating = m_rel_translation;
   m_rel_translation = std::any_of(
       m_active_rel_sections.begin(), m_active_rel_sections.end(),
       [](const ActiveRelSection& section) { return section.runtime_start != section.linked_start; });
+  if (m_rel_translation != was_translating)
+    UpdateModuleDirectCalls();
   for (const ActiveRelSection& section : m_active_rel_sections)
   {
     NOTICE_LOG_FMT(POWERPC,
