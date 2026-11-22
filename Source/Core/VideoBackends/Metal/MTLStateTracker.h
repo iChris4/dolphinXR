@@ -193,6 +193,18 @@ private:
   u64 m_current_draw = 1;
   std::atomic<u64> m_last_finished_draw{0};
 
+  // GPU load of the render command buffers, logged every few seconds (updated under the backref
+  // lock by their completion handlers): the time the GPU spent on them, counting overlaps once.
+  struct GPULoad
+  {
+    double window_start = 0;  // GPU timeline, seconds
+    double last_end = 0;
+    double busy = 0;
+    u32 buffers = 0;
+  };
+  GPULoad m_gpu_load;
+  void AccountGPUTime(id<MTLCommandBuffer> buffer);
+
   MRCOwned<id<MTLTexture>> m_dummy_texture;
 
   // Compute has a set of samplers and a set of writable images

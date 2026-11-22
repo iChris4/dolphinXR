@@ -44,19 +44,37 @@ async def main() -> None:
     parser.add_argument("--udid", help="devicectl device identifier, when several are paired")
     parser.add_argument("--port", type=int, default=7311, help="the Agent Server port")
     args = parser.parse_args()
-    host = args.device or tunnel_address(args.udid)
+    target = {"host": args.device or tunnel_address(args.udid)}
 
     async def relay(client_reader, client_writer):
+        host = target["host"]
         try:
             server_reader, server_writer = await asyncio.open_connection(host, args.port + 1)
         except OSError as error:
-            print(f"cannot reach {host}:{args.port + 1}: {error}", flush=True)
-            client_writer.close()
-            return
+            # The CoreDevice tunnel address changes when the headset reconnects (often over Wi-Fi):
+            # look it up again and retry once.
+            fresh = None
+            if not args.device:
+                try:
+                    fresh = await asyncio.to_thread(tunnel_address, args.udid)
+                except (SystemExit, subprocess.SubprocessError):
+                    fresh = None
+            if not fresh or fresh == host:
+                print(f"cannot reach {host}:{args.port + 1}: {error}", flush=True)
+                client_writer.close()
+                return
+            target["host"] = host = fresh
+            print(f"tunnel moved: now [{host}]:{args.port + 1}", flush=True)
+            try:
+                server_reader, server_writer = await asyncio.open_connection(host, args.port + 1)
+            except OSError as retry_error:
+                print(f"cannot reach {host}:{args.port + 1}: {retry_error}", flush=True)
+                client_writer.close()
+                return
         await asyncio.gather(pipe(client_reader, server_writer), pipe(server_reader, client_writer))
 
     server = await asyncio.start_server(relay, "127.0.0.1", args.port)
-    print(f"http://127.0.0.1:{args.port}/mcp -> [{host}]:{args.port + 1}", flush=True)
+    print(f"http://127.0.0.1:{args.port}/mcp -> [{target['host']}]:{args.port + 1}", flush=True)
     async with server:
         await server.serve_forever()
 

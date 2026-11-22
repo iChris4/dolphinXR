@@ -248,10 +248,41 @@ void MetalOpenXR::WaitForCompositor(XrSwapchain swapchain, uint32_t index)
 {
   void* event = nullptr;
   uint64_t value = 0;
-  if (XR_SUCCEEDED(xr_visionos_swapchain_image_acquire_fence(swapchain, index, &event, &value)) &&
-      event)
+  if (XR_FAILED(xr_visionos_swapchain_image_acquire_fence(swapchain, index, &event, &value)) ||
+      !event)
   {
-    g_state_tracker->EncodeWaitForEvent(static_cast<id<MTLEvent>>(event), value);
+    return;
+  }
+  // The compositor signals this image's read fence once it has composited the last frame that
+  // showed it. This used to be a GPU-side wait, which has no timeout: a fence the compositor never
+  // signalled (compositing stalled or paused) froze every command buffer queued behind it, the
+  // video thread then blocked on a full command queue, and the system killed the app. Wait on the
+  // CPU instead, bounded; past the bound render anyway (at worst one frame tears), and while the
+  // compositor stays stuck at the same fence value, do not wait again.
+  constexpr uint64_t COMPOSITOR_RELEASE_TIMEOUT_MS = 100;
+  id<MTLSharedEvent> shared = static_cast<id<MTLSharedEvent>>(event);
+  const uint64_t signalled = shared.signaledValue;
+  if (signalled >= value)
+  {
+    m_compositor_stalled = false;
+    return;
+  }
+  if (m_compositor_stalled && signalled == m_stalled_read_value)
+    return;
+  m_compositor_stalled = false;
+  if ([shared waitUntilSignaledValue:value timeoutMS:COMPOSITOR_RELEASE_TIMEOUT_MS])
+    return;
+
+  m_compositor_stalled = true;
+  m_stalled_read_value = shared.signaledValue;
+  ++m_compositor_wait_timeouts;
+  if (m_compositor_wait_timeouts == 1 || m_compositor_wait_timeouts % 100 == 0)
+  {
+    WARN_LOG_FMT(VIDEO,
+                 "OpenXR Metal: the compositor did not release a swapchain image within {} ms "
+                 "(read fence {} < {}); rendering into it anyway ({} time(s) so far).",
+                 COMPOSITOR_RELEASE_TIMEOUT_MS, m_stalled_read_value, value,
+                 m_compositor_wait_timeouts);
   }
 }
 

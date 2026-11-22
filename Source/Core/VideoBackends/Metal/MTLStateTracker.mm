@@ -9,6 +9,7 @@
 
 #include "Common/Align.h"
 #include "Common/Assert.h"
+#include "Common/Logging/Log.h"
 
 #include "Core/System.h"
 
@@ -438,6 +439,7 @@ void Metal::StateTracker::FlushEncoders()
           u64 newval =
               std::max(draw, tracker->m_last_finished_draw.load(std::memory_order_relaxed));
           tracker->m_last_finished_draw.store(newval, std::memory_order_release);
+          tracker->AccountGPUTime(buf);
           if (q)
           {
             if (PerfQuery* query = static_cast<PerfQuery*>(g_perf_query.get()))
@@ -453,6 +455,34 @@ void Metal::StateTracker::FlushEncoders()
   m_current_draw++;
   if (g_features.manual_buffer_upload && !m_manual_buffer_upload)
     SetManualBufferUpload(true);
+}
+
+void Metal::StateTracker::AccountGPUTime(id<MTLCommandBuffer> buffer)
+{
+  const double start = buffer.GPUStartTime;
+  const double end = buffer.GPUEndTime;
+  if (start <= 0 || end <= start)
+    return;
+  GPULoad& load = m_gpu_load;
+  if (load.window_start == 0)
+    load.window_start = start;
+  // One queue: buffers finish in order, but one may start before the previous one ends.
+  if (end > load.last_end)
+  {
+    load.busy += end - std::max(start, load.last_end);
+    load.last_end = end;
+  }
+  ++load.buffers;
+  const double span = end - load.window_start;
+  if (span >= 5.0)
+  {
+    INFO_LOG_FMT(VIDEO,
+                 "Metal GPU: busy {:.0f}% over {:.1f} s ({:.1f} ms per second, {} command buffers)",
+                 100.0 * load.busy / span, span, 1000.0 * load.busy / span, load.buffers);
+    load = {};
+    load.window_start = end;
+    load.last_end = end;
+  }
 }
 
 void Metal::StateTracker::WaitForFlushedEncoders()

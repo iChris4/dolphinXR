@@ -74,6 +74,44 @@ int s_internal_resolution = 0;
 constexpr int FIRST_STATE_SLOT = 1;
 constexpr int LAST_STATE_SLOT = 10;
 
+// The headset's thermal state, logged at start and on each change: visionOS lowers an app's
+// display rate (90 to 45 Hz) and throttles its GPU when the headset runs hot.
+const char* ThermalStateName(NSProcessInfoThermalState state)
+{
+  switch (state)
+  {
+  case NSProcessInfoThermalStateNominal:
+    return "nominal";
+  case NSProcessInfoThermalStateFair:
+    return "fair";
+  case NSProcessInfoThermalStateSerious:
+    return "serious";
+  case NSProcessInfoThermalStateCritical:
+    return "critical";
+  }
+  return "unknown";
+}
+
+void WatchThermalState()
+{
+  static std::atomic<NSProcessInfoThermalState> s_thermal_state =
+      NSProcessInfo.processInfo.thermalState;
+  NOTICE_LOG_FMT(COMMON, "visionOS host: thermal state {}", ThermalStateName(s_thermal_state));
+  [[NSNotificationCenter defaultCenter]
+      addObserverForName:NSProcessInfoThermalStateDidChangeNotification
+                  object:nil
+                   queue:nil
+              usingBlock:^(NSNotification*) {
+                const NSProcessInfoThermalState state = NSProcessInfo.processInfo.thermalState;
+                const NSProcessInfoThermalState previous = s_thermal_state.exchange(state);
+                if (state != previous)
+                {
+                  NOTICE_LOG_FMT(COMMON, "visionOS host: thermal state {} (was {})",
+                                 ThermalStateName(state), ThermalStateName(previous));
+                }
+              }];
+}
+
 bool IsStateSlot(int slot)
 {
   return slot >= FIRST_STATE_SLOT && slot <= LAST_STATE_SLOT;
@@ -513,6 +551,7 @@ bool dvx_initialize(const char* user_dir)
 
   s_initialized = true;
   NOTICE_LOG_FMT(COMMON, "visionOS host: initialized, user directory {}", dir);
+  WatchThermalState();
   return true;
 }
 
@@ -574,10 +613,12 @@ bool dvx_boot(const char* path, void* metal_layer)
   Config::SetCurrent(Config::MAIN_CPU_CORE, s_cpu_core);
   if (s_internal_resolution > 0)
     Config::SetCurrent(Config::GFX_EFB_SCALE, s_internal_resolution);
-  NOTICE_LOG_FMT(COMMON, "visionOS host: booting {} (CPU core {}, VR {}, resolution {}x)", path,
-                 static_cast<int>(s_cpu_core),
+  NOTICE_LOG_FMT(COMMON,
+                 "visionOS host: booting {} (CPU core {}, VR {}, resolution {}x, thermal state {})",
+                 path, static_cast<int>(s_cpu_core),
                  Config::Get(Config::GFX_VR_ENABLE_OPENXR) ? "on" : "off",
-                 Config::Get(Config::GFX_EFB_SCALE));
+                 Config::Get(Config::GFX_EFB_SCALE),
+                 ThermalStateName(NSProcessInfo.processInfo.thermalState));
 
   CAMetalLayer* layer = (__bridge CAMetalLayer*)metal_layer;
   WindowSystemInfo wsi(WindowSystemType::VisionOS, nullptr, nullptr, metal_layer);

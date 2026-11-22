@@ -64,6 +64,7 @@
 #include "Core/System.h"
 #include "VideoCommon/GPUFifoDiagnostics.h"
 #include "VideoCommon/OnScreenDisplay.h"
+#include "VideoCommon/PerformanceMetrics.h"
 #include "VideoCommon/VR/CameraAnchorSource.h"
 #include "VideoCommon/VR/CameraPitch.h"
 #include "VideoCommon/VideoConfig.h"
@@ -1502,6 +1503,9 @@ void OpenXRManager::FrameThreadLoop()
   u32 stat_cycles = 0, stat_fresh = 0, stat_repeat = 0, stat_empty = 0;
   u32 stat_handoff_waited = 0;  // 50us slices spent waiting out a video-thread handoff
   double stat_wait_ms = 0.0, stat_end_ms = 0.0, stat_content_wait_ms = 0.0;
+  // The emulation speed seen at each cycle (1.0 = full speed), to tell a slower game from a
+  // slower display.
+  double stat_speed_sum = 0.0, stat_speed_min = 0.0;
 
   // Smoothed xrEndFrame cost. Cheap on Quest (~0.5ms) but 1–5ms on PC runtimes like
   // Virtual Desktop; the content-wait budget must shrink accordingly or a full pacing
@@ -1698,6 +1702,11 @@ void OpenXRManager::FrameThreadLoop()
     stat_wait_ms += (t1 - t0) / 1000.0;
     stat_content_wait_ms += (t3 - t2) / 1000.0;
     stat_end_ms += (t4 - t3) / 1000.0;
+    {
+      const double speed = Core::System::GetInstance().GetPerfMetrics().GetSpeed();
+      stat_speed_sum += speed;
+      stat_speed_min = stat_cycles == 1 ? speed : std::min(stat_speed_min, speed);
+    }
 
     const u64 now_us = Common::Timer::NowUs();
     if (now_us - stats_start_us >= 5'000'000 && stat_cycles > 0)
@@ -1705,16 +1714,19 @@ void OpenXRManager::FrameThreadLoop()
       INFO_LOG_FMT(OPENXR,
                    "XRPacing: {:.1f} cycles/s (fresh={} repeat={} empty={}) | per cycle: "
                    "xrWaitFrame={:.2f}ms content_wait={:.2f}ms xrEndFrame={:.2f}ms | "
-                   "handoff_waits={} (x50us)",
+                   "handoff_waits={} (x50us) | display period {:.2f}ms | game speed {:.0f}% "
+                   "(min {:.0f}%)",
                    stat_cycles / ((now_us - stats_start_us) / 1'000'000.0), stat_fresh,
                    stat_repeat, stat_empty, stat_wait_ms / stat_cycles,
                    stat_content_wait_ms / stat_cycles, stat_end_ms / stat_cycles,
-                   stat_handoff_waited);
+                   stat_handoff_waited, period_ns / 1'000'000.0,
+                   100.0 * stat_speed_sum / stat_cycles, 100.0 * stat_speed_min);
       LogGameStall(stat_fresh == 0);
       stats_start_us = now_us;
       stat_cycles = stat_fresh = stat_repeat = stat_empty = 0;
       stat_handoff_waited = 0;
       stat_wait_ms = stat_end_ms = stat_content_wait_ms = 0.0;
+      stat_speed_sum = stat_speed_min = 0.0;
     }
   }
 

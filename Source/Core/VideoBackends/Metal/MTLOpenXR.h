@@ -106,6 +106,12 @@ private:
   MRCOwned<id<MTLSharedEvent>> m_write_event;
   u64 m_write_event_value = 0;
 
+  // Compositor read fences that were not signalled in time (see WaitForCompositor), and the read
+  // fence value seen at the last such timeout: no further waits until the compositor moves past it.
+  u64 m_compositor_wait_timeouts = 0;
+  u64 m_stalled_read_value = 0;
+  bool m_compositor_stalled = false;
+
   std::array<XrCompositionLayerProjectionView, 2> m_projection_views{};
   XrCompositionLayerProjection m_projection_layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
 };
