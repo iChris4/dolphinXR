@@ -358,7 +358,9 @@ FPRes ni_add(CPUState* cpu, f64 a, f64 b) {
         return result;
     }
 
-    if (isinf(a) || isinf(b))
+    /* Past the NaN case an infinite operand always gives an infinite result: test that first, so
+     * the common finite case pays one test. */
+    if (__builtin_expect(isinf(result.value), 0) && (isinf(a) || isinf(b)))
         clear_fifr(cpu);
     return result;
 }
@@ -380,7 +382,9 @@ FPRes ni_sub(CPUState* cpu, f64 a, f64 b) {
         return result;
     }
 
-    if (isinf(a) || isinf(b))
+    /* Past the NaN case an infinite operand always gives an infinite result: test that first, so
+     * the common finite case pays one test. */
+    if (__builtin_expect(isinf(result.value), 0) && (isinf(a) || isinf(b)))
         clear_fifr(cpu);
     return result;
 }
@@ -436,7 +440,16 @@ FPRes ni_div(CPUState* cpu, f64 a, f64 b) {
     return result;
 }
 
-FPRes ni_madd_msub(CPUState* cpu, f64 a, f64 c, f64 b, bool sub, bool single) {
+/* (cpu.h undefines GXRUNTIME_ALWAYS_INLINE at its end.) */
+#if defined(_MSC_VER)
+#define GX_LOCAL_INLINE static __forceinline
+#else
+#define GX_LOCAL_INLINE static inline __attribute__((always_inline))
+#endif
+/* DolphinXR: always inlined into the paired-single multiply-adds, which pass single = true and
+ * call it twice per instruction; ni_madd_msub stays the out-of-line entry for the others. */
+GX_LOCAL_INLINE FPRes ni_madd_msub_impl(CPUState* cpu, f64 a, f64 c, f64 b, bool sub,
+                                        bool single) {
     FPRes result = {0.0, 0};
 
     if (!single) {
@@ -479,9 +492,14 @@ FPRes ni_madd_msub(CPUState* cpu, f64 a, f64 c, f64 b, bool sub, bool single) {
         return result;
     }
 
-    if (isinf(a) || isinf(b) || isinf(c))
+    /* Past the NaN case an infinite operand always gives an infinite result (see ni_add). */
+    if (__builtin_expect(isinf(result.value), 0) && (isinf(a) || isinf(b) || isinf(c)))
         clear_fifr(cpu);
     return result;
+}
+
+FPRes ni_madd_msub(CPUState* cpu, f64 a, f64 c, f64 b, bool sub, bool single) {
+    return ni_madd_msub_impl(cpu, a, c, b, sub, single);
 }
 
 
@@ -717,9 +735,9 @@ void ppc_ps_div_op(CPUState* cpu, u8 d, u8 a, u8 b) {
 void ppc_ps_madd_op(CPUState* cpu, u8 d, u8 a, u8 c, u8 b,
                     bool subtract, bool negative) {
     f32 tmp0 = force_single(
-        cpu, ni_madd_msub(cpu, cpu->fpr[a], cpu->fpr[c], cpu->fpr[b], subtract, true).value);
+        cpu, ni_madd_msub_impl(cpu, cpu->fpr[a], cpu->fpr[c], cpu->fpr[b], subtract, true).value);
     f32 tmp1 = force_single(
-        cpu, ni_madd_msub(cpu, cpu->ps1[a], cpu->ps1[c], cpu->ps1[b], subtract, true).value);
+        cpu, ni_madd_msub_impl(cpu, cpu->ps1[a], cpu->ps1[c], cpu->ps1[b], subtract, true).value);
     f32 ps0 = (negative && !isnan(tmp0)) ? -tmp0 : tmp0;
     f32 ps1 = (negative && !isnan(tmp1)) ? -tmp1 : tmp1;
     ps_write_both(cpu, d, ps0, ps1);
@@ -728,18 +746,18 @@ void ppc_ps_madd_op(CPUState* cpu, u8 d, u8 a, u8 c, u8 b,
 
 void ppc_ps_madds0(CPUState* cpu, u8 d, u8 a, u8 c, u8 b) {
     f32 ps0 = force_single(
-        cpu, ni_madd_msub(cpu, cpu->fpr[a], cpu->fpr[c], cpu->fpr[b], false, true).value);
+        cpu, ni_madd_msub_impl(cpu, cpu->fpr[a], cpu->fpr[c], cpu->fpr[b], false, true).value);
     f32 ps1 = force_single(
-        cpu, ni_madd_msub(cpu, cpu->ps1[a], cpu->fpr[c], cpu->ps1[b], false, true).value);
+        cpu, ni_madd_msub_impl(cpu, cpu->ps1[a], cpu->fpr[c], cpu->ps1[b], false, true).value);
     ps_write_both(cpu, d, ps0, ps1);
     set_fprf(cpu, classify_f32(ps0));
 }
 
 void ppc_ps_madds1(CPUState* cpu, u8 d, u8 a, u8 c, u8 b) {
     f32 ps0 = force_single(
-        cpu, ni_madd_msub(cpu, cpu->fpr[a], cpu->ps1[c], cpu->fpr[b], false, true).value);
+        cpu, ni_madd_msub_impl(cpu, cpu->fpr[a], cpu->ps1[c], cpu->fpr[b], false, true).value);
     f32 ps1 = force_single(
-        cpu, ni_madd_msub(cpu, cpu->ps1[a], cpu->ps1[c], cpu->ps1[b], false, true).value);
+        cpu, ni_madd_msub_impl(cpu, cpu->ps1[a], cpu->ps1[c], cpu->ps1[b], false, true).value);
     ps_write_both(cpu, d, ps0, ps1);
     set_fprf(cpu, classify_f32(ps0));
 }

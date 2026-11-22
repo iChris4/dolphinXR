@@ -10,6 +10,9 @@
        already (GXRuntime marks it visibility("default")); only this version
        script was hiding it on Linux. */
     ppc_set_mem_write_journal;
+    /* DolphinXR: the chassis turns FPSCR[FPRF] updates off unless the game's settings (or
+       lockstep) need them, as Dolphin's JITs do. */
+    ppc_set_fprf_enabled;
   local:
     *;
 };

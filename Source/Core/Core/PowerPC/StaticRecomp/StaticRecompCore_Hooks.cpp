@@ -336,6 +336,18 @@ void StaticRecompCore::HookSPRWrite(CPUState* cpu, u16 spr, u32 value, u32 cia)
     system.GetMMU().DBATUpdated();
 }
 
+// Whether the 32-byte cache line holding `address` overlaps code the module covers.
+static bool LineInModuleCode(const StaticRecompModuleDesc& module, u32 address)
+{
+  const u32 line = address & ~0x1Fu;
+  for (u32 i = 0; i < module.num_code_ranges; ++i)
+  {
+    if (line < module.code_ranges[i].end && line + 0x20u > module.code_ranges[i].start)
+      return true;
+  }
+  return false;
+}
+
 void StaticRecompCore::HookCacheControl(CPUState* cpu, u8 operation, u32 ea, u32 cia)
 {
   auto* core = static_cast<StaticRecompCore*>(cpu->external_user_data);
@@ -359,7 +371,14 @@ void StaticRecompCore::HookCacheControl(CPUState* cpu, u8 operation, u32 ea, u32
   }
   else if (!ppc.m_enable_dcache)
   {
-    core->m_system.GetJitInterface().InvalidateICacheLine(ea);
+    // With no data cache emulated, the op only invalidates code caches. Most flush data (DMA
+    // buffers, display lists), where no chunk can be retired: skip the walk down to
+    // OnICacheInvalidate for those. A fallback JIT or a moved REL keeps the full path.
+    if (core->m_fallback_jit || core->m_rel_translation || !core->m_module ||
+        LineInModuleCode(*core->m_module, ea))
+    {
+      core->m_system.GetJitInterface().InvalidateICacheLine(ea);
+    }
   }
   else
   {

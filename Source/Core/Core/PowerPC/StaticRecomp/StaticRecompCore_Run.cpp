@@ -70,6 +70,30 @@ void StaticRecompCore::Run()
   // The module's direct RAM path (CPU ABI v4). Lockstep journals RAM writes around its checks,
   // which only the slow path does, so writes stay there while it is on.
   gx_mem_segments_fill(&m_guest, !lockstep_enabled);
+  // The locked L1 cache at 0xE0000000 is plain memory to Dolphin's MMU as well (no translation, no
+  // HID2 check, the same big-endian layout as RAM), so it takes the direct path too. Video players
+  // decode into it: Mario Kart Wii's video menus spent nearly a quarter of the CPU thread sending
+  // these stores through HookExternalWrite and MMU::WriteToHardware one byte at a time.
+  // STATICRECOMP_L1_SLOW_PATH=1 keeps the old path, for A/B comparisons.
+  static const bool l1_slow_path = [] {
+    const char* value = std::getenv("STATICRECOMP_L1_SLOW_PATH");
+    return value && *value == '1';
+  }();
+  if (u8* const l1_cache = memory.GetL1Cache();
+      l1_cache && memory.GetL1CacheSize() > 8 && !lockstep_enabled && !l1_slow_path)
+  {
+    const u32 limit = memory.GetL1CacheSize() - 8u;
+    gx_mem_segment_set(&m_guest.mem_read_seg[0xE], l1_cache, limit);
+    gx_mem_segment_set(&m_guest.mem_write_seg[0xE], l1_cache, limit);
+  }
+  // FPSCR[FPRF] after every FP result only when the game's settings ask for it (Core.FPRF), as
+  // Dolphin's JITs do, or for lockstep, which compares against the interpreter (always FPRF).
+  using SetFprfEnabledFn = void (*)(bool);
+  if (const auto set_fprf = reinterpret_cast<SetFprfEnabledFn>(
+          m_library.IsOpen() ? m_library.GetSymbolAddress("ppc_set_fprf_enabled") : nullptr))
+  {
+    set_fprf(Config::Get(Config::MAIN_FPRF) || lockstep_enabled);
+  }
   const auto fast_dispatchable_at = [this](u32 address) {
     // A REL running where it was recompiled needs no translation: its chunks are looked up as
     // main.dol's are (the chunk hashes still decide whether its code is there).

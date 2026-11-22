@@ -33,6 +33,15 @@ __attribute__((visibility("default"))) void ppc_set_mem_write_journal(PPCMemWrit
     g_mem_write_journal_user = user;
 }
 
+bool g_ppc_fprf_enabled = true;
+#if defined(_MSC_VER)
+__declspec(dllexport) void ppc_set_fprf_enabled(bool enabled) {
+#else
+__attribute__((visibility("default"))) void ppc_set_fprf_enabled(bool enabled) {
+#endif
+    g_ppc_fprf_enabled = enabled;
+}
+
 /* DolphinXR: the slow half of cpu.h's mem_readN / mem_writeN: the full former logic (MEM2 then
  * MEM1 lookup, external hooks, reservation, RAM write journal), out of line. */
 u64 gx_mem_read64_slow(CPUState* cpu, u32 addr) {
@@ -264,22 +273,6 @@ u32 ppc_mftb(CPUState* cpu, u16 tbr, u32 cia) {
     ppc_program_exception(cpu, PPC_PROGRAM_ILLEGAL, cia);
     return 0;
 }
-static s32 gqr_scale(u32 value) {
-    return sign_extend(value & 0x3Fu, 6);
-}
-
-
-static u32 psq_type_size(u8 type) {
-    switch (type) {
-    case 0: return 4;
-    case 4:
-    case 6: return 1;
-    case 5:
-    case 7: return 2;
-    default: return 0;
-    }
-}
-
 /* Quantized load/store semantics mirror Dolphin's interpreter (the chassis
  * lockstep oracle) exactly:
  *  - psq_l/psq_st (non-indexed) require only HID2.LSQE; the indexed forms
@@ -289,59 +282,54 @@ static u32 psq_type_size(u8 type) {
  *  - Dequantization: f32(int) * f32 power-of-two, rounded once to f32.
  *  - Quantization: round the lane to f32 first, multiply by the f32
  *    power-of-two scale, clamp in f32, truncate. NaN quantizes to 0
- *    (matching SType(NaN-after-clamp) in release Dolphin on arm64). */
-static f64 psq_dequant(f64 value, s32 scale) {
-    if (scale == 0)
-        return (f64)(f32)value;
-    return (f64)(f32)ldexp(value, -scale);
+ *    (matching SType(NaN-after-clamp) in release Dolphin on arm64).
+ *
+ * DolphinXR: the scale factors come from Dolphin's interpreter tables (m_dequantizeTable,
+ * m_quantizeTable), indexed by the GQR's 6-bit scale field: 2^-scale and 2^scale for the signed
+ * scale. Every product with them is exact (at most 16 significant bits, well inside the f32
+ * range), so the results are the bits the former ldexp/ldexpf calls gave, without a libm call
+ * per element. The type is decoded once per instruction, for both lanes: a video decoder (Mario
+ * Kart Wii's menus) runs these by the thousand per frame. */
+/* (cpu.h undefines GXRUNTIME_ALWAYS_INLINE at its end.) */
+#if defined(_MSC_VER)
+#define GX_LOCAL_INLINE static __forceinline
+#else
+#define GX_LOCAL_INLINE static inline __attribute__((always_inline))
+#endif
+static const f32 k_psq_dequantize[64] = {
+    0x1p-0f, 0x1p-1f, 0x1p-2f, 0x1p-3f, 0x1p-4f, 0x1p-5f, 0x1p-6f, 0x1p-7f,
+    0x1p-8f, 0x1p-9f, 0x1p-10f, 0x1p-11f, 0x1p-12f, 0x1p-13f, 0x1p-14f, 0x1p-15f,
+    0x1p-16f, 0x1p-17f, 0x1p-18f, 0x1p-19f, 0x1p-20f, 0x1p-21f, 0x1p-22f, 0x1p-23f,
+    0x1p-24f, 0x1p-25f, 0x1p-26f, 0x1p-27f, 0x1p-28f, 0x1p-29f, 0x1p-30f, 0x1p-31f,
+    0x1p32f, 0x1p31f, 0x1p30f, 0x1p29f, 0x1p28f, 0x1p27f, 0x1p26f, 0x1p25f,
+    0x1p24f, 0x1p23f, 0x1p22f, 0x1p21f, 0x1p20f, 0x1p19f, 0x1p18f, 0x1p17f,
+    0x1p16f, 0x1p15f, 0x1p14f, 0x1p13f, 0x1p12f, 0x1p11f, 0x1p10f, 0x1p9f,
+    0x1p8f, 0x1p7f, 0x1p6f, 0x1p5f, 0x1p4f, 0x1p3f, 0x1p2f, 0x1p1f,
+};
+static const f32 k_psq_quantize[64] = {
+    0x1p0f, 0x1p1f, 0x1p2f, 0x1p3f, 0x1p4f, 0x1p5f, 0x1p6f, 0x1p7f,
+    0x1p8f, 0x1p9f, 0x1p10f, 0x1p11f, 0x1p12f, 0x1p13f, 0x1p14f, 0x1p15f,
+    0x1p16f, 0x1p17f, 0x1p18f, 0x1p19f, 0x1p20f, 0x1p21f, 0x1p22f, 0x1p23f,
+    0x1p24f, 0x1p25f, 0x1p26f, 0x1p27f, 0x1p28f, 0x1p29f, 0x1p30f, 0x1p31f,
+    0x1p-32f, 0x1p-31f, 0x1p-30f, 0x1p-29f, 0x1p-28f, 0x1p-27f, 0x1p-26f, 0x1p-25f,
+    0x1p-24f, 0x1p-23f, 0x1p-22f, 0x1p-21f, 0x1p-20f, 0x1p-19f, 0x1p-18f, 0x1p-17f,
+    0x1p-16f, 0x1p-15f, 0x1p-14f, 0x1p-13f, 0x1p-12f, 0x1p-11f, 0x1p-10f, 0x1p-9f,
+    0x1p-8f, 0x1p-7f, 0x1p-6f, 0x1p-5f, 0x1p-4f, 0x1p-3f, 0x1p-2f, 0x1p-1f,
+};
+
+GX_LOCAL_INLINE f64 psq_dequant(s32 value, f32 factor) {
+    return (f64)((f32)value * factor);
 }
 
-static f64 psq_load_value(CPUState* cpu, u32 ea, u8 type, s32 scale) {
-    switch (type) {
-    case 0:
-        return f64_value(convert_to_double(mem_read32(cpu, ea)));
-    case 4:
-        return psq_dequant((f64)mem_read8(cpu, ea), scale);
-    case 5:
-        return psq_dequant((f64)mem_read16(cpu, ea), scale);
-    case 6:
-        return psq_dequant((f64)(s8)mem_read8(cpu, ea), scale);
-    case 7:
-        return psq_dequant((f64)(s16)mem_read16(cpu, ea), scale);
-    default:
-        return 0.0;
-    }
-}
-
-static s64 psq_quantize_int(f64 value, s64 min_value, s64 max_value, s32 scale) {
-    f32 conv = (f32)value * ldexpf(1.0f, scale);
+GX_LOCAL_INLINE s32 psq_quantize(f64 value, f32 factor, f32 min_value, f32 max_value) {
+    const f32 conv = (f32)value * factor;
     if (isnan(conv))
         return 0;
-    if (conv <= (f32)min_value)
-        return min_value;
-    if (conv >= (f32)max_value)
-        return max_value;
-    return (s64)conv;
-}
-
-static void psq_store_value(CPUState* cpu, u32 ea, u8 type, s32 scale, f64 value) {
-    switch (type) {
-    case 0:
-        mem_write32(cpu, ea, convert_to_single_ftz(f64_bits(value)));
-        break;
-    case 4:
-        mem_write8(cpu, ea, (u8)psq_quantize_int(value, 0, 255, scale));
-        break;
-    case 5:
-        mem_write16(cpu, ea, (u16)psq_quantize_int(value, 0, 65535, scale));
-        break;
-    case 6:
-        mem_write8(cpu, ea, (u8)(s8)psq_quantize_int(value, -128, 127, scale));
-        break;
-    case 7:
-        mem_write16(cpu, ea, (u16)(s16)psq_quantize_int(value, -32768, 32767, scale));
-        break;
-    }
+    if (conv <= min_value)
+        return (s32)min_value;
+    if (conv >= max_value)
+        return (s32)max_value;
+    return (s32)conv;
 }
 
 static bool psq_check_enabled(CPUState* cpu, bool indexed, u32 cia) {
@@ -356,18 +344,43 @@ bool ppc_psq_load(CPUState* cpu, u8 frD, u32 ea, bool w, u8 gqr_index, bool inde
     if (!psq_check_enabled(cpu, indexed, cia))
         return false;
 
-    u32 gqr = cpu->gqr[gqr_index & 7u];
-    s32 scale = gqr_scale(gqr >> 24);
-    u8 type = (u8)((gqr >> 16) & 7u);
-    u32 size = psq_type_size(type);
-    if (size == 0) { /* invalid GQR type: both lanes read as 0.0 */
-        cpu->fpr[frD] = 0.0;
-        cpu->ps1[frD] = 0.0;
-        return true;
+    const u32 gqr = cpu->gqr[gqr_index & 7u];
+    const f32 factor = k_psq_dequantize[(gqr >> 24) & 0x3Fu];
+    f64 ps0;
+    f64 ps1 = 1.0;
+    switch ((gqr >> 16) & 7u) {
+    case 0:
+        ps0 = f64_value(convert_to_double(mem_read32(cpu, ea)));
+        if (!w)
+            ps1 = f64_value(convert_to_double(mem_read32(cpu, ea + 4u)));
+        break;
+    case 4:
+        ps0 = psq_dequant(mem_read8(cpu, ea), factor);
+        if (!w)
+            ps1 = psq_dequant(mem_read8(cpu, ea + 1u), factor);
+        break;
+    case 5:
+        ps0 = psq_dequant(mem_read16(cpu, ea), factor);
+        if (!w)
+            ps1 = psq_dequant(mem_read16(cpu, ea + 2u), factor);
+        break;
+    case 6:
+        ps0 = psq_dequant((s8)mem_read8(cpu, ea), factor);
+        if (!w)
+            ps1 = psq_dequant((s8)mem_read8(cpu, ea + 1u), factor);
+        break;
+    case 7:
+        ps0 = psq_dequant((s16)mem_read16(cpu, ea), factor);
+        if (!w)
+            ps1 = psq_dequant((s16)mem_read16(cpu, ea + 2u), factor);
+        break;
+    default: /* invalid GQR type: both lanes read as 0.0 */
+        ps0 = 0.0;
+        ps1 = 0.0;
+        break;
     }
-
-    cpu->fpr[frD] = psq_load_value(cpu, ea, type, scale);
-    cpu->ps1[frD] = w ? 1.0 : psq_load_value(cpu, ea + size, type, scale);
+    cpu->fpr[frD] = ps0;
+    cpu->ps1[frD] = ps1;
     return true;
 }
 
@@ -375,16 +388,39 @@ bool ppc_psq_store(CPUState* cpu, u8 frS, u32 ea, bool w, u8 gqr_index, bool ind
     if (!psq_check_enabled(cpu, indexed, cia))
         return false;
 
-    u32 gqr = cpu->gqr[gqr_index & 7u];
-    s32 scale = gqr_scale(gqr >> 8);
-    u8 type = (u8)(gqr & 7u);
-    u32 size = psq_type_size(type);
-    if (size == 0) /* invalid GQR type: nothing is stored */
-        return true;
-
-    psq_store_value(cpu, ea, type, scale, cpu->fpr[frS]);
-    if (!w)
-        psq_store_value(cpu, ea + size, type, scale, cpu->ps1[frS]);
+    const u32 gqr = cpu->gqr[gqr_index & 7u];
+    const f32 factor = k_psq_quantize[(gqr >> 8) & 0x3Fu];
+    const f64 ps0 = cpu->fpr[frS];
+    const f64 ps1 = cpu->ps1[frS];
+    switch (gqr & 7u) {
+    case 0:
+        mem_write32(cpu, ea, convert_to_single_ftz(f64_bits(ps0)));
+        if (!w)
+            mem_write32(cpu, ea + 4u, convert_to_single_ftz(f64_bits(ps1)));
+        break;
+    case 4:
+        mem_write8(cpu, ea, (u8)psq_quantize(ps0, factor, 0.0f, 255.0f));
+        if (!w)
+            mem_write8(cpu, ea + 1u, (u8)psq_quantize(ps1, factor, 0.0f, 255.0f));
+        break;
+    case 5:
+        mem_write16(cpu, ea, (u16)psq_quantize(ps0, factor, 0.0f, 65535.0f));
+        if (!w)
+            mem_write16(cpu, ea + 2u, (u16)psq_quantize(ps1, factor, 0.0f, 65535.0f));
+        break;
+    case 6:
+        mem_write8(cpu, ea, (u8)(s8)psq_quantize(ps0, factor, -128.0f, 127.0f));
+        if (!w)
+            mem_write8(cpu, ea + 1u, (u8)(s8)psq_quantize(ps1, factor, -128.0f, 127.0f));
+        break;
+    case 7:
+        mem_write16(cpu, ea, (u16)(s16)psq_quantize(ps0, factor, -32768.0f, 32767.0f));
+        if (!w)
+            mem_write16(cpu, ea + 2u, (u16)(s16)psq_quantize(ps1, factor, -32768.0f, 32767.0f));
+        break;
+    default: /* invalid GQR type: nothing is stored */
+        break;
+    }
     return true;
 }
 

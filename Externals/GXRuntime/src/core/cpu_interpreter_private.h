@@ -111,9 +111,25 @@ static inline u32 classify_f32(f32 value) {
     return fraction ? (sign ? 0x18u : 0x14u) : (sign ? 0x12u : 0x02u);
 }
 
-static inline void set_fprf(CPUState* cpu, u32 value) {
+/* DolphinXR: FPSCR[FPRF] after every FP result is what Dolphin's interpreter does; its JITs only
+ * do it when the game's settings ask (Core.FPRF), and so does this when the environment turns it
+ * off (ppc_set_fprf_enabled). The classification feeding it is dead then, and goes away inlined. */
+extern bool g_ppc_fprf_enabled;
+static inline void gx_set_fprf_bits(CPUState* cpu, u32 value) {
     cpu->fpscr = (cpu->fpscr & ~(0x1Fu << 12)) | ((value & 0x1Fu) << 12);
 }
+/* A statement macro, so the classification in `value` is only evaluated when FPRF is on: as an
+ * inline function the compiler computed it anyway and selected the result at the end. */
+#if defined(__GNUC__) || defined(__clang__)
+#define GX_FPRF_ON() __builtin_expect(g_ppc_fprf_enabled, 0)
+#else
+#define GX_FPRF_ON() (g_ppc_fprf_enabled)
+#endif
+#define set_fprf(cpu, value)                       \
+    do {                                           \
+        if (GX_FPRF_ON())                          \
+            gx_set_fprf_bits((cpu), (value));      \
+    } while (0)
 
 static inline f32 force_single(const CPUState* cpu, f64 value) {
     if (cpu->fpscr & FPSCR_NI_BIT) {
