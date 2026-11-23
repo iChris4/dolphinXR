@@ -341,7 +341,14 @@ f64 force_25bit_c(f64 d) {
     return f64_value(integral);
 }
 
-FPRes ni_add(CPUState* cpu, f64 a, f64 b) {
+/* (cpu.h undefines GXRUNTIME_ALWAYS_INLINE at its end.) */
+#if defined(_MSC_VER)
+#define GX_LOCAL_INLINE static __forceinline
+#else
+#define GX_LOCAL_INLINE static inline __attribute__((always_inline))
+#endif
+
+GX_LOCAL_INLINE FPRes ni_add_impl(CPUState* cpu, f64 a, f64 b) {
     FPRes result = {a + b, 0};
 
     if (isnan(result.value)) {
@@ -365,7 +372,11 @@ FPRes ni_add(CPUState* cpu, f64 a, f64 b) {
     return result;
 }
 
-FPRes ni_sub(CPUState* cpu, f64 a, f64 b) {
+FPRes ni_add(CPUState* cpu, f64 a, f64 b) {
+    return ni_add_impl(cpu, a, b);
+}
+
+GX_LOCAL_INLINE FPRes ni_sub_impl(CPUState* cpu, f64 a, f64 b) {
     FPRes result = {a - b, 0};
 
     if (isnan(result.value)) {
@@ -389,7 +400,11 @@ FPRes ni_sub(CPUState* cpu, f64 a, f64 b) {
     return result;
 }
 
-FPRes ni_mul(CPUState* cpu, f64 a, f64 b) {
+FPRes ni_sub(CPUState* cpu, f64 a, f64 b) {
+    return ni_sub_impl(cpu, a, b);
+}
+
+GX_LOCAL_INLINE FPRes ni_mul_impl(CPUState* cpu, f64 a, f64 b) {
     FPRes result = {a * b, 0};
 
     if (isnan(result.value)) {
@@ -407,6 +422,10 @@ FPRes ni_mul(CPUState* cpu, f64 a, f64 b) {
     }
 
     return result;
+}
+
+FPRes ni_mul(CPUState* cpu, f64 a, f64 b) {
+    return ni_mul_impl(cpu, a, b);
 }
 
 FPRes ni_div(CPUState* cpu, f64 a, f64 b) {
@@ -440,12 +459,6 @@ FPRes ni_div(CPUState* cpu, f64 a, f64 b) {
     return result;
 }
 
-/* (cpu.h undefines GXRUNTIME_ALWAYS_INLINE at its end.) */
-#if defined(_MSC_VER)
-#define GX_LOCAL_INLINE static __forceinline
-#else
-#define GX_LOCAL_INLINE static inline __attribute__((always_inline))
-#endif
 /* DolphinXR: always inlined into the paired-single multiply-adds, which pass single = true and
  * call it twice per instruction; ni_madd_msub stays the out-of-line entry for the others. */
 GX_LOCAL_INLINE FPRes ni_madd_msub_impl(CPUState* cpu, f64 a, f64 c, f64 b, bool sub,
@@ -506,20 +519,20 @@ FPRes ni_madd_msub(CPUState* cpu, f64 a, f64 c, f64 b, bool sub, bool single) {
 
 
 void ppc_fadds(CPUState* cpu, u8 d, u8 a, u8 b) {
-    FPRes sum = ni_add(cpu, cpu->fpr[a], cpu->fpr[b]);
+    FPRes sum = ni_add_impl(cpu, cpu->fpr[a], cpu->fpr[b]);
     if (!fp_invalid_gated(cpu, &sum))
         fp_write_single(cpu, d, force_single(cpu, sum.value));
 }
 
 void ppc_fsubs(CPUState* cpu, u8 d, u8 a, u8 b) {
-    FPRes diff = ni_sub(cpu, cpu->fpr[a], cpu->fpr[b]);
+    FPRes diff = ni_sub_impl(cpu, cpu->fpr[a], cpu->fpr[b]);
     if (!fp_invalid_gated(cpu, &diff))
         fp_write_single(cpu, d, force_single(cpu, diff.value));
 }
 
 void ppc_fmuls(CPUState* cpu, u8 d, u8 a, u8 c) {
     f64 c_value = force_25bit_c(cpu->fpr[c]);
-    FPRes product = ni_mul(cpu, cpu->fpr[a], c_value);
+    FPRes product = ni_mul_impl(cpu, cpu->fpr[a], c_value);
     if (!fp_invalid_gated(cpu, &product)) {
         fp_write_single(cpu, d, force_single(cpu, product.value));
         cpu->fpscr &= ~(FPSCR_FI_BIT | FPSCR_FR_BIT);
@@ -535,19 +548,19 @@ void ppc_fdivs(CPUState* cpu, u8 d, u8 a, u8 b) {
 }
 
 void ppc_fadd(CPUState* cpu, u8 d, u8 a, u8 b) {
-    FPRes sum = ni_add(cpu, cpu->fpr[a], cpu->fpr[b]);
+    FPRes sum = ni_add_impl(cpu, cpu->fpr[a], cpu->fpr[b]);
     if (!fp_invalid_gated(cpu, &sum))
         fp_write_double(cpu, d, force_double(cpu, sum.value));
 }
 
 void ppc_fsub(CPUState* cpu, u8 d, u8 a, u8 b) {
-    FPRes diff = ni_sub(cpu, cpu->fpr[a], cpu->fpr[b]);
+    FPRes diff = ni_sub_impl(cpu, cpu->fpr[a], cpu->fpr[b]);
     if (!fp_invalid_gated(cpu, &diff))
         fp_write_double(cpu, d, force_double(cpu, diff.value));
 }
 
 void ppc_fmul(CPUState* cpu, u8 d, u8 a, u8 c) {
-    FPRes product = ni_mul(cpu, cpu->fpr[a], cpu->fpr[c]);
+    FPRes product = ni_mul_impl(cpu, cpu->fpr[a], cpu->fpr[c]);
     if (!fp_invalid_gated(cpu, &product)) {
         fp_write_double(cpu, d, force_double(cpu, product.value));
         cpu->fpscr &= ~(FPSCR_FI_BIT | FPSCR_FR_BIT);
@@ -703,15 +716,15 @@ void ps_write_both(CPUState* cpu, u8 d, f32 ps0, f32 ps1) {
 }
 
 void ppc_ps_add_op(CPUState* cpu, u8 d, u8 a, u8 b) {
-    f32 ps0 = force_single(cpu, ni_add(cpu, cpu->fpr[a], cpu->fpr[b]).value);
-    f32 ps1 = force_single(cpu, ni_add(cpu, cpu->ps1[a], cpu->ps1[b]).value);
+    f32 ps0 = force_single(cpu, ni_add_impl(cpu, cpu->fpr[a], cpu->fpr[b]).value);
+    f32 ps1 = force_single(cpu, ni_add_impl(cpu, cpu->ps1[a], cpu->ps1[b]).value);
     ps_write_both(cpu, d, ps0, ps1);
     set_fprf(cpu, classify_f32(ps0));
 }
 
 void ppc_ps_sub_op(CPUState* cpu, u8 d, u8 a, u8 b) {
-    f32 ps0 = force_single(cpu, ni_sub(cpu, cpu->fpr[a], cpu->fpr[b]).value);
-    f32 ps1 = force_single(cpu, ni_sub(cpu, cpu->ps1[a], cpu->ps1[b]).value);
+    f32 ps0 = force_single(cpu, ni_sub_impl(cpu, cpu->fpr[a], cpu->fpr[b]).value);
+    f32 ps1 = force_single(cpu, ni_sub_impl(cpu, cpu->ps1[a], cpu->ps1[b]).value);
     ps_write_both(cpu, d, ps0, ps1);
     set_fprf(cpu, classify_f32(ps0));
 }
@@ -719,8 +732,8 @@ void ppc_ps_sub_op(CPUState* cpu, u8 d, u8 a, u8 b) {
 void ppc_ps_mul_op(CPUState* cpu, u8 d, u8 a, u8 c) {
     f64 c0 = force_25bit_c(cpu->fpr[c]);
     f64 c1 = force_25bit_c(cpu->ps1[c]);
-    f32 ps0 = force_single(cpu, ni_mul(cpu, cpu->fpr[a], c0).value);
-    f32 ps1 = force_single(cpu, ni_mul(cpu, cpu->ps1[a], c1).value);
+    f32 ps0 = force_single(cpu, ni_mul_impl(cpu, cpu->fpr[a], c0).value);
+    f32 ps1 = force_single(cpu, ni_mul_impl(cpu, cpu->ps1[a], c1).value);
     ps_write_both(cpu, d, ps0, ps1);
     set_fprf(cpu, classify_f32(ps0));
 }
@@ -763,7 +776,7 @@ void ppc_ps_madds1(CPUState* cpu, u8 d, u8 a, u8 c, u8 b) {
 }
 
 void ppc_ps_sum0(CPUState* cpu, u8 d, u8 a, u8 c, u8 b) {
-    f32 ps0 = force_single(cpu, ni_add(cpu, cpu->fpr[a], cpu->ps1[b]).value);
+    f32 ps0 = force_single(cpu, ni_add_impl(cpu, cpu->fpr[a], cpu->ps1[b]).value);
     f32 ps1 = force_single(cpu, cpu->ps1[c]);
     ps_write_both(cpu, d, ps0, ps1);
     set_fprf(cpu, classify_f32(ps0));
@@ -771,23 +784,23 @@ void ppc_ps_sum0(CPUState* cpu, u8 d, u8 a, u8 c, u8 b) {
 
 void ppc_ps_sum1(CPUState* cpu, u8 d, u8 a, u8 c, u8 b) {
     f32 ps0 = force_single(cpu, cpu->fpr[c]);
-    f32 ps1 = force_single(cpu, ni_add(cpu, cpu->fpr[a], cpu->ps1[b]).value);
+    f32 ps1 = force_single(cpu, ni_add_impl(cpu, cpu->fpr[a], cpu->ps1[b]).value);
     ps_write_both(cpu, d, ps0, ps1);
     set_fprf(cpu, classify_f32(ps1));
 }
 
 void ppc_ps_muls0(CPUState* cpu, u8 d, u8 a, u8 c) {
     f64 c0 = force_25bit_c(cpu->fpr[c]);
-    f32 ps0 = force_single(cpu, ni_mul(cpu, cpu->fpr[a], c0).value);
-    f32 ps1 = force_single(cpu, ni_mul(cpu, cpu->ps1[a], c0).value);
+    f32 ps0 = force_single(cpu, ni_mul_impl(cpu, cpu->fpr[a], c0).value);
+    f32 ps1 = force_single(cpu, ni_mul_impl(cpu, cpu->ps1[a], c0).value);
     ps_write_both(cpu, d, ps0, ps1);
     set_fprf(cpu, classify_f32(ps0));
 }
 
 void ppc_ps_muls1(CPUState* cpu, u8 d, u8 a, u8 c) {
     f64 c1 = force_25bit_c(cpu->ps1[c]);
-    f32 ps0 = force_single(cpu, ni_mul(cpu, cpu->fpr[a], c1).value);
-    f32 ps1 = force_single(cpu, ni_mul(cpu, cpu->ps1[a], c1).value);
+    f32 ps0 = force_single(cpu, ni_mul_impl(cpu, cpu->fpr[a], c1).value);
+    f32 ps1 = force_single(cpu, ni_mul_impl(cpu, cpu->ps1[a], c1).value);
     ps_write_both(cpu, d, ps0, ps1);
     set_fprf(cpu, classify_f32(ps0));
 }
@@ -925,4 +938,10 @@ bool ppc_fctiw(CPUState* cpu, f64 value, bool toward_zero, u64* output) {
     *output = 0xFFF8000000000000ull | result |
               ((result == 0 && signbit(value)) ? 0x100000000ull : 0ull);
     return true;
+}
+
+/* DolphinXR: FPSCR[FPRF] for a single-precision result, for the inline fast paths of
+ * core/cpu_fast_fp.h (called only while FPRF is maintained). */
+void gx_fp_set_fprf_single(CPUState* cpu, f32 value) {
+    gx_set_fprf_bits(cpu, classify_f32(value));
 }

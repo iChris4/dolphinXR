@@ -1,0 +1,5 @@
+# Mario Kart Wii: paired-single fast paths (see ../psfast.py).
+# The THP video decoder's inverse DCT passes, which the menus run for every video frame (the cup
+# select's track previews were CPU-bound at about 85% speed on Vision Pro).
+801B4D08
+801B5194

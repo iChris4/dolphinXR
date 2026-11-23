@@ -96,6 +96,14 @@ if [ -n "$rel" ]; then
   rel_args=(-DREL_GENERATED_DIR="$rel_generated")
 fi
 
+# Paired-single fast paths (psfast.py) for the functions psfast/<GAMEID>.txt lists: leaf functions
+# whose paired-single arithmetic is worth running on NEON (a video decoder's transforms, say).
+psfast_list="$here/psfast/$game_id.txt"
+if [ -f "$psfast_list" ]; then
+  # shellcheck disable=SC2046
+  python3 "$here/psfast.py" --generated "$generated" $(grep -v '^#' "$psfast_list")
+fi
+
 platform_args=()
 case "$platform" in
   macos) ;;

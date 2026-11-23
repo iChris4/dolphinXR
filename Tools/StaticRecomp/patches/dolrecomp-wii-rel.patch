@@ -26,6 +26,8 @@ DolphinXR changes to DolRecomp fa0cf619e8d7eb8cba7eaf55267a12caaebb46aa for Wii 
   stack floor (char* dolrecomp_stack_floor) instead of a depth count. The dispatch lookup is the
   indexed one with 256-byte pages, and generated.h lists the covered code as
   // DOLRECOMP_CODE_RANGE lines.
+- cntlzw: the host's count-leading-zeros (dolrecomp_cntlz32) instead of a bit-scan loop, which
+  compiled to a chain of data-dependent branches (THP video Huffman decoders mispredict them).
 
 diff --git a/src/app/cli.c b/src/app/cli.c
 index 33d3c23..60a67d1 100644
@@ -751,7 +753,7 @@ index 55122bd..f05dad6 100644
  
  #endif
 diff --git a/src/backend/emitter.c b/src/backend/emitter.c
-index 1cae76f..822e0df 100644
+index 1cae76f..c73de72 100644
 --- a/src/backend/emitter.c
 +++ b/src/backend/emitter.c
 @@ -317,6 +317,18 @@ static bool branch_target_is_local(u32 func_start, u32 func_end, u32 target) {
@@ -924,7 +926,7 @@ index 1cae76f..822e0df 100644
          "extern unsigned dolrecomp_call_depth;\n"
          "static inline int dolrecomp_call_enter(void) {\n"
          "    if (dolrecomp_call_depth >= (unsigned)DOLRECOMP_C_MAX_CALL_DEPTH)\n"
-@@ -519,6 +619,7 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+@@ -519,14 +619,26 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
          "    if (dolrecomp_call_depth)\n"
          "        dolrecomp_call_depth--;\n"
          "}\n"
@@ -932,9 +934,17 @@ index 1cae76f..822e0df 100644
          "\n"
          "static inline u32 dolrecomp_rotl32(u32 value, u32 sh) {\n"
          "    sh &= 31u;\n"
-@@ -526,7 +627,10 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         "    return sh ? ((value << sh) | (value >> (32u - sh))) : value;\n"
          "}\n"
          "\n"
++        // DolphinXR: cntlzw is the host's count-leading-zeros (one instruction
++        // on arm64, where it also gives 32 for zero). The former bit-scan loop
++        // compiled to a chain of data-dependent branches, which Huffman decoders
++        // (THP video) mispredict constantly.
++        "static inline u32 dolrecomp_cntlz32(u32 value) {\n"
++        "    return value ? (u32)__builtin_clz(value) : 32u;\n"
++        "}\n"
++        "\n"
          // Preserve the PPC bit-level single conversion, including denormals.
 -        "static inline f64 dolrecomp_f32_from_bits(u32 bits) {\n"
 +        // DolphinXR: out of line for the rare exponents (zero, denormal, inf,
@@ -944,7 +954,7 @@ index 1cae76f..822e0df 100644
          "    u64 x = bits;\n"
          "    u64 exp = (x >> 23) & 0xFFu;\n"
          "    u64 frac = x & 0x007FFFFFu;\n"
-@@ -555,6 +659,15 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+@@ -555,6 +667,15 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
          "    return value;\n"
          "}\n"
          "\n"
@@ -960,7 +970,7 @@ index 1cae76f..822e0df 100644
          "static inline u32 dolrecomp_f32_to_bits(f64 value) {\n"
          "    u64 bits;\n"
          "    memcpy(&bits, &value, sizeof(bits));\n"
-@@ -597,7 +710,8 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+@@ -597,7 +718,8 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
          ,
          emit_cpu_label(cpu),
          emit_cpu_macro(cpu),
@@ -970,7 +980,20 @@ index 1cae76f..822e0df 100644
  }
  
  void emit_header(FILE* out) {
-@@ -1611,6 +1725,27 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
+@@ -992,10 +1114,8 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
+ 
+     case PPC_OP_CNTLZW:
+         fprintf(out, "    {\n");
+-        fprintf(out, "        u32 v = ctx->gpr[%u];\n", inst->rS);
+-        fprintf(out, "        u32 n = 0;\n");
+-        fprintf(out, "        while (n < 32 && ((v & (0x80000000u >> n)) == 0)) n++;\n");
+-        fprintf(out, "        ctx->gpr[%u] = n;\n", inst->rA);
++        fprintf(out, "        ctx->gpr[%u] = dolrecomp_cntlz32(ctx->gpr[%u]);\n", inst->rA,
++                inst->rS);
+         emit_record_if_needed(out, inst, inst->rA);
+         fprintf(out, "    }\n");
+         break;
+@@ -1611,6 +1731,27 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
      case PPC_OP_DCBF:
      case PPC_OP_DCBI:
      case PPC_OP_ICBI:
@@ -998,7 +1021,7 @@ index 1cae76f..822e0df 100644
          fprintf(out, "    ppc_fallback_instruction(ctx, 0x%08Xu, 0x%08Xu);\n",
                  inst->raw, inst->address);
          fprintf(out, "    return;\n");
-@@ -1662,11 +1797,11 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
+@@ -1662,11 +1803,11 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
  
      case PPC_OP_BCLR:
          emit_dynamic_branch(out, inst, "ctx->lr & ~3u",
@@ -1012,7 +1035,7 @@ index 1cae76f..822e0df 100644
          break;
  
      case PPC_OP_TWI:
-@@ -1921,6 +2056,8 @@ bool emit_function(FILE* out, const PPCInst* insts, u32 count, u32 func_addr) {
+@@ -1921,6 +2062,8 @@ bool emit_function(FILE* out, const PPCInst* insts, u32 count, u32 func_addr) {
      }
  
      fprintf(out, "void func_%08X(CPUState* ctx) {\n", func_addr);
