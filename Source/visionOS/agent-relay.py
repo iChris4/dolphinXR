@@ -46,11 +46,15 @@ async def main() -> None:
     args = parser.parse_args()
     target = {"host": args.device or tunnel_address(args.udid)}
 
+    async def connect(host):
+        # A stale tunnel address can hang rather than refuse: bound the attempt.
+        return await asyncio.wait_for(asyncio.open_connection(host, args.port + 1), timeout=5)
+
     async def relay(client_reader, client_writer):
         host = target["host"]
         try:
-            server_reader, server_writer = await asyncio.open_connection(host, args.port + 1)
-        except OSError as error:
+            server_reader, server_writer = await connect(host)
+        except (OSError, asyncio.TimeoutError) as error:
             # The CoreDevice tunnel address changes when the headset reconnects (often over Wi-Fi):
             # look it up again and retry once.
             fresh = None
@@ -66,8 +70,8 @@ async def main() -> None:
             target["host"] = host = fresh
             print(f"tunnel moved: now [{host}]:{args.port + 1}", flush=True)
             try:
-                server_reader, server_writer = await asyncio.open_connection(host, args.port + 1)
-            except OSError as retry_error:
+                server_reader, server_writer = await connect(host)
+            except (OSError, asyncio.TimeoutError) as retry_error:
                 print(f"cannot reach {host}:{args.port + 1}: {retry_error}", flush=True)
                 client_writer.close()
                 return
