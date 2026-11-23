@@ -15,6 +15,7 @@
 #include "Core/PowerPC/JitCommon/JitCache.h"
 #include "Core/PowerPC/StaticRecomp/StaticRecompABI.h"
 #include "Core/PowerPC/StaticRecomp/StaticRecompModuleSource.h"
+#include "Core/PowerPC/StaticRecomp/StaticRecompSampler.h"
 
 namespace Core
 {
@@ -157,6 +158,9 @@ private:
   void UpdateModuleDirectCalls();
 
   std::unique_ptr<StaticRecompLockstep::StaticRecompLockstepVerifier> m_lockstep_verifier;
+  // STATICRECOMP_SAMPLER profiling (see StaticRecompSampler.h), set up on the first Run().
+  std::unique_ptr<StaticRecomp::Sampler> m_sampler;
+  bool m_sampler_checked = false;
 
   EmptyBlockCache m_block_cache{*this};
 

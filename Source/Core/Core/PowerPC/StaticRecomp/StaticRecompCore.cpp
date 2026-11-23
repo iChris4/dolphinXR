@@ -224,6 +224,7 @@ void StaticRecompCore::UpdateModuleDirectCalls()
 void StaticRecompCore::Shutdown()
 {
   g_static_recomp_core = nullptr;
+  m_sampler.reset();
   std::fprintf(stderr,
                "[staticrecomp] shutdown: native=%llu fallback=%llu native_exc=%llu hook_fb=%llu "
                "smc_failed=%u verifications=%llu reverify_events=%llu bursts=%llu cycles=%llu\n",

@@ -66,6 +66,11 @@ void StaticRecompCore::Run()
   m_guest.exram = memory.GetEXRAM();
   m_guest.exram_size = memory.GetExRamSizeReal();
   InitLookupTable(m_guest.ram_size, m_guest.exram_size);
+  if (!m_sampler_checked)
+  {
+    m_sampler_checked = true;
+    m_sampler = StaticRecomp::Sampler::CreateFromEnvironment(&m_guest.pc);
+  }
   const bool lockstep_enabled = m_lockstep_verifier->IsEnabled();
   // The module's direct RAM path (CPU ABI v4). Lockstep journals RAM writes around its checks,
   // which only the slow path does, so writes stay there while it is on.
