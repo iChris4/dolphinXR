@@ -680,6 +680,11 @@ if(ENABLE_VR)
   set(BUILD_SDK_TESTS OFF CACHE BOOL "" FORCE)
   set(DYNAMIC_LOADER OFF CACHE BOOL "" FORCE)
   add_subdirectory(Externals/OpenXR "${CMAKE_BINARY_DIR}/Externals/OpenXR" EXCLUDE_FROM_ALL)
+  if(TARGET openxr_loader AND NOT MSVC)
+    # Dolphin compiles with -fno-exceptions. From OpenXR SDK 1.1.63 the loader has try/catch that
+    # its BUILD_LOADER_WITH_EXCEPTION_HANDLING=OFF does not remove, so it fails without this.
+    target_compile_options(openxr_loader PRIVATE -fexceptions)
+  endif()
 endif()
 
 if(NOT (WIN32 AND _M_ARM_64))

@@ -68,7 +68,7 @@ private:
 
   enum class Verdict : u8
   {
-    None,
+    Pending,  // not "None": X11 defines None as a macro on Linux
     Kept,
     Lost,
   };
@@ -97,7 +97,7 @@ private:
     u32 lost_trials = 0;
     bool foveated = false;
     // Outcome of the latest trial (or of a kept pass found slower): what the cache stores.
-    Verdict verdict = Verdict::None;
+    Verdict verdict = Verdict::Pending;
   };
 
   struct TimedPass

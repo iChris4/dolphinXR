@@ -983,11 +983,11 @@ private:
   MenuGateState m_menu_gate;
   enum class MenuRequest : int
   {
-    None,
+    Idle,  // not "None": X11 defines None as a macro on Linux
     Open,
     Close,
   };
-  std::atomic<MenuRequest> m_menu_request{MenuRequest::None};
+  std::atomic<MenuRequest> m_menu_request{MenuRequest::Idle};
   std::atomic<bool> m_menu_binding_capture{false};
   std::atomic<u64> m_menu_last_present_us{0};
   // Panel layer shown by EndFrameDetached. m_menu_layer_serial is the open serial the layer may
