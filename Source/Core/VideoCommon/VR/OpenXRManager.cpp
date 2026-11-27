@@ -2354,7 +2354,7 @@ void OpenXRManager::UpdateMenuGate(
   gate.previous_toggle = toggle;
   gate.previous_close = close;
 
-  const MenuRequest request = m_menu_request.exchange(MenuRequest::None);
+  const MenuRequest request = m_menu_request.exchange(MenuRequest::Idle);
   const bool capture = menu.open && m_menu_binding_capture.load(std::memory_order_acquire);
   menu.binding_capture = capture;
   bool open = menu.open;
